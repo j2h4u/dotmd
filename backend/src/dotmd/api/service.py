@@ -46,6 +46,7 @@ class DotMDService:
             self._pipeline.vector_store,
             self._settings.embedding_model,
             score_floor=self._settings.semantic_score_floor,
+            embedding_url=self._settings.embedding_url,
         )
         self._bm25_engine = BM25SearchEngine(self._settings.bm25_path)
         self._graph_engine = GraphSearchEngine(
@@ -74,7 +75,7 @@ class DotMDService:
     def warmup(self) -> None:
         """Eagerly load ML models so first query is fast."""
         logger.info("Warming up models...")
-        self._semantic_engine._load_model()
+        self._semantic_engine.warmup()
         self._reranker._load_model()
         self._bm25_engine.load_index()
         logger.info("Models ready")
