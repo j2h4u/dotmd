@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     # Alternatives: all-mpnet-base-v2 (768-dim, general-purpose), bge-m3 (1024-dim, multilingual)
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     embedding_dim: int = 384
+    # Optional: URL to a TEI-compatible embedding server (e.g. http://host:8088).
+    # When set, embeddings are fetched via HTTP instead of loading a local model.
+    embedding_url: str | None = None
+
+    # Vector store backend: "lancedb" (default) or "sqlite-vec"
+    vector_backend: Literal["lancedb", "sqlite-vec"] = "sqlite-vec"
 
     # Reranker
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
@@ -64,6 +70,10 @@ class Settings(BaseSettings):
     @property
     def lancedb_path(self) -> Path:
         return self.index_dir / "lancedb"
+
+    @property
+    def sqlite_vec_path(self) -> Path:
+        return self.index_dir / "vec.db"
 
     @property
     def graph_db_path(self) -> Path:

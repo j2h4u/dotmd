@@ -22,9 +22,21 @@ from dotmd.search.bm25 import BM25SearchEngine
 from dotmd.search.semantic import SemanticSearchEngine
 from dotmd.storage.graph import LadybugDBGraphStore
 from dotmd.storage.metadata import SQLiteMetadataStore
-from dotmd.storage.vector import LanceDBVectorStore
+from dotmd.storage.base import VectorStoreProtocol
 
 logger = logging.getLogger(__name__)
+
+
+def _create_vector_store(settings: Settings) -> VectorStoreProtocol:
+    """Instantiate the configured vector store backend."""
+    if settings.vector_backend == "sqlite-vec":
+        from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
+
+        return SQLiteVecVectorStore(settings.sqlite_vec_path)
+
+    from dotmd.storage.vector import LanceDBVectorStore
+
+    return LanceDBVectorStore(settings.lancedb_path)
 
 
 class IndexingPipeline:
@@ -45,7 +57,7 @@ class IndexingPipeline:
 
         # -- storage backends --------------------------------------------------
         self._metadata_store = SQLiteMetadataStore(settings.sqlite_path)
-        self._vector_store = LanceDBVectorStore(settings.lancedb_path)
+        self._vector_store = _create_vector_store(settings)
         self._graph_store = LadybugDBGraphStore(
             settings.graph_db_path, read_only=settings.read_only,
         )
@@ -54,6 +66,7 @@ class IndexingPipeline:
         self._semantic_engine = SemanticSearchEngine(
             self._vector_store,
             settings.embedding_model,
+            embedding_url=settings.embedding_url,
         )
         self._bm25_engine = BM25SearchEngine(settings.bm25_path)
 
@@ -113,17 +126,23 @@ class IndexingPipeline:
         logger.info("Produced %d chunks from %d files", len(all_chunks), len(files))
 
         # 3. Save chunks to metadata store
+        logger.info("Saving %d chunks to metadata store...", len(all_chunks))
         self._metadata_store.save_chunks(all_chunks)
+        logger.info("Metadata saved")
 
         # 4. Encode and add to vector store
         if all_chunks:
             texts = [chunk.text for chunk in all_chunks]
+            logger.info("Encoding %d chunks via embedding backend...", len(texts))
             embeddings = self._semantic_engine.encode_batch(texts)
+            logger.info("Embeddings received, adding to vector store...")
             self._vector_store.add_chunks(all_chunks, embeddings)
             logger.info("Added %d vectors to vector store", len(all_chunks))
 
         # 5. Build BM25 index
+        logger.info("Building BM25 index...")
         self._bm25_engine.build_index(all_chunks)
+        logger.info("BM25 index built")
 
         # 6. Structural extraction
         structural_result = self._structural_extractor.extract(all_chunks)
