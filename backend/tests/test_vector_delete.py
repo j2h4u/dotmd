@@ -1,4 +1,4 @@
-"""Tests for SQLiteVecVectorStore.delete_vectors_by_chunk_ids()."""
+"""Tests for SQLiteVecVectorStore delete and overwrite behavior."""
 
 from pathlib import Path
 
@@ -83,4 +83,55 @@ class TestDeleteVectorsByChunkIds:
         _add_three_chunks(vector_store)
         deleted = vector_store.delete_vectors_by_chunk_ids(["c1", "nonexistent"])
         assert deleted == 1
+        assert vector_store.count() == 2
+
+
+class TestAddChunksOverwrite:
+    """Tests for add_chunks overwrite parameter."""
+
+    def test_add_chunks_overwrite_true_replaces_all(
+        self, vector_store: SQLiteVecVectorStore
+    ) -> None:
+        """add_chunks with overwrite=True (default) wipes existing vectors before insert."""
+        _add_three_chunks(vector_store)
+        assert vector_store.count() == 3
+
+        # Add 2 new chunks with overwrite=True
+        new_chunks = [_make_chunk("c4"), _make_chunk("c5")]
+        new_embeddings = [_make_embedding() for _ in new_chunks]
+        vector_store.add_chunks(new_chunks, new_embeddings, overwrite=True)
+
+        assert vector_store.count() == 2
+
+    def test_add_chunks_overwrite_false_appends(
+        self, vector_store: SQLiteVecVectorStore
+    ) -> None:
+        """add_chunks with overwrite=False appends without wiping — count goes from N to N+M."""
+        _add_three_chunks(vector_store)
+        assert vector_store.count() == 3
+
+        # Add 2 new chunks with overwrite=False
+        new_chunks = [_make_chunk("c4"), _make_chunk("c5")]
+        new_embeddings = [_make_embedding() for _ in new_chunks]
+        vector_store.add_chunks(new_chunks, new_embeddings, overwrite=False)
+
+        assert vector_store.count() == 5
+
+        # Verify all 5 chunk_ids are searchable
+        results = vector_store.search(_make_embedding(), top_k=10)
+        result_ids = {chunk_id for chunk_id, _score in results}
+        assert result_ids == {"c1", "c2", "c3", "c4", "c5"}
+
+    def test_add_chunks_overwrite_false_default_is_true(
+        self, vector_store: SQLiteVecVectorStore
+    ) -> None:
+        """Default behavior (no overwrite kwarg) still wipes existing data."""
+        _add_three_chunks(vector_store)
+        assert vector_store.count() == 3
+
+        # Add 2 new chunks without specifying overwrite
+        new_chunks = [_make_chunk("c4"), _make_chunk("c5")]
+        new_embeddings = [_make_embedding() for _ in new_chunks]
+        vector_store.add_chunks(new_chunks, new_embeddings)
+
         assert vector_store.count() == 2
