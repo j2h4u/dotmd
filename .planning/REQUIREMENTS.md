@@ -19,10 +19,10 @@
 
 ### Incremental Pipeline
 
-- [ ] **IP-01**: Modified files: purge old data from all stores, then re-ingest
-- [ ] **IP-02**: New files: ingest normally (embed + NER + graph)
-- [ ] **IP-03**: Deleted files: purge from all stores
-- [ ] **IP-04**: BM25 index rebuilt from all chunks after diff applied (~0.1s)
+- [x] **IP-01**: Modified files: purge old data from all stores, then re-ingest
+- [x] **IP-02**: New files: ingest normally (embed + NER + graph)
+- [x] **IP-03**: Deleted files: purge from all stores
+- [x] **IP-04**: BM25 index rebuilt from all chunks after diff applied (~0.1s)
 - [ ] **IP-05**: `--force` flag to bypass fingerprints and do full re-index
 
 ### CLI / API
@@ -70,10 +70,10 @@
 | SC-01 | Phase 1 | Complete |
 | SC-02 | Phase 1 | Complete |
 | SC-03 | Phase 1 | Complete |
-| IP-01 | Phase 2 | Pending |
-| IP-02 | Phase 2 | Pending |
-| IP-03 | Phase 2 | Pending |
-| IP-04 | Phase 2 | Pending |
+| IP-01 | Phase 2 | Complete |
+| IP-02 | Phase 2 | Complete |
+| IP-03 | Phase 2 | Complete |
+| IP-04 | Phase 2 | Complete |
 | IP-05 | Phase 2 | Pending |
 | CA-01 | Phase 3 | Pending |
 | CA-02 | Phase 3 | Pending |

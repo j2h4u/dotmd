@@ -40,7 +40,7 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — sqlite-vec overwrite param + pipeline incremental refactor (_purge_file, _incremental_index, _full_index, FileTracker integration)
+- [x] 02-01-PLAN.md — sqlite-vec overwrite param + pipeline incremental refactor (_purge_file, _incremental_index, _full_index, FileTracker integration)
 - [ ] 02-02-PLAN.md — Thread force parameter through DotMDService + CLI --force flag
 
 **Scope:**
