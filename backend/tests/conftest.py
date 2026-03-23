@@ -8,6 +8,7 @@ import pytest
 
 from dotmd.storage.metadata import SQLiteMetadataStore
 from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
+from dotmd.storage.graph import LadybugDBGraphStore
 
 
 @pytest.fixture
@@ -32,3 +33,9 @@ def sqlite_conn(tmp_dir: Path) -> sqlite3.Connection:
 def vector_store(tmp_dir: Path) -> SQLiteVecVectorStore:
     """Return a fresh SQLiteVecVectorStore backed by a temp db."""
     return SQLiteVecVectorStore(tmp_dir / "vec.db")
+
+
+@pytest.fixture
+def graph_store(tmp_dir: Path) -> LadybugDBGraphStore:
+    """Return a fresh LadybugDBGraphStore backed by a temp directory."""
+    return LadybugDBGraphStore(tmp_dir / "graphdb")
