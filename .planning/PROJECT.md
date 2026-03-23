@@ -19,6 +19,9 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 - ✓ Hybrid search working (semantic + BM25 + graph) — deployed
 - ✓ First full index completed (226 files, 495 chunks, 3143 entities, 21020 edges)
 - ✓ Incremental indexing — diff-based pipeline with `--force` override — Validated in Phase 2: Incremental Pipeline
+- ✓ CLI progress reporting ("3 new, 1 modified, 0 deleted, 222 unchanged") — Validated in Phase 3: CLI & API Polish
+- ✓ Status command with live change detection — Validated in Phase 3: CLI & API Polish
+- ✓ API force parameter on POST /index — Validated in Phase 3: CLI & API Polish
 
 ### Active
 - [ ] Fix BM25 results missing in hybrid mode (reranker/fusion issue?)
@@ -91,4 +94,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-23 after Phase 1 completion — storage layer (file tracking + delete methods) verified*
+*Last updated: 2026-03-23 after Phase 3 completion — CLI & API polish (diff reporting, status change detection, API force param). Milestone v1.1 complete.*
