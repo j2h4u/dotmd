@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from dotmd.storage.metadata import SQLiteMetadataStore
+from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
 
 
 @pytest.fixture
@@ -25,3 +26,9 @@ def metadata_store(tmp_dir: Path) -> SQLiteMetadataStore:
 def sqlite_conn(tmp_dir: Path) -> sqlite3.Connection:
     """Return a raw sqlite3 connection to a temp database."""
     return sqlite3.connect(str(tmp_dir / "test.db"))
+
+
+@pytest.fixture
+def vector_store(tmp_dir: Path) -> SQLiteVecVectorStore:
+    """Return a fresh SQLiteVecVectorStore backed by a temp db."""
+    return SQLiteVecVectorStore(tmp_dir / "vec.db")
