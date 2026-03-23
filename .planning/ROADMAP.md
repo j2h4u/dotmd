@@ -14,7 +14,7 @@
 **Plans:** 2 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — FileTracker class, protocol extensions, metadata delete methods + pytest bootstrap
+- [x] 01-01-PLAN.md — FileTracker class, protocol extensions, metadata delete methods + pytest bootstrap
 - [ ] 01-02-PLAN.md — Vector store delete, graph store delete with DETACH DELETE spike
 
 **Scope:**

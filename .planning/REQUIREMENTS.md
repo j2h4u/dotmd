@@ -7,13 +7,13 @@
 
 ### File Tracking
 
-- [ ] **FT-01**: Persist file fingerprints (path, mtime, size, checksum) in metadata.db
-- [ ] **FT-02**: Classify files as new/modified/deleted/unchanged on each index run
-- [ ] **FT-03**: Skip unchanged files entirely (no re-read, no re-embed, no re-extract)
+- [x] **FT-01**: Persist file fingerprints (path, mtime, size, checksum) in metadata.db
+- [x] **FT-02**: Classify files as new/modified/deleted/unchanged on each index run
+- [x] **FT-03**: Skip unchanged files entirely (no re-read, no re-embed, no re-extract)
 
 ### Store Cleanup
 
-- [ ] **SC-01**: Delete chunks by file_path from metadata store
+- [x] **SC-01**: Delete chunks by file_path from metadata store
 - [ ] **SC-02**: Delete vectors by file_path from sqlite-vec store
 - [ ] **SC-03**: Delete Section nodes and edges by file_path from graph store (preserve Entity/Tag nodes)
 
@@ -64,10 +64,10 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| FT-01 | Phase 1 | Pending |
-| FT-02 | Phase 1 | Pending |
-| FT-03 | Phase 1 | Pending |
-| SC-01 | Phase 1 | Pending |
+| FT-01 | Phase 1 | Complete |
+| FT-02 | Phase 1 | Complete |
+| FT-03 | Phase 1 | Complete |
+| SC-01 | Phase 1 | Complete |
 | SC-02 | Phase 1 | Pending |
 | SC-03 | Phase 1 | Pending |
 | IP-01 | Phase 2 | Pending |
