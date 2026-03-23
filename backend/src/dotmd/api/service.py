@@ -80,7 +80,7 @@ class DotMDService:
         self._bm25_engine.load_index()
         logger.info("Models ready")
 
-    def index(self, directory: Path) -> IndexStats:
+    def index(self, directory: Path, *, force: bool = False) -> IndexStats:
         """Index all markdown files under *directory*.
 
         Delegates entirely to :class:`IndexingPipeline`.
@@ -89,13 +89,17 @@ class DotMDService:
         ----------
         directory:
             Root directory to scan.
+        force:
+            When ``True``, bypass incremental change detection and
+            re-index all files from scratch.  When ``False`` (default),
+            only new and modified files are processed.
 
         Returns
         -------
         IndexStats
             Summary statistics for the completed index.
         """
-        return self._pipeline.index(directory)
+        return self._pipeline.index(directory, force=force)
 
     def search(
         self,

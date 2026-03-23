@@ -39,15 +39,22 @@ def _get_service(**overrides: object) -> DotMDService:
     default=None,
     help="Comma-separated GLiNER entity types (e.g. 'person,technology,concept').",
 )
-def index(directory: Path, extract_depth: str, entity_types: str | None) -> None:
+@click.option(
+    "--force", "-f",
+    is_flag=True,
+    default=False,
+    help="Force full re-index, bypassing incremental change detection.",
+)
+def index(directory: Path, extract_depth: str, entity_types: str | None, force: bool) -> None:
     """Index all markdown files in DIRECTORY."""
     overrides: dict[str, object] = {"extract_depth": extract_depth}
     if entity_types:
         overrides["ner_entity_types"] = [t.strip() for t in entity_types.split(",")]
 
     service = _get_service(**overrides)
-    click.echo(f"Indexing {directory}...")
-    stats = service.index(directory)
+    mode_label = "full re-index" if force else "incremental"
+    click.echo(f"Indexing {directory} ({mode_label})...")
+    stats = service.index(directory, force=force)
     click.echo(
         f"Done. {stats.total_files} files, {stats.total_chunks} chunks, "
         f"{stats.total_entities} entities, {stats.total_edges} edges."
