@@ -65,6 +65,11 @@ Plans:
 
 **Requirements:** CA-01, CA-02, CA-03
 
+**Plans:** 1 plan
+
+Plans:
+- [ ] 03-01-PLAN.md — Diff count threading (IndexStats + metadata + pipeline), CLI output formatting, status change detection, API force param
+
 **Scope:**
 - Default `dotmd index` uses incremental
 - `dotmd index --force` does full re-index
@@ -83,7 +88,7 @@ Plans:
 | Phase | Name | Requirements | Status |
 |-------|------|-------------|--------|
 | 1 | Storage Layer | FT-01..03, SC-01..03 | ● Complete (2/2 plans) |
-| 2 | Incremental Pipeline | IP-01..05 | ○ Pending |
+| 2 | Incremental Pipeline | IP-01..05 | ● Complete (2/2 plans) |
 | 3 | CLI & API Polish | CA-01..03 | ○ Pending |
 
 **Total requirements:** 14
@@ -91,4 +96,4 @@ Plans:
 
 ---
 *Roadmap created: 2026-03-23*
-*Last updated: 2026-03-23 after Phase 2 planning*
+*Last updated: 2026-03-23 after Phase 3 planning*
