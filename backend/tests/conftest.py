@@ -1,0 +1,27 @@
+"""Shared test fixtures for dotmd."""
+
+import sqlite3
+import tempfile
+from pathlib import Path
+
+import pytest
+
+from dotmd.storage.metadata import SQLiteMetadataStore
+
+
+@pytest.fixture
+def tmp_dir(tmp_path: Path) -> Path:
+    """Return a temporary directory for test artifacts."""
+    return tmp_path
+
+
+@pytest.fixture
+def metadata_store(tmp_dir: Path) -> SQLiteMetadataStore:
+    """Return a fresh SQLiteMetadataStore backed by a temp db."""
+    return SQLiteMetadataStore(tmp_dir / "metadata.db")
+
+
+@pytest.fixture
+def sqlite_conn(tmp_dir: Path) -> sqlite3.Connection:
+    """Return a raw sqlite3 connection to a temp database."""
+    return sqlite3.connect(str(tmp_dir / "test.db"))
