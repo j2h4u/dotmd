@@ -168,12 +168,14 @@ def seed_fingerprints(directory: Path) -> None:
     sees all files as unchanged.
     """
     import hashlib
+    import sqlite3
 
+    from dotmd.ingestion.file_tracker import FileTracker
     from dotmd.ingestion.reader import discover_files
 
     settings = Settings(read_only=True)
-    service = DotMDService(settings=settings)
-    tracker = service._pipeline.file_tracker
+    conn = sqlite3.connect(str(settings.sqlite_path))
+    tracker = FileTracker(conn)
 
     files = discover_files(directory)
     for fi in files:
@@ -181,6 +183,7 @@ def seed_fingerprints(directory: Path) -> None:
         checksum = hashlib.md5(fi.path.read_bytes()).hexdigest()
         tracker.save_fingerprint(str(fi.path), stat.st_mtime, stat.st_size, checksum)
 
+    conn.close()
     click.echo(f"Seeded fingerprints for {len(files)} files.")
 
 
