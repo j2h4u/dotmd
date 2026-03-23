@@ -37,6 +37,12 @@ Plans:
 
 **Requirements:** IP-01, IP-02, IP-03, IP-04, IP-05
 
+**Plans:** 2 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — sqlite-vec overwrite param + pipeline incremental refactor (_purge_file, _incremental_index, _full_index, FileTracker integration)
+- [ ] 02-02-PLAN.md — Thread force parameter through DotMDService + CLI --force flag
+
 **Scope:**
 - Refactor `IndexingPipeline.index()` into diff-based flow:
   1. Discover files → compare fingerprints → classify changes
@@ -76,7 +82,7 @@ Plans:
 
 | Phase | Name | Requirements | Status |
 |-------|------|-------------|--------|
-| 1 | Storage Layer | FT-01..03, SC-01..03 | ○ Pending |
+| 1 | Storage Layer | FT-01..03, SC-01..03 | ● Complete (2/2 plans) |
 | 2 | Incremental Pipeline | IP-01..05 | ○ Pending |
 | 3 | CLI & API Polish | CA-01..03 | ○ Pending |
 
@@ -85,4 +91,4 @@ Plans:
 
 ---
 *Roadmap created: 2026-03-23*
-*Last updated: 2026-03-23 after Phase 1 planning*
+*Last updated: 2026-03-23 after Phase 2 planning*
