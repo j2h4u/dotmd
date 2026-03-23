@@ -96,3 +96,8 @@ class IndexStats(BaseModel):
     total_entities: int = 0
     total_edges: int = 0
     last_indexed: datetime | None = None
+    new_files: int = 0
+    modified_files: int = 0
+    deleted_files: int = 0
+    unchanged_files: int = 0
+    data_dir: str | None = None
