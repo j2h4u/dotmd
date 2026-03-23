@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from dotmd.ingestion.file_tracker import FileTracker
 from dotmd.storage.metadata import SQLiteMetadataStore
 from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
 from dotmd.storage.graph import LadybugDBGraphStore
@@ -39,3 +40,9 @@ def vector_store(tmp_dir: Path) -> SQLiteVecVectorStore:
 def graph_store(tmp_dir: Path) -> LadybugDBGraphStore:
     """Return a fresh LadybugDBGraphStore backed by a temp directory."""
     return LadybugDBGraphStore(tmp_dir / "graphdb")
+
+
+@pytest.fixture
+def file_tracker(metadata_store: SQLiteMetadataStore) -> FileTracker:
+    """Return a FileTracker sharing the metadata store's connection."""
+    return FileTracker(metadata_store._conn)

@@ -196,6 +196,7 @@ class TestModifiedFile:
         # Reset mocks
         mock_read_file.reset_mock()
         mock_chunk_file.reset_mock()
+        mock_chunk_file.side_effect = None  # clear exhausted iterator
         pipeline._semantic_engine.encode_batch.reset_mock()
 
         file_a_modified = _make_file_info(str(md_dir / "a.md"), "File A")
@@ -244,6 +245,7 @@ class TestDeletedFile:
         # Reset mocks
         mock_read_file.reset_mock()
         mock_chunk_file.reset_mock()
+        mock_chunk_file.side_effect = None  # clear exhausted iterator
         pipeline._semantic_engine.encode_batch.reset_mock()
 
         # Only file b remains
@@ -339,6 +341,7 @@ class TestBM25RebuildAfterChanges:
         (md_dir / "a.md").unlink()
         mock_read_file.reset_mock()
         mock_chunk_file.reset_mock()
+        mock_chunk_file.side_effect = None  # clear exhausted iterator
 
         file_b_again = _make_file_info(str(md_dir / "b.md"), "File B")
         mock_discover.return_value = [file_b_again]
