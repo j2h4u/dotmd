@@ -21,7 +21,7 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 
 ### Active
 
-- [ ] Incremental indexing — diff-based, only process new/modified/deleted files
+- [ ] Incremental indexing — diff-based, only process new/modified/deleted files (Phase 1 complete: storage layer ready)
 - [ ] Fix BM25 results missing in hybrid mode (reranker/fusion issue?)
 - [ ] Upstream PR strategy — start small, build trust with maintainer
 
@@ -92,4 +92,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-23 after initialization*
+*Last updated: 2026-03-23 after Phase 1 completion — storage layer (file tracking + delete methods) verified*
