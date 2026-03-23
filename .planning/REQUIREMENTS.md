@@ -23,7 +23,7 @@
 - [x] **IP-02**: New files: ingest normally (embed + NER + graph)
 - [x] **IP-03**: Deleted files: purge from all stores
 - [x] **IP-04**: BM25 index rebuilt from all chunks after diff applied (~0.1s)
-- [ ] **IP-05**: `--force` flag to bypass fingerprints and do full re-index
+- [x] **IP-05**: `--force` flag to bypass fingerprints and do full re-index
 
 ### CLI / API
 
@@ -74,7 +74,7 @@
 | IP-02 | Phase 2 | Complete |
 | IP-03 | Phase 2 | Complete |
 | IP-04 | Phase 2 | Complete |
-| IP-05 | Phase 2 | Pending |
+| IP-05 | Phase 2 | Complete |
 | CA-01 | Phase 3 | Pending |
 | CA-02 | Phase 3 | Pending |
 | CA-03 | Phase 3 | Pending |
