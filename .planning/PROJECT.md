@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Fork of [inventivepotter/dotmd](https://github.com/inventivepotter/dotmd) — a markdown knowledgebase search tool combining semantic search, BM25 keyword matching, and knowledge graph traversal. Deployed on a personal home server as search engine for voicenotes transcripts and documentation (~226 markdown files, bilingual RU/EN).
+Independent fork of [inventivepotter/dotmd](https://github.com/inventivepotter/dotmd) — a markdown knowledgebase search tool combining semantic search, BM25 keyword matching, and knowledge graph traversal. Deployed on a personal home server as search engine for voicenotes transcripts and documentation (~227 markdown files, bilingual RU/EN). Developed independently; upstream is a reference for ideas, not a merge target.
 
 ## Core Value
 
@@ -25,13 +25,13 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 
 ### Active
 - [ ] Fix BM25 results missing in hybrid mode (reranker/fusion issue?)
-- [ ] Upstream PR strategy — start small, build trust with maintainer
 
 ### Out of Scope
 
 - GPU acceleration — no GPU on current hardware, Jetson/Mac Mini is future consideration
 - LadybugDB replacement — works fine for reads, single-connection is manageable
 - Full QMD-style query expansion/reranking — different product philosophy
+- Upstream PRs — fork has diverged too far (sqlite-vec, TEI, incremental indexing, schema migrations). Upstream is reference-only now
 
 ## Context
 
@@ -46,11 +46,10 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 - /srv/knowledgebase/voicenotes/ — 226 voice recordings with transcripts (daily sync via voicenotes-sync)
 - /home/j2h4u/ — docs, scripts, AGENTS.md, repos (mounted read-only)
 
-**Upstream:**
-- inventivepotter/dotmd: 11 commits, 1 author, 26 stars, 0 PRs/issues
-- No CONTRIBUTING.md, no license
-- Solo-dev commit style (short messages, no conventional commits)
-- PR strategy: small fixes first (MCP fix → TEI support → sqlite-vec → incremental indexing)
+**Upstream (reference only):**
+- inventivepotter/dotmd: 11 commits (Jan 29-31 2026), inactive since. 26 stars, 5 forks, no license
+- Useful as reference for graph search patterns and reranker tuning ideas
+- No plans to submit PRs — our fork has diverged architecturally
 
 **Performance baseline (full index):**
 - Embedding via TEI: ~25 min (495 chunks × 4 per batch × 12s/batch on CPU)
@@ -62,8 +61,8 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 
 - **CPU**: Xeon E3 V2 (Ivy Bridge) — no AVX2, limits ML library versions
 - **RAM**: 16GB shared across all Docker services — TEI already uses ~2.6GB
-- **Deployment**: Docker compose, build from fork, deploy branch merges main + our features
-- **Upstream compatibility**: Changes must be backward-compatible, opt-in via config
+- **Deployment**: Docker compose, build from fork
+- **TEI required**: `DOTMD_EMBEDDING_URL` is mandatory — no local model fallback
 
 ## Key Decisions
 
@@ -71,8 +70,8 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 |----------|-----------|---------|
 | sqlite-vec over lancedb | lancedb Python wheels require AVX2, server is Ivy Bridge | ✓ Good |
 | TEI over local embeddings | Avoid 2GB model duplication in memory, reuse existing container | ✓ Good |
-| Fork over patches | Want to contribute upstream, need clean PR branches | ✓ Good |
-| deploy branch for deployment | Separate from PR branches, merges main + all our features | — Pending |
+| Fork → independent project | Upstream inactive, architectural divergence too large for PRs | ✓ Good |
+| TEI mandatory (no local fallback) | Prevent accidental 50-min local model indexing | ✓ Good |
 | truncate:true for TEI | Chunks exceed 512 token limit of e5-large | ✓ Good — works but loses tail context |
 | NER enabled (not structural-only) | Knowledge graph quality worth the CPU cost on first index | ⚠️ Revisit — 18min NER may not be worth it for incremental |
 
@@ -94,4 +93,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-23 after Phase 3 completion — CLI & API polish (diff reporting, status change detection, API force param). Milestone v1.1 complete.*
+*Last updated: 2026-03-23 — upstream decoupled, fork is now independent project. TEI enforced as mandatory. Milestone v1.1 complete.*
