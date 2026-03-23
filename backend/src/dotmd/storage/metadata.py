@@ -53,6 +53,8 @@ ON CONFLICT(chunk_id) DO UPDATE SET
     char_offset       = excluded.char_offset
 """
 
+_CREATE_INDEX_FILE_PATH = "CREATE INDEX IF NOT EXISTS idx_chunks_file_path ON chunks(file_path)"
+
 _UPSERT_STATS = """
 INSERT INTO stats (id, total_files, total_chunks, total_entities, total_edges, last_indexed)
 VALUES (1, ?, ?, ?, ?, ?)
@@ -85,6 +87,7 @@ class SQLiteMetadataStore:
         self._conn = sqlite3.connect(str(db_path))
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute(_CREATE_CHUNKS)
+        self._conn.execute(_CREATE_INDEX_FILE_PATH)
         self._conn.execute(_CREATE_STATS)
         self._conn.commit()
 
@@ -139,6 +142,23 @@ class SQLiteMetadataStore:
             "FROM chunks"
         )
         return [self._row_to_chunk(row) for row in cur.fetchall()]
+
+    def get_chunk_ids_by_file(self, file_path: str) -> list[str]:
+        """Return all chunk_ids for a given file path."""
+        cur = self._conn.execute(
+            "SELECT chunk_id FROM chunks WHERE file_path = ?",
+            (file_path,),
+        )
+        return [row[0] for row in cur.fetchall()]
+
+    def delete_chunks_by_file(self, file_path: str) -> int:
+        """Delete all chunks belonging to a file. Returns count deleted."""
+        cur = self._conn.execute(
+            "DELETE FROM chunks WHERE file_path = ?",
+            (file_path,),
+        )
+        self._conn.commit()
+        return cur.rowcount
 
     # -- stats --------------------------------------------------------------
 
