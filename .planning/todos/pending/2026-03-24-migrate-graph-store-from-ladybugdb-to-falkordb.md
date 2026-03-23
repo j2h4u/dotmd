@@ -20,7 +20,15 @@ Write a `FalkorDBGraphStore` adapter implementing the same interface as `Ladybug
 - Add `graph_backend` setting to config (similar to `vector_backend`)
 - Keep LadybugDB adapter as fallback
 
-Benefits:
+### Data migration strategy
+
+Two options — evaluate cost/benefit before choosing:
+1. **Re-index from scratch** (~59 min) — simplest, graph is derived from chunks which are already in metadata.db. No migration code needed.
+2. **Export/import** — `MATCH (n) RETURN n` from LadybugDB → `MERGE` into FalkorDB. Both speak openCypher but property/schema differences may bite. Probably not worth the migration code for a one-time operation.
+
+Likely answer: re-index with `--force` after switching the adapter. Simpler and guaranteed correct.
+
+### Benefits
 - No more lock conflicts
 - Reuses existing infrastructure
 - Concurrent read/write from serve + CLI
