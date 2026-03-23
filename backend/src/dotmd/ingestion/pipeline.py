@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
+import uuid
 from dataclasses import dataclass as _dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -128,25 +130,32 @@ class IndexingPipeline:
         IndexStats
             Summary statistics for the completed index.
         """
+        run_id = uuid.uuid4().hex[:8]
+        t_start = time.perf_counter()
+
+        t0 = time.perf_counter()
         files = discover_files(directory)
-        logger.info("Discovered %d files in %s", len(files), directory)
+        logger.info("[%s] discover: %d files in %s (%.2fs)", run_id, len(files), directory, time.perf_counter() - t0)
         data_dir_str = str(directory)
 
         if force:
-            return self._full_index(files, data_dir=data_dir_str)
+            stats = self._full_index(files, data_dir=data_dir_str, run_id=run_id)
+            logger.info("[%s] total: %.1fs (force)", run_id, time.perf_counter() - t_start)
+            return stats
 
+        t0 = time.perf_counter()
         diff = self._file_tracker.diff(files)
         logger.info(
-            "File diff: %d new, %d modified, %d deleted, %d unchanged",
-            len(diff.new), len(diff.modified), len(diff.deleted), len(diff.unchanged),
+            "[%s] diff: %d new, %d modified, %d deleted, %d unchanged (%.2fs)",
+            run_id, len(diff.new), len(diff.modified), len(diff.deleted), len(diff.unchanged),
+            time.perf_counter() - t0,
         )
 
         if not diff.new and not diff.modified and not diff.deleted:
-            logger.info("No changes detected -- skipping indexing")
+            logger.info("[%s] no changes — skipping (%.2fs total)", run_id, time.perf_counter() - t_start)
             stats = self._metadata_store.get_stats()
             if stats is None:
                 stats = IndexStats()
-            # Return stored totals but FRESH diff counts (Pitfall 3)
             stats.new_files = 0
             stats.modified_files = 0
             stats.deleted_files = 0
@@ -154,7 +163,9 @@ class IndexingPipeline:
             stats.data_dir = data_dir_str
             return stats
 
-        return self._incremental_index(files, diff, data_dir=data_dir_str)
+        stats = self._incremental_index(files, diff, data_dir=data_dir_str, run_id=run_id)
+        logger.info("[%s] total: %.1fs (incremental)", run_id, time.perf_counter() - t_start)
+        return stats
 
     def clear(self) -> None:
         """Delete all data from every backing store."""
@@ -173,7 +184,7 @@ class IndexingPipeline:
     # ------------------------------------------------------------------
 
     def _full_index(
-        self, files: list[FileInfo], *, data_dir: str | None = None,
+        self, files: list[FileInfo], *, data_dir: str | None = None, run_id: str = "",
     ) -> IndexStats:
         """Process all files from scratch (used for force=True)."""
         self.clear()
@@ -181,24 +192,28 @@ class IndexingPipeline:
         return self._ingest_and_finalize(
             files, list(files),
             diff_counts={"new": len(files), "modified": 0, "deleted": 0, "unchanged": 0},
-            data_dir=data_dir,
+            data_dir=data_dir, run_id=run_id,
         )
 
     def _incremental_index(
         self, all_files: list[FileInfo], diff: FileDiff,
-        *, data_dir: str | None = None,
+        *, data_dir: str | None = None, run_id: str = "",
     ) -> IndexStats:
         """Process only changed files."""
         # 1. Purge deleted files
+        t0 = time.perf_counter()
         for path_str in diff.deleted:
             self._purge_file(path_str)
             self._file_tracker.remove_fingerprint(path_str)
-            logger.info("Purged deleted file: %s", path_str)
+        if diff.deleted:
+            logger.info("[%s] purge_deleted: %d files (%.2fs)", run_id, len(diff.deleted), time.perf_counter() - t0)
 
         # 2. Purge modified files (data only, fingerprint updated after re-ingest)
+        t0 = time.perf_counter()
         for path_str in diff.modified:
             self._purge_file(path_str)
-            logger.info("Purged modified file: %s", path_str)
+        if diff.modified:
+            logger.info("[%s] purge_modified: %d files (%.2fs)", run_id, len(diff.modified), time.perf_counter() - t0)
 
         # 3. Determine files to ingest (new + modified)
         changed_paths = set(diff.new) | set(diff.modified)
@@ -213,7 +228,7 @@ class IndexingPipeline:
                 "deleted": len(diff.deleted),
                 "unchanged": len(diff.unchanged),
             },
-            data_dir=data_dir,
+            data_dir=data_dir, run_id=run_id,
         )
 
     # ------------------------------------------------------------------
@@ -228,9 +243,11 @@ class IndexingPipeline:
         overwrite_vectors: bool = True,
         diff_counts: dict[str, int] | None = None,
         data_dir: str | None = None,
+        run_id: str = "",
     ) -> IndexStats:
         """Ingest *files_to_ingest* and rebuild BM25/stats from full corpus."""
         # Read and chunk only the files to ingest
+        t0 = time.perf_counter()
         new_chunks: list[Chunk] = []
         for file_info in files_to_ingest:
             content = read_file(file_info.path)
@@ -241,38 +258,46 @@ class IndexingPipeline:
                 overlap_tokens=self._settings.chunk_overlap_tokens,
             )
             new_chunks.extend(file_chunks)
-
-        logger.info(
-            "Produced %d chunks from %d files",
-            len(new_chunks), len(files_to_ingest),
-        )
+        logger.info("[%s] chunk: %d chunks from %d files (%.2fs)", run_id, len(new_chunks), len(files_to_ingest), time.perf_counter() - t0)
 
         # Save chunks to metadata
         if new_chunks:
+            t0 = time.perf_counter()
             self._metadata_store.save_chunks(new_chunks)
+            logger.info("[%s] metadata_save: %d chunks (%.2fs)", run_id, len(new_chunks), time.perf_counter() - t0)
 
         # Encode and add to vector store
         if new_chunks:
             texts = [c.text for c in new_chunks]
-            logger.info("Encoding %d chunks...", len(texts))
+            t0 = time.perf_counter()
             embeddings = self._semantic_engine.encode_batch(texts)
+            t_embed = time.perf_counter() - t0
+            logger.info("[%s] embed: %d chunks (%.1fs, %.0f chunks/s)", run_id, len(texts), t_embed, len(texts) / t_embed if t_embed > 0 else 0)
+
+            t0 = time.perf_counter()
             self._vector_store.add_chunks(
                 new_chunks, embeddings, overwrite=overwrite_vectors,
             )
-            logger.info("Added %d vectors", len(new_chunks))
+            logger.info("[%s] vector_store: %d vectors (%.2fs)", run_id, len(new_chunks), time.perf_counter() - t0)
 
         # BM25 always full rebuild (IP-04)
+        t0 = time.perf_counter()
         all_chunks = self._metadata_store.get_all_chunks()
-        logger.info("Rebuilding BM25 from %d total chunks...", len(all_chunks))
         self._bm25_engine.build_index(all_chunks)
+        logger.info("[%s] bm25: %d chunks (%.2fs)", run_id, len(all_chunks), time.perf_counter() - t0)
 
         # Extraction (structural + NER + key-terms) on NEW chunks only
+        t0 = time.perf_counter()
         extraction_result = self._run_extraction(new_chunks)
+        logger.info("[%s] extraction: %d entities, %d relations (%.1fs)", run_id, extraction_result.total_entities, extraction_result.total_relations, time.perf_counter() - t0)
 
         # Graph population for new chunks
+        t0 = time.perf_counter()
         self._populate_graph(files_to_ingest, new_chunks, extraction_result)
+        logger.info("[%s] graph: %d files, %d chunks (%.1fs)", run_id, len(files_to_ingest), len(new_chunks), time.perf_counter() - t0)
 
         # Acronym rebuild from ALL chunks (same as BM25 -- always full)
+        t0 = time.perf_counter()
         acronym_dict = extract_acronyms_from_chunks(all_chunks)
         if acronym_dict:
             import json
@@ -280,15 +305,16 @@ class IndexingPipeline:
             self._settings.acronyms_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self._settings.acronyms_path, "w") as f:
                 json.dump(acronym_dict, f, indent=2)
-            logger.info("Extracted %d acronyms", len(acronym_dict))
+        logger.info("[%s] acronyms: %d (%.2fs)", run_id, len(acronym_dict) if acronym_dict else 0, time.perf_counter() - t0)
 
         # Update fingerprints AFTER successful ingestion (Pitfall 3)
+        t0 = time.perf_counter()
         self._update_fingerprints(files_to_ingest)
+        logger.info("[%s] fingerprints: %d files (%.2fs)", run_id, len(files_to_ingest), time.perf_counter() - t0)
 
         # Stats from full store (Pitfall 6)
         all_entities_count = extraction_result.total_entities
         all_edges_count = extraction_result.total_relations
-        # For incremental, use graph store counts for accuracy
         if not overwrite_vectors:
             try:
                 all_entities_count = self._graph_store.node_count()
@@ -310,7 +336,6 @@ class IndexingPipeline:
             data_dir=data_dir,
         )
         self._metadata_store.save_stats(stats)
-        logger.info("Indexing complete: %s", stats)
         return stats
 
     # ------------------------------------------------------------------
