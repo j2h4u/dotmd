@@ -11,6 +11,12 @@
 
 **Requirements:** FT-01, FT-02, FT-03, SC-01, SC-02, SC-03
 
+**Plans:** 2 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — FileTracker class, protocol extensions, metadata delete methods + pytest bootstrap
+- [ ] 01-02-PLAN.md — Vector store delete, graph store delete with DETACH DELETE spike
+
 **Scope:**
 - `file_fingerprints` table in metadata.db (path, mtime, size, checksum)
 - `FileTracker` class: save/load fingerprints, classify files (new/modified/deleted/unchanged)
@@ -79,4 +85,4 @@
 
 ---
 *Roadmap created: 2026-03-23*
-*Last updated: 2026-03-23 after initial creation*
+*Last updated: 2026-03-23 after Phase 1 planning*
