@@ -14,8 +14,8 @@
 ### Store Cleanup
 
 - [x] **SC-01**: Delete chunks by file_path from metadata store
-- [ ] **SC-02**: Delete vectors by file_path from sqlite-vec store
-- [ ] **SC-03**: Delete Section nodes and edges by file_path from graph store (preserve Entity/Tag nodes)
+- [x] **SC-02**: Delete vectors by file_path from sqlite-vec store
+- [x] **SC-03**: Delete Section nodes and edges by file_path from graph store (preserve Entity/Tag nodes)
 
 ### Incremental Pipeline
 
@@ -68,8 +68,8 @@
 | FT-02 | Phase 1 | Complete |
 | FT-03 | Phase 1 | Complete |
 | SC-01 | Phase 1 | Complete |
-| SC-02 | Phase 1 | Pending |
-| SC-03 | Phase 1 | Pending |
+| SC-02 | Phase 1 | Complete |
+| SC-03 | Phase 1 | Complete |
 | IP-01 | Phase 2 | Pending |
 | IP-02 | Phase 2 | Pending |
 | IP-03 | Phase 2 | Pending |
