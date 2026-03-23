@@ -119,6 +119,8 @@ class SQLiteVecVectorStore:
         self,
         chunks: list[Chunk],
         embeddings: list[list[float]],
+        *,
+        overwrite: bool = True,
     ) -> None:
         if not chunks:
             return
@@ -127,9 +129,10 @@ class SQLiteVecVectorStore:
         self._create_vec_table(dim)
         conn = self._get_conn()
 
-        # Clear existing data (matches LanceDB's mode="overwrite")
-        conn.execute(f"DELETE FROM {self._VEC_TABLE}")
-        conn.execute(f"DELETE FROM {self._META_TABLE}")
+        if overwrite:
+            # Clear existing data (matches LanceDB's mode="overwrite")
+            conn.execute(f"DELETE FROM {self._VEC_TABLE}")
+            conn.execute(f"DELETE FROM {self._META_TABLE}")
 
         for chunk, embedding in zip(chunks, embeddings):
             cur = conn.execute(

@@ -31,6 +31,8 @@ class VectorStoreProtocol(Protocol):
         self,
         chunks: list[Chunk],
         embeddings: list[list[float]],
+        *,
+        overwrite: bool = True,
     ) -> None:
         """Upsert *chunks* with their corresponding *embeddings*.
 
@@ -40,6 +42,10 @@ class VectorStoreProtocol(Protocol):
             The chunk objects to store.
         embeddings:
             A parallel list of embedding vectors, one per chunk.
+        overwrite:
+            When ``True`` (default), all existing vectors are deleted
+            before inserting.  When ``False``, new vectors are appended
+            to existing ones.
         """
         ...
 
