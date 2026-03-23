@@ -68,7 +68,7 @@ Plans:
 **Plans:** 1 plan
 
 Plans:
-- [ ] 03-01-PLAN.md — Diff count threading (IndexStats + metadata + pipeline), CLI output formatting, status change detection, API force param
+- [x] 03-01-PLAN.md — Diff count threading (IndexStats + metadata + pipeline), CLI output formatting, status change detection, API force param
 
 **Scope:**
 - Default `dotmd index` uses incremental

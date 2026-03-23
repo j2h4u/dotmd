@@ -27,9 +27,9 @@
 
 ### CLI / API
 
-- [ ] **CA-01**: `dotmd index` uses incremental by default
-- [ ] **CA-02**: `dotmd index --force` does full re-index
-- [ ] **CA-03**: Progress reporting: "3 new, 1 modified, 0 deleted, 222 unchanged"
+- [x] **CA-01**: `dotmd index` uses incremental by default
+- [x] **CA-02**: `dotmd index --force` does full re-index
+- [x] **CA-03**: Progress reporting: "3 new, 1 modified, 0 deleted, 222 unchanged"
 
 ## v2 Requirements
 
@@ -75,9 +75,9 @@
 | IP-03 | Phase 2 | Complete |
 | IP-04 | Phase 2 | Complete |
 | IP-05 | Phase 2 | Complete |
-| CA-01 | Phase 3 | Pending |
-| CA-02 | Phase 3 | Pending |
-| CA-03 | Phase 3 | Pending |
+| CA-01 | Phase 3 | Complete |
+| CA-02 | Phase 3 | Complete |
+| CA-03 | Phase 3 | Complete |
 
 **Coverage:**
 - v1 requirements: 14 total
