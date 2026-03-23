@@ -45,7 +45,8 @@ def _get_service(**overrides: object) -> DotMDService:
     default=False,
     help="Force full re-index, bypassing incremental change detection.",
 )
-def index(directory: Path, extract_depth: str, entity_types: str | None, force: bool) -> None:
+@click.pass_context
+def index(ctx: click.Context, directory: Path, extract_depth: str, entity_types: str | None, force: bool) -> None:
     """Index all markdown files in DIRECTORY."""
     overrides: dict[str, object] = {"extract_depth": extract_depth}
     if entity_types:
@@ -55,6 +56,10 @@ def index(directory: Path, extract_depth: str, entity_types: str | None, force: 
     mode_label = "full re-index" if force else "incremental"
     click.echo(f"Indexing {directory} ({mode_label})...")
     stats = service.index(directory, force=force)
+    click.echo(
+        f"{stats.new_files} new, {stats.modified_files} modified, "
+        f"{stats.deleted_files} deleted, {stats.unchanged_files} unchanged"
+    )
     click.echo(
         f"Done. {stats.total_files} files, {stats.total_chunks} chunks, "
         f"{stats.total_entities} entities, {stats.total_edges} edges."
@@ -112,6 +117,14 @@ def status() -> None:
     click.echo(f"Edges:    {stats.total_edges}")
     if stats.last_indexed:
         click.echo(f"Last indexed: {stats.last_indexed.isoformat()}")
+    if stats.data_dir:
+        if stats.new_files or stats.modified_files or stats.deleted_files:
+            click.echo(
+                f"Pending: {stats.new_files} new, {stats.modified_files} modified, "
+                f"{stats.deleted_files} deleted since last index"
+            )
+        else:
+            click.echo("No changes detected since last index.")
 
 
 @main.command()

@@ -130,9 +130,10 @@ class IndexingPipeline:
         """
         files = discover_files(directory)
         logger.info("Discovered %d files in %s", len(files), directory)
+        data_dir_str = str(directory)
 
         if force:
-            return self._full_index(files)
+            return self._full_index(files, data_dir=data_dir_str)
 
         diff = self._file_tracker.diff(files)
         logger.info(
@@ -143,9 +144,17 @@ class IndexingPipeline:
         if not diff.new and not diff.modified and not diff.deleted:
             logger.info("No changes detected -- skipping indexing")
             stats = self._metadata_store.get_stats()
-            return stats or IndexStats()
+            if stats is None:
+                stats = IndexStats()
+            # Return stored totals but FRESH diff counts (Pitfall 3)
+            stats.new_files = 0
+            stats.modified_files = 0
+            stats.deleted_files = 0
+            stats.unchanged_files = len(diff.unchanged)
+            stats.data_dir = data_dir_str
+            return stats
 
-        return self._incremental_index(files, diff)
+        return self._incremental_index(files, diff, data_dir=data_dir_str)
 
     def clear(self) -> None:
         """Delete all data from every backing store."""
@@ -163,14 +172,21 @@ class IndexingPipeline:
     # Indexing strategies
     # ------------------------------------------------------------------
 
-    def _full_index(self, files: list[FileInfo]) -> IndexStats:
+    def _full_index(
+        self, files: list[FileInfo], *, data_dir: str | None = None,
+    ) -> IndexStats:
         """Process all files from scratch (used for force=True)."""
         self.clear()
         self._file_tracker.clear()
-        return self._ingest_and_finalize(files, list(files))
+        return self._ingest_and_finalize(
+            files, list(files),
+            diff_counts={"new": len(files), "modified": 0, "deleted": 0, "unchanged": 0},
+            data_dir=data_dir,
+        )
 
     def _incremental_index(
         self, all_files: list[FileInfo], diff: FileDiff,
+        *, data_dir: str | None = None,
     ) -> IndexStats:
         """Process only changed files."""
         # 1. Purge deleted files
@@ -191,6 +207,13 @@ class IndexingPipeline:
         # 4. Ingest changed files + finalize
         return self._ingest_and_finalize(
             all_files, files_to_ingest, overwrite_vectors=False,
+            diff_counts={
+                "new": len(diff.new),
+                "modified": len(diff.modified),
+                "deleted": len(diff.deleted),
+                "unchanged": len(diff.unchanged),
+            },
+            data_dir=data_dir,
         )
 
     # ------------------------------------------------------------------
@@ -203,6 +226,8 @@ class IndexingPipeline:
         files_to_ingest: list[FileInfo],
         *,
         overwrite_vectors: bool = True,
+        diff_counts: dict[str, int] | None = None,
+        data_dir: str | None = None,
     ) -> IndexStats:
         """Ingest *files_to_ingest* and rebuild BM25/stats from full corpus."""
         # Read and chunk only the files to ingest
@@ -271,12 +296,18 @@ class IndexingPipeline:
             except Exception:
                 pass
 
+        _dc = diff_counts or {}
         stats = IndexStats(
             total_files=len(all_files),
             total_chunks=len(all_chunks),
             total_entities=all_entities_count,
             total_edges=all_edges_count,
             last_indexed=datetime.now(tz=timezone.utc),
+            new_files=_dc.get("new", 0),
+            modified_files=_dc.get("modified", 0),
+            deleted_files=_dc.get("deleted", 0),
+            unchanged_files=_dc.get("unchanged", 0),
+            data_dir=data_dir,
         )
         self._metadata_store.save_stats(stats)
         logger.info("Indexing complete: %s", stats)

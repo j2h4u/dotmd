@@ -49,6 +49,7 @@ class IndexRequest(BaseModel):
     directory: str
     extract_depth: str = "ner"
     entity_types: list[str] | None = None
+    force: bool = False
 
 
 class SearchResponse(BaseModel):
@@ -88,7 +89,7 @@ async def index(req: IndexRequest) -> IndexStats:
     if req.entity_types is not None:
         overrides["ner_entity_types"] = req.entity_types
     service = DotMDService(Settings(**overrides))  # type: ignore[arg-type]
-    return service.index(Path(req.directory))
+    return service.index(Path(req.directory), force=req.force)
 
 
 @app.get("/search", response_model=SearchResponse)

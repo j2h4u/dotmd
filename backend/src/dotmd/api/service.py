@@ -243,12 +243,33 @@ class DotMDService:
     def status(self) -> IndexStats | None:
         """Return the current index statistics, or ``None`` if not yet indexed.
 
+        When a previous data_dir is known and the directory still exists,
+        runs a live file diff to populate pending change counts.
+
         Returns
         -------
         IndexStats | None
             The most recent index statistics.
         """
-        return self._pipeline.metadata_store.get_stats()
+        stats = self._pipeline.metadata_store.get_stats()
+        if stats is None:
+            return None
+        # Change detection: run live diff if data_dir known
+        if stats.data_dir:
+            data_path = Path(stats.data_dir)
+            if data_path.is_dir():
+                try:
+                    from dotmd.ingestion.reader import discover_files
+
+                    files = discover_files(data_path)
+                    diff = self._pipeline.file_tracker.diff(files)
+                    stats.new_files = len(diff.new)
+                    stats.modified_files = len(diff.modified)
+                    stats.deleted_files = len(diff.deleted)
+                    stats.unchanged_files = len(diff.unchanged)
+                except Exception as e:
+                    logger.warning("Change detection failed: %s", e)
+        return stats
 
     def graph_data(self) -> dict:
         """Return all graph nodes and edges for visualization."""
