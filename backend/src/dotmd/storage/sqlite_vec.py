@@ -144,6 +144,38 @@ class SQLiteVecVectorStore:
         conn.commit()
         logger.info("Indexed %d chunks (%d-dim vectors)", len(chunks), dim)
 
+    def delete_vectors_by_chunk_ids(self, chunk_ids: list[str]) -> int:
+        """Delete vectors for the given chunk IDs. Returns count deleted."""
+        if not chunk_ids:
+            return 0
+        conn = self._get_conn()
+        placeholders = ",".join("?" for _ in chunk_ids)
+
+        # Get rowids from meta table
+        rows = conn.execute(
+            f"SELECT rowid FROM {self._META_TABLE} WHERE chunk_id IN ({placeholders})",
+            chunk_ids,
+        ).fetchall()
+        rowids = [r[0] for r in rows]
+
+        if not rowids:
+            return 0
+
+        rowid_placeholders = ",".join("?" for _ in rowids)
+        # Delete from vec0 virtual table by rowid
+        conn.execute(
+            f"DELETE FROM {self._VEC_TABLE} WHERE rowid IN ({rowid_placeholders})",
+            rowids,
+        )
+        # Delete from meta table
+        conn.execute(
+            f"DELETE FROM {self._META_TABLE} WHERE chunk_id IN ({placeholders})",
+            chunk_ids,
+        )
+        conn.commit()
+
+        return len(rowids)
+
     def delete_all(self) -> None:
         try:
             conn = self._get_conn()
