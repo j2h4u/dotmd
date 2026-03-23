@@ -232,6 +232,27 @@ class LadybugDBGraphStore:
 
     # -- housekeeping -------------------------------------------------------
 
+    def delete_file_subgraph(self, file_path: str) -> None:
+        """Delete all Section nodes for a file and the File node itself.
+
+        Entity and Tag nodes are preserved (shared across files).
+        DETACH DELETE removes the node AND all its connected edges
+        across all relationship tables.
+        """
+        with self._connection() as conn:
+            # 1. Delete Section nodes (+ edges: SECTION_ENTITY, SECTION_TAG,
+            #    SECTION_SECTION, and the FILE_SECTION edge from the parent File)
+            conn.execute(
+                "MATCH (s:Section {file_path: $fp}) DETACH DELETE s",
+                parameters={"fp": file_path},
+            )
+            # 2. Delete File node (+ edges: FILE_TAG, FILE_ENTITY,
+            #    any remaining FILE_SECTION edges)
+            conn.execute(
+                "MATCH (f:File {id: $fp}) DETACH DELETE f",
+                parameters={"fp": file_path},
+            )
+
     def delete_all(self) -> None:
         """Remove all nodes and edges from the graph."""
         with self._connection() as conn:
