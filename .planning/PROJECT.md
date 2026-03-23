@@ -18,10 +18,9 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 - ✓ CPU-only Dockerfile (torch<2.5 for Ivy Bridge) — feat/sqlite-vec-backend
 - ✓ Hybrid search working (semantic + BM25 + graph) — deployed
 - ✓ First full index completed (226 files, 495 chunks, 3143 entities, 21020 edges)
+- ✓ Incremental indexing — diff-based pipeline with `--force` override — Validated in Phase 2: Incremental Pipeline
 
 ### Active
-
-- [ ] Incremental indexing — diff-based, only process new/modified/deleted files (Phase 1 complete: storage layer ready)
 - [ ] Fix BM25 results missing in hybrid mode (reranker/fusion issue?)
 - [ ] Upstream PR strategy — start small, build trust with maintainer
 
