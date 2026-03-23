@@ -25,9 +25,10 @@ class Settings(BaseSettings):
     # Alternatives: all-mpnet-base-v2 (768-dim, general-purpose), bge-m3 (1024-dim, multilingual)
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     embedding_dim: int = 384
-    # Optional: URL to a TEI-compatible embedding server (e.g. http://host:8088).
-    # When set, embeddings are fetched via HTTP instead of loading a local model.
-    embedding_url: str | None = None
+    # URL to a TEI-compatible embedding server (e.g. http://host:8088).
+    # Required — dotMD is designed to run with an external embedding server.
+    # Set DOTMD_EMBEDDING_URL in your environment or docker-compose.yml.
+    embedding_url: str
 
     # Vector store backend: "lancedb" (default) or "sqlite-vec"
     vector_backend: Literal["lancedb", "sqlite-vec"] = "sqlite-vec"

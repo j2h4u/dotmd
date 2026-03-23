@@ -76,7 +76,7 @@ def mock_settings(index_dir: Path):
     settings.bm25_path = index_dir / "bm25_index.pkl"
     settings.acronyms_path = index_dir / "acronyms.json"
     settings.embedding_model = "test-model"
-    settings.embedding_url = None
+    settings.embedding_url = "http://test:8088"
     settings.extract_depth = "structural"  # skip NER for speed
     settings.ner_entity_types = []
     settings.max_chunk_tokens = 512

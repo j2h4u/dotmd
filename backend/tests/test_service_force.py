@@ -14,7 +14,7 @@ class TestServiceForceParameter:
         from dotmd.core.config import Settings
         from dotmd.api.service import DotMDService
 
-        settings = Settings(index_dir=tmp_path / "idx")
+        settings = Settings(index_dir=tmp_path / "idx", embedding_url="http://test:8088")
         service = DotMDService(settings=settings)
         # Replace the pipeline's index method with a mock
         service._pipeline.index = MagicMock(return_value=MagicMock())
