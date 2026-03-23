@@ -157,36 +157,6 @@ def mcp() -> None:
     mcp_app.run()
 
 
-@main.command("seed-fingerprints")
-@click.argument("directory", type=click.Path(exists=True, file_okay=False, path_type=Path))
-def seed_fingerprints(directory: Path) -> None:
-    """Populate file fingerprints without re-indexing.
-
-    Use after upgrading to incremental indexing when the index already
-    contains correct data.  Scans DIRECTORY, computes fingerprints
-    (mtime, size, md5), and saves them so the next ``dotmd index``
-    sees all files as unchanged.
-    """
-    import hashlib
-    import sqlite3
-
-    from dotmd.ingestion.file_tracker import FileTracker
-    from dotmd.ingestion.reader import discover_files
-
-    settings = Settings(read_only=True)
-    conn = sqlite3.connect(str(settings.sqlite_path))
-    tracker = FileTracker(conn)
-
-    files = discover_files(directory)
-    for fi in files:
-        stat = fi.path.stat()
-        checksum = hashlib.md5(fi.path.read_bytes()).hexdigest()
-        tracker.save_fingerprint(str(fi.path), stat.st_mtime, stat.st_size, checksum)
-
-    conn.close()
-    click.echo(f"Seeded fingerprints for {len(files)} files.")
-
-
 @main.command("mcp-config")
 def mcp_config() -> None:
     """Print MCP client configuration JSON with absolute paths."""
