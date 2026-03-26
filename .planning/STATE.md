@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: milestone
-status: Milestone complete
-last_updated: "2026-03-23T12:54:08.811Z"
+status: v1.1 milestone complete
+last_updated: "2026-03-26T11:55:36.333Z"
 progress:
   total_phases: 3
   completed_phases: 3

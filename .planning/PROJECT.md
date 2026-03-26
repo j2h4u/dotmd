@@ -6,7 +6,7 @@ Independent fork of [inventivepotter/dotmd](https://github.com/inventivepotter/d
 
 ## Core Value
 
-Fast, incremental search indexing — so the daily sync of new voicenotes doesn't bog down the server for 25 minutes.
+Fast, incremental search indexing — so the daily sync of new voicenotes doesn't bog down the server for 25 minutes. (Validated in v1.1 — incremental runs in <1s for typical daily changes.)
 
 ## Requirements
 
@@ -29,7 +29,7 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 ### Out of Scope
 
 - GPU acceleration — no GPU on current hardware, Jetson/Mac Mini is future consideration
-- LadybugDB replacement — works fine for reads, single-connection is manageable
+- LadybugDB replacement — ~~works fine for reads, single-connection is manageable~~ Now planned for v1.2 (FalkorDB migration) due to lock conflicts with concurrent access
 - Full QMD-style query expansion/reranking — different product philosophy
 - Upstream PRs — fork has diverged too far (sqlite-vec, TEI, incremental indexing, schema migrations). Upstream is reference-only now
 
@@ -43,19 +43,25 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 - Source at ~/repos/j2h4u/dotmd/
 
 **Data:**
-- /srv/knowledgebase/voicenotes/ — 226 voice recordings with transcripts (daily sync via voicenotes-sync)
+- /srv/knowledgebase/voicenotes/ — 227 voice recordings with transcripts (daily sync via voicenotes-sync)
 - /home/j2h4u/ — docs, scripts, AGENTS.md, repos (mounted read-only)
 
 **Upstream (reference only):**
 - inventivepotter/dotmd: 11 commits (Jan 29-31 2026), inactive since. 26 stars, 5 forks, no license
 - Useful as reference for graph search patterns and reranker tuning ideas
-- No plans to submit PRs — our fork has diverged architecturally
+- PR #1 (MCP stderr fix) approved, PR #2 (LadybugDB lock fix) submitted
+
+**Current index (after v1.1):**
+- 227 files, 520 chunks, 3,456 entities, 19,667 edges
+- Full re-index: ~59 min via TEI
+- Incremental (no changes): <1s
+- Per-stage timing metrics in pipeline logs (run_id correlation)
 
 **Performance baseline (full index):**
-- Embedding via TEI: ~25 min (495 chunks × 4 per batch × 12s/batch on CPU)
+- Embedding via TEI: ~25 min (520 chunks)
 - NER (GLiNER): ~18 min on CPU
-- Graph population: ~10 min (21k edges)
-- Total: ~50 min — unacceptable for daily runs
+- Graph population: ~10 min (19k edges)
+- Total: ~59 min
 
 ## Constraints
 
@@ -74,6 +80,8 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 | TEI mandatory (no local fallback) | Prevent accidental 50-min local model indexing | ✓ Good |
 | truncate:true for TEI | Chunks exceed 512 token limit of e5-large | ✓ Good — works but loses tail context |
 | NER enabled (not structural-only) | Knowledge graph quality worth the CPU cost on first index | ⚠️ Revisit — 18min NER may not be worth it for incremental |
+| Reuse global DotMDService in API | LadybugDB file lock prevents concurrent connections | ✓ Good — fixes /index endpoint crash |
+| Pipeline timing metrics | No visibility into stage durations without instrumentation | ✓ Good — run_id correlation in logs |
 
 ## Evolution
 
@@ -93,4 +101,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-23 — upstream decoupled, fork is now independent project. TEI enforced as mandatory. Milestone v1.1 complete.*
+*Last updated: 2026-03-26 after v1.1 milestone — incremental indexing shipped, LadybugDB Out of Scope revised (FalkorDB migration planned for v1.2)*
