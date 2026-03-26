@@ -115,6 +115,12 @@ def status() -> None:
     click.echo(f"Chunks:   {stats.total_chunks}")
     click.echo(f"Entities: {stats.total_entities}")
     click.echo(f"Edges:    {stats.total_edges}")
+    # Graph backend info
+    settings = Settings()
+    if settings.graph_backend == "falkordb":
+        click.echo(f"Graph:    falkordb @ {settings.falkordb_url}/{settings.falkordb_graph_name}")
+    else:
+        click.echo(f"Graph:    ladybugdb @ {settings.graph_db_path}")
     if stats.last_indexed:
         click.echo(f"Last indexed: {stats.last_indexed.isoformat()}")
     if stats.data_dir:
