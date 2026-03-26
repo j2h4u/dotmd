@@ -199,8 +199,9 @@ class DotMDService:
 
         # -- Optional reranking -----------------------------------------------
         if rerank and fused:
-            chunk_ids = [cid for cid, _ in fused[:pool_size]]
-            fused_scores = {cid: score for cid, score in fused[:pool_size]}
+            rerank_candidates = fused[:pool_size]
+            chunk_ids = [cid for cid, _ in rerank_candidates]
+            fused_scores = {cid: score for cid, score in fused}  # ALL fused, not just pool_size
             reranked = self._reranker.rerank(
                 search_query,
                 chunk_ids,
@@ -224,8 +225,31 @@ class DotMDService:
                     raw_f = fused_scores.get(cid, f_min)
                     norm_f = (raw_f - f_min) / f_range
                     blended.append((cid, 0.4 * norm_f + 0.6 * norm_re))
+
+                # D-02: Merge back fusion candidates not scored by reranker
+                # (beyond pool_size or missing from reranked set)
+                reranked_ids = {cid for cid, _ in blended}
+                for cid, fused_score in fused:
+                    if cid not in reranked_ids:
+                        norm_f = (fused_score - f_min) / f_range
+                        blended.append((cid, 0.4 * norm_f))
+
                 blended.sort(key=lambda x: x[1], reverse=True)
                 fused = blended
+
+                # D-05: Diagnostic logging for BM25 survival
+                bm25_ids = {cid for cid, _ in bm25_hits}
+                semantic_ids = {cid for cid, _ in semantic_hits}
+                bm25_only_ids = bm25_ids - semantic_ids
+                bm25_in_final = sum(1 for cid, _ in fused if cid in bm25_only_ids)
+                logger.debug(
+                    "Reranked %d candidates (pool_size=%d, fused=%d); "
+                    "%d BM25-only matches in final list",
+                    len(reranked),
+                    pool_size,
+                    len(fused),
+                    bm25_in_final,
+                )
 
         # -- Build final SearchResult list ------------------------------------
         results = build_search_results(
