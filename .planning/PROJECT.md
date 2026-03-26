@@ -22,13 +22,13 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 - ✓ CLI progress reporting ("3 new, 1 modified, 0 deleted, 222 unchanged") — Validated in Phase 3: CLI & API Polish
 - ✓ Status command with live change detection — Validated in Phase 3: CLI & API Polish
 - ✓ API force parameter on POST /index — Validated in Phase 3: CLI & API Polish
+- ✓ Fix BM25 results missing in hybrid mode — Validated in Phase 5: BM25 Hybrid Fix
 
 ### Active
 - [ ] FalkorDB graph store adapter (replace LadybugDB)
 - [ ] Graph backend config (`graph_backend`, `falkordb_url`)
 - [ ] Pipeline integration for backend selection
 - [ ] Docker networking for FalkorDB connectivity
-- [ ] Fix BM25 results missing in hybrid mode (reranker/fusion issue?)
 
 ### Out of Scope
 
@@ -116,4 +116,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-26 after v1.2 milestone start — FalkorDB migration + BM25 hybrid fix*
+*Last updated: 2026-03-27 after Phase 5 complete — BM25 hybrid fix verified, reranker threshold removed, merge-back logic added*
