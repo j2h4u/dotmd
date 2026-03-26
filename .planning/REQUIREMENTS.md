@@ -17,7 +17,7 @@ Requirements for FalkorDB migration and BM25 hybrid fix.
 
 ### Search Quality
 
-- [ ] **SEARCH-01**: BM25 results appear in hybrid search mode (diagnose reranker threshold issue, fix scoring pipeline)
+- [x] **SEARCH-01**: BM25 results appear in hybrid search mode (diagnose reranker threshold issue, fix scoring pipeline)
 
 ## Future Requirements
 
@@ -49,7 +49,7 @@ Requirements for FalkorDB migration and BM25 hybrid fix.
 | GRAPH-03 | Phase 4 | Complete |
 | GRAPH-04 | Phase 6 | Pending |
 | GRAPH-05 | Phase 6 | Pending |
-| SEARCH-01 | Phase 5 | Pending |
+| SEARCH-01 | Phase 5 | Complete |
 
 **Coverage:**
 - v1.2 requirements: 6 total

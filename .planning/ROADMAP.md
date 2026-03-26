@@ -41,7 +41,7 @@ Plans:
   2. Results that match only via BM25 (no semantic similarity) still appear in final output, not filtered by reranker
 **Plans:** 1 plan
 Plans:
-- [ ] 05-01-PLAN.md — Remove reranker score threshold, add merge-back logic for fusion candidates, diagnostic logging
+- [x] 05-01-PLAN.md — Remove reranker score threshold, add merge-back logic for fusion candidates, diagnostic logging
 
 ### Phase 6: Docker Integration + Migration
 **Goal**: dotmd production container connects to FalkorDB and the knowledge graph is fully populated

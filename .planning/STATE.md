@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: milestone
 status: planning
-stopped_at: Phase 5 context gathered
-last_updated: "2026-03-26T22:02:13.186Z"
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-03-26T22:24:16.512Z"
 last_activity: 2026-03-26
 progress:
   total_phases: 3
-  completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
+  completed_phases: 2
+  total_plans: 3
+  completed_plans: 3
   percent: 0
 ---
 
@@ -21,7 +21,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-26)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 04 — falkordb-adapter-config
+**Current focus:** Phase 05 — bm25-hybrid-fix
 
 ## Current Milestone
 
@@ -50,6 +50,7 @@ Progress: [░░░░░░░░░░] 0%
 | 5. BM25 Hybrid Fix | — | — | — |
 | 6. Docker Integration + Migration | — | — | — |
 | Phase 04 P02 | 2min | 2 tasks | 2 files |
+| Phase 05 P01 | 5min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -62,6 +63,8 @@ Recent decisions affecting current work:
 - [v1.2]: FalkorDB adapter written from scratch (not ported from LadybugDB) — dialect differences and unnecessary complexity
 - [Phase 04]: Settings read directly in CLI status (not via service) so status works even if FalkorDB is unreachable
 - [Phase 04]: Lazy imports inside graph factory — FalkorDB dependency only loaded when graph_backend=falkordb
+- [Phase 05]: D-01: Remove hard score threshold from reranker entirely rather than making it configurable
+- [Phase 05]: D-02: Merge back all fusion candidates not scored by reranker with fusion-only weight
 
 ### Pending Todos
 
@@ -74,9 +77,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-26T22:02:13.182Z
-Stopped at: Phase 5 context gathered
-Resume file: .planning/phases/05-bm25-hybrid-fix/05-CONTEXT.md
+Last session: 2026-03-26T22:24:16.508Z
+Stopped at: Completed 05-01-PLAN.md
+Resume file: None
 
 ---
 *Last updated: 2026-03-26*
