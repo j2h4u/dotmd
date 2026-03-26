@@ -31,8 +31,7 @@ from dotmd.ingestion.file_tracker import FileDiff, FileTracker
 from dotmd.ingestion.reader import discover_files, read_file
 from dotmd.search.bm25 import BM25SearchEngine
 from dotmd.search.semantic import SemanticSearchEngine
-from dotmd.storage.base import VectorStoreProtocol
-from dotmd.storage.graph import LadybugDBGraphStore
+from dotmd.storage.base import GraphStoreProtocol, VectorStoreProtocol
 from dotmd.storage.metadata import SQLiteMetadataStore
 
 logger = logging.getLogger(__name__)
@@ -65,6 +64,22 @@ def _create_vector_store(settings: Settings) -> VectorStoreProtocol:
     return LanceDBVectorStore(settings.lancedb_path)
 
 
+def _create_graph_store(settings: Settings) -> GraphStoreProtocol:
+    """Instantiate the configured graph store backend."""
+    if settings.graph_backend == "falkordb":
+        from dotmd.storage.falkordb_graph import FalkorDBGraphStore
+
+        return FalkorDBGraphStore(
+            url=settings.falkordb_url,
+            graph_name=settings.falkordb_graph_name,
+        )
+    from dotmd.storage.graph import LadybugDBGraphStore
+
+    return LadybugDBGraphStore(
+        settings.graph_db_path, read_only=settings.read_only,
+    )
+
+
 class IndexingPipeline:
     """Orchestrates the full indexing workflow from raw files to populated stores.
 
@@ -84,9 +99,7 @@ class IndexingPipeline:
         # -- storage backends --------------------------------------------------
         self._metadata_store = SQLiteMetadataStore(settings.sqlite_path)
         self._vector_store = _create_vector_store(settings)
-        self._graph_store = LadybugDBGraphStore(
-            settings.graph_db_path, read_only=settings.read_only,
-        )
+        self._graph_store = _create_graph_store(settings)
 
         # -- file tracker (shares metadata store's connection) -----------------
         self._file_tracker = FileTracker(self._metadata_store._conn)
@@ -466,7 +479,7 @@ class IndexingPipeline:
         return self._vector_store
 
     @property
-    def graph_store(self) -> LadybugDBGraphStore:
+    def graph_store(self) -> GraphStoreProtocol:
         """Return the graph store instance."""
         return self._graph_store
 
