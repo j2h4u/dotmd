@@ -1,182 +1,125 @@
-# Feature Research
+# Feature Landscape
 
-**Domain:** Incremental indexing for a hybrid search system (semantic + BM25 + knowledge graph)
-**Researched:** 2026-03-23
-**Confidence:** HIGH (code inspected directly; research confirms patterns)
-
----
-
-## Context: What the Codebase Currently Does
-
-Before categorizing features, the relevant gaps in the current code:
-
-- `metadata.py` chunks table has no `file_hash` or `mtime` column — no way to detect unchanged files
-- `FileInfo.checksum` is a `@computed_field` that calls `path.read_bytes()` on every access — no caching
-- `reader.py` `discover_files()` reads every file's content just to extract a title — full corpus read on every run
-- `BM25SearchEngine.build_index()` takes the full corpus; `rank_bm25` has no incremental add/remove API
-- `SQLiteMetadataStore` has no `delete_chunks_by_file()` — only `delete_all()`
-- `LadybugDBGraphStore` has no delete-by-file-path method — orphan nodes accumulate silently
-- Graph `File` node stores `checksum` but nothing reads it back for comparison
-
-The 50-minute full index breaks down as: ~25 min embedding (TEI, CPU) + ~18 min NER (GLiNER, CPU) + ~10 min graph. The embedding and NER costs are per-chunk, not per-file — meaning any file with changes re-runs both.
+**Domain:** FalkorDB graph store migration + BM25 hybrid search fix
+**Researched:** 2026-03-26
+**Confidence:** HIGH (direct codebase analysis + verified FalkorDB capability mapping)
 
 ---
 
-## Feature Landscape
+## Table Stakes
 
-### Table Stakes (Users Expect These)
-
-Features an incremental indexer must have to be correct and usable. Missing any of these means the index silently diverges from disk.
+Features that must work for v1.2 to be considered complete. Missing any = regression from v1.1.
 
 | Feature | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| **File change detection via content hash** | Without it, "incremental" is just "skip nothing" | LOW | MD5 or SHA-1 of file bytes. Already computed in `FileInfo.checksum` but never persisted to metadata DB. Add `file_hash` column to chunks table; compare on next run. |
-| **Persist hash/mtime to metadata store** | Change detection requires a stored baseline | LOW | Add `file_hash TEXT` and `mtime REAL` to the `chunks` table (or a separate `files` table). Mtime as fast pre-filter; hash as authoritative diff. |
-| **Skip unchanged files** | The whole point — avoid re-embedding files that haven't changed | LOW | After hash comparison, bypass chunking/embedding/NER/graph update for unchanged files. Expected speedup: proportional to fraction of unchanged files. |
-| **Delete stale chunks on file change** | If a file's chunk count changes, old chunks linger in all stores | MEDIUM | On file change: delete old chunks from metadata store, vector store, and BM25 corpus before re-indexing. Requires `delete_chunks_by_file(path)` on all three stores. |
-| **Handle deleted files** | Files removed from disk must be removed from the index | MEDIUM | `discover_files()` gives current set. Diff against stored file paths. Delete all chunks/vectors/graph nodes for missing files. |
-| **BM25 full rebuild on corpus change** | `rank_bm25` has no incremental API — rebuild is the only correct path | LOW | After all file changes are applied to metadata, rebuild BM25 from `get_all_chunks()`. This is cheap (~1s for 500 chunks) compared to embedding. |
-| **Atomic per-file update** | Partial failure mid-file leaves index inconsistent | MEDIUM | Wrap each file's update (delete old + insert new) in a SQLite transaction. If embedding or NER fails, roll back that file — don't corrupt the rest. |
-| **Progress reporting to stdout** | Long-running CLI command must show what it's doing | LOW | Log counts: "X files unchanged, Y modified, Z new, W deleted. Processing Y+Z files..." Already using `logger.info` — add structured progress lines. |
+| **FalkorDB adapter implementing full GraphStoreProtocol** | Core deliverable -- replace LadybugDB | MEDIUM | 11 methods to implement. Most Cypher is identical. `add_edge` gets simpler (no label lookup). `get_graph_data` needs FalkorDB-native queries. |
+| **Config-driven graph backend selection** | Must preserve LadybugDB as fallback during migration | LOW | 3 new Settings fields: `graph_backend`, `falkordb_url`, `falkordb_graph_name`. Follow existing `vector_backend` pattern. |
+| **Pipeline factory for graph store** | Pipeline currently hardcodes LadybugDB | LOW | Add `_create_graph_store()` mirroring `_create_vector_store()`. ~10 lines. |
+| **Docker networking to FalkorDB** | dotMD container must reach FalkorDB container | LOW | Add `graphiti_default` external network. Same pattern as existing `embeddings_default`. |
+| **BM25 results visible in hybrid search** | v1.1 hybrid mode drops BM25 results -- users lose keyword search value | MEDIUM | Diagnosis needed first. Likely reranker threshold or blending weight issue. |
+| **Graph name isolation** | Shared FalkorDB instance must not corrupt Graphiti's `knowledgebase` graph | LOW | Use separate named graph `"dotmd"`. Add startup validation. |
+| **FalkorDB property indexes** | Without indexes, node lookup by `id` requires full graph scan | LOW | `CREATE INDEX FOR (n:Label) ON (n.id)` for File, Section, Entity, Tag at adapter init. |
+| **Full re-index with new backend** | Graph data must be rebuilt in FalkorDB after migration | LOW (ops) | `dotmd index --force` with `DOTMD_GRAPH_BACKEND=falkordb`. ~59 min. Schedule overnight. |
+| **Search quality parity** | Graph search results with FalkorDB must match LadybugDB quality | MEDIUM | Same Cypher queries, same traversal depth. Verify `get_neighbors` returns equivalent results. |
+| **Concurrent CLI + serve** | The primary motivation for migration -- eliminate LadybugDB file lock | LOW | FalkorDB is a network service with connection pooling. Concurrent access works by default. |
 
-### Differentiators (Competitive Advantage)
+## Differentiators
 
-Features that make this incremental indexer genuinely good, not just correct.
+Features that improve the product beyond just replacing LadybugDB.
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| **Separate files table with per-file metadata** | Enables O(1) "is this file changed?" without touching chunks | LOW | Dedicated `files` table with `(path, hash, mtime, chunk_count, last_indexed)`. Mtime check first (cheap), hash check only if mtime differs. Avoids reading file bytes for truly unchanged files. |
-| **Selective NER skip for unchanged files** | NER is 18 min of the 50-min budget — skipping it for unchanged files is the biggest win | LOW | NER cost is per-chunk. If a file is unchanged, its chunks are unchanged, so NER output is identical. Store NER results per-chunk or simply skip NER for unchanged files' chunks. |
-| **Graph pruning: delete-by-file-path** | Without this, deleted/modified files leave orphan nodes in the graph indefinitely | MEDIUM | LadybugDB supports Cypher DELETE. Add `delete_file_subgraph(path)` that removes File node, its Section nodes, and any Entity nodes that have no remaining MENTIONS edges (the orphaned entity problem documented in Graphiti issue #1083). |
-| **Dry-run mode** | Confidence before committing a long run | LOW | `dotmd index --dry-run` — discovers files, computes diff (new/modified/deleted counts), prints what would happen, exits. No writes. Useful for verifying cron job logic. |
-| **Stats delta in output** | Show what changed, not just final state | LOW | `IndexStats` currently shows totals. For incremental runs, report: `+12 files, -3 files, 47 chunks added, 23 chunks removed, 0 entities changed`. |
-| **Idempotent re-runs** | Running `dotmd index` twice with no file changes must produce no writes | LOW | Falls out of correct hash-based detection. Important for cron safety — a failed run followed by retry should not double-write. |
-| **`--force` flag to bypass diff** | Escape hatch for when you suspect index corruption | LOW | `dotmd index --force` ignores stored hashes, re-indexes everything. Equivalent to current behavior. |
+| **Simplified edge creation (no label lookup)** | 8x fewer queries per edge during indexing | LOW | FalkorDB allows `MATCH (a {id: $src}), (b {id: $tgt}) MERGE (a)-[r:EDGE]->(b)` without knowing source/target labels. Eliminates `_find_node_label()` entirely. |
+| **Single-query node/edge counts** | `MATCH (n) RETURN count(n)` instead of 4+7 queries | LOW | FalkorDB is schemaless -- no need to iterate per-label/per-rel-table. |
+| **Connection resilience (retry on timeout)** | FalkorDB is a network service -- transient failures should not kill 59-min index runs | LOW | `BlockingConnectionPool` + simple retry decorator. |
+| **BM25 fallback preservation** | Reranker-dropped BM25 results retained with penalty instead of discarded | MEDIUM | Append dropped results at end of blended list with reduced score. Preserves keyword search diversity. |
+| **Search diagnostics logging** | Per-engine result counts and reranker decisions visible in debug logs | LOW | Add `logger.debug` calls showing BM25/semantic/graph hit counts before and after reranking. Essential for future search tuning. |
+| **Smaller Docker image** | Remove `real_ladybug` + `pandas` dependencies | LOW | `falkordb` is pure Python (~50KB). `real_ladybug` + `pandas` + `numpy` = ~150MB in Docker image. Net savings. |
 
-### Anti-Features (Commonly Requested, Often Problematic)
+## Anti-Features
 
-Features that seem useful but should not be built in v1.
+Features to explicitly NOT build in v1.2.
 
-| Feature | Why Requested | Why Problematic | Alternative |
-|---------|---------------|-----------------|-------------|
-| **File watcher / daemon mode** | "Index automatically when files change" | Adds persistent process, inotify limit issues on large directories, Docker container lifecycle complexity, event coalescing needed (burst writes trigger many re-indexes). Not needed for a cron-driven workflow. | Cron + `dotmd index` is simpler and sufficient for daily voicenotes sync. Add watcher in v2 if needed. |
-| **Partial BM25 update (document-level)** | Avoid full BM25 rebuild on each run | `rank_bm25` has no incremental API. `BM25opt` fork exists but adds a dependency and diverges from upstream. BM25 rebuild from 500 chunks takes ~0.1s — not worth the complexity. | Full BM25 rebuild from metadata store after each incremental run. Fast enough. |
-| **Embedding model version migration** | Re-embed only chunks that used an older model version | Adds model versioning to every chunk record, complex migration logic, risk of mixed-model indexes giving inconsistent scores. | On model change, do a full `dotmd index --force`. Embedding model changes are rare for this use case. |
-| **Real-time index consistency during search** | Serve search queries while indexing is running | Requires locking or copy-on-write semantics across SQLite + sqlite-vec + LadybugDB. Three separate stores make atomic cross-store consistency hard. | Index offline (cron job), search always reads a stable snapshot. The 50-min window becomes 2-5 min for incremental — acceptable for daily sync. |
-| **Conflict resolution / merge strategies** | Handle concurrent indexing from multiple processes | Single-process, single-server deployment. No concurrency requirement. Adding this is pure complexity. | Document that `dotmd index` must not run concurrently. Use a lockfile if paranoid. |
-| **Index corruption auto-repair** | Detect and heal inconsistencies between stores | Detecting cross-store inconsistency (e.g., vector exists but metadata row missing) requires full cross-joins across all stores. Complex and slow. | Provide `dotmd index --force` as the recovery path. For SQLite, WAL mode (already enabled) handles crash recovery. Document recovery procedure. |
+| Anti-Feature | Why Avoid | What to Do Instead |
+|--------------|-----------|-------------------|
+| **Data migration (export LadybugDB -> import FalkorDB)** | One-time operation, migration code is throwaway, schema differences may bite | Re-index with `--force` (~59 min). Simpler and guaranteed correct. Metadata + vectors are already valid -- only graph is rebuilt. |
+| **FalkorDB schema enforcement** | FalkorDB is schemaless by design -- adding constraints would fight the DB | Rely on application-level validation in the adapter. Node labels and property names are already controlled by the Protocol methods. |
+| **Async FalkorDB operations** | `falkordb` supports async, but the entire pipeline is synchronous | Keep sync. The pipeline processes files sequentially. Async would only help if multiple files were indexed in parallel, which adds complexity with no benefit at 227-file scale. |
+| **Graph-only re-index command** | Useful but not MVP for v1.2 | Use existing `--force` flag. Graph-only re-index could save ~30 min but requires new pipeline logic. Defer to v1.3 if repeated migrations are needed. |
+| **FalkorDB vector search** | FalkorDB supports `vecf32()` and `vec.cosineDistance()` -- could replace sqlite-vec | Two backend swaps in one milestone is too risky. sqlite-vec works correctly. Evaluate FalkorDB vectors separately if needed. |
+| **Multiple graph backend support (3+ options)** | Only need LadybugDB (legacy) and FalkorDB (new) | Factory pattern supports adding more later, but don't over-engineer for hypothetical backends. |
 
 ---
 
 ## Feature Dependencies
 
 ```
-[Persist hash/mtime to metadata store]
-    └──required by──> [File change detection via content hash]
-                          └──required by──> [Skip unchanged files]
-                          └──required by──> [Selective NER skip]
-                          └──required by──> [Idempotent re-runs]
-                          └──required by──> [Dry-run mode]
+[Config: graph_backend, falkordb_url, falkordb_graph_name]
+    |
+    +--required by--> [FalkorDB adapter implementation]
+    |                      |
+    |                      +--required by--> [Pipeline factory: _create_graph_store()]
+    |                      |                      |
+    |                      |                      +--required by--> [Search with FalkorDB]
+    |                      |                      +--required by--> [Index with FalkorDB]
+    |                      |
+    |                      +--required by--> [Property indexes on id]
+    |                      +--required by--> [Connection resilience / retry]
+    |
+    +--required by--> [Docker networking (graphiti_default)]
+                           |
+                           +--required by--> [Full re-index with FalkorDB]
+                                                  |
+                                                  +--required by--> [Search quality validation]
 
-[Delete stale chunks on file change]
-    └──required by──> [Graph pruning: delete-by-file-path]
-    └──required by──> [Handle deleted files]
-
-[Skip unchanged files] ──enables──> [Stats delta in output]
-
-[BM25 full rebuild on corpus change]
-    └──runs after──> [Delete stale chunks] + [Skip unchanged files]
-    (corpus = all current chunks from metadata store after diff applied)
-
-[Atomic per-file update] ──wraps──> [Delete stale chunks] + [embedding + NER]
+[BM25 hybrid fix] -- INDEPENDENT of FalkorDB migration
+    |
+    +-- [Diagnosis: identify root cause]
+    |       |
+    |       +--required by--> [Fix: threshold / blending / warmup]
+    |                              |
+    |                              +--required by--> [Search diagnostics logging]
+    |                              +--required by--> [BM25 fallback preservation]
 ```
 
-### Dependency Notes
+### Key Insight: BM25 fix is independent
 
-- **Hash persistence is the foundation.** Everything else — skip, delete, dry-run, NER skip — requires a stored baseline hash. This is the first thing to build.
-- **Delete before insert.** When a file changes, old chunks must be removed from all stores before new chunks are added. Otherwise chunk IDs from different chunking runs coexist.
-- **BM25 rebuild is always last.** It reads the final state of the metadata store after all adds/deletes are committed.
-- **Graph pruning depends on stale chunk deletion.** You can only identify orphaned entities after all stale Section nodes are removed.
-- **NER skip depends on file-level skipping.** If a file is skipped entirely, its chunks are never re-processed, so NER is implicitly skipped too.
+The BM25 hybrid issue exists regardless of which graph backend is used. It can be worked on in parallel with the FalkorDB migration.
 
 ---
 
-## MVP Definition
+## MVP Recommendation
 
-### Launch With (v1 — "incremental indexing works correctly")
+### Must Ship (v1.2 complete criteria)
 
-These are the minimum features for the daily cron to use incremental instead of full:
+1. **FalkorDB adapter** -- all 11+ Protocol methods implemented and tested
+2. **Config settings** -- `graph_backend`, `falkordb_url`, `falkordb_graph_name`
+3. **Pipeline factory** -- `_create_graph_store()` replacing hardcoded LadybugDB
+4. **Property indexes** -- created at adapter init
+5. **Docker networking** -- `graphiti_default` added to production compose
+6. **Graph name isolation** -- startup validation
+7. **Full re-index** -- completed with FalkorDB backend
+8. **BM25 hybrid fix** -- diagnosed and fixed; BM25 results visible in hybrid mode
+9. **Concurrent access verified** -- CLI + serve simultaneously without errors
 
-- [ ] **Persist hash/mtime** — add `files` table to metadata store with `(path, hash, mtime, last_indexed)`
-- [ ] **File change detection** — on `dotmd index`, diff current files against stored hashes
-- [ ] **Skip unchanged files** — bypass chunking/embedding/NER for hash-matched files
-- [ ] **Delete stale chunks** — `delete_chunks_by_file(path)` on metadata + vector store before re-indexing changed files
-- [ ] **Handle deleted files** — diff discovered paths against stored paths, delete removed files from all stores
-- [ ] **BM25 rebuild from current corpus** — always rebuild BM25 at end of incremental run (fast, correct)
-- [ ] **Progress reporting** — log diff summary at start, per-file progress during embedding phase
-- [ ] **`--force` flag** — bypass diff for full re-index (recovery path)
+### Defer to v1.3
 
-### Add After Validation (v1.x)
-
-- [ ] **Graph pruning / orphan entity cleanup** — add after v1 is stable and we can measure orphan accumulation
-- [ ] **Dry-run mode** — add once incremental is battle-tested and we want cron verification
-- [ ] **Separate files table** (if the chunk-level approach proves awkward) — may be needed anyway for graph pruning to work cleanly
-- [ ] **Stats delta reporting** — add once the diff logic is in place (trivial then)
-
-### Future Consideration (v2+)
-
-- [ ] **File watcher daemon** — only if cron granularity becomes insufficient (e.g., live search over active note-taking)
-- [ ] **Selective NER per-chunk caching** — only if NER cost dominates after incremental is running (currently NER is skipped implicitly for unchanged files)
-
----
-
-## Feature Prioritization Matrix
-
-| Feature | User Value | Implementation Cost | Priority |
-|---------|------------|---------------------|----------|
-| Persist hash/mtime | HIGH | LOW | P1 |
-| Skip unchanged files | HIGH | LOW | P1 |
-| Delete stale chunks (all stores) | HIGH | MEDIUM | P1 |
-| Handle deleted files | HIGH | MEDIUM | P1 |
-| BM25 rebuild from corpus | HIGH | LOW | P1 |
-| Progress reporting | MEDIUM | LOW | P1 |
-| `--force` flag | MEDIUM | LOW | P1 |
-| Atomic per-file update | MEDIUM | MEDIUM | P1 |
-| Graph pruning / orphan cleanup | MEDIUM | MEDIUM | P2 |
-| Dry-run mode | LOW | LOW | P2 |
-| Stats delta in output | LOW | LOW | P2 |
-| File watcher daemon | LOW | HIGH | P3 |
-| Partial BM25 update | LOW | HIGH | P3 (anti-feature) |
-
----
-
-## Codebase-Specific Implementation Notes
-
-These are not generic features — they're gaps in the current code that the feature list above requires:
-
-| Gap | Current State | What's Needed |
-|-----|---------------|---------------|
-| `FileInfo.checksum` | Computed on every access, reads file bytes each time | Cache the value; or move hash computation to `discover_files()` explicitly |
-| `metadata.py` chunks table | No `file_hash`, no `mtime`, no file-level record | Add `files` table or at minimum `file_hash` + `mtime` columns on chunks |
-| `SQLiteMetadataStore` | Only `delete_all()` | Add `delete_chunks_by_file(path: Path)`, `get_indexed_files() -> dict[str, str]` (path → hash) |
-| `SQLiteVecVectorStore` | Unknown delete API | Need `delete_by_file(path)` or `delete_by_chunk_ids(ids)` |
-| `LadybugDBGraphStore` | No delete methods | Need `delete_file_subgraph(path)` via Cypher |
-| `BM25SearchEngine` | `build_index(chunks)` only | No change needed — full rebuild from metadata store is the right approach |
-| `IndexingPipeline.index()` | Processes all discovered files unconditionally | Needs diff phase before processing loop |
+- Graph-only re-index command (optimization, not needed if full re-index is acceptable)
+- `real_ladybug` removal from core deps (keep as optional during v1.2 for rollback safety)
+- Connection pool tuning (defaults are fine for current scale)
+- FalkorDB vector search evaluation (separate investigation)
+- `reranker_score` field on `SearchResult` (nice-to-have for diagnostics)
 
 ---
 
 ## Sources
 
-- Code inspection: `/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/` (ingestion/pipeline.py, storage/metadata.py, search/bm25.py, ingestion/reader.py, core/models.py, storage/graph.py)
-- [CocoIndex incremental processing architecture](https://cocoindex.io/blogs/incremental-processing) — lineage tracking, hash-based change detection patterns
-- [Graphiti issue #1083: orphaned entities not cleaned up during episode deletion](https://github.com/getzep/graphiti/issues/1083) — real-world graph orphan problem
-- [How to Update RAG Knowledge Base Without Rebuilding Everything](https://particula.tech/blog/update-rag-knowledge-without-rebuilding) — versioned deletion + re-insertion pattern
-- [rank_bm25 GitHub](https://github.com/dorianbrown/rank_bm25) — confirmed no incremental add/remove API
-- [Incremental Updates in RAG Systems](https://dasroot.net/posts/2026/01/incremental-updates-rag-dynamic-documents/) — delta indexing, 70% processing time reduction
-- [Milvus: handling incremental updates in vector databases](https://milvus.io/ai-quick-reference/how-do-you-handle-incremental-updates-in-a-vector-database)
-- [Azure AI Search: incremental enrichment](https://learn.microsoft.com/en-us/azure/search/cognitive-search-incremental-indexing-conceptual) — dependency graph recomputation patterns
+- Direct codebase analysis: `storage/base.py` (11 GraphStoreProtocol methods), `storage/graph.py` (LadybugDB implementation patterns), `ingestion/pipeline.py` (hardcoded graph store, vector factory pattern), `api/service.py` (search blending logic), `search/reranker.py` (score threshold)
+- [FalkorDB Python client](https://github.com/FalkorDB/falkordb-py) -- API compatibility
+- [FalkorDB Cypher docs](https://docs.falkordb.com/cypher/) -- feature support matrix
+- Production infrastructure: `/opt/docker/dotmd/docker-compose.yml`, `/opt/docker/graphiti/docker-compose.yml`
+- `.planning/todos/pending/2026-03-24-migrate-graph-store-from-ladybugdb-to-falkordb.md` -- migration rationale
 
 ---
-*Feature research for: dotMD incremental indexing milestone*
-*Researched: 2026-03-23*
+*Feature research for: dotMD v1.2 FalkorDB Migration & BM25 Hybrid Fix*
+*Researched: 2026-03-26*

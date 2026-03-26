@@ -1,184 +1,319 @@
-# Pitfalls Research
+# Domain Pitfalls
 
-**Domain:** Incremental indexing for a multi-store search system (sqlite-vec + LadybugDB + SQLite metadata + BM25 pickle)
-**Researched:** 2026-03-23
-**Confidence:** HIGH — based on direct codebase analysis; pitfalls derived from concrete code paths, not generic advice
+**Domain:** FalkorDB graph store migration + BM25 hybrid search fix for existing knowledgebase search system
+**Researched:** 2026-03-26
+**Confidence:** HIGH -- based on direct codebase analysis, FalkorDB docs, and cross-encoder documentation
 
 ---
 
 ## Critical Pitfalls
 
-### Pitfall 1: BM25 Index Rebuilt From Scratch Every Incremental Run
+### Pitfall 1: FalkorDB Cypher Dialect Differences Silently Return Wrong Results
 
 **What goes wrong:**
-`build_index()` in `bm25.py` takes a `list[Chunk]` and replaces the entire in-memory index. For incremental indexing the naive approach passes only the changed chunks, producing a BM25 index over a fraction of the corpus. Searches then silently miss everything in unchanged files — no error, just wrong results.
+The existing LadybugDB adapter uses `label(b)` (singular) in the `get_neighbors` query (graph.py line 220) to get node labels. FalkorDB's function is `labels(b)` (plural) and returns a **list** not a string. The query `RETURN DISTINCT b.id, label(b)` will fail or return unexpected results. Additionally, LadybugDB uses `CREATE NODE TABLE` / `CREATE REL TABLE` statements for schema -- FalkorDB is schema-free and does not have these commands at all.
 
 **Why it happens:**
-BM25Okapi (rank_bm25) requires the full corpus at construction time to compute IDF. There is no `add_document()` API. Developers see the incremental pipeline writing only new/changed chunks to vector and metadata stores, and mirror that pattern to BM25 without realising BM25 is statistically global.
+LadybugDB is a Kuzu fork with its own Cypher dialect. FalkorDB implements openCypher but with its own subset. Developers assume "both speak Cypher" means identical syntax. The differences are subtle enough that some queries work and others silently produce wrong results.
 
-**How to avoid:**
-Always rebuild BM25 from the full chunk set after any incremental run. Load existing chunks from `SQLiteMetadataStore.get_all_chunks()`, merge with newly indexed chunks, then call `build_index()` with the merged list. The BM25 rebuild cost is cheap (pure CPU, no embedding calls) — ~226 files × 2 chunks average = ~450 chunks, negligible.
+**Specific dialect differences found:**
 
-**Warning signs:**
-- BM25 results disappear or shrink drastically after first incremental run
-- `bd search --mode bm25` returns fewer hits than `dotmd search` before incremental was added
-- `len(self._data.chunk_ids)` after an incremental run is smaller than the full chunk count in `metadata.db`
+| Feature | LadybugDB (current) | FalkorDB | Action needed |
+|---------|---------------------|----------|---------------|
+| Schema DDL | `CREATE NODE TABLE IF NOT EXISTS File(...)` | Not needed -- schema-free, nodes have labels | Remove all `_SCHEMA_INIT` statements |
+| Node label function | `label(n)` (returns string) | `labels(n)` (returns list of strings) | Change to `labels(n)[0]` or iterate |
+| Relationship tables | `CREATE REL TABLE FILE_SECTION(FROM File TO Section, ...)` | Not needed -- relationships are just `[:REL_TYPE]` | Simplify edge creation |
+| `_REL_TABLE_MAP` lookup | Required -- edges must use named rel tables | Not needed -- `MERGE (a)-[:HAS_SECTION]->(b)` works directly | Eliminate the lookup entirely |
+| `_find_node_label` | Iterates 4 node tables to find which table has an ID | Query any node by ID: `MATCH (n {id: $id}) RETURN labels(n)` | Single query replaces 4 |
+| Parameters | `parameters={"id": value}` | `params={"id": value}` in falkordb-py client | Check API signature |
+| Variable-length paths | `[r* 1..N]` | `[*1..N]` (same syntax, confirmed in docs) | Works as-is |
+| MERGE | Supported | Supported with same semantics | Works as-is |
+| DETACH DELETE | Supported | Supported (auto-cascading) | Works as-is |
 
-**Phase to address:**
-Phase 1 — core diff detection. The incremental pipeline's "write new chunks" step must be followed immediately by "rebuild BM25 from all chunks". Must be a deliberate step in the pipeline design, not an afterthought.
+**Consequences:**
+Schema init fails on first connection. Queries using `label()` return errors. Edge creation via `_REL_TABLE_MAP` fails because those table names don't exist in FalkorDB. The adapter appears broken on every single write and most reads.
+
+**Prevention:**
+Write the FalkorDB adapter from scratch using the Protocol interface rather than adapting the LadybugDB code. The schema-free nature of FalkorDB means **half of the existing adapter code is unnecessary** -- no schema init, no `_REL_TABLE_MAP`, no `_find_node_label` 4-query scan. Test every Cypher query against the actual FalkorDB instance before considering the adapter done.
+
+**Detection:**
+Any call to `add_file_node`, `add_edge`, or `get_neighbors` will raise immediately if dialect issues exist. Run the full graph population on a small test set (3 files) before attempting a 227-file re-index.
+
+**Phase to address:** Phase 1 -- FalkorDB adapter. This is the core of the migration.
 
 ---
 
-### Pitfall 2: Chunk ID Instability Breaks Cross-Store Consistency
+### Pitfall 2: BM25 Results Vanish After Reranker -- Score Threshold Kills Keyword Matches
 
 **What goes wrong:**
-`_make_chunk_id()` in `chunker.py` uses `md5(f"{file_path}:{chunk_index}")`. Chunk index is a sequential counter over sections within a file. If a file gains or loses a heading, every chunk from that section onward gets a new `chunk_index` and therefore a new `chunk_id`. Incremental indexing detects the file as "changed", re-chunks it, and inserts new chunk IDs — but the old IDs remain in the vector store (sqlite-vec `vec_meta` table), the graph (Section nodes), and the BM25 index mapping. Searches return the old chunk IDs, which either resolve to stale content or produce orphaned results.
+BM25 results appear in `engine_results["bm25"]` and survive RRF fusion, but disappear from final output. The cross-encoder `ms-marco-MiniLM-L-6-v2` outputs raw logits, not probabilities. Its score range is approximately -11 to +10, with most irrelevant pairs scoring around -8 to -10. The current `score_threshold` of -8.0 (reranker.py line 44, config.py line 63) filters out results that the cross-encoder considers marginal -- but BM25 keyword matches are often **exactly the kind of result** that cross-encoders undervalue. A query for a specific technical term (e.g., "LadybugDB") matches perfectly via BM25 but may score -7.5 on the cross-encoder because the surrounding context doesn't read like a natural question-answer pair.
+
+**Root cause analysis from code:**
+
+1. `service.py` line 188: `if bm25_hits:` -- this check is correct, BM25 hits enter fusion
+2. `service.py` line 195: `fuse_results()` -- RRF merges correctly, BM25-only results get score `1/(60+rank)`
+3. `service.py` line 203: `chunk_ids = [cid for cid, _ in fused[:pool_size]]` -- pool_size=20, so top 20 fused results go to reranker
+4. `reranker.py` line 128-132: `if score >= self._score_threshold` -- **HERE** -- results scoring below -8.0 are dropped entirely
+5. `service.py` line 212: `if reranked:` -- if the reranker drops BM25-only results, they vanish from the blended output
+6. `service.py` line 227: `blended.append((cid, 0.4 * norm_f + 0.6 * norm_re))` -- blending uses only reranked results, not the full fused set
+
+**The kill chain:**
+BM25 finds chunk X (exact keyword match, high BM25 score). RRF ranks X in the top 20. Reranker scores X at -8.5 (below threshold). X is dropped from `reranked` list. Blending loop only iterates over `reranked`, so X is gone. Final `fused[:top_k]` at line 233 uses the `blended` list, not the original fusion. X never appears in results.
 
 **Why it happens:**
-The ID scheme is positional, not content-addressed. Structural changes in a file shift all subsequent positions. Incremental code that only inserts new chunks without deleting old ones for modified files leaves dangling references across all four stores.
+The ms-marco model was trained on natural language question-passage pairs from MS MARCO. Technical documentation, code snippets, and bilingual RU/EN voicenote transcripts don't match this distribution. Cross-encoder scores for these texts are systematically lower than for clean English prose. The -8.0 threshold was set without testing against the actual corpus.
 
-**How to avoid:**
-For any modified file, delete all existing data for that file before reinserting: remove chunks by `file_path` from metadata, delete corresponding rows from `vec_meta`/`vec_chunks` by chunk_id, delete Section nodes and their edges from LadybugDB, then re-chunk and reinsert. Treat a modified file the same as delete + add. The metadata store needs a `get_chunks_by_file(file_path)` query to support this; that query does not currently exist.
+**Prevention:**
+Three fixes, apply all:
+1. **Lower or remove the score threshold.** Set `rerank_score_threshold` to -11.0 or remove filtering entirely. The reranker's job is to **reorder**, not to **filter**. Let RRF handle relevance gating.
+2. **Preserve non-reranked results as fallback.** After reranking, if a chunk from the fused top-K was dropped by the reranker, append it to the blended list with its original RRF score (penalized) rather than discarding it entirely.
+3. **Log per-engine attribution.** Add debug logging showing which engine found each result and whether the reranker kept or dropped it. Without this, the "BM25 results missing" symptom is nearly impossible to diagnose.
 
-**Warning signs:**
-- `vec_meta` row count drifts upward across incremental runs while file count stays constant
-- Graph Section node count exceeds expected chunks-per-file ratio
-- Search returns results pointing to stale content (text no longer in the file)
-- `dotmd stats` shows more chunks than `SELECT COUNT(*) FROM chunks WHERE file_path = ?` would suggest for a file's current content
+**Detection:**
+Run `dotmd search "LadybugDB" --mode bm25` and `dotmd search "LadybugDB" --mode hybrid`. If BM25-only mode returns results but hybrid mode drops them, the reranker threshold is the cause. Check reranker scores in debug logs.
 
-**Phase to address:**
-Phase 1 — diff detection design must include a "delete stale data for modified file" step before re-ingestion. The metadata store Protocol should gain `get_chunks_by_file(file_path: str) -> list[Chunk]` and `delete_chunks_by_file(file_path: str) -> None` in this phase.
+**Phase to address:** Phase 2 -- BM25 hybrid fix. This is the primary search quality issue.
 
 ---
 
-### Pitfall 3: LadybugDB Single-Connection Constraint Breaks Concurrent or Re-entrant Indexing
+### Pitfall 3: Shared FalkorDB Instance -- Graph Name Collision With "knowledgebase"
 
 **What goes wrong:**
-`LadybugDBGraphStore.__init__` opens one `lb.Connection` at construction time. Incremental indexing triggered while a search request is in-flight (or if the pipeline is invoked twice) causes the second accessor to either block, raise, or silently corrupt the graph. LadybugDB (Kuzu fork) does not support concurrent write connections to the same database directory.
+FalkorDB on this server (`graphiti-falkordb-1`) already contains a graph named `knowledgebase` (used by the Graphiti knowledge graph service). If the adapter accidentally uses the wrong graph name, or if a query is sent without specifying the graph name, it operates on the `knowledgebase` graph -- corrupting the Graphiti data or returning wrong results for dotMD.
 
 **Why it happens:**
-The current full-index flow is single-shot: start, index, done. Incremental indexing is designed to run on a schedule (daily voicenotes sync) — but the MCP server and search queries may be running simultaneously. The single connection held open in write mode by the `IndexingPipeline` will conflict with any read-only connection opened by the search service.
+FalkorDB uses Redis protocol. The `falkordb-py` client's `select_graph("dotmd")` must be called to scope queries. But if the adapter is written using raw Redis commands (`GRAPH.QUERY graphname "..."`) and the graph name is misconfigured, or if a developer hardcodes `"knowledgebase"` while testing, the wrong graph is mutated. There is no namespace isolation beyond the graph name string.
 
-**How to avoid:**
-The indexing pipeline and the search service must not hold simultaneous open connections to LadybugDB. Two strategies: (a) stop the search service during indexing (heavy, undesirable), or (b) serialize graph access via a lock file and ensure the search service opens read-only connections only when no writer is active. The `read_only=True` path in `LadybugDBGraphStore` already exists — enforce it on the search side. Add a write lock (a simple file lock via `fcntl` or a SQLite-based flag) before graph mutation and check it on the search path.
+**Consequences:**
+- **Mild:** dotMD searches return Graphiti knowledge graph nodes (different schema, meaningless results)
+- **Severe:** dotMD's `delete_all()` runs `MATCH (n) DETACH DELETE n` on the `knowledgebase` graph, destroying Graphiti's data
+- **Subtle:** Both graphs have entity nodes with similar names (e.g., "Python", "Docker") -- cross-contamination produces plausible-looking but wrong graph traversals
 
-**Warning signs:**
-- LadybugDB raises `RuntimeError` or segfault during indexing when MCP/search is running
-- Graph search returns no results immediately after an incremental run
-- Log shows "Schema statement skipped" during indexing for tables that should exist
+**Prevention:**
+- Make graph name a **required** config parameter (`DOTMD_FALKORDB_GRAPH`), not a default
+- Add a startup assertion that verifies the graph name is `"dotmd"` and is NOT `"knowledgebase"`
+- Never use `GRAPH.LIST` results to auto-select a graph
+- Integration test: after indexing, verify `GRAPH.LIST` shows exactly `["knowledgebase", "dotmd"]` -- not fewer, not more
 
-**Phase to address:**
-Phase 2 — graph store update. Before implementing graph delta updates, define the connection lifecycle and mutual exclusion strategy. Do not assume "it works in practice" because daily scheduling means low concurrency — the risk is real when re-indexing is triggered manually mid-session.
+**Detection:**
+`docker exec graphiti-falkordb-1 redis-cli GRAPH.LIST` should always show both graphs. If only one appears after a dotMD operation, something was written to the wrong graph.
+
+**Phase to address:** Phase 1 -- adapter configuration. The graph name must be set before any queries are written.
 
 ---
 
-### Pitfall 4: sqlite-vec `add_chunks` Does Full Delete-and-Replace
+### Pitfall 4: Docker Networking -- dotMD Container Can't Reach FalkorDB
 
 **What goes wrong:**
-`SQLiteVecVectorStore.add_chunks()` (line 131-132) executes `DELETE FROM vec_chunks` and `DELETE FROM vec_meta` before inserting. This matches the original "overwrite everything" design. For incremental indexing, calling `add_chunks()` with only the new/changed chunks destroys all existing vectors.
+The dotMD container is on `default` and `embeddings_default` networks. FalkorDB is on `graphiti_default` network. They cannot reach each other. The adapter connects to `falkordb:6379` and gets a connection refused or timeout.
+
+**Current network topology:**
+```
+dotmd-api-1:       [dotmd_default, embeddings_default]
+graphiti-falkordb-1: [graphiti_default]
+```
+
+These networks are isolated. DNS resolution of `falkordb` from the dotMD container fails.
 
 **Why it happens:**
-The comment on line 131 explicitly says "Clear existing data (matches LanceDB's mode='overwrite')". Developers may call `add_chunks()` on the delta thinking it is additive, without reading the implementation.
+Docker Compose creates per-project networks. Services on different networks can only communicate if they share an external network. The dotMD compose already does this for embeddings (`embeddings_default` as external). The same pattern must be applied for `graphiti_default`.
 
-**How to avoid:**
-Add `add_chunks_incremental(chunks, embeddings)` to `SQLiteVecVectorStore` that does per-rowid upserts instead of full clear. The `vec0` virtual table supports individual row inserts. Delete old rows for a specific file's chunk IDs before inserting new ones. Alternatively, add `delete_chunks(chunk_ids: list[str]) -> None` to the Protocol and use it explicitly in the pipeline before calling the existing `add_chunks`. The Protocol in `base.py` needs updating regardless.
+**Prevention:**
+Add to dotMD's production `docker-compose.yml`:
+```yaml
+networks:
+  graphiti:
+    external: true
+    name: graphiti_default
+```
+And add `graphiti` to the `api` service's `networks` list. The FalkorDB container's DNS alias is `falkordb` on the `graphiti_default` network (confirmed via `docker inspect`).
 
-**Warning signs:**
-- Vector store count drops to only the latest incremental batch's chunk count after a run
-- Semantic search misses content from unchanged files after first incremental run
-- Log shows "Indexed N chunks" where N is much smaller than total corpus size
+Set `DOTMD_FALKORDB_URL=redis://falkordb:6379` in the environment.
 
-**Phase to address:**
-Phase 1 — alongside BM25 fix. Both stores share the same failure mode (incremental write destroys existing data). Fix the vector store Protocol and sqlite-vec implementation together.
+**Detection:**
+From inside the dotMD container: `python -c "import socket; socket.create_connection(('falkordb', 6379), timeout=3)"`. If this times out, networking is not configured.
+
+**Phase to address:** Phase 1 -- infrastructure setup, before adapter testing.
 
 ---
 
-### Pitfall 5: File Deletion Not Propagated to Any Store
+## Moderate Pitfalls
+
+### Pitfall 5: Reranker Score Blending Erases Per-Engine Score Attribution
 
 **What goes wrong:**
-If a voicenotes file is deleted from disk (transcript corrected and replaced, or removed), incremental indexing detects "file no longer exists" but has no mechanism to remove its data from any of the four stores. The deleted file's chunks remain in metadata, vectors remain in sqlite-vec, Section/File nodes and their edges remain in LadybugDB, and BM25 continues scoring those chunks. Search results return hits pointing to non-existent files.
+After reranking, `service.py` lines 212-229 replace the `fused` list with `blended` -- a new list of `(chunk_id, blended_score)`. But `build_search_results()` at line 232 receives `fused[:top_k]` (the blended list) and `per_engine=engine_results` (original per-engine scores). The `SearchResult.fused_score` field now contains the blended score, but `matched_engines` and individual `semantic_score`/`bm25_score`/`graph_score` fields still reflect the pre-rerank engine results. This is technically correct but confusing -- a result can show `bm25_score=4.5` but have been dropped from the blended list if the reranker killed it, yet it appears in results if it survived because a different code path kept it.
 
-**Why it happens:**
-The current `pipeline.index()` operates only in "discover and write" mode. There is no concept of a "remove" operation. Incremental work focuses on "what's new/changed" and neglects the delete case, which is less common but causes permanent index contamination.
+More importantly: if the reranker drops a result, that result's per-engine scores are **never surfaced to the user**, making it invisible that BM25 found relevant content.
 
-**How to avoid:**
-The diff detection step must compute three sets: `added`, `modified`, `deleted`. For `deleted`, execute the full cleanup: `delete_chunks_by_file()` on metadata, delete corresponding vectors, delete File node + all attached Section nodes + all their edges from LadybugDB. The checksum tracking table (needed for diff detection anyway) provides the "was indexed" reference set.
+**Prevention:**
+When fixing the BM25 hybrid issue, add a `reranker_score` field to `SearchResult` and populate it from the reranker output. Also add a `dropped_by_reranker: bool` field (or equivalent) so the UI/CLI can show "BM25 found this but reranker disagreed".
 
-**Warning signs:**
-- `dotmd search` returns results with file paths that return 404 or don't open
-- Graph node count grows monotonically across index runs even when files are deleted
-- `total_files` in stats decreases but `total_chunks` stays the same
-
-**Phase to address:**
-Phase 1 — diff detection. The `deleted` set must be a first-class output of the diff algorithm, not an afterthought. Add a test with file deletion in the test matrix.
+**Phase to address:** Phase 2 -- alongside the BM25 fix.
 
 ---
 
-### Pitfall 6: No Atomic Commit Across Stores — Partial Failure Leaves Inconsistent State
+### Pitfall 6: FalkorDB Connection Not Resilient -- No Retry on Redis Timeout
 
 **What goes wrong:**
-The pipeline writes to four stores in sequence: metadata (SQLite) → vectors (sqlite-vec) → BM25 (pickle) → graph (LadybugDB). If any step fails mid-run (TEI server timeout during embedding, LadybugDB write error, disk full), the stores are left in partially updated states. Metadata has new chunks, vectors do not. Or vectors have new data but BM25 still reflects the old corpus. Subsequent searches return mixed results from different index generations.
+The falkordb-py client uses the Redis protocol. If FalkorDB is temporarily unavailable (container restart, OOM kill, slow GC pause), every graph operation fails with a `ConnectionError` or `TimeoutError`. The current LadybugDB adapter has no retry logic (it's embedded, so connection failures mean disk errors). Carrying this pattern to FalkorDB means a single FalkorDB hiccup during a 59-minute re-index kills the entire run.
 
 **Why it happens:**
-There is no transaction spanning across stores. SQLite WAL and LadybugDB transactions are independent. The pickle write is not transactional at all. Error handling in the current pipeline does not roll back previous store writes if a later one fails.
+Network services fail transiently. Redis connections drop. FalkorDB may be processing a heavy query from Graphiti while dotMD tries to connect. Without retry logic, the first failure is fatal.
 
-**How to avoid:**
-For a single-user home server with ~226 files, the pragmatic mitigation is: (a) write to a staging path for BM25 pickle and atomically rename it on success; (b) track an "index generation ID" in the metadata stats table — only commit stats after all stores succeed; (c) treat an inconsistent state as "run full index on next startup" by checking for the presence of a generation ID mismatch. Full cross-store transactions are not feasible; defense-in-depth with a generation marker is the practical approach.
+**Prevention:**
+- Use `BlockingConnectionPool` with `max_connections=4`, `timeout=10`, `socket_keepalive=True`
+- Wrap graph store methods in a retry decorator (3 attempts, exponential backoff: 1s, 2s, 4s)
+- On connection failure during indexing, log a warning and continue with remaining stores -- a failed graph write is recoverable via re-index, not worth aborting the entire pipeline
 
-**Warning signs:**
-- Index run terminated mid-way (OOM, SIGKILL, network timeout to TEI)
-- Chunk count in metadata differs from vector store count
-- BM25 returns results for chunk IDs that no longer exist in metadata
-
-**Phase to address:**
-Phase 2 — robustness. The generation ID / dirty flag mechanism should be designed in Phase 1 but implemented with the full incremental pipeline. At minimum, write the BM25 pickle atomically (write to `.tmp`, rename).
+**Phase to address:** Phase 1 -- adapter implementation. Build retry into the adapter from the start.
 
 ---
 
-## Technical Debt Patterns
+### Pitfall 7: `get_neighbors` Performance -- FalkorDB Variable-Length Paths Without Indexes
 
-| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
-|----------|-------------------|----------------|-----------------|
-| Rebuild BM25 from all chunks every incremental run | No BM25-specific delta logic needed | ~450 chunks rebuild takes <1s, trivial | Always acceptable at this scale |
-| Delete-all per modified file, then reinsert | No upsert logic per store | Re-embeds all chunks of a changed file (TEI call cost) | Acceptable — a changed voicenote transcript is small; embedding 5-10 chunks costs ~1 batch call |
-| File-based lock for LadybugDB write exclusion | Simple, no extra deps | No timeout/retry — hung indexer holds lock forever | Acceptable with watchdog timer |
-| Skip graph delta, delete all nodes for file and reinsert | No subgraph diff logic | Re-traverses entity lookup for each edge (currently N²) | Acceptable at 226 files; revisit at 2000+ |
-| Pickle for BM25 (no rollback) | Zero extra deps | Corrupt pickle on crash requires full rebuild | Never acceptable without atomic rename |
+**What goes wrong:**
+The `get_neighbors` query uses `MATCH (a {id: $id})-[*1..2]-(b)` -- an untyped, undirected, variable-length path pattern. In FalkorDB this traverses **all** relationship types in **both** directions for up to 2 hops. On the current graph (19,667 edges), this is a full graph scan from the starting node. FalkorDB uses GraphBLAS sparse matrices, which are efficient for this, but without an index on the `id` property, finding node `a` requires a sequential scan of all nodes first.
 
----
+**Why it happens:**
+LadybugDB (Kuzu) automatically creates primary key indexes. FalkorDB requires explicit `CREATE INDEX` statements. The schema-free nature means no automatic indexing.
 
-## Integration Gotchas
+**Prevention:**
+After creating the graph, run:
+```cypher
+CREATE INDEX FOR (n:File) ON (n.id)
+CREATE INDEX FOR (n:Section) ON (n.id)
+CREATE INDEX FOR (n:Entity) ON (n.id)
+CREATE INDEX FOR (n:Tag) ON (n.id)
+```
+These must be created once and persist across container restarts (FalkorDB persists indexes). Add index creation to the adapter's `__init__` or a dedicated `ensure_indexes()` method.
 
-| Integration | Common Mistake | Correct Approach |
-|-------------|----------------|------------------|
-| TEI embedding server (port 8088) | Calling embed on the full new+changed corpus in one batch | The current `encode_batch` splits into sub-batches already; respect that for incremental too — don't hand it 500 chunks at once if only 5 changed |
-| sqlite-vec `vec0` virtual table | Trying to `UPDATE` a vec0 row — not supported | Delete by rowid and reinsert; `vec0` is append-and-delete only |
-| LadybugDB MERGE semantics | MERGE updates properties but does not remove old edges | Old Section→Entity edges from a now-deleted entity mention remain after file update; must explicitly delete stale edges before MERGE |
-| BM25 pickle across Python versions | Pickle protocol mismatch if Python version changes in Docker rebuild | Always use `pickle.HIGHEST_PROTOCOL` on write (already done); add version tag to `_BM25Data` for forward compatibility |
-| `FileInfo.checksum` (used in graph node) | Checksum is stored on File node but not in metadata SQLite | For diff detection, the checksum source of truth must be a single place — either add it to `metadata.db` (a `files` table) or always recompute from disk. Storing only in graph requires opening LadybugDB for diff computation, coupling ingestion to graph startup. |
+**Detection:**
+Time `get_neighbors` calls. Without indexes: O(N) where N is total nodes. With indexes: O(degree * hops). On 3,456 entities, the difference is measurable.
 
----
-
-## Performance Traps
-
-| Trap | Symptoms | Prevention | When It Breaks |
-|------|----------|------------|----------------|
-| `_find_node_label()` does 4 sequential queries per edge add | Slow graph population at scale | Cache label per node_id in a dict during bulk insert; the current full-index run hits this for 21k edges | Already slow at 21k edges; incremental adds only a few, so not critical for incremental — but fix before adding more entity types |
-| Loading all chunks via `get_all_chunks()` for BM25 rebuild | Reads all chunk text into RAM | At 495 chunks × avg 300 chars = ~150KB — not an issue; load freely | Breaks at ~100k chunks (~30MB text in RAM) |
-| Re-embedding unchanged chunks on modified file | Full TEI batch call for a file where only metadata changed | Content-hash each chunk text, not just file mtime — if chunk content is identical, skip embedding | Wasted TEI calls, not a correctness issue |
-| Graph `delete_all()` iterates all relation tables and node labels with try/except | 12+ Cypher queries on every clear | Not relevant for incremental (clear is not called); fine as-is | N/A for incremental |
+**Phase to address:** Phase 1 -- adapter implementation. Create indexes at adapter initialization.
 
 ---
 
-## "Looks Done But Isn't" Checklist
+### Pitfall 8: `_find_node_label` Pattern Must Be Redesigned, Not Ported
 
-- [ ] **Incremental add:** After adding N new files, verify `vector_store.count()` equals `len(metadata.get_all_chunks())` — not just "N chunks added" in the log
-- [ ] **Incremental modify:** After modifying a file, search for content from the OLD version — it must not appear in results
-- [ ] **Incremental delete:** After deleting a file from disk and re-running, verify the File node no longer exists in the graph and its chunks are gone from vec_meta
-- [ ] **BM25 completeness:** After any incremental run, `len(bm25._data.chunk_ids)` must equal total chunk count in metadata, not just the batch size
-- [ ] **Concurrent search:** Run a search query during an incremental index run — it must not raise or return corrupt data
-- [ ] **Crash recovery:** Kill the indexer mid-run (SIGKILL), restart, verify search still works (returns pre-crash results, not mixed state)
-- [ ] **Stats accuracy:** `dotmd stats` must reflect actual counts from each store, not just what the last pipeline run wrote to the stats table
+**What goes wrong:**
+The LadybugDB adapter's `add_edge` method calls `_find_node_label()` which runs 4 sequential queries (one per node type) to determine what label a node has. This was necessary because LadybugDB requires knowing the source/target table names for `CREATE REL TABLE`. FalkorDB doesn't need this -- edges are just `MERGE (a)-[:TYPE]->(b)` regardless of node labels. But a naive port copies this expensive pattern.
+
+**Consequences at scale:**
+During the initial graph population of 227 files with 19,667 edges, `add_edge` is called ~20,000 times. If `_find_node_label` is ported, that's 160,000 queries to FalkorDB over the network (vs. in-process for LadybugDB). At 1ms per Redis round-trip, that's 160 seconds of pure latency -- vs. ~10 minutes total for the current embedded implementation.
+
+**Prevention:**
+In the FalkorDB adapter, `add_edge` should MERGE by matching nodes directly:
+```cypher
+MATCH (a {id: $src}), (b {id: $tgt})
+MERGE (a)-[r:RELATES]->(b)
+SET r.rel_type = $rel_type, r.weight = $weight
+```
+No label lookup needed. FalkorDB matches by `id` property across all labels. If `a` or `b` doesn't exist, the MATCH returns empty and no edge is created (same behavior as current adapter's `if src_label is None` guard).
+
+**Phase to address:** Phase 1 -- adapter implementation. Design the adapter around FalkorDB's strengths, not LadybugDB's constraints.
+
+---
+
+### Pitfall 9: Pipeline Hardcodes `LadybugDBGraphStore` -- No Backend Abstraction
+
+**What goes wrong:**
+`pipeline.py` line 87 directly instantiates `LadybugDBGraphStore`. The `graph_store` property (line 469) returns type `LadybugDBGraphStore`, not `GraphStoreProtocol`. The `DotMDService` constructs `GraphSearchEngine` with the pipeline's graph store, which works via duck typing, but there is no configuration switch like `vector_backend` to select between graph backends.
+
+Adding FalkorDB as an option requires:
+1. A `graph_backend` config setting (like `vector_backend`)
+2. A factory function in `pipeline.py` (like `_create_vector_store`)
+3. Changing the `graph_store` property return type to `GraphStoreProtocol`
+4. FalkorDB-specific config: URL, graph name, optional password
+
+**Why it's a pitfall:**
+If you write the FalkorDB adapter but forget to update the pipeline factory, it's never used. If you update the factory but the property type annotation still says `LadybugDBGraphStore`, type checkers flag downstream code. If you add config but docker-compose doesn't set it, the default falls back to LadybugDB silently.
+
+**Prevention:**
+Follow the exact pattern established for `vector_backend`:
+- Add `graph_backend: Literal["ladybugdb", "falkordb"] = "ladybugdb"` to Settings
+- Add `falkordb_url: str = "redis://localhost:6379"` and `falkordb_graph: str = "dotmd"` to Settings
+- Write `_create_graph_store(settings) -> GraphStoreProtocol` factory
+- Update `graph_store` property return type to `GraphStoreProtocol`
+- Update docker-compose with `DOTMD_GRAPH_BACKEND=falkordb` and `DOTMD_FALKORDB_URL`
+
+**Phase to address:** Phase 1 -- config and pipeline integration.
+
+---
+
+### Pitfall 10: Re-Index Required But 59 Minutes on This Hardware
+
+**What goes wrong:**
+Switching from LadybugDB to FalkorDB requires rebuilding the graph from scratch (the data formats are incompatible). The current full re-index takes ~59 minutes (25min embedding + 18min NER + 10min graph + overhead). During this time, the search service is partially functional (semantic and BM25 work, graph search returns nothing until graph is populated).
+
+**Why it matters:**
+If the re-index fails at minute 45 (FalkorDB connection drops, OOM, etc.), 45 minutes of work is lost. The graph store is empty but metadata and vectors are populated. The system is in an inconsistent state.
+
+**Prevention:**
+- **Embedding and NER are already done** -- the current vectors and metadata are valid and don't need rebuilding. Only the graph needs repopulation.
+- Write a **graph-only re-index** command that reads chunks from metadata, re-runs extraction, and populates the new FalkorDB graph without touching vectors or BM25. This reduces the re-index from 59 minutes to ~28 minutes (NER + graph population).
+- Better yet: if extraction results are cached (they aren't currently), skip NER entirely and just repopulate the graph from stored entities/relations. This would take ~10 minutes.
+- Run the re-index overnight with `nohup` or via a systemd timer.
+
+**Phase to address:** Phase 1 -- migration planning. Decide the re-index strategy before writing the adapter.
+
+---
+
+## Minor Pitfalls
+
+### Pitfall 11: `get_graph_data()` Is Not in the Protocol
+
+**What goes wrong:**
+`LadybugDBGraphStore.get_graph_data()` is called by `DotMDService.graph_data()` (service.py line 276) but `get_graph_data` is not part of `GraphStoreProtocol` in `base.py`. The FalkorDB adapter won't be required to implement it by the Protocol, but the service will crash at runtime when calling it.
+
+**Prevention:**
+Either add `get_graph_data()` to `GraphStoreProtocol` or handle it as an optional method with `hasattr()` check. Adding it to the Protocol is cleaner.
+
+**Phase to address:** Phase 1 -- Protocol update.
+
+---
+
+### Pitfall 12: FalkorDB Memory on 16GB Shared Server
+
+**What goes wrong:**
+FalkorDB currently uses ~10MB RSS for the `knowledgebase` graph. The dotMD graph has 3,456 entities and 19,667 edges -- roughly 4x the knowledgebase graph. Expected memory: ~40-50MB additional. This is fine. But if the graph grows significantly (more files, denser NER extraction), FalkorDB and TEI (2.6GB) and the dotMD container together may pressure the 16GB limit.
+
+**Prevention:**
+Monitor `docker stats` after re-index. Set `maxmemory` on the FalkorDB Redis instance if needed. The current scale (227 files, ~20K edges) is well within limits.
+
+**Phase to address:** Not blocking; monitor during Phase 1 testing.
+
+---
+
+## Phase-Specific Warnings
+
+| Phase Topic | Likely Pitfall | Mitigation |
+|-------------|---------------|------------|
+| FalkorDB adapter implementation | Porting LadybugDB Cypher verbatim (Pitfall 1) | Write from scratch against Protocol, test each query |
+| FalkorDB adapter implementation | Porting `_find_node_label` N-query pattern (Pitfall 8) | Use label-agnostic MATCH for edges |
+| FalkorDB adapter implementation | No indexes on id property (Pitfall 7) | `CREATE INDEX` in adapter init |
+| Config + pipeline integration | Pipeline hardcodes LadybugDB (Pitfall 9) | Follow vector_backend pattern exactly |
+| Docker networking | Containers on different networks (Pitfall 4) | Add graphiti_default as external network |
+| Graph name safety | Collision with knowledgebase graph (Pitfall 3) | Config validation, startup assertion |
+| BM25 hybrid fix | Reranker threshold killing BM25 results (Pitfall 2) | Lower threshold, preserve dropped results |
+| BM25 hybrid fix | Score attribution lost after blending (Pitfall 5) | Add reranker_score field to SearchResult |
+| Migration re-index | 59-minute full re-index risk (Pitfall 10) | Graph-only re-index, run overnight |
+| Connection resilience | No retry on Redis timeout (Pitfall 6) | Connection pool + retry decorator |
+
+---
+
+## "Looks Done But Isn't" Checklist (v1.2)
+
+- [ ] **FalkorDB adapter:** After indexing 3 test files, `GRAPH.QUERY dotmd "MATCH (n) RETURN count(n)"` returns expected node count -- not zero, not in the knowledgebase graph
+- [ ] **Graph name isolation:** `GRAPH.QUERY knowledgebase "MATCH (n) RETURN count(n)"` returns same count as before dotMD migration -- Graphiti data untouched
+- [ ] **Neighbor traversal:** `get_neighbors("some_chunk_id")` returns Section nodes reachable via Entity nodes, not Entity/Tag/File nodes directly
+- [ ] **Index creation:** `GRAPH.QUERY dotmd "CALL db.indexes()"` shows indexes on all node labels
+- [ ] **BM25 in hybrid:** `dotmd search "specific_term" --mode hybrid` returns results that include `bm25` in `matched_engines`
+- [ ] **Reranker preservation:** Results with `bm25_score` set but low reranker score still appear (with lower ranking, not absent)
+- [ ] **Network connectivity:** `dotmd search` from Docker returns graph results, not just semantic+BM25
+- [ ] **Concurrent access:** Run `POST /index` while `GET /search` is in-flight -- no connection errors, no data corruption
+- [ ] **Container restart recovery:** Restart FalkorDB container, verify dotMD reconnects automatically on next query
 
 ---
 
@@ -186,37 +321,37 @@ Phase 2 — robustness. The generation ID / dirty flag mechanism should be desig
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| Stale BM25 (wrong chunk set) | LOW | Delete `bm25_index.pkl`, run full index |
-| Orphaned vectors in sqlite-vec | LOW | Delete `sqlite_vec.db`, run full index (or targeted delete by chunk_id list) |
-| Orphaned graph nodes (LadybugDB) | MEDIUM | `graph_store.delete_all()` + re-run full index; no partial graph repair without custom Cypher |
-| Partial failure mid-incremental | LOW | Check generation ID mismatch, fall back to full index automatically |
-| Corrupt BM25 pickle (crash during write) | LOW | Delete pickle file; will be rebuilt on next index run |
-| sqlite-vec dimension mismatch (embedding model changed) | LOW | Already handled — `_create_vec_table()` drops and recreates on dim change |
-
----
-
-## Pitfall-to-Phase Mapping
-
-| Pitfall | Prevention Phase | Verification |
-|---------|------------------|--------------|
-| BM25 built from delta only | Phase 1: diff detection + pipeline design | After incremental add, `len(bm25_data.chunk_ids) == total_chunks_in_metadata` |
-| Chunk ID instability / stale data | Phase 1: add `delete_chunks_by_file()` to stores | After modifying a file, old chunk IDs absent from all stores |
-| LadybugDB concurrent access | Phase 2: graph delta implementation | Run search during indexing — no exception, no hang |
-| sqlite-vec full-replace on incremental | Phase 1: add `delete_chunks()` / incremental insert | `vector_store.count()` matches metadata count after partial run |
-| File deletion not propagated | Phase 1: deleted set in diff algorithm | Delete a file, re-run, search for its content — no results |
-| No atomic commit across stores | Phase 2: generation ID + atomic BM25 rename | SIGKILL mid-run, restart — search returns coherent pre-run results |
+| Wrong graph name (wrote to knowledgebase) | HIGH | Restore Graphiti data from backup; drop dotmd graph if created; fix config; re-index |
+| Reranker kills all BM25 results | LOW | Change `DOTMD_RERANK_SCORE_THRESHOLD=-11` in env; restart container |
+| FalkorDB connection lost mid-index | MEDIUM | Graph partially populated; run graph-only re-index |
+| No indexes, slow graph search | LOW | Run `CREATE INDEX` statements manually via redis-cli; adapter restart creates them |
+| Docker networking not configured | LOW | Add network to docker-compose.yml; `docker compose up -d` |
+| Pipeline still using LadybugDB | LOW | Set `DOTMD_GRAPH_BACKEND=falkordb` in env; restart; verify via graph_data endpoint |
 
 ---
 
 ## Sources
 
-- Direct analysis of `backend/src/dotmd/storage/sqlite_vec.py` — `add_chunks()` full-clear behavior (lines 131-132)
-- Direct analysis of `backend/src/dotmd/ingestion/chunker.py` — `_make_chunk_id()` positional ID scheme
-- Direct analysis of `backend/src/dotmd/search/bm25.py` — `build_index()` full-corpus requirement
-- Direct analysis of `backend/src/dotmd/storage/graph.py` — single connection constraint, `_find_node_label()` N-query pattern
-- Direct analysis of `backend/src/dotmd/ingestion/pipeline.py` — sequential store writes, no cross-store rollback
-- `PROJECT.md` — performance baseline (50 min full index), LadybugDB single-connection constraint noted as known, NER cost flagged for revisit on incremental
+- Direct analysis of `backend/src/dotmd/storage/graph.py` -- LadybugDB adapter, `label()` usage, `_REL_TABLE_MAP`, `_find_node_label` pattern
+- Direct analysis of `backend/src/dotmd/api/service.py` -- reranker blending logic, BM25 kill chain (lines 186-233)
+- Direct analysis of `backend/src/dotmd/search/reranker.py` -- score threshold filtering (line 128-132)
+- Direct analysis of `backend/src/dotmd/ingestion/pipeline.py` -- hardcoded `LadybugDBGraphStore` (line 87)
+- Direct analysis of `backend/src/dotmd/core/config.py` -- missing graph_backend config
+- [FalkorDB Cypher known limitations](https://docs.falkordb.com/cypher/known-limitations.html) -- LIMIT/eager ops, index limitations
+- [FalkorDB MERGE docs](https://docs.falkordb.com/cypher/merge.html) -- full path matching, duplicate node creation risk
+- [FalkorDB MATCH docs](https://docs.falkordb.com/cypher/match.html) -- variable-length path syntax confirmed
+- [FalkorDB functions docs](https://docs.falkordb.com/cypher/functions.html) -- `labels()` (plural), not `label()`
+- [FalkorDB Python client](https://github.com/FalkorDB/falkordb-py) -- `select_graph()`, `query()`, `ro_query()`, async support
+- [FalkorDB Cypher coverage](https://docs.falkordb.com/cypher/cypher-support.html) -- subset of openCypher, parameterized queries
+- [cross-encoder/ms-marco-MiniLM-L-6-v2 score range issue](https://github.com/huggingface/sentence-transformers/issues/1058) -- raw logits, negative scores normal, ranking-only not filtering
+- [Hybrid search fusion best practices](https://ashutoshkumars1ngh.medium.com/hybrid-search-done-right-fixing-rag-retrieval-failures-using-bm25-hnsw-reciprocal-rank-fusion-a73596652d22) -- RRF over score combination
+- Production docker-compose at `/opt/docker/dotmd/docker-compose.yml` -- network topology
+- `docker inspect graphiti-falkordb-1` -- network aliases, IP, DNS names
+- `docker exec graphiti-falkordb-1 redis-cli GRAPH.LIST` -- confirms `knowledgebase` graph exists
+- `docker exec graphiti-falkordb-1 redis-cli INFO memory` -- 10MB RSS current usage
+- `.planning/RETROSPECTIVE.md` -- LadybugDB lock hit 3 times in v1.1
+- `.planning/todos/pending/2026-03-24-migrate-graph-store-from-ladybugdb-to-falkordb.md` -- migration strategy notes
 
 ---
-*Pitfalls research for: dotMD incremental indexing milestone*
-*Researched: 2026-03-23*
+*Pitfalls research for: dotMD v1.2 FalkorDB migration + BM25 hybrid fix*
+*Researched: 2026-03-26*
