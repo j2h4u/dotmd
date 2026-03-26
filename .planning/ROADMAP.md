@@ -12,7 +12,7 @@
 
 ## Phases
 
-- [ ] **Phase 4: FalkorDB Adapter + Config** - New graph store backend with config-driven backend selection
+- [x] **Phase 4: FalkorDB Adapter + Config** - New graph store backend with config-driven backend selection
 - [ ] **Phase 5: BM25 Hybrid Fix** - Diagnose and fix BM25 results missing from hybrid search
 - [ ] **Phase 6: Docker Integration + Migration** - Connect dotmd container to FalkorDB and run full re-index
 
@@ -39,7 +39,9 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. `dotmd search --mode hybrid "some keyword"` returns results with `bm25` in `matched_engines` field
   2. Results that match only via BM25 (no semantic similarity) still appear in final output, not filtered by reranker
-**Plans**: TBD
+**Plans:** 1 plan
+Plans:
+- [ ] 05-01-PLAN.md — Remove reranker score threshold, add merge-back logic for fusion candidates, diagnostic logging
 
 ### Phase 6: Docker Integration + Migration
 **Goal**: dotmd production container connects to FalkorDB and the knowledge graph is fully populated
@@ -58,10 +60,10 @@ Plans:
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 4. FalkorDB Adapter + Config | v1.2 | 0/2 | Planned | - |
-| 5. BM25 Hybrid Fix | v1.2 | 0/? | Not started | - |
+| 4. FalkorDB Adapter + Config | v1.2 | 2/2 | Done | 2026-03-27 |
+| 5. BM25 Hybrid Fix | v1.2 | 0/1 | Planned | - |
 | 6. Docker Integration + Migration | v1.2 | 0/? | Not started | - |
 
 ---
 *Roadmap created: 2026-03-26*
-*Last updated: 2026-03-26*
+*Last updated: 2026-03-27*
