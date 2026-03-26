@@ -11,7 +11,7 @@ Requirements for FalkorDB migration and BM25 hybrid fix.
 
 - [x] **GRAPH-01**: FalkorDB adapter implementing GraphStoreProtocol (new storage/falkordb_graph.py, written from scratch — not ported from LadybugDB)
 - [x] **GRAPH-02**: Config settings for graph backend selection (`graph_backend`, `falkordb_url`, `falkordb_graph_name`)
-- [ ] **GRAPH-03**: Pipeline factory selects graph backend based on config (follow existing `_create_vector_store` pattern)
+- [x] **GRAPH-03**: Pipeline factory selects graph backend based on config (follow existing `_create_vector_store` pattern)
 - [ ] **GRAPH-04**: Docker networking connects dotmd container to `graphiti_default` network for FalkorDB access
 - [ ] **GRAPH-05**: Full re-index with `--force` populates FalkorDB graph (~59 min, overnight run)
 
@@ -46,7 +46,7 @@ Requirements for FalkorDB migration and BM25 hybrid fix.
 |-------------|-------|--------|
 | GRAPH-01 | Phase 4 | Complete |
 | GRAPH-02 | Phase 4 | Complete |
-| GRAPH-03 | Phase 4 | Pending |
+| GRAPH-03 | Phase 4 | Complete |
 | GRAPH-04 | Phase 6 | Pending |
 | GRAPH-05 | Phase 6 | Pending |
 | SEARCH-01 | Phase 5 | Pending |

@@ -30,7 +30,7 @@
 **Plans:** 2 plans
 Plans:
 - [x] 04-01-PLAN.md — FalkorDB dependency, config settings, protocol update, adapter implementation
-- [ ] 04-02-PLAN.md — Pipeline factory for graph backend selection, CLI status enhancement
+- [x] 04-02-PLAN.md — Pipeline factory for graph backend selection, CLI status enhancement
 
 ### Phase 5: BM25 Hybrid Fix
 **Goal**: BM25 keyword matches survive the scoring pipeline and appear in hybrid search results
