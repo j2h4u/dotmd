@@ -14,6 +14,7 @@ dependencies = [
     "sqlite-vec>=0.1.6",
     "rank-bm25>=0.2",
     "real_ladybug>=0.1",
+    "FalkorDB>=1.6.0",
     "gliner>=0.2",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",

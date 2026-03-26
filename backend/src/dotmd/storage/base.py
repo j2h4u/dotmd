@@ -245,6 +245,18 @@ class GraphStoreProtocol(Protocol):
         """Return the total number of edges in the graph."""
         ...
 
+    def get_graph_data(self) -> dict:
+        """Return all nodes and edges for visualization.
+
+        Returns
+        -------
+        dict
+            A dictionary with ``'nodes'`` and ``'edges'`` keys.
+            Each node: ``{'id': str, 'label': str, 'properties': dict}``.
+            Each edge: ``{'source': str, 'target': str, 'relation_type': str, 'weight': float}``.
+        """
+        ...
+
 
 # ---------------------------------------------------------------------------
 # Metadata store

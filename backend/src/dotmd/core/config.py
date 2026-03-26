@@ -67,6 +67,12 @@ class Settings(BaseSettings):
     # Graph
     graph_max_hops: int = 2
     read_only: bool = False
+    # Graph backend: "ladybugdb" (default, embedded) or "falkordb" (network, Redis protocol)
+    graph_backend: Literal["ladybugdb", "falkordb"] = "ladybugdb"
+    # FalkorDB connection URL (Redis protocol). Only used when graph_backend="falkordb".
+    falkordb_url: str = "redis://localhost:6379"
+    # FalkorDB graph name. Must differ from Graphiti's "knowledgebase" graph.
+    falkordb_graph_name: str = "dotmd"
 
     @property
     def lancedb_path(self) -> Path:
