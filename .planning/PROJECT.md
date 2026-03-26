@@ -24,12 +24,16 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 - ✓ API force parameter on POST /index — Validated in Phase 3: CLI & API Polish
 
 ### Active
+- [ ] FalkorDB graph store adapter (replace LadybugDB)
+- [ ] Graph backend config (`graph_backend`, `falkordb_url`)
+- [ ] Pipeline integration for backend selection
+- [ ] Docker networking for FalkorDB connectivity
 - [ ] Fix BM25 results missing in hybrid mode (reranker/fusion issue?)
 
 ### Out of Scope
 
 - GPU acceleration — no GPU on current hardware, Jetson/Mac Mini is future consideration
-- LadybugDB replacement — ~~works fine for reads, single-connection is manageable~~ Now planned for v1.2 (FalkorDB migration) due to lock conflicts with concurrent access
+- LadybugDB replacement — Now active in v1.2 (FalkorDB migration) due to lock conflicts with concurrent access
 - Full QMD-style query expansion/reranking — different product philosophy
 - Upstream PRs — fork has diverged too far (sqlite-vec, TEI, incremental indexing, schema migrations). Upstream is reference-only now
 
@@ -83,6 +87,17 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 | Reuse global DotMDService in API | LadybugDB file lock prevents concurrent connections | ✓ Good — fixes /index endpoint crash |
 | Pipeline timing metrics | No visibility into stage durations without instrumentation | ✓ Good — run_id correlation in logs |
 
+## Current Milestone: v1.2 FalkorDB Migration & Search Fix
+
+**Goal:** Replace LadybugDB graph store with FalkorDB to eliminate single-connection file lock issues, and fix BM25 results missing in hybrid search mode.
+
+**Target features:**
+- FalkorDB graph store adapter implementing existing protocol
+- Config settings for graph backend selection and FalkorDB URL
+- Pipeline integration to select backend based on config
+- Docker networking (connect dotmd to `graphiti_default` network)
+- BM25 hybrid mode fix (reranker/fusion investigation)
+
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
@@ -101,4 +116,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-26 after v1.1 milestone — incremental indexing shipped, LadybugDB Out of Scope revised (FalkorDB migration planned for v1.2)*
+*Last updated: 2026-03-26 after v1.2 milestone start — FalkorDB migration + BM25 hybrid fix*
