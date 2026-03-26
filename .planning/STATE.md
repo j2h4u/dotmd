@@ -4,7 +4,7 @@ milestone: v1.2
 milestone_name: milestone
 status: planning
 stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-03-26T22:24:16.512Z"
+last_updated: "2026-03-26T22:30:35.990Z"
 last_activity: 2026-03-26
 progress:
   total_phases: 3
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-03-26)
 
 **v1.2 — FalkorDB Migration & Search Fix**
 
-Phase: 4 of 6 (FalkorDB Adapter + Config)
-Plan: —
+Phase: 6 of 6 (docker integration + migration)
+Plan: Not started
 Status: Ready to plan
 Last activity: 2026-03-26
 
