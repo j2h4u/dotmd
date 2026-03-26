@@ -65,7 +65,6 @@ class DotMDService:
             model_name=self._settings.reranker_model,
             length_penalty=self._settings.reranker_length_penalty,
             min_length=self._settings.reranker_min_length,
-            score_threshold=self._settings.rerank_score_threshold,
         )
 
     # ------------------------------------------------------------------

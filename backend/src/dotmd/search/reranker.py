@@ -23,6 +23,9 @@ class Reranker:
     :meth:`rerank` so that import time stays fast and GPU/CPU resources
     are only consumed when actually needed.
 
+    The reranker reorders candidates by cross-encoder score but never
+    filters them -- all scored candidates are returned (up to *top_k*).
+
     Optionally applies a length penalty to downrank very short chunks
     (e.g., navigation tables) that may be keyword-dense but lack content.
 
@@ -41,13 +44,11 @@ class Reranker:
         model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
         length_penalty: bool = True,
         min_length: int = 100,
-        score_threshold: float = -8.0,
     ) -> None:
         self._model_name = model_name
         self._model: Any | None = None
         self._length_penalty = length_penalty
         self._min_length = min_length
-        self._score_threshold = score_threshold
 
     # ------------------------------------------------------------------
     # Internals
@@ -128,7 +129,6 @@ class Reranker:
         scored = [
             (cid, float(score))
             for (cid, _text), score in zip(id_text_pairs, scores)
-            if score >= self._score_threshold
         ]
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:top_k]
