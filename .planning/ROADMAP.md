@@ -52,7 +52,9 @@ Plans:
   2. `dotmd index --force` from Docker populates the FalkorDB "dotmd" graph (separate from Graphiti's "knowledgebase" graph)
   3. After full re-index, `dotmd search` and `dotmd serve` both return graph results from FalkorDB
   4. Concurrent CLI search + API serve works without connection conflicts (the whole reason for leaving LadybugDB)
-**Plans**: TBD
+**Plans:** 1 plan
+Plans:
+- [ ] 06-01-PLAN.md — Add graphiti_default network and FalkorDB env vars to compose, rebuild image, overnight re-index
 
 ## Progress
 
@@ -62,7 +64,7 @@ Plans:
 |-------|-----------|----------------|--------|-----------|
 | 4. FalkorDB Adapter + Config | v1.2 | 2/2 | Done | 2026-03-27 |
 | 5. BM25 Hybrid Fix | v1.2 | 0/1 | Planned | - |
-| 6. Docker Integration + Migration | v1.2 | 0/? | Not started | - |
+| 6. Docker Integration + Migration | v1.2 | 0/1 | Planned | - |
 
 ---
 *Roadmap created: 2026-03-26*
