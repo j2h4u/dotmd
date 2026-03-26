@@ -29,7 +29,7 @@
   4. `dotmd status` reports graph store type and connection status
 **Plans:** 2 plans
 Plans:
-- [ ] 04-01-PLAN.md — FalkorDB dependency, config settings, protocol update, adapter implementation
+- [x] 04-01-PLAN.md — FalkorDB dependency, config settings, protocol update, adapter implementation
 - [ ] 04-02-PLAN.md — Pipeline factory for graph backend selection, CLI status enhancement
 
 ### Phase 5: BM25 Hybrid Fix
