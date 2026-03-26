@@ -27,7 +27,10 @@
   2. `dotmd search --mode hybrid` with FalkorDB backend returns graph-sourced results alongside semantic and BM25
   3. Setting `DOTMD_GRAPH_BACKEND=ladybugdb` (or omitting the setting) still works as before -- no regression
   4. `dotmd status` reports graph store type and connection status
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 04-01-PLAN.md — FalkorDB dependency, config settings, protocol update, adapter implementation
+- [ ] 04-02-PLAN.md — Pipeline factory for graph backend selection, CLI status enhancement
 
 ### Phase 5: BM25 Hybrid Fix
 **Goal**: BM25 keyword matches survive the scoring pipeline and appear in hybrid search results
@@ -55,7 +58,7 @@
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 4. FalkorDB Adapter + Config | v1.2 | 0/? | Not started | - |
+| 4. FalkorDB Adapter + Config | v1.2 | 0/2 | Planned | - |
 | 5. BM25 Hybrid Fix | v1.2 | 0/? | Not started | - |
 | 6. Docker Integration + Migration | v1.2 | 0/? | Not started | - |
 
