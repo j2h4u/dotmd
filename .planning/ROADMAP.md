@@ -54,7 +54,7 @@ Plans:
   4. Concurrent CLI search + API serve works without connection conflicts (the whole reason for leaving LadybugDB)
 **Plans:** 1 plan
 Plans:
-- [ ] 06-01-PLAN.md — Add graphiti_default network and FalkorDB env vars to compose, rebuild image, overnight re-index
+- [x] 06-01-PLAN.md — Add graphiti_default network and FalkorDB env vars to compose, rebuild image, overnight re-index
 
 ## Progress
 
