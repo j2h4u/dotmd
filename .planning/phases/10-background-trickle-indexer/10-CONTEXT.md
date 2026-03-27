@@ -31,7 +31,7 @@ Unindexed files are processed gradually in the background while the API continue
 
 ### Progress Reporting
 - **D-09:** `GET /status` and `dotmd status` return background indexer state: `indexed_files`, `total_files`, `state` (idle/indexing/done), `files_per_hour`, `eta_minutes`.
-- **D-10:** Logs: INFO-level log line per processed file with progress counter (e.g., "[trickle] 1,234/13,515 indexed: /path/to/file.md (3.2s)").
+- **D-10:** Logs: INFO-level log line per processed file with progress counter (e.g., "[trickle] 1,234/14,128 indexed: /path/to/file.md (3.2s)").
 
 ### Graceful Shutdown
 - **D-11:** On SIGTERM, finish processing the current file, then shut down cleanly. No corrupt state in SQLite (WAL mode from Phase 7) or FTS5 index.
