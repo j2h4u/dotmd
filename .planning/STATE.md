@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Production Packaging & Background Indexing
 status: executing
-last_updated: "2026-03-27T19:33:07.900Z"
+last_updated: "2026-03-27T19:42:38.211Z"
 last_activity: 2026-03-27
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 8
-  completed_plans: 6
+  completed_plans: 7
   percent: 63
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 **v1.3 — Production Packaging & Background Indexing**
 
 Phase: 10 of 10 (background trickle indexer)
-Plan: 3 of 4 (config & file discovery complete)
+Plan: 4 of 4 (config & file discovery complete)
 Status: Executing Phase 10
 Last activity: 2026-03-27
 
@@ -50,6 +50,7 @@ Progress: [██████░░░░] 63%
 | Phase 09-speed-benchmarks P01 | 3min | 2 tasks | 2 files |
 | Phase 10 P02 | 2min | 2 tasks | 3 files |
 | Phase 10 P01 | 4min | 2 tasks | 5 files |
+| Phase 10 P03 | 4min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -70,6 +71,8 @@ Recent decisions affecting current work:
 - [Phase 10 P02]: Exclude patterns pruned during os.walk (not post-filtered) for performance on large directory trees
 - [Phase 10]: FTS5 shares metadata store SQLite connection (WAL mode) instead of separate file
 - [Phase 10]: unicode61 tokenizer for FTS5 to handle bilingual RU/EN content
+- [Phase 10]: Per-file processing in thread pool via asyncio.to_thread to avoid blocking event loop
+- [Phase 10]: Watchdog events bridged to asyncio via loop.call_soon_threadsafe with 2s debounce
 
 ### Pending Todos
 

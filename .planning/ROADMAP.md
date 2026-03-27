@@ -91,11 +91,11 @@ Plans:
   3. Sending SIGTERM to the container finishes the current file and shuts down cleanly -- no corrupt state in SQLite or FTS5
   4. BM25 search is incremental via FTS5 -- each file becomes searchable immediately after indexing (no batch rebuild needed)
   5. CPU pressure is controllable via configurable pause interval and docker cpu-shares
-**Plans:** 2/4 plans executed
+**Plans:** 3/4 plans executed
 Plans:
 - [x] 10-01-PLAN.md — Replace rank_bm25 with SQLite FTS5 for incremental BM25 search
 - [x] 10-02-PLAN.md — Config.toml support + multi-path file discovery with glob/exclude
-- [ ] 10-03-PLAN.md — TrickleIndexer background loop with watchdog filesystem watching
+- [x] 10-03-PLAN.md — TrickleIndexer background loop with watchdog filesystem watching
 - [ ] 10-04-PLAN.md — Trickle progress reporting via status API and CLI
 
 ## Progress
@@ -113,7 +113,7 @@ Plans:
 | 7. Production Packaging | v1.3 | 2/2 | Complete   | 2026-03-27 |
 | 8. Smoke Tests | v1.3 | 0/1 | Planned | - |
 | 9. Speed Benchmarks | v1.3 | 0/1 | Planned | - |
-| 10. Background Trickle Indexer | v1.3 | 2/4 | In Progress|  |
+| 10. Background Trickle Indexer | v1.3 | 3/4 | In Progress|  |
 
 ---
 *Roadmap created: 2026-03-26*
