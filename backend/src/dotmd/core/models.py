@@ -107,5 +107,6 @@ class IndexStats(BaseModel):
     trickle_indexed: int | None = None  # files indexed so far in current run
     trickle_total: int | None = None  # total files to index in current run
     trickle_current_file: str | None = None  # file currently being processed
-    trickle_chunks_per_hour: float | None = None  # throughput rate
+    trickle_chunks_per_hour: float | None = None  # chunk throughput (TEI bottleneck)
+    trickle_files_per_hour: float | None = None  # file throughput (for capacity estimates)
     trickle_eta_minutes: float | None = None  # estimated time remaining

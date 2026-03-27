@@ -41,6 +41,7 @@ class TrickleState:
     indexed_count: int = 0
     total_files: int = 0
     current_file: str | None = None
+    files_per_hour: float = 0.0
     chunks_per_hour: float = 0.0
     total_chunks_done: int = 0
     eta_minutes: float | None = None
@@ -231,7 +232,7 @@ class TrickleIndexer:
                     eta_str = f", ETA ~{self._state.eta_minutes / 60:.1f}hr"
             rate_str = ""
             if self._state.chunks_per_hour > 0:
-                rate_str = f" @ {self._state.chunks_per_hour:.0f} chunks/hr"
+                rate_str = f" @ {self._state.chunks_per_hour:.0f} chunks/hr ({self._state.files_per_hour:.0f} files/hr)"
             logger.info(
                 "[%d/%d] %d chunks total%s%s",
                 succeeded,
@@ -404,13 +405,12 @@ class TrickleIndexer:
             self._observer = None
 
     def _update_eta(self, files_done: int, files_total: int) -> None:
-        """Update chunks_per_hour and ETA based on chunk throughput."""
+        """Update throughput rates and ETA."""
         elapsed = time.monotonic() - self._state._start_time
-        if elapsed > 0 and self._state.total_chunks_done > 0:
-            self._state.chunks_per_hour = self._state.total_chunks_done / (elapsed / 3600)
-            # ETA: estimate remaining chunks from avg chunks/file so far
-            avg_chunks_per_file = self._state.total_chunks_done / files_done
-            remaining_files = files_total - files_done
-            remaining_chunks = remaining_files * avg_chunks_per_file
-            if self._state.chunks_per_hour > 0:
-                self._state.eta_minutes = remaining_chunks / (self._state.chunks_per_hour / 60)
+        if elapsed > 0 and files_done > 0:
+            self._state.files_per_hour = files_done / (elapsed / 3600)
+            if self._state.total_chunks_done > 0:
+                self._state.chunks_per_hour = self._state.total_chunks_done / (elapsed / 3600)
+            remaining = files_total - files_done
+            if self._state.files_per_hour > 0:
+                self._state.eta_minutes = remaining / (self._state.files_per_hour / 60)

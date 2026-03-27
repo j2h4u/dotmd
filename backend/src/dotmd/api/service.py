@@ -318,6 +318,11 @@ class DotMDService:
             if trickle_state.chunks_per_hour > 0
             else None
         )
+        stats.trickle_files_per_hour = (
+            round(trickle_state.files_per_hour, 1)
+            if trickle_state.files_per_hour > 0
+            else None
+        )
         stats.trickle_eta_minutes = (
             round(trickle_state.eta_minutes, 1)
             if trickle_state.eta_minutes is not None
