@@ -8,6 +8,8 @@ Thin HTTP layer over :class:`DotMDService`.  Start with::
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
@@ -18,6 +20,8 @@ from pydantic import BaseModel
 from dotmd.api.service import DotMDService
 from dotmd.core.config import Settings
 from dotmd.core.models import IndexStats, SearchResult
+
+logger = logging.getLogger(__name__)
 
 _service: DotMDService | None = None
 
@@ -32,7 +36,22 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _service  # noqa: PLW0603
     _service = DotMDService(Settings())
     _service.warmup()
+
+    # Start background trickle indexer (per D-01: built into serve)
+    shutdown_event = asyncio.Event()
+    indexer_task = asyncio.create_task(
+        _service.trickle_indexer.run(shutdown_event)
+    )
+
     yield
+
+    # Signal shutdown, wait for current file to finish (per D-17: graceful)
+    shutdown_event.set()
+    try:
+        await asyncio.wait_for(indexer_task, timeout=120)
+    except asyncio.TimeoutError:
+        logger.warning("Trickle indexer did not stop within 120s -- cancelling")
+        indexer_task.cancel()
     _service = None
 
 

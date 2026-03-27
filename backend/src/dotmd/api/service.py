@@ -12,6 +12,7 @@ from pathlib import Path
 from dotmd.core.config import Settings
 from dotmd.core.models import IndexStats, SearchResult
 from dotmd.ingestion.pipeline import IndexingPipeline
+from dotmd.ingestion.trickle import TrickleIndexer
 from dotmd.search.bm25 import FTS5SearchEngine
 from dotmd.search.fusion import build_search_results, fuse_results
 from dotmd.search.graph_search import GraphSearchEngine
@@ -68,9 +69,17 @@ class DotMDService:
             min_length=self._settings.reranker_min_length,
         )
 
+        # Background trickle indexer
+        self._trickle_indexer = TrickleIndexer(self._pipeline, self._settings)
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    @property
+    def trickle_indexer(self) -> TrickleIndexer:
+        """Return the trickle indexer instance."""
+        return self._trickle_indexer
 
     def warmup(self) -> None:
         """Eagerly load ML models so first query is fast."""
