@@ -30,9 +30,9 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 - ✓ Full re-index with FalkorDB (229 files, 3520 entities, 20269 edges) — Validated in Phase 6
 - ✓ Production packaging — parameterized compose with bundled profiles, env-driven config, production include: pattern — Validated in Phase 7: Production Packaging
 - ✓ Smoke tests — 5 external HTTP tests covering semantic/BM25/graph/hybrid/API — Validated in Phase 8: Smoke Tests
+- ✓ Background trickle indexer — FTS5 incremental BM25, TOML config, watchdog + polling, progress reporting — Validated in Phase 10: Background Trickle Indexer
 
 ### Active
-- [ ] Background trickle indexer — process pending files at low priority with progress reporting
 - [ ] Indexing speed optimization — concurrent TEI requests, batch NER, throughput auto-tuning
 
 ### Out of Scope
