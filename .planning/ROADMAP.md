@@ -77,7 +77,9 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. Benchmark script reports texts/sec for 1, 2, and 3 concurrent TEI requests with a clear conclusion on whether concurrency helps
   2. Benchmark script reports GLiNER throughput for batch vs sequential NER with a clear conclusion on whether batching helps
-**Plans**: TBD
+**Plans:** 1 plan
+Plans:
+- [ ] 09-01-PLAN.md — TEI concurrency benchmark + GLiNER batching benchmark scripts
 
 ### Phase 10: Background Trickle Indexer
 **Goal**: Unindexed files are processed gradually in the background while the API continues serving search queries
@@ -105,9 +107,9 @@ Plans:
 | 6. Docker Integration + Migration | v1.2 | 1/1 | Complete | 2026-03-27 |
 | 7. Production Packaging | v1.3 | 2/2 | Complete   | 2026-03-27 |
 | 8. Smoke Tests | v1.3 | 0/1 | Planned | - |
-| 9. Speed Benchmarks | v1.3 | 0/? | Not started | - |
+| 9. Speed Benchmarks | v1.3 | 0/1 | Planned | - |
 | 10. Background Trickle Indexer | v1.3 | 0/? | Not started | - |
 
 ---
 *Roadmap created: 2026-03-26*
-*Last updated: 2026-03-27 after Phase 8 planning complete*
+*Last updated: 2026-03-27 after Phase 9 planning complete*
