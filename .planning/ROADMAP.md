@@ -6,6 +6,7 @@
 
 - [x] **v1.1 Incremental Indexing** — Phases 1-3 (shipped 2026-03-26)
 - [x] **v1.2 FalkorDB Migration & Search Fix** — Phases 4-6 (shipped 2026-03-27)
+- [ ] **v1.3 Production Packaging & Background Indexing** — Phases 7-10 (in progress)
 
 <details>
 <summary>v1.1 Incremental Indexing (Phases 1-3) — SHIPPED 2026-03-26</summary>
@@ -29,6 +30,79 @@ See: `.planning/milestones/v1.2-ROADMAP.md`
 
 </details>
 
+## v1.3 Production Packaging & Background Indexing
+
+**Milestone Goal:** Turn dotMD from a developer prototype into a self-contained production service -- docker compose up, point at paths, it indexes and serves search. Plus background indexing for large corpora and smoke tests for regression safety.
+
+## Phases
+
+- [ ] **Phase 7: Production Packaging** - Self-contained docker-compose stack with healthchecks, env config, and WAL mode
+- [ ] **Phase 8: Smoke Tests** - Automated regression safety net covering all search engines and API
+- [ ] **Phase 9: Speed Benchmarks** - Empirical measurement of TEI concurrency and NER batching gains
+- [ ] **Phase 10: Background Trickle Indexer** - Gradual indexing of full 13,500-file corpus at low priority
+
+## Phase Details
+
+### Phase 7: Production Packaging
+**Goal**: Service deploys as a self-contained stack with zero manual steps beyond `docker compose up`
+**Depends on**: Phase 6 (Docker Integration from v1.2)
+**Requirements**: PACK-01, PACK-02, PACK-03, PACK-04
+**Success Criteria** (what must be TRUE):
+  1. Running `docker compose up` starts dotMD, FalkorDB, and references TEI -- all healthy before API accepts requests
+  2. Healthchecks on TEI and FalkorDB gate service startup -- API does not start until dependencies report healthy
+  3. All configuration lives in environment variables with an `.env.example` documenting every option and its default
+  4. SQLite databases operate in WAL mode -- concurrent reads during writes do not return "database is locked"
+**Plans**: TBD
+
+### Phase 8: Smoke Tests
+**Goal**: Automated tests verify all search engines and API work correctly against the running stack
+**Depends on**: Phase 7 (reliable stack to test against)
+**Requirements**: TEST-01, TEST-02, TEST-03, TEST-04, TEST-05
+**Success Criteria** (what must be TRUE):
+  1. `pytest tests/smoke/` passes against a running stack with indexed data, covering semantic, BM25, and graph search
+  2. Hybrid fusion test confirms results from multiple engines are combined (not just one engine returning results)
+  3. API smoke test verifies HTTP 200 with valid JSON structure on the search endpoint
+  4. Tests skip gracefully (not fail) when the stack is unavailable, so they work in CI-less dev workflow
+**Plans**: TBD
+
+### Phase 9: Speed Benchmarks
+**Goal**: Empirical data on whether TEI concurrency and NER batching improve throughput on this hardware
+**Depends on**: Phase 8 (smoke tests catch regressions if benchmark code touches pipeline)
+**Requirements**: SPEED-01, SPEED-02
+**Success Criteria** (what must be TRUE):
+  1. Benchmark script reports texts/sec for 1, 2, and 3 concurrent TEI requests with a clear conclusion on whether concurrency helps
+  2. Benchmark script reports GLiNER throughput for batch vs sequential NER with a clear conclusion on whether batching helps
+**Plans**: TBD
+
+### Phase 10: Background Trickle Indexer
+**Goal**: Unindexed files are processed gradually in the background while the API continues serving search queries
+**Depends on**: Phase 7 (WAL mode for concurrent SQLite access), Phase 9 (speed optimizations benefit per-file throughput)
+**Requirements**: BGIDX-01, BGIDX-02, BGIDX-03, BGIDX-04, BGIDX-05, BGIDX-06
+**Success Criteria** (what must be TRUE):
+  1. Background indexer discovers and processes unindexed files one at a time while search queries continue returning results
+  2. `dotmd status` shows background indexing progress (e.g., "indexing 1,234/13,515 files")
+  3. Sending SIGTERM to the container finishes the current file and shuts down cleanly -- no corrupt state in SQLite or BM25
+  4. BM25 index rebuilds happen in batches (not per-file) with atomic swap -- readers never see a partial index
+  5. CPU pressure is controllable via configurable pause interval and docker cpu-shares
+**Plans**: TBD
+
+## Progress
+
+**Execution Order:** Phase 7 -> 8 -> 9 -> 10
+
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 1. sqlite-vec Migration | v1.1 | 2/2 | Complete | 2026-03-26 |
+| 2. Incremental Pipeline | v1.1 | 2/2 | Complete | 2026-03-26 |
+| 3. CLI & API Polish | v1.1 | 2/2 | Complete | 2026-03-26 |
+| 4. FalkorDB Adapter + Config | v1.2 | 2/2 | Complete | 2026-03-27 |
+| 5. BM25 Hybrid Fix | v1.2 | 1/1 | Complete | 2026-03-27 |
+| 6. Docker Integration + Migration | v1.2 | 1/1 | Complete | 2026-03-27 |
+| 7. Production Packaging | v1.3 | 0/? | Not started | - |
+| 8. Smoke Tests | v1.3 | 0/? | Not started | - |
+| 9. Speed Benchmarks | v1.3 | 0/? | Not started | - |
+| 10. Background Trickle Indexer | v1.3 | 0/? | Not started | - |
+
 ---
 *Roadmap created: 2026-03-26*
-*Last updated: 2026-03-27 after v1.2 shipped*
+*Last updated: 2026-03-27 after v1.3 roadmap created*

@@ -3,11 +3,11 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Production Packaging & Background Indexing
 status: planning
-stopped_at: ""
+stopped_at: "Roadmap created, ready to plan Phase 7"
 last_updated: "2026-03-27"
 last_activity: 2026-03-27
 progress:
-  total_phases: 0
+  total_phases: 4
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -21,16 +21,31 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-27)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Defining requirements for v1.3
+**Current focus:** Phase 7 — Production Packaging
 
 ## Current Milestone
 
 **v1.3 — Production Packaging & Background Indexing**
 
-Phase: Not started (defining requirements)
+Phase: 7 of 10 (Production Packaging) — first of 4 phases in v1.3
 Plan: —
-Status: Defining requirements
-Last activity: 2026-03-27 — Milestone v1.3 started
+Status: Ready to plan
+Last activity: 2026-03-27 — Roadmap created for v1.3
+
+Progress: [░░░░░░░░░░] 0%
+
+## Performance Metrics
+
+**Velocity:**
+- Total plans completed: 10 (across v1.1 + v1.2)
+- Average duration: —
+- Total execution time: —
+
+**By Phase:**
+
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| 1-6 (v1.1+v1.2) | 10 | — | — |
 
 ## Accumulated Context
 
@@ -39,12 +54,10 @@ Last activity: 2026-03-27 — Milestone v1.3 started
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- [v1.1]: Reuse global DotMDService in API — LadybugDB file lock prevents concurrent connections
-- [v1.2]: FalkorDB adapter written from scratch (not ported from LadybugDB) — dialect differences and unnecessary complexity
-- [Phase 04]: Settings read directly in CLI status (not via service) so status works even if FalkorDB is unreachable
-- [Phase 04]: Lazy imports inside graph factory — FalkorDB dependency only loaded when graph_backend=falkordb
-- [Phase 05]: D-01: Remove hard score threshold from reranker entirely rather than making it configurable
-- [Phase 05]: D-02: Merge back all fusion candidates not scored by reranker with fusion-only weight
+- [v1.2]: FalkorDB is production graph backend, LadybugDB kept as alternative
+- [v1.2]: Removed cross-encoder score threshold — all fusion candidates survive reranking
+- [Research]: Do NOT bundle second TEI instance — reuse shared TEI, document dependency
+- [Research]: Benchmark TEI concurrency before implementing — bs=4 equals bs=32 suggests compute-bound
 
 ### Pending Todos
 

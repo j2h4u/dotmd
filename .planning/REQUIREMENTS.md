@@ -72,29 +72,29 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PACK-01 | — | Pending |
-| PACK-02 | — | Pending |
-| PACK-03 | — | Pending |
-| PACK-04 | — | Pending |
-| TEST-01 | — | Pending |
-| TEST-02 | — | Pending |
-| TEST-03 | — | Pending |
-| TEST-04 | — | Pending |
-| TEST-05 | — | Pending |
-| SPEED-01 | — | Pending |
-| SPEED-02 | — | Pending |
-| BGIDX-01 | — | Pending |
-| BGIDX-02 | — | Pending |
-| BGIDX-03 | — | Pending |
-| BGIDX-04 | — | Pending |
-| BGIDX-05 | — | Pending |
-| BGIDX-06 | — | Pending |
+| PACK-01 | Phase 7 | Pending |
+| PACK-02 | Phase 7 | Pending |
+| PACK-03 | Phase 7 | Pending |
+| PACK-04 | Phase 7 | Pending |
+| TEST-01 | Phase 8 | Pending |
+| TEST-02 | Phase 8 | Pending |
+| TEST-03 | Phase 8 | Pending |
+| TEST-04 | Phase 8 | Pending |
+| TEST-05 | Phase 8 | Pending |
+| SPEED-01 | Phase 9 | Pending |
+| SPEED-02 | Phase 9 | Pending |
+| BGIDX-01 | Phase 10 | Pending |
+| BGIDX-02 | Phase 10 | Pending |
+| BGIDX-03 | Phase 10 | Pending |
+| BGIDX-04 | Phase 10 | Pending |
+| BGIDX-05 | Phase 10 | Pending |
+| BGIDX-06 | Phase 10 | Pending |
 
 **Coverage:**
 - v1.3 requirements: 17 total
-- Mapped to phases: 0
-- Unmapped: 17
+- Mapped to phases: 17
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-27*
-*Last updated: 2026-03-27 after initial definition*
+*Last updated: 2026-03-27 after roadmap creation — traceability complete*
