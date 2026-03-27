@@ -79,7 +79,6 @@ class Settings(BaseSettings):
     indexing_exclude: list[str] = ["**/node_modules", "**/.git", "**/__pycache__"]
 
     # Trickle indexer settings
-    trickle_pause_seconds: float = 1.0
     poll_interval_seconds: float = 3600.0  # 1 hour fallback poll
 
     # Graph

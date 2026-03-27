@@ -214,16 +214,6 @@ class TrickleIndexer:
                 file_info.path.name,
             )
 
-            # Configurable pause for CPU pressure control (per D-18, BGIDX-05)
-            if self._settings.trickle_pause_seconds > 0:
-                try:
-                    await asyncio.wait_for(
-                        shutdown.wait(),
-                        timeout=self._settings.trickle_pause_seconds,
-                    )
-                    return  # shutdown signaled during pause
-                except asyncio.TimeoutError:
-                    pass  # normal -- pause elapsed
 
         self._state.current_file = None
         logger.info("Backlog complete: %d files indexed", len(unindexed))
