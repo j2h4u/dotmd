@@ -124,10 +124,16 @@ class TrickleIndexer:
             Event set by the server lifespan to signal graceful shutdown.
         """
         if not self._settings.indexing_paths:
-            logger.info("No indexing paths configured -- trickle indexer idle")
+            logger.info("Trickle indexer idle — no indexing_paths in config")
             self._state.status = "idle"
             await shutdown.wait()
             return
+
+        logger.info(
+            "Trickle indexer starting — %d paths configured: %s",
+            len(self._settings.indexing_paths),
+            ", ".join(self._settings.indexing_paths),
+        )
 
         try:
             # Phase 1: Process existing backlog
@@ -179,8 +185,10 @@ class TrickleIndexer:
         self._state.total_files = len(unindexed)
         self._state.indexed_count = 0
         logger.info(
-            "Backlog: %d unindexed files (of %d total)",
-            len(unindexed),
+            "Backlog: %d new, %d modified, %d already indexed, %d total discovered",
+            len(diff.new),
+            len(diff.modified),
+            len(diff.unchanged),
             len(all_files),
         )
 
@@ -211,11 +219,23 @@ class TrickleIndexer:
             succeeded += 1
             self._state.indexed_count = succeeded
             self._update_eta(i + 1, len(unindexed))
+
+            # Progress log every file (rate/ETA available after first few)
+            eta_str = ""
+            if self._state.eta_minutes is not None:
+                if self._state.eta_minutes < 60:
+                    eta_str = f", ETA ~{self._state.eta_minutes:.0f}min"
+                else:
+                    eta_str = f", ETA ~{self._state.eta_minutes / 60:.1f}hr"
+            rate_str = ""
+            if self._state.files_per_hour > 0:
+                rate_str = f" @ {self._state.files_per_hour:.0f}/hr"
             logger.info(
-                "Indexed %d/%d: %s",
+                "[%d/%d]%s%s",
                 succeeded,
                 len(unindexed),
-                file_info.path.name,
+                rate_str,
+                eta_str,
             )
 
         self._state.current_file = None
@@ -288,6 +308,7 @@ class TrickleIndexer:
         from dotmd.ingestion.chunker import chunk_file
         from dotmd.ingestion.reader import read_file
 
+        t0 = time.perf_counter()
         path = file_info.path
         path_str = str(path)
 
@@ -295,6 +316,7 @@ class TrickleIndexer:
         chunk_ids = self._pipeline.metadata_store.get_chunk_ids_by_file(path_str)
         if chunk_ids:
             self._pipeline._purge_file(path_str)
+            logger.debug("Purged %d existing chunks for %s", len(chunk_ids), path.name)
 
         # Read and chunk
         content = read_file(path)
@@ -306,6 +328,7 @@ class TrickleIndexer:
         )
 
         if not chunks:
+            logger.debug("Skipping %s — empty after chunking", path.name)
             return
 
         # Save to metadata store
@@ -315,8 +338,10 @@ class TrickleIndexer:
         self._pipeline.bm25_engine.add_chunks(chunks)
 
         # Encode and add to vector store
+        t_embed = time.perf_counter()
         texts = [c.text for c in chunks]
         embeddings = self._pipeline.semantic_engine.encode_batch(texts)
+        t_embed = time.perf_counter() - t_embed
         self._pipeline.vector_store.add_chunks(chunks, embeddings, overwrite=True)
 
         # Extraction
@@ -333,6 +358,16 @@ class TrickleIndexer:
             stat.st_mtime,
             stat.st_size,
             checksum,
+        )
+
+        elapsed = time.perf_counter() - t0
+        logger.info(
+            "%s — %d chunks, %d entities, %.1fs (embed %.1fs)",
+            path.name,
+            len(chunks),
+            extraction.total_entities,
+            elapsed,
+            t_embed,
         )
 
     # ------------------------------------------------------------------
