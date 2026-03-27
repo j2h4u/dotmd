@@ -88,10 +88,15 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. Background indexer discovers and processes unindexed files one at a time while search queries continue returning results
   2. `dotmd status` shows background indexing progress (e.g., "indexing 1,234/13,515 files")
-  3. Sending SIGTERM to the container finishes the current file and shuts down cleanly -- no corrupt state in SQLite or BM25
-  4. BM25 index rebuilds happen in batches (not per-file) with atomic swap -- readers never see a partial index
+  3. Sending SIGTERM to the container finishes the current file and shuts down cleanly -- no corrupt state in SQLite or FTS5
+  4. BM25 search is incremental via FTS5 -- each file becomes searchable immediately after indexing (no batch rebuild needed)
   5. CPU pressure is controllable via configurable pause interval and docker cpu-shares
-**Plans**: TBD
+**Plans:** 4 plans
+Plans:
+- [ ] 10-01-PLAN.md — Replace rank_bm25 with SQLite FTS5 for incremental BM25 search
+- [ ] 10-02-PLAN.md — Config.toml support + multi-path file discovery with glob/exclude
+- [ ] 10-03-PLAN.md — TrickleIndexer background loop with watchdog filesystem watching
+- [ ] 10-04-PLAN.md — Trickle progress reporting via status API and CLI
 
 ## Progress
 
@@ -108,8 +113,8 @@ Plans:
 | 7. Production Packaging | v1.3 | 2/2 | Complete   | 2026-03-27 |
 | 8. Smoke Tests | v1.3 | 0/1 | Planned | - |
 | 9. Speed Benchmarks | v1.3 | 0/1 | Planned | - |
-| 10. Background Trickle Indexer | v1.3 | 0/? | Not started | - |
+| 10. Background Trickle Indexer | v1.3 | 0/4 | Planned | - |
 
 ---
 *Roadmap created: 2026-03-26*
-*Last updated: 2026-03-27 after Phase 9 planning complete*
+*Last updated: 2026-03-28 after Phase 10 planning complete*
