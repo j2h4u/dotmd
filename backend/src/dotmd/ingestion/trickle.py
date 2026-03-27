@@ -188,6 +188,8 @@ class TrickleIndexer:
             return
 
         self._state._start_time = time.monotonic()
+        succeeded = 0
+        failed = 0
 
         for i, file_info in enumerate(unindexed):
             if shutdown.is_set():
@@ -202,21 +204,25 @@ class TrickleIndexer:
             try:
                 await asyncio.to_thread(self._process_one_file, file_info)
             except Exception:
+                failed += 1
                 logger.exception("Failed to index %s -- skipping", file_info.path)
                 continue
 
-            self._state.indexed_count = i + 1
+            succeeded += 1
+            self._state.indexed_count = succeeded
             self._update_eta(i + 1, len(unindexed))
             logger.info(
                 "Indexed %d/%d: %s",
-                i + 1,
+                succeeded,
                 len(unindexed),
                 file_info.path.name,
             )
 
-
         self._state.current_file = None
-        logger.info("Backlog complete: %d files indexed", len(unindexed))
+        if failed:
+            logger.warning("Backlog done: %d indexed, %d failed (of %d total)", succeeded, failed, len(unindexed))
+        else:
+            logger.info("Backlog complete: %d files indexed", succeeded)
 
     # ------------------------------------------------------------------
     # Watch mode

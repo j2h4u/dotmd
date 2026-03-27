@@ -45,7 +45,7 @@ class SQLiteVecVectorStore:
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
             self._db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._conn = sqlite3.connect(str(self._db_path))
+            self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
             self._conn.execute("PRAGMA journal_mode=WAL")  # concurrent read/write safety
             self._conn.enable_load_extension(True)
             import sqlite_vec  # type: ignore[import-untyped]

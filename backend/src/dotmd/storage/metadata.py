@@ -90,7 +90,7 @@ class SQLiteMetadataStore:
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
-        self._conn = sqlite3.connect(str(db_path))
+        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute(_CREATE_CHUNKS)
         self._conn.execute(_CREATE_INDEX_FILE_PATH)
