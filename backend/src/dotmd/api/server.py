@@ -132,9 +132,9 @@ async def search(
     return SearchResponse(query=q, results=results, count=len(results))
 
 
-@app.get("/status", response_model=IndexStats | None)
-async def status() -> IndexStats | None:
-    """Return current index statistics."""
+@app.get("/status", response_model=IndexStats)
+async def status() -> IndexStats:
+    """Return current index statistics and trickle indexer progress."""
     return _get_service().status()
 
 

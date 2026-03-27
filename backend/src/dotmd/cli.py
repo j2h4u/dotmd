@@ -132,6 +132,32 @@ def status() -> None:
         else:
             click.echo("No changes detected since last index.")
 
+    # Trickle indexer progress (per D-15, BGIDX-02)
+    if stats.trickle_status and stats.trickle_status != "idle":
+        click.echo("")  # blank line separator
+        if stats.trickle_status == "backlog":
+            progress = ""
+            if stats.trickle_total and stats.trickle_total > 0:
+                progress = f" ({stats.trickle_indexed or 0}/{stats.trickle_total} files)"
+            rate = ""
+            if stats.trickle_files_per_hour:
+                rate = f" @ {stats.trickle_files_per_hour:.0f} files/hr"
+            eta = ""
+            if stats.trickle_eta_minutes is not None:
+                if stats.trickle_eta_minutes < 60:
+                    eta = f", ETA ~{stats.trickle_eta_minutes:.0f}min"
+                else:
+                    hours = stats.trickle_eta_minutes / 60
+                    eta = f", ETA ~{hours:.1f}hr"
+            click.echo(f"Background: indexing{progress}{rate}{eta}")
+        elif stats.trickle_status == "watching":
+            click.echo(f"Background: watching for new files (indexed {stats.trickle_indexed or 0} total)")
+        elif stats.trickle_status == "stopping":
+            click.echo("Background: shutting down...")
+
+        if stats.trickle_current_file:
+            click.echo(f"  Current: {stats.trickle_current_file}")
+
 
 @main.command()
 def clear() -> None:
