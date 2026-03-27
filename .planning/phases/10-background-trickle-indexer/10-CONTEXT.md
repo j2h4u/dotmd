@@ -26,27 +26,39 @@ Unindexed files are processed gradually in the background while the API continue
 - **D-06:** FTS5 tokenizer: `unicode61` — handles Cyrillic and other Unicode correctly. Parity with current tokenizer behavior (no stemming). Stemming (Russian + English) deferred to future search quality phase.
 - **D-07:** This change makes BGIDX-04 (batched BM25 rebuild with atomic swap) obsolete — the requirement is satisfied by design since FTS5 is inherently incremental.
 
-### Directory Filtering
-- **D-08:** Exclude hidden directories (`.*`) and `node_modules/` at any depth. This removes ~5,700 junk .md files (dependency docs, caches, toolchains). Real corpus: ~8,400 markdown files (repos, docs, scripts, voicenotes) instead of ~14,100.
-- **D-09:** Exclude patterns are configurable — not hardcoded. Live in config file (see D-14).
+### Indexing Scope (paths + exclude)
+- **D-08:** Glob-based `paths` + `exclude` pattern — same mental model as `.gitignore`/`tsconfig.json`. One `[indexing]` section in config.toml controls what gets indexed:
+  ```toml
+  [indexing]
+  paths = [
+      "/srv/knowledgebase/voicenotes",   # full recursive scan
+      "/home/j2h4u/docs",                # full recursive scan
+      "/home/j2h4u/**/README.md",        # glob: all README.md recursively
+      "/home/j2h4u/**/AGENTS.md",
+      "/home/j2h4u/**/CLAUDE.md",
+  ]
+  exclude = ["**/node_modules", "**/.git", "**/__pycache__"]
+  ```
+- **D-09:** `paths` entries can be directories (full recursive scan for .md) or glob patterns (specific filenames across a tree). `exclude` patterns filter out matches from both. Python `pathlib.glob()` or `wcmatch` handles both.
+- **D-10:** This replaces the single `data_dir` setting. Current `DOTMD_DATA_DIR` env var becomes a simple comma-separated list fallback for Docker, but config.toml is the primary source for complex path configs.
 
 ### Configuration File
-- **D-10:** Introduce `~/.dotmd/config.toml` as the primary configuration source. Hierarchical TOML format — cleaner than flat env vars for structured settings like exclude patterns.
-- **D-11:** Priority: env var (`DOTMD_*`) overrides config.toml, config.toml overrides code defaults. Env vars remain useful for Docker compose; config.toml for persistent settings that don't change per deployment.
-- **D-12:** `pydantic-settings` v2 supports TOML natively (`TomlConfigSettingsSource`). Minimal code change to existing Settings class.
+- **D-11:** Introduce `~/.dotmd/config.toml` as the primary configuration source. Hierarchical TOML format — cleaner than flat env vars for structured settings like paths/exclude patterns.
+- **D-12:** Priority: env var (`DOTMD_*`) overrides config.toml, config.toml overrides code defaults. Env vars remain useful for Docker compose; config.toml for persistent settings that don't change per deployment.
+- **D-13:** `pydantic-settings` v2 supports TOML natively (`TomlConfigSettingsSource`). Minimal code change to existing Settings class.
 
 ### File Processing Order
-- **D-13:** Sort unindexed files by mtime descending — newest files first. Fresh voicenotes become searchable before old scripts and docs.
+- **D-14:** Sort unindexed files by mtime descending — newest files first. Fresh voicenotes become searchable before old scripts and docs.
 
 ### Progress Reporting
-- **D-14:** `GET /status` and `dotmd status` return background indexer state: `indexed_files`, `total_files`, `state` (idle/indexing/done), `files_per_hour`, `eta_minutes`.
-- **D-15:** Logs: INFO-level log line per processed file with progress counter (e.g., "[trickle] 1,234/8,400 indexed: /path/to/file.md (3.2s)").
+- **D-15:** `GET /status` and `dotmd status` return background indexer state: `indexed_files`, `total_files`, `state` (idle/indexing/done), `files_per_hour`, `eta_minutes`.
+- **D-16:** Logs: INFO-level log line per processed file with progress counter.
 
 ### Graceful Shutdown
-- **D-16:** On SIGTERM, finish processing the current file, then shut down cleanly. No corrupt state in SQLite (WAL mode from Phase 7) or FTS5 index.
+- **D-17:** On SIGTERM, finish processing the current file, then shut down cleanly. No corrupt state in SQLite (WAL mode from Phase 7) or FTS5 index.
 
 ### CPU Control
-- **D-17:** Configurable pause interval between files via config.toml (`[indexing] trickle_pause_seconds`) with env var override (`DOTMD_TRICKLE_PAUSE_SECONDS`). CPU priority via `docker update --cpu-shares` as documented in deployment.
+- **D-18:** Configurable pause interval between files via config.toml (`[indexing] trickle_pause_seconds`) with env var override (`DOTMD_TRICKLE_PAUSE_SECONDS`). CPU priority via `docker update --cpu-shares` as documented in deployment.
 
 ### Claude's Discretion
 - Threading/asyncio implementation for background loop (whatever fits FastAPI lifespan best)
