@@ -1,5 +1,17 @@
 # Milestones
 
+## v1.2 FalkorDB Migration & Search Fix (Shipped: 2026-03-27)
+
+**Phases completed:** 3 phases, 4 plans, 6 tasks
+
+**Key accomplishments:**
+
+- FalkorDB graph store adapter with 12 protocol methods, config-driven backend selection, and updated GraphStoreProtocol
+- Config-driven graph store factory in pipeline with CLI status reporting of active backend
+- Removed cross-encoder score threshold and added merge-back logic so all BM25 fusion candidates survive through reranking
+
+---
+
 ## v1.1 Incremental Indexing (Shipped: 2026-03-26)
 
 **Phases completed:** 3 phases, 5 plans, 9 tasks

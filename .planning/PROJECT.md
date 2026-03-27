@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Independent fork of [inventivepotter/dotmd](https://github.com/inventivepotter/dotmd) — a markdown knowledgebase search tool combining semantic search, BM25 keyword matching, and knowledge graph traversal. Deployed on a personal home server as search engine for voicenotes transcripts and documentation (~227 markdown files, bilingual RU/EN). Developed independently; upstream is a reference for ideas, not a merge target.
+Independent fork of [inventivepotter/dotmd](https://github.com/inventivepotter/dotmd) — a markdown knowledgebase search tool combining semantic search, BM25 keyword matching, and knowledge graph traversal. Deployed on a personal home server as search engine for voicenotes transcripts and documentation (~13,500 markdown files, bilingual RU/EN). Developed independently; upstream is a reference for ideas, not a merge target.
 
 ## Core Value
 
@@ -36,7 +36,7 @@ None — v1.2 milestone complete.
 ### Out of Scope
 
 - GPU acceleration — no GPU on current hardware, Jetson/Mac Mini is future consideration
-- LadybugDB replacement — Now active in v1.2 (FalkorDB migration) due to lock conflicts with concurrent access
+- LadybugDB removal — keep as alternative embedded backend and for upstream compatibility
 - Full QMD-style query expansion/reranking — different product philosophy
 - Upstream PRs — fork has diverged too far (sqlite-vec, TEI, incremental indexing, schema migrations). Upstream is reference-only now
 
@@ -58,17 +58,19 @@ None — v1.2 milestone complete.
 - Useful as reference for graph search patterns and reranker tuning ideas
 - PR #1 (MCP stderr fix) approved, PR #2 (LadybugDB lock fix) submitted
 
-**Current index (after v1.1):**
-- 227 files, 520 chunks, 3,456 entities, 19,667 edges
-- Full re-index: ~59 min via TEI
+**Current index (after v1.2):**
+- 229 files (voicenotes), 532 chunks, 3,520 entities, 20,269 edges
+- Graph backend: FalkorDB @ redis://falkordb:6379/dotmd
+- Full corpus: ~13,500 files (voicenotes + home) — only voicenotes indexed so far
+- Full re-index (voicenotes): ~50 min via TEI
 - Incremental (no changes): <1s
 - Per-stage timing metrics in pipeline logs (run_id correlation)
 
-**Performance baseline (full index):**
-- Embedding via TEI: ~25 min (520 chunks)
-- NER (GLiNER): ~18 min on CPU
-- Graph population: ~10 min (19k edges)
-- Total: ~59 min
+**Performance baseline (voicenotes full index, v1.2):**
+- Embedding via TEI: ~30 min (532 chunks, bs=4)
+- NER (GLiNER): ~15 min on CPU
+- Graph population (FalkorDB): ~5 min (20k edges)
+- Total: ~50 min
 
 ## Constraints
 
@@ -89,17 +91,20 @@ None — v1.2 milestone complete.
 | NER enabled (not structural-only) | Knowledge graph quality worth the CPU cost on first index | ⚠️ Revisit — 18min NER may not be worth it for incremental |
 | Reuse global DotMDService in API | LadybugDB file lock prevents concurrent connections | ✓ Good — fixes /index endpoint crash |
 | Pipeline timing metrics | No visibility into stage durations without instrumentation | ✓ Good — run_id correlation in logs |
+| FalkorDB over LadybugDB (production) | LadybugDB file lock prevents concurrent CLI + API | ✓ Good — concurrent access works |
+| FalkorDB adapter from scratch | LadybugDB Cypher dialect too different to port | ✓ Good — clean implementation |
+| Keep LadybugDB as alternative | Embedded use case + upstream compatibility | — Ongoing |
+| Remove reranker score threshold | Cross-encoder threshold silently dropped BM25 results | ✓ Good — all fusion candidates survive |
+| TEI batch size auto-tuning | Avoid 413 errors, adapt to server capacity | ✓ Good — probe on first call |
 
-## Current Milestone: v1.2 FalkorDB Migration & Search Fix
+## Shipped Milestones
 
-**Goal:** Replace LadybugDB graph store with FalkorDB to eliminate single-connection file lock issues, and fix BM25 results missing in hybrid search mode.
+- **v1.1** — Incremental Indexing (Phases 1-3, shipped 2026-03-26)
+- **v1.2** — FalkorDB Migration & Search Fix (Phases 4-6, shipped 2026-03-27)
 
-**Target features:**
-- FalkorDB graph store adapter implementing existing protocol
-- Config settings for graph backend selection and FalkorDB URL
-- Pipeline integration to select backend based on config
-- Docker networking (connect dotmd to `graphiti_default` network)
-- BM25 hybrid mode fix (reranker/fusion investigation)
+## Current State
+
+v1.2 shipped. FalkorDB is production graph backend. Voicenotes indexed (229 files, 3520 entities). Home directory (~13k files) not yet indexed — pending background trickle indexer (v1.3 candidate). Search works across semantic, BM25, and graph engines with hybrid fusion.
 
 ## Evolution
 
@@ -119,4 +124,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-27 after Phase 6 complete — FalkorDB Docker integration done, graph populated (3520 entities, 20269 edges), v1.2 milestone complete*
+*Last updated: 2026-03-27 after v1.2 milestone — FalkorDB migration complete, BM25 hybrid fix shipped, 5553 LOC Python*
