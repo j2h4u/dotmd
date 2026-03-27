@@ -33,8 +33,8 @@ Requirements for v1.3 milestone. Each maps to roadmap phases.
 - [ ] **BGIDX-02**: `dotmd status` reports background indexing progress ("indexing 1,234/13,515 files")
 - [ ] **BGIDX-03**: Background indexer shuts down gracefully on SIGTERM (finishes current file, does not corrupt state)
 - [ ] **BGIDX-04**: BM25 index rebuilds batched (every N files) with atomic pickle swap to prevent reader corruption
-- [ ] **BGIDX-05**: Configurable pause interval between files to control CPU pressure
-- [ ] **BGIDX-06**: Background indexer runs at low CPU priority via `docker update --cpu-shares`
+- [x] **BGIDX-05**: Configurable pause interval between files to control CPU pressure
+- [x] **BGIDX-06**: Background indexer runs at low CPU priority via `docker update --cpu-shares`
 
 ## Future Requirements
 
@@ -87,8 +87,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BGIDX-02 | Phase 10 | Pending |
 | BGIDX-03 | Phase 10 | Pending |
 | BGIDX-04 | Phase 10 | Pending |
-| BGIDX-05 | Phase 10 | Pending |
-| BGIDX-06 | Phase 10 | Pending |
+| BGIDX-05 | Phase 10 | Complete |
+| BGIDX-06 | Phase 10 | Complete |
 
 **Coverage:**
 - v1.3 requirements: 17 total

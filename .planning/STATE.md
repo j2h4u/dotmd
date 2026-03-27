@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Production Packaging & Background Indexing
 status: completed
-last_updated: "2026-03-27T18:13:35.607Z"
+last_updated: "2026-03-27T19:30:46.275Z"
 last_activity: 2026-03-27
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 4
-  completed_plans: 4
+  total_plans: 8
+  completed_plans: 5
   percent: 100
 ---
 
@@ -20,18 +20,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-27)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 09 — speed-benchmarks (complete)
+**Current focus:** Phase 10 — background-trickle-indexer
 
 ## Current Milestone
 
 **v1.3 — Production Packaging & Background Indexing**
 
 Phase: 10 of 10 (background trickle indexer)
-Plan: Not started
-Status: Phase 09 complete
+Plan: 2 of 4 (config & file discovery complete)
+Status: Executing Phase 10
 Last activity: 2026-03-27
 
-Progress: [██████████] 100%
+Progress: [██████░░░░] 63%
 
 ## Performance Metrics
 
@@ -48,6 +48,7 @@ Progress: [██████████] 100%
 | 1-6 (v1.1+v1.2) | 10 | — | — |
 | Phase 07 P02 | 5min | 2 tasks | 5 files |
 | Phase 09-speed-benchmarks P01 | 3min | 2 tasks | 2 files |
+| Phase 10 P02 | 2min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -64,6 +65,8 @@ Recent decisions affecting current work:
 - [Phase 07]: Production uses include: directive referencing repo compose as single source of truth
 - [Phase 07]: Port override via DOTMD_PORT env var (not compose override ports) to avoid list merge
 - [Phase 09-speed-benchmarks]: Standalone benchmark scripts with no dotmd imports -- test TEI HTTP and GLiNER model directly
+- [Phase 10 P02]: TOML config loaded conditionally (only when file exists) -- no startup failure without config
+- [Phase 10 P02]: Exclude patterns pruned during os.walk (not post-filtered) for performance on large directory trees
 
 ### Pending Todos
 
