@@ -24,8 +24,8 @@ Requirements for v1.3 milestone. Each maps to roadmap phases.
 
 ### Speed Optimization
 
-- [ ] **SPEED-01**: Benchmark measures end-to-end texts/sec for concurrent TEI requests (1, 2, 3 parallel) and reports whether concurrency improves throughput
-- [ ] **SPEED-02**: Benchmark measures GLiNER batch vs sequential NER throughput and reports whether batching improves speed
+- [x] **SPEED-01**: Benchmark measures end-to-end texts/sec for concurrent TEI requests (1, 2, 3 parallel) and reports whether concurrency improves throughput
+- [x] **SPEED-02**: Benchmark measures GLiNER batch vs sequential NER throughput and reports whether batching improves speed
 
 ### Background Indexer
 
@@ -81,8 +81,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TEST-03 | Phase 8 | Pending |
 | TEST-04 | Phase 8 | Pending |
 | TEST-05 | Phase 8 | Pending |
-| SPEED-01 | Phase 9 | Pending |
-| SPEED-02 | Phase 9 | Pending |
+| SPEED-01 | Phase 9 | Complete |
+| SPEED-02 | Phase 9 | Complete |
 | BGIDX-01 | Phase 10 | Pending |
 | BGIDX-02 | Phase 10 | Pending |
 | BGIDX-03 | Phase 10 | Pending |

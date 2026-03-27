@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Production Packaging & Background Indexing
-status: executing
-last_updated: "2026-03-27T15:09:30.353Z"
+status: completed
+last_updated: "2026-03-27T18:08:02.358Z"
 last_activity: 2026-03-27
 progress:
   total_phases: 4
-  completed_phases: 2
-  total_plans: 3
-  completed_plans: 3
+  completed_phases: 3
+  total_plans: 4
+  completed_plans: 4
   percent: 100
 ---
 
@@ -20,15 +20,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-27)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 08 — smoke-tests
+**Current focus:** Phase 09 — speed-benchmarks (complete)
 
 ## Current Milestone
 
 **v1.3 — Production Packaging & Background Indexing**
 
 Phase: 9 of 10 (speed benchmarks)
-Plan: Not started
-Status: Executing — awaiting Task 3 human verification
+Plan: 1 of 1 (complete)
+Status: Phase 09 complete
 Last activity: 2026-03-27
 
 Progress: [██████████] 100%
@@ -47,6 +47,7 @@ Progress: [██████████] 100%
 |-------|-------|-------|----------|
 | 1-6 (v1.1+v1.2) | 10 | — | — |
 | Phase 07 P02 | 5min | 2 tasks | 5 files |
+| Phase 09-speed-benchmarks P01 | 3min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -62,6 +63,7 @@ Recent decisions affecting current work:
 - [Phase 07]: Compose profiles for optional bundled services (TEI, FalkorDB) -- depends_on removed due to v5.1 profile incompatibility
 - [Phase 07]: Production uses include: directive referencing repo compose as single source of truth
 - [Phase 07]: Port override via DOTMD_PORT env var (not compose override ports) to avoid list merge
+- [Phase 09-speed-benchmarks]: Standalone benchmark scripts with no dotmd imports -- test TEI HTTP and GLiNER model directly
 
 ### Pending Todos
 

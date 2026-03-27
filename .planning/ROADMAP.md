@@ -79,7 +79,7 @@ Plans:
   2. Benchmark script reports GLiNER throughput for batch vs sequential NER with a clear conclusion on whether batching helps
 **Plans:** 1 plan
 Plans:
-- [ ] 09-01-PLAN.md — TEI concurrency benchmark + GLiNER batching benchmark scripts
+- [x] 09-01-PLAN.md — TEI concurrency benchmark + GLiNER batching benchmark scripts
 
 ### Phase 10: Background Trickle Indexer
 **Goal**: Unindexed files are processed gradually in the background while the API continues serving search queries
