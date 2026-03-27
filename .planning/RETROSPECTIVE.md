@@ -42,8 +42,52 @@
 - Sessions: 2 (planning + execution in one, deployment/testing in another)
 - Notable: Single-plan phases execute cleanly with one subagent, no wave overhead
 
+## Milestone: v1.2 — FalkorDB Migration & Search Fix
+
+**Shipped:** 2026-03-27
+**Phases:** 3 | **Plans:** 4 | **Tasks:** 6
+
+### What Was Built
+- FalkorDB graph store adapter (12 protocol methods, written from scratch)
+- Config-driven graph backend selection (`graph_backend`, `falkordb_url`, `falkordb_graph_name`)
+- Pipeline factory for backend selection with lazy imports
+- BM25 hybrid fix — removed reranker score threshold, added merge-back logic for fusion candidates
+- Docker networking to FalkorDB (graphiti_default external network)
+- Full re-index on FalkorDB: 229 files → 3520 entities → 20269 edges
+- TEI batch size auto-tuning probe (start high, halve on 413)
+
+### What Worked
+- Phase 4 (adapter) and Phase 5 (BM25 fix) were independent — could have been parallelized
+- FalkorDB adapter from scratch was cleaner than porting from LadybugDB — dialect differences would have been a trap
+- Expert panel approach for BM25 diagnosis gave unanimous clear direction (remove threshold, keep weights)
+- Auto-advance pipeline (discuss → plan → execute) worked smoothly for Phase 6
+- Research agent caught the stale Docker image blocker before execution
+
+### What Was Inefficient
+- Full `/mnt` re-index launched without checking file count — discovered 13,515 files (vs expected 227) after 20 minutes of TEI batching
+- TEI batch size changed to 32 then back to 4 — should have benchmarked first instead of assuming bigger=faster
+- `nice -n 19` on `docker compose run` — doesn't affect container process priority (need `docker update`)
+- Three failed re-index attempts before the successful one (scope issue, hung process, wrong batch size)
+
+### Patterns Established
+- `docker update --cpu-shares 2` for low-priority container work, not nice/ionice on CLI
+- TEI batch size: small (4-8) is faster on CPU due to lower queue_time — measure integral throughput, not per-batch time
+- LadybugDB is NOT legacy — keep as alternative embedded backend for upstream compatibility
+- Container logs with `--rm` are ephemeral — telemetry needed for auto-tuning must persist to disk
+
+### Key Lessons
+- Dataset size assumptions are dangerous — always check `find | wc -l` before `--force` re-index
+- Auto-tuning should optimize end-to-end throughput (texts/sec), not just avoid errors (413)
+- Background trickle indexing is the right paradigm for large datasets on constrained hardware — heroic one-shot re-index doesn't scale
+
+### Cost Observations
+- Model mix: 100% Opus 4.6 (1M context)
+- Sessions: 2 (planning in one, execution + debugging in another)
+- Notable: Phase 6 execution done inline (no subagent) — simpler for single-plan phases modifying files outside repo
+
 ## Cross-Milestone Trends
 
 | Milestone | Phases | Plans | Duration | Key Metric |
 |-----------|--------|-------|----------|------------|
 | v1.1 | 3 | 5 | 2 days | Incremental index: <1s (was 50min) |
+| v1.2 | 3 | 4 | 2 days | FalkorDB: concurrent CLI+API, 3520 entities |
