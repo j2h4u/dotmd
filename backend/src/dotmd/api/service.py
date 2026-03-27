@@ -12,7 +12,7 @@ from pathlib import Path
 from dotmd.core.config import Settings
 from dotmd.core.models import IndexStats, SearchResult
 from dotmd.ingestion.pipeline import IndexingPipeline
-from dotmd.search.bm25 import BM25SearchEngine
+from dotmd.search.bm25 import FTS5SearchEngine
 from dotmd.search.fusion import build_search_results, fuse_results
 from dotmd.search.graph_search import GraphSearchEngine
 from dotmd.search.query import QueryExpander
@@ -47,7 +47,7 @@ class DotMDService:
             self._settings.embedding_model,
             score_floor=self._settings.semantic_score_floor,
         )
-        self._bm25_engine = BM25SearchEngine(self._settings.bm25_path)
+        self._bm25_engine = FTS5SearchEngine(self._pipeline.metadata_store._conn)
         self._graph_engine = GraphSearchEngine(
             self._pipeline.graph_store,
             self._pipeline.metadata_store,

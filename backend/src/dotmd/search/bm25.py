@@ -40,7 +40,7 @@ def _sanitize_fts5_query(query: str) -> str:
 class FTS5SearchEngine:
     """Full-text search engine backed by SQLite FTS5.
 
-    Replaces the former pickle-based ``BM25SearchEngine``.  The FTS5
+    Replaces the former pickle-based BM25 search engine.  The FTS5
     virtual table lives in the same SQLite database as chunk metadata,
     sharing the WAL-mode connection.
 

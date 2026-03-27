@@ -18,7 +18,7 @@ from dotmd.extraction.ner import NERExtractor
 from dotmd.extraction.structural import StructuralExtractor
 from dotmd.ingestion.chunker import chunk_file
 from dotmd.ingestion.reader import discover_files, read_file
-from dotmd.search.bm25 import BM25SearchEngine
+from dotmd.search.bm25 import FTS5SearchEngine
 from dotmd.search.semantic import SemanticSearchEngine
 from dotmd.storage.graph import LadybugDBGraphStore
 from dotmd.storage.metadata import SQLiteMetadataStore
@@ -55,7 +55,7 @@ class IndexingPipeline:
             self._vector_store,
             settings.embedding_model,
         )
-        self._bm25_engine = BM25SearchEngine(settings.bm25_path)
+        self._bm25_engine = FTS5SearchEngine(self._metadata_store._conn)
 
         # -- extractors --------------------------------------------------------
         self._structural_extractor = StructuralExtractor()
@@ -122,8 +122,8 @@ class IndexingPipeline:
             self._vector_store.add_chunks(all_chunks, embeddings)
             logger.info("Added %d vectors to vector store", len(all_chunks))
 
-        # 5. Build BM25 index
-        self._bm25_engine.build_index(all_chunks)
+        # 5. Update FTS5 index (incremental)
+        self._bm25_engine.add_chunks(all_chunks)
 
         # 6. Structural extraction
         structural_result = self._structural_extractor.extract(all_chunks)
@@ -234,7 +234,7 @@ class IndexingPipeline:
 
     def clear(self) -> None:
         """Delete all data from every backing store."""
-        self._metadata_store.delete_all()
+        self._metadata_store.delete_all()  # also clears chunks_fts
         self._vector_store.delete_all()
         self._graph_store.delete_all()
 
@@ -269,6 +269,6 @@ class IndexingPipeline:
         return self._semantic_engine
 
     @property
-    def bm25_engine(self) -> BM25SearchEngine:
-        """Return the BM25 search engine instance."""
+    def bm25_engine(self) -> FTS5SearchEngine:
+        """Return the FTS5 search engine instance."""
         return self._bm25_engine
