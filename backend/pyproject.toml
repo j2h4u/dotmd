@@ -39,6 +39,11 @@ eval = [
 [project.scripts]
 dotmd = "dotmd.cli:main"
 
+[tool.pytest.ini_options]
+markers = [
+    "smoke: smoke tests requiring a running dotMD stack",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/dotmd"]
 sources = ["src"]
