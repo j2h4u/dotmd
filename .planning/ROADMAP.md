@@ -66,7 +66,9 @@ Plans:
   2. Hybrid fusion test confirms results from multiple engines are combined (not just one engine returning results)
   3. API smoke test verifies HTTP 200 with valid JSON structure on the search endpoint
   4. Tests skip gracefully (not fail) when the stack is unavailable, so they work in CI-less dev workflow
-**Plans**: TBD
+**Plans:** 1 plan
+Plans:
+- [ ] 08-01-PLAN.md — Smoke test suite: conftest skip logic, search engine tests, hybrid fusion, API validation
 
 ### Phase 9: Speed Benchmarks
 **Goal**: Empirical data on whether TEI concurrency and NER batching improve throughput on this hardware
@@ -102,10 +104,10 @@ Plans:
 | 5. BM25 Hybrid Fix | v1.2 | 1/1 | Complete | 2026-03-27 |
 | 6. Docker Integration + Migration | v1.2 | 1/1 | Complete | 2026-03-27 |
 | 7. Production Packaging | v1.3 | 2/2 | Complete   | 2026-03-27 |
-| 8. Smoke Tests | v1.3 | 0/? | Not started | - |
+| 8. Smoke Tests | v1.3 | 0/1 | Planned | - |
 | 9. Speed Benchmarks | v1.3 | 0/? | Not started | - |
 | 10. Background Trickle Indexer | v1.3 | 0/? | Not started | - |
 
 ---
 *Roadmap created: 2026-03-26*
-*Last updated: 2026-03-27 after Phase 7 planning complete*
+*Last updated: 2026-03-27 after Phase 8 planning complete*
