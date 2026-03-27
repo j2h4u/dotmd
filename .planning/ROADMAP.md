@@ -68,7 +68,7 @@ Plans:
   4. Tests skip gracefully (not fail) when the stack is unavailable, so they work in CI-less dev workflow
 **Plans:** 1 plan
 Plans:
-- [ ] 08-01-PLAN.md — Smoke test suite: conftest skip logic, search engine tests, hybrid fusion, API validation
+- [x] 08-01-PLAN.md — Smoke test suite: conftest skip logic, search engine tests, hybrid fusion, API validation
 
 ### Phase 9: Speed Benchmarks
 **Goal**: Empirical data on whether TEI concurrency and NER batching improve throughput on this hardware
