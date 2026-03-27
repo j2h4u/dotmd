@@ -140,8 +140,8 @@ def status() -> None:
             if stats.trickle_total and stats.trickle_total > 0:
                 progress = f" ({stats.trickle_indexed or 0}/{stats.trickle_total} files)"
             rate = ""
-            if stats.trickle_files_per_hour:
-                rate = f" @ {stats.trickle_files_per_hour:.0f} files/hr"
+            if stats.trickle_chunks_per_hour:
+                rate = f" @ {stats.trickle_chunks_per_hour:.0f} chunks/hr"
             eta = ""
             if stats.trickle_eta_minutes is not None:
                 if stats.trickle_eta_minutes < 60:

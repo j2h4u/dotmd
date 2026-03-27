@@ -41,7 +41,8 @@ class TrickleState:
     indexed_count: int = 0
     total_files: int = 0
     current_file: str | None = None
-    files_per_hour: float = 0.0
+    chunks_per_hour: float = 0.0
+    total_chunks_done: int = 0
     eta_minutes: float | None = None
     _start_time: float = field(default_factory=time.monotonic, repr=False)
 
@@ -210,7 +211,7 @@ class TrickleIndexer:
 
             self._state.current_file = str(file_info.path)
             try:
-                await asyncio.to_thread(self._process_one_file, file_info)
+                n_chunks = await asyncio.to_thread(self._process_one_file, file_info)
             except Exception:
                 failed += 1
                 logger.exception("Failed to index %s -- skipping", file_info.path)
@@ -218,9 +219,10 @@ class TrickleIndexer:
 
             succeeded += 1
             self._state.indexed_count = succeeded
+            self._state.total_chunks_done += n_chunks or 0
             self._update_eta(i + 1, len(unindexed))
 
-            # Progress log every file (rate/ETA available after first few)
+            # Progress log every file
             eta_str = ""
             if self._state.eta_minutes is not None:
                 if self._state.eta_minutes < 60:
@@ -228,12 +230,13 @@ class TrickleIndexer:
                 else:
                     eta_str = f", ETA ~{self._state.eta_minutes / 60:.1f}hr"
             rate_str = ""
-            if self._state.files_per_hour > 0:
-                rate_str = f" @ {self._state.files_per_hour:.0f}/hr"
+            if self._state.chunks_per_hour > 0:
+                rate_str = f" @ {self._state.chunks_per_hour:.0f} chunks/hr"
             logger.info(
-                "[%d/%d]%s%s",
+                "[%d/%d] %d chunks total%s%s",
                 succeeded,
                 len(unindexed),
+                self._state.total_chunks_done,
                 rate_str,
                 eta_str,
             )
@@ -329,7 +332,7 @@ class TrickleIndexer:
 
         if not chunks:
             logger.debug("Skipping %s — empty after chunking", path.name)
-            return
+            return 0
 
         # Save to metadata store
         self._pipeline.metadata_store.save_chunks(chunks)
@@ -369,6 +372,7 @@ class TrickleIndexer:
             elapsed,
             t_embed,
         )
+        return len(chunks)
 
     # ------------------------------------------------------------------
     # Observer management
@@ -399,11 +403,14 @@ class TrickleIndexer:
             self._observer.join(timeout=10)
             self._observer = None
 
-    def _update_eta(self, done: int, total: int) -> None:
-        """Update files_per_hour and ETA estimates."""
+    def _update_eta(self, files_done: int, files_total: int) -> None:
+        """Update chunks_per_hour and ETA based on chunk throughput."""
         elapsed = time.monotonic() - self._state._start_time
-        if elapsed > 0 and done > 0:
-            self._state.files_per_hour = done / (elapsed / 3600)
-            remaining = total - done
-            if self._state.files_per_hour > 0:
-                self._state.eta_minutes = remaining / (self._state.files_per_hour / 60)
+        if elapsed > 0 and self._state.total_chunks_done > 0:
+            self._state.chunks_per_hour = self._state.total_chunks_done / (elapsed / 3600)
+            # ETA: estimate remaining chunks from avg chunks/file so far
+            avg_chunks_per_file = self._state.total_chunks_done / files_done
+            remaining_files = files_total - files_done
+            remaining_chunks = remaining_files * avg_chunks_per_file
+            if self._state.chunks_per_hour > 0:
+                self._state.eta_minutes = remaining_chunks / (self._state.chunks_per_hour / 60)

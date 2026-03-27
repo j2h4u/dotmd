@@ -313,9 +313,9 @@ class DotMDService:
         stats.trickle_indexed = trickle_state.indexed_count
         stats.trickle_total = trickle_state.total_files
         stats.trickle_current_file = trickle_state.current_file
-        stats.trickle_files_per_hour = (
-            round(trickle_state.files_per_hour, 1)
-            if trickle_state.files_per_hour > 0
+        stats.trickle_chunks_per_hour = (
+            round(trickle_state.chunks_per_hour, 1)
+            if trickle_state.chunks_per_hour > 0
             else None
         )
         stats.trickle_eta_minutes = (
