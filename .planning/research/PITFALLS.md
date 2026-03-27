@@ -1,357 +1,342 @@
-# Domain Pitfalls
+# Pitfalls Research
 
-**Domain:** FalkorDB graph store migration + BM25 hybrid search fix for existing knowledgebase search system
-**Researched:** 2026-03-26
-**Confidence:** HIGH -- based on direct codebase analysis, FalkorDB docs, and cross-encoder documentation
-
----
+**Domain:** Production packaging, background indexing, speed optimization, and smoke tests for dotMD v1.3
+**Researched:** 2026-03-27
+**Confidence:** HIGH (based on codebase analysis, official documentation, and multiple verified sources)
 
 ## Critical Pitfalls
 
-### Pitfall 1: FalkorDB Cypher Dialect Differences Silently Return Wrong Results
+### Pitfall 1: Background Indexer Blocks the FastAPI Event Loop
 
 **What goes wrong:**
-The existing LadybugDB adapter uses `label(b)` (singular) in the `get_neighbors` query (graph.py line 220) to get node labels. FalkorDB's function is `labels(b)` (plural) and returns a **list** not a string. The query `RETURN DISTINCT b.id, label(b)` will fail or return unexpected results. Additionally, LadybugDB uses `CREATE NODE TABLE` / `CREATE REL TABLE` statements for schema -- FalkorDB is schema-free and does not have these commands at all.
+The current `DotMDService.index()` is fully synchronous -- it calls `IndexingPipeline.index()` which does file I/O, HTTP calls to TEI, GLiNER CPU-bound NER inference, and FalkorDB network writes. If a background trickle indexer is launched from an async context (e.g., FastAPI `BackgroundTasks` or `asyncio.create_task`), the entire event loop freezes for the duration of each file's processing. Search queries queue behind indexing and the API becomes unresponsive. With GLiNER taking ~4 seconds per chunk on this Xeon E3 V2, a single file with 3 chunks blocks the API for 12+ seconds.
 
 **Why it happens:**
-LadybugDB is a Kuzu fork with its own Cypher dialect. FalkorDB implements openCypher but with its own subset. Developers assume "both speak Cypher" means identical syntax. The differences are subtle enough that some queries work and others silently produce wrong results.
+FastAPI's `BackgroundTasks` runs sync functions in Starlette's default threadpool, but there are two subtleties:
+1. If the background task is defined as `async def` and calls sync code without `run_in_executor`/`run_in_threadpool`, it blocks the event loop directly -- no thread offloading occurs.
+2. Even when correctly offloaded to a thread, Python's GIL means CPU-bound work (GLiNER, cross-encoder) in the background thread starves the event loop thread. The GIL is released during I/O (httpx calls to TEI, SQLite writes) but held during tensor operations.
 
-**Specific dialect differences found:**
+The existing `server.py` lifespan creates a single `DotMDService` instance. If both API handlers and the background indexer use this same instance, they also share the same SQLite connections and in-memory BM25 index (see Pitfall 2).
 
-| Feature | LadybugDB (current) | FalkorDB | Action needed |
-|---------|---------------------|----------|---------------|
-| Schema DDL | `CREATE NODE TABLE IF NOT EXISTS File(...)` | Not needed -- schema-free, nodes have labels | Remove all `_SCHEMA_INIT` statements |
-| Node label function | `label(n)` (returns string) | `labels(n)` (returns list of strings) | Change to `labels(n)[0]` or iterate |
-| Relationship tables | `CREATE REL TABLE FILE_SECTION(FROM File TO Section, ...)` | Not needed -- relationships are just `[:REL_TYPE]` | Simplify edge creation |
-| `_REL_TABLE_MAP` lookup | Required -- edges must use named rel tables | Not needed -- `MERGE (a)-[:HAS_SECTION]->(b)` works directly | Eliminate the lookup entirely |
-| `_find_node_label` | Iterates 4 node tables to find which table has an ID | Query any node by ID: `MATCH (n {id: $id}) RETURN labels(n)` | Single query replaces 4 |
-| Parameters | `parameters={"id": value}` | `params={"id": value}` in falkordb-py client | Check API signature |
-| Variable-length paths | `[r* 1..N]` | `[*1..N]` (same syntax, confirmed in docs) | Works as-is |
-| MERGE | Supported | Supported with same semantics | Works as-is |
-| DETACH DELETE | Supported | Supported (auto-cascading) | Works as-is |
+**How to avoid:**
+- Run the background indexer as a **separate process**, not a thread. Options:
+  - A second container entrypoint (`dotmd trickle --data-dir /mnt`) sharing the same index volume
+  - A subprocess spawned from the lifespan handler via `multiprocessing`
+  - Process isolation eliminates GIL contention entirely and is the simplest correct approach
+- If using threads (simpler but worse): use `asyncio.to_thread()` or `loop.run_in_executor(ThreadPoolExecutor(max_workers=1), ...)` and insert explicit `time.sleep(0.05)` yield points between files so the GIL releases regularly
+- Never define the background indexer as an `async def` that calls sync pipeline code directly
 
-**Consequences:**
-Schema init fails on first connection. Queries using `label()` return errors. Edge creation via `_REL_TABLE_MAP` fails because those table names don't exist in FalkorDB. The adapter appears broken on every single write and most reads.
+**Warning signs:**
+- Search latency spikes from ~200ms to 10+ seconds during active indexing
+- API `/health` or `/status` endpoint stops responding during indexing
+- `docker logs` shows no search requests completing while indexing is active
 
-**Prevention:**
-Write the FalkorDB adapter from scratch using the Protocol interface rather than adapting the LadybugDB code. The schema-free nature of FalkorDB means **half of the existing adapter code is unnecessary** -- no schema init, no `_REL_TABLE_MAP`, no `_find_node_label` 4-query scan. Test every Cypher query against the actual FalkorDB instance before considering the adapter done.
-
-**Detection:**
-Any call to `add_file_node`, `add_edge`, or `get_neighbors` will raise immediately if dialect issues exist. Run the full graph population on a small test set (3 files) before attempting a 227-file re-index.
-
-**Phase to address:** Phase 1 -- FalkorDB adapter. This is the core of the migration.
+**Phase to address:**
+Background Trickle Indexer -- the process vs. thread isolation decision must be made before implementation begins.
 
 ---
 
-### Pitfall 2: BM25 Results Vanish After Reranker -- Score Threshold Kills Keyword Matches
+### Pitfall 2: SQLite Concurrent Access Without WAL Mode Causes Locks and Corruption
 
 **What goes wrong:**
-BM25 results appear in `engine_results["bm25"]` and survive RRF fusion, but disappear from final output. The cross-encoder `ms-marco-MiniLM-L-6-v2` outputs raw logits, not probabilities. Its score range is approximately -11 to +10, with most irrelevant pairs scoring around -8 to -10. The current `score_threshold` of -8.0 (reranker.py line 44, config.py line 63) filters out results that the cross-encoder considers marginal -- but BM25 keyword matches are often **exactly the kind of result** that cross-encoders undervalue. A query for a specific technical term (e.g., "LadybugDB") matches perfectly via BM25 but may score -7.5 on the cross-encoder because the surrounding context doesn't read like a natural question-answer pair.
+The background indexer writes to `metadata.db` (chunks, fingerprints, stats) and `vec.db` (sqlite-vec embeddings). Search queries read from these same databases. Two problems compound:
 
-**Root cause analysis from code:**
+1. **Shared connection objects**: `SQLiteVecVectorStore._get_conn()` stores a single `sqlite3.Connection` as `self._conn`. SQLite connections are thread-bound by default -- using one from two threads raises `ProgrammingError: SQLite objects created in a thread can only be used in that same thread` or causes silent data corruption.
 
-1. `service.py` line 188: `if bm25_hits:` -- this check is correct, BM25 hits enter fusion
-2. `service.py` line 195: `fuse_results()` -- RRF merges correctly, BM25-only results get score `1/(60+rank)`
-3. `service.py` line 203: `chunk_ids = [cid for cid, _ in fused[:pool_size]]` -- pool_size=20, so top 20 fused results go to reranker
-4. `reranker.py` line 128-132: `if score >= self._score_threshold` -- **HERE** -- results scoring below -8.0 are dropped entirely
-5. `service.py` line 212: `if reranked:` -- if the reranker drops BM25-only results, they vanish from the blended output
-6. `service.py` line 227: `blended.append((cid, 0.4 * norm_f + 0.6 * norm_re))` -- blending uses only reranked results, not the full fused set
+2. **No WAL mode**: The codebase does not set `PRAGMA journal_mode=WAL` anywhere. SQLite's default rollback journal mode means **any write blocks all readers**. Without WAL, a background indexer writing chunks to metadata.db blocks all search queries from reading metadata until the write transaction commits. With WAL, readers proceed unblocked during writes.
 
-**The kill chain:**
-BM25 finds chunk X (exact keyword match, high BM25 score). RRF ranks X in the top 20. Reranker scores X at -8.5 (below threshold). X is dropped from `reranked` list. Blending loop only iterates over `reranked`, so X is gone. Final `fused[:top_k]` at line 233 uses the `blended` list, not the original fusion. X never appears in results.
+3. **No busy timeout**: Without `PRAGMA busy_timeout`, any lock contention immediately raises `sqlite3.OperationalError: database is locked` instead of retrying.
 
 **Why it happens:**
-The ms-marco model was trained on natural language question-passage pairs from MS MARCO. Technical documentation, code snippets, and bilingual RU/EN voicenote transcripts don't match this distribution. Cross-encoder scores for these texts are systematically lower than for clean English prose. The -8.0 threshold was set without testing against the actual corpus.
+The codebase was designed for single-threaded CLI usage (`dotmd index` then `dotmd search`, never concurrent). `DotMDService.__init__` creates one set of storage backends and both indexing and search reuse them. Adding background processing to this architecture requires concurrent access that was never anticipated.
 
-**Prevention:**
-Three fixes, apply all:
-1. **Lower or remove the score threshold.** Set `rerank_score_threshold` to -11.0 or remove filtering entirely. The reranker's job is to **reorder**, not to **filter**. Let RRF handle relevance gating.
-2. **Preserve non-reranked results as fallback.** After reranking, if a chunk from the fused top-K was dropped by the reranker, append it to the blended list with its original RRF score (penalized) rather than discarding it entirely.
-3. **Log per-engine attribution.** Add debug logging showing which engine found each result and whether the reranker kept or dropped it. Without this, the "BM25 results missing" symptom is nearly impossible to diagnose.
+**How to avoid:**
+- **Enable WAL mode immediately** on all SQLite databases: `conn.execute("PRAGMA journal_mode=WAL")` right after opening each connection in `SQLiteVecVectorStore._get_conn()` and `SQLiteMetadataStore.__init__`. WAL allows unlimited concurrent readers during writes. This is a one-line fix with massive impact and no downside.
+- **Set busy_timeout**: `conn.execute("PRAGMA busy_timeout=5000")` to retry on lock contention for up to 5 seconds instead of immediately raising an error.
+- **Separate connections per thread/process**: If the indexer runs in a different thread, it MUST use its own `DotMDService` instance (which creates fresh storage backends with fresh connections). If it runs as a separate process, SQLite handles this correctly via OS-level file locks.
+- **BM25 pickle file**: `bm25_index.pkl` is read by search and written during indexing. Use atomic write pattern: write to temp file, then `os.rename()` (atomic on Linux/ext4). Search should catch `EOFError` on read and retry.
 
-**Detection:**
-Run `dotmd search "LadybugDB" --mode bm25` and `dotmd search "LadybugDB" --mode hybrid`. If BM25-only mode returns results but hybrid mode drops them, the reranker threshold is the cause. Check reranker scores in debug logs.
+**Warning signs:**
+- `sqlite3.OperationalError: database is locked` in API or indexer logs
+- `ProgrammingError: SQLite objects created in a thread can only be used in that same thread`
+- Intermittent search failures that only occur during active background indexing
+- `EOFError` or `UnpicklingError` when loading BM25 index
 
-**Phase to address:** Phase 2 -- BM25 hybrid fix. This is the primary search quality issue.
+**Phase to address:**
+Background Trickle Indexer phase. WAL mode enablement should be a **prerequisite** -- implement it even in the Production Packaging phase since it improves robustness with zero cost.
 
 ---
 
-### Pitfall 3: Shared FalkorDB Instance -- Graph Name Collision With "knowledgebase"
+### Pitfall 3: Docker Compose Startup Race -- API Starts Before Dependencies Are Ready
 
 **What goes wrong:**
-FalkorDB on this server (`graphiti-falkordb-1`) already contains a graph named `knowledgebase` (used by the Graphiti knowledge graph service). If the adapter accidentally uses the wrong graph name, or if a query is sent without specifying the graph name, it operates on the `knowledgebase` graph -- corrupting the Graphiti data or returning wrong results for dotMD.
+Making the stack self-contained means bundling FalkorDB into the dotmd compose file (it IS dotmd-specific, unlike TEI). Without proper healthchecks and `depends_on` conditions, the dotmd API container starts before FalkorDB has loaded its persisted graph data. The `FalkorDBGraphStore.__init__()` immediately tries to connect and create indexes -- if FalkorDB isn't ready, it raises `ConnectionError("Cannot connect to FalkorDB")` and the container exits.
+
+Similarly, TEI (referenced as external service) needs 10-60 seconds for model loading. The API's `_lifespan` handler creates `DotMDService` which creates `SemanticSearchEngine` -- if the first TEI health probe during warmup fails, the API crashes on startup.
 
 **Why it happens:**
-FalkorDB uses Redis protocol. The `falkordb-py` client's `select_graph("dotmd")` must be called to scope queries. But if the adapter is written using raw Redis commands (`GRAPH.QUERY graphname "..."`) and the graph name is misconfigured, or if a developer hardcodes `"knowledgebase"` while testing, the wrong graph is mutated. There is no namespace isolation beyond the graph name string.
+Docker Compose `depends_on` without a `condition` only waits for the container to **start**, not for the service inside to be **ready**. FalkorDB (Redis-protocol) needs seconds to load AOF data from disk. The official FalkorDB Docker docs recommend a `start_period` of 30 seconds. Without `condition: service_healthy`, the API container races the dependencies.
 
-**Consequences:**
-- **Mild:** dotMD searches return Graphiti knowledge graph nodes (different schema, meaningless results)
-- **Severe:** dotMD's `delete_all()` runs `MATCH (n) DETACH DELETE n` on the `knowledgebase` graph, destroying Graphiti's data
-- **Subtle:** Both graphs have entity nodes with similar names (e.g., "Python", "Docker") -- cross-contamination produces plausible-looking but wrong graph traversals
+**How to avoid:**
+- Add healthchecks to FalkorDB (bundled) and verify TEI availability:
+  ```yaml
+  falkordb:
+    image: falkordb/falkordb:latest
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
-**Prevention:**
-- Make graph name a **required** config parameter (`DOTMD_FALKORDB_GRAPH`), not a default
-- Add a startup assertion that verifies the graph name is `"dotmd"` and is NOT `"knowledgebase"`
-- Never use `GRAPH.LIST` results to auto-select a graph
-- Integration test: after indexing, verify `GRAPH.LIST` shows exactly `["knowledgebase", "dotmd"]` -- not fewer, not more
+  api:
+    depends_on:
+      falkordb:
+        condition: service_healthy
+  ```
+- Add **connection retry logic** in the dotmd API startup (lifespan handler) as defense-in-depth. Don't rely solely on Docker healthchecks -- the API should retry FalkorDB and TEI connections 3-5 times with exponential backoff before giving up.
+- For TEI (external service): add a startup probe in the lifespan handler that polls `{DOTMD_EMBEDDING_URL}/health` before proceeding. Currently the code has no TEI readiness check at all.
 
-**Detection:**
-`docker exec graphiti-falkordb-1 redis-cli GRAPH.LIST` should always show both graphs. If only one appears after a dotMD operation, something was written to the wrong graph.
+**Warning signs:**
+- API container exits immediately on `docker compose up` with `ConnectionError: Cannot connect to FalkorDB`
+- Intermittent startup failures that "fix themselves" on retry with `docker compose restart api`
+- `docker compose up` works after `docker compose start` (FalkorDB already running) but fails after `docker compose down && docker compose up` (clean start)
 
-**Phase to address:** Phase 1 -- adapter configuration. The graph name must be set before any queries are written.
+**Phase to address:**
+Production Packaging phase -- healthchecks and startup ordering are the first things to get right in the compose file.
 
 ---
 
-### Pitfall 4: Docker Networking -- dotMD Container Can't Reach FalkorDB
+### Pitfall 4: Internalizing TEI Doubles RAM Usage on a 16GB Server
 
 **What goes wrong:**
-The dotMD container is on `default` and `embeddings_default` networks. FalkorDB is on `graphiti_default` network. They cannot reach each other. The adapter connects to `falkordb:6379` and gets a connection refused or timeout.
+TEI currently runs as a shared service (`/opt/docker/embeddings/`) used by both dotmd and openclaw via external networks. Its memory limit is 4GB and it typically uses ~2.6GB RSS. If the self-contained dotmd stack bundles its own TEI instance, you have two options:
 
-**Current network topology:**
-```
-dotmd-api-1:       [dotmd_default, embeddings_default]
-graphiti-falkordb-1: [graphiti_default]
-```
-
-These networks are isolated. DNS resolution of `falkordb` from the dotMD container fails.
+- **(a) Run a second TEI instance**: Doubles RAM to ~5.2GB just for embeddings. Combined with FalkorDB (~50MB), the dotmd API container (~800MB with GLiNER loaded), and other server services, total memory approaches 14-15GB on a 16GB server. OOM killer territory.
+- **(b) Move TEI into dotmd stack, have openclaw reference it**: Creates a dependency inversion -- openclaw now depends on dotmd being up to get embeddings.
 
 **Why it happens:**
-Docker Compose creates per-project networks. Services on different networks can only communicate if they share an external network. The dotMD compose already does this for embeddings (`embeddings_default` as external). The same pattern must be applied for `graphiti_default`.
+"Self-contained" is interpreted as "everything in one compose file." But TEI is shared infrastructure, not a dotmd-specific dependency. Bundling shared infra into one consumer's stack is an architectural mistake.
 
-**Prevention:**
-Add to dotMD's production `docker-compose.yml`:
-```yaml
-networks:
-  graphiti:
-    external: true
-    name: graphiti_default
-```
-And add `graphiti` to the `api` service's `networks` list. The FalkorDB container's DNS alias is `falkordb` on the `graphiti_default` network (confirmed via `docker inspect`).
+**How to avoid:**
+- **Keep TEI as a separate shared service** at `/opt/docker/embeddings/`. Reference it via the existing `embeddings_default` external network. This is the architecturally correct pattern for shared infrastructure.
+- "Self-contained" for dotmd means: FalkorDB bundled (dotmd-specific), TEI referenced as external dependency with a startup readiness check, all env vars documented with sensible defaults, `docker compose up` works assuming TEI is running.
+- Document the dependency clearly in the compose file with comments and a startup error message if TEI is unreachable.
+- For portability (running on a different server): use a Docker Compose profile (`--profile standalone`) that optionally starts a local TEI. Not the default.
 
-Set `DOTMD_FALKORDB_URL=redis://falkordb:6379` in the environment.
+**Warning signs:**
+- `docker stats` shows total memory >14GB
+- OOM killer starts killing containers (check `dmesg | grep -i oom`)
+- Two TEI containers competing for CPU during embedding requests, halving throughput for both dotmd and openclaw
 
-**Detection:**
-From inside the dotMD container: `python -c "import socket; socket.create_connection(('falkordb', 6379), timeout=3)"`. If this times out, networking is not configured.
-
-**Phase to address:** Phase 1 -- infrastructure setup, before adapter testing.
+**Phase to address:**
+Production Packaging phase -- this architecture decision must be made before writing the compose file. The wrong choice here wastes the 16GB RAM budget.
 
 ---
 
-## Moderate Pitfalls
-
-### Pitfall 5: Reranker Score Blending Erases Per-Engine Score Attribution
+### Pitfall 5: Concurrent TEI Requests Don't Improve Throughput When CPU-Bound
 
 **What goes wrong:**
-After reranking, `service.py` lines 212-229 replace the `fused` list with `blended` -- a new list of `(chunk_id, blended_score)`. But `build_search_results()` at line 232 receives `fused[:top_k]` (the blended list) and `per_engine=engine_results` (original per-engine scores). The `SearchResult.fused_score` field now contains the blended score, but `matched_engines` and individual `semantic_score`/`bm25_score`/`graph_score` fields still reflect the pre-rerank engine results. This is technically correct but confusing -- a result can show `bm25_score=4.5` but have been dropped from the blended list if the reranker killed it, yet it appears in results if it survived because a different code path kept it.
-
-More importantly: if the reranker drops a result, that result's per-engine scores are **never surfaced to the user**, making it invisible that BM25 found relevant content.
-
-**Prevention:**
-When fixing the BM25 hybrid issue, add a `reranker_score` field to `SearchResult` and populate it from the reranker output. Also add a `dropped_by_reranker: bool` field (or equivalent) so the UI/CLI can show "BM25 found this but reranker disagreed".
-
-**Phase to address:** Phase 2 -- alongside the BM25 fix.
-
----
-
-### Pitfall 6: FalkorDB Connection Not Resilient -- No Retry on Redis Timeout
-
-**What goes wrong:**
-The falkordb-py client uses the Redis protocol. If FalkorDB is temporarily unavailable (container restart, OOM kill, slow GC pause), every graph operation fails with a `ConnectionError` or `TimeoutError`. The current LadybugDB adapter has no retry logic (it's embedded, so connection failures mean disk errors). Carrying this pattern to FalkorDB means a single FalkorDB hiccup during a 59-minute re-index kills the entire run.
+The v1.3 plan calls for "concurrent TEI requests (2-3 parallel)" to speed up embedding. On this server, TEI runs on CPU with `intfloat/multilingual-e5-large` (560M params, `cpu-1.6` image). Existing benchmarks show bs=4 and bs=32 give roughly the same throughput (~0.5-1.3 texts/sec). Sending multiple concurrent HTTP requests to TEI doesn't create parallelism in model inference -- TEI's internal token-based dynamic batching (`max_batch_tokens=16384` default) already handles this. The requests just queue inside TEI's internal batch scheduler. Worse, adding concurrency on the dotmd side (asyncio/threading for httpx) introduces complexity and bug surface for zero throughput gain.
 
 **Why it happens:**
-Network services fail transiently. Redis connections drop. FalkorDB may be processing a heavy query from Graphiti while dotMD tries to connect. Without retry logic, the first failure is fatal.
+TEI uses token-based dynamic batching internally. When the model is compute-bound on CPU (which this Xeon E3 V2 absolutely is for a 560M parameter model), adding more concurrent requests fills the internal queue faster but the model still processes one batch at a time through matrix multiplication. The bottleneck is FLOPS, not I/O wait between requests. This is fundamentally different from GPU deployment where concurrent requests enable better utilization of thousands of parallel compute units.
 
-**Prevention:**
-- Use `BlockingConnectionPool` with `max_connections=4`, `timeout=10`, `socket_keepalive=True`
-- Wrap graph store methods in a retry decorator (3 attempts, exponential backoff: 1s, 2s, 4s)
-- On connection failure during indexing, log a warning and continue with remaining stores -- a failed graph write is recoverable via re-index, not worth aborting the entire pipeline
+The empirical evidence already exists: bs=4 and bs=32 have the same throughput. This means TEI is compute-bound even at bs=4. More requests in flight won't help.
 
-**Phase to address:** Phase 1 -- adapter implementation. Build retry into the adapter from the start.
+**How to avoid:**
+- **Benchmark before implementing**: Send 1, 2, 3 concurrent requests from dotmd and measure actual end-to-end texts/sec. If they're the same (which the bs=4 vs bs=32 evidence strongly predicts), don't add concurrency code.
+- **Pipeline HTTP overhead instead**: If there IS measurable gap between "response received" and "next request sent" (HTTP round-trip overhead ~5-10ms), use a simple prefetch (send request N+1 while processing response N) rather than full concurrent fan-out. This is simpler and lower-risk.
+- **Reduce total work instead**: Skip NER for background trickle indexing (`extract_depth=structural`). NER (GLiNER) is the 15-minute bottleneck in a 50-minute full index. Eliminating it gives 30% speedup with zero concurrency complexity. NER can be run as a separate enrichment pass later.
+- **Optimize batch size**: The real lever is finding the optimal `tei_batch_size` for this specific hardware. The auto-tuning probe already exists -- persist its result to avoid re-probing on every restart.
+
+**Warning signs:**
+- Concurrent TEI requests show identical throughput to sequential in benchmarks
+- Adding concurrency introduces httpx connection pool errors or timeout issues
+- TEI memory usage spikes when multiple large batches queue simultaneously
+
+**Phase to address:**
+Speed Optimization phase. Must be preceded by empirical benchmarking. Do not assume concurrency helps -- the existing data suggests it won't.
 
 ---
 
-### Pitfall 7: `get_neighbors` Performance -- FalkorDB Variable-Length Paths Without Indexes
+### Pitfall 6: Full BM25 Rebuild Per File During Background Indexing
 
 **What goes wrong:**
-The `get_neighbors` query uses `MATCH (a {id: $id})-[*1..2]-(b)` -- an untyped, undirected, variable-length path pattern. In FalkorDB this traverses **all** relationship types in **both** directions for up to 2 hops. On the current graph (19,667 edges), this is a full graph scan from the starting node. FalkorDB uses GraphBLAS sparse matrices, which are efficient for this, but without an index on the `id` property, finding node `a` requires a sequential scan of all nodes first.
+The pipeline always does a full BM25 rebuild: `_ingest_and_finalize()` calls `self._metadata_store.get_all_chunks()` then `self._bm25_engine.build_index(all_chunks)`. For the current 532 chunks, this takes <1 second. For the target 13,500-file corpus (~188k estimated chunks), this takes significant time and memory -- loading 188k chunk texts into memory, tokenizing all of them, and rebuilding the BM25Okapi index. If the trickle indexer triggers this after every single file, it becomes O(N) per file indexed, making total background indexing O(N^2).
+
+Additionally, the BM25 index is persisted as `bm25_index.pkl`. If the background indexer writes this pickle while a concurrent search reads it, the pickle can be corrupted (partial write visible to reader).
 
 **Why it happens:**
-LadybugDB (Kuzu) automatically creates primary key indexes. FalkorDB requires explicit `CREATE INDEX` statements. The schema-free nature means no automatic indexing.
+BM25 (rank_bm25) does not support incremental updates -- you can't add a document to an existing BM25Okapi instance. The full rebuild was acceptable for batch indexing of a small corpus. The pipeline comment even notes this: `# BM25 always full rebuild (IP-04)`.
 
-**Prevention:**
-After creating the graph, run:
-```cypher
-CREATE INDEX FOR (n:File) ON (n.id)
-CREATE INDEX FOR (n:Section) ON (n.id)
-CREATE INDEX FOR (n:Entity) ON (n.id)
-CREATE INDEX FOR (n:Tag) ON (n.id)
-```
-These must be created once and persist across container restarts (FalkorDB persists indexes). Add index creation to the adapter's `__init__` or a dedicated `ensure_indexes()` method.
+**How to avoid:**
+- **Batch BM25 rebuilds**: Don't rebuild after every single file. The trickle indexer should accumulate a batch (e.g., 10-50 files or 5-minute intervals) then rebuild once. New files are searchable via semantic and graph search immediately; BM25 catches up periodically.
+- **Atomic pickle swap**: Write to a temp file (`bm25_index.pkl.tmp`), then `os.rename()` to final path. `os.rename()` is atomic on Linux/ext4. Search always reads a complete index. Add `EOFError` catch in `BM25SearchEngine.load_index()` with a short retry.
+- **Consider append-only BM25**: Maintain a small secondary BM25 index for newly-indexed documents. At search time, query both and merge results. Periodically (e.g., once per hour), rebuild the full index and clear the secondary. This avoids O(N^2) entirely.
+- **Memory guard**: For 188k chunks, estimate memory before loading. If the full BM25 rebuild would exceed available RAM, defer it or run it when the API is idle.
 
-**Detection:**
-Time `get_neighbors` calls. Without indexes: O(N) where N is total nodes. With indexes: O(degree * hops). On 3,456 entities, the difference is measurable.
+**Warning signs:**
+- Memory spikes visible in `docker stats` during background indexing (loading all chunks for BM25)
+- `EOFError` or `UnpicklingError` in search logs for `bm25_index.pkl`
+- BM25 search results disappear intermittently during active indexing
+- Background indexing throughput degrades as corpus grows (O(N) rebuild visible in timing logs)
 
-**Phase to address:** Phase 1 -- adapter implementation. Create indexes at adapter initialization.
+**Phase to address:**
+Background Trickle Indexer phase. The batch interval and atomic swap are design decisions that affect implementation. Must be decided before coding the trickle loop.
 
 ---
 
-### Pitfall 8: `_find_node_label` Pattern Must Be Redesigned, Not Ported
+### Pitfall 7: Smoke Tests That Depend on Running Services Are Inherently Flaky
 
 **What goes wrong:**
-The LadybugDB adapter's `add_edge` method calls `_find_node_label()` which runs 4 sequential queries (one per node type) to determine what label a node has. This was necessary because LadybugDB requires knowing the source/target table names for `CREATE REL TABLE`. FalkorDB doesn't need this -- edges are just `MERGE (a)-[:TYPE]->(b)` regardless of node labels. But a naive port copies this expensive pattern.
+Smoke tests verifying "all 3 search engines return results" need a running TEI server, a running FalkorDB instance, and an indexed corpus. Common failure modes:
+1. **Service startup timing**: TEI needs 10-60s to load the model, FalkorDB needs 5-30s to load data. Tests that don't wait long enough fail intermittently.
+2. **Model download on first run**: TEI downloads 1.2GB model on first start. In CI or on a clean test run, this causes a timeout.
+3. **Port/resource conflicts**: On this server, TEI already runs on port 8088 and FalkorDB on graphiti_default. Starting duplicate test instances conflicts with production.
+4. **Test isolation**: If tests use the production FalkorDB graph name (`dotmd`), they corrupt production data. If they use the production TEI, they're not truly isolated.
+5. **Cleanup**: Tests that create Docker containers/volumes and don't clean up waste disk space over time.
 
-**Consequences at scale:**
-During the initial graph population of 227 files with 19,667 edges, `add_edge` is called ~20,000 times. If `_find_node_label` is ported, that's 160,000 queries to FalkorDB over the network (vs. in-process for LadybugDB). At 1ms per Redis round-trip, that's 160 seconds of pure latency -- vs. ~10 minutes total for the current embedded implementation.
+**Why it happens:**
+Integration tests that require external services are fundamentally different from unit tests. Developers often write them as if they're fast and deterministic -- no explicit readiness polling, hardcoded `time.sleep(30)`, shared state between test runs, no cleanup fixtures.
 
-**Prevention:**
-In the FalkorDB adapter, `add_edge` should MERGE by matching nodes directly:
-```cypher
-MATCH (a {id: $src}), (b {id: $tgt})
-MERGE (a)-[r:RELATES]->(b)
-SET r.rel_type = $rel_type, r.weight = $weight
-```
-No label lookup needed. FalkorDB matches by `id` property across all labels. If `a` or `b` doesn't exist, the MATCH returns empty and no edge is created (same behavior as current adapter's `if src_label is None` guard).
+**How to avoid:**
+- **Layer the test strategy**:
+  - **Unit tests** (no Docker, fast): Mock TEI responses (`httpx_mock`) and FalkorDB (in-memory dict). Test fusion logic, BM25 ranking, pipeline orchestration, query expansion. Run in <5 seconds. These catch most regressions.
+  - **Smoke tests** (Docker required, slow): Test real service integration. Accept they're slow (30-120s). Mark with `@pytest.mark.smoke` and run separately.
+- **For smoke tests on this server**:
+  - Reuse the running production TEI (it's shared infra, no point duplicating). Don't start a separate TEI container.
+  - Use a **separate FalkorDB graph name** (`dotmd_test`) and **separate index directory** (`/tmp/dotmd-test-index/`) to isolate from production data.
+  - Use `session`-scoped pytest fixtures so service readiness checks run once, not per test.
+  - Poll TEI `/health` and FalkorDB `redis-cli ping` with exponential backoff (100ms, 200ms, 400ms, ..., up to 60s) instead of `time.sleep(30)`.
+  - Pre-index a small test corpus (5-10 markdown files) as a fixture.
+  - Clean up the test graph and test index directory in the fixture teardown.
+- **For CI (if ever needed)**: Use `pytest-docker` with a test-specific compose file that starts FalkorDB on a different port and uses a mock/small TEI or pre-computed embeddings.
 
-**Phase to address:** Phase 1 -- adapter implementation. Design the adapter around FalkorDB's strengths, not LadybugDB's constraints.
+**Warning signs:**
+- Tests pass locally but fail on a different machine (or after `docker compose down`)
+- Tests pass individually but fail when run together (shared state)
+- Test suite takes >120 seconds and developers stop running it
+- `docker volume ls` shows growing number of orphaned test volumes
 
----
-
-### Pitfall 9: Pipeline Hardcodes `LadybugDBGraphStore` -- No Backend Abstraction
-
-**What goes wrong:**
-`pipeline.py` line 87 directly instantiates `LadybugDBGraphStore`. The `graph_store` property (line 469) returns type `LadybugDBGraphStore`, not `GraphStoreProtocol`. The `DotMDService` constructs `GraphSearchEngine` with the pipeline's graph store, which works via duck typing, but there is no configuration switch like `vector_backend` to select between graph backends.
-
-Adding FalkorDB as an option requires:
-1. A `graph_backend` config setting (like `vector_backend`)
-2. A factory function in `pipeline.py` (like `_create_vector_store`)
-3. Changing the `graph_store` property return type to `GraphStoreProtocol`
-4. FalkorDB-specific config: URL, graph name, optional password
-
-**Why it's a pitfall:**
-If you write the FalkorDB adapter but forget to update the pipeline factory, it's never used. If you update the factory but the property type annotation still says `LadybugDBGraphStore`, type checkers flag downstream code. If you add config but docker-compose doesn't set it, the default falls back to LadybugDB silently.
-
-**Prevention:**
-Follow the exact pattern established for `vector_backend`:
-- Add `graph_backend: Literal["ladybugdb", "falkordb"] = "ladybugdb"` to Settings
-- Add `falkordb_url: str = "redis://localhost:6379"` and `falkordb_graph: str = "dotmd"` to Settings
-- Write `_create_graph_store(settings) -> GraphStoreProtocol` factory
-- Update `graph_store` property return type to `GraphStoreProtocol`
-- Update docker-compose with `DOTMD_GRAPH_BACKEND=falkordb` and `DOTMD_FALKORDB_URL`
-
-**Phase to address:** Phase 1 -- config and pipeline integration.
+**Phase to address:**
+Smoke Tests phase. The test architecture (what's mocked vs. real, unit vs. integration) must be decided before writing any tests.
 
 ---
 
-### Pitfall 10: Re-Index Required But 59 Minutes on This Hardware
+## Technical Debt Patterns
 
-**What goes wrong:**
-Switching from LadybugDB to FalkorDB requires rebuilding the graph from scratch (the data formats are incompatible). The current full re-index takes ~59 minutes (25min embedding + 18min NER + 10min graph + overhead). During this time, the search service is partially functional (semantic and BM25 work, graph search returns nothing until graph is populated).
+| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
+|----------|-------------------|----------------|-----------------|
+| Single `DotMDService` shared between API and indexer threads | Simple, no data duplication | Thread safety bugs, SQLite connection sharing, hard-to-reproduce races | Never -- always use separate instances or process boundary |
+| Full BM25 rebuild on every trickle-indexed file | Correct results, simple code path | O(N) per file, O(N^2) total for background indexing of large corpus | Only for batch indexing of <100 files |
+| Skip WAL mode on SQLite databases | No code changes needed | Readers blocked by writers, "database is locked" under any concurrency | Only when single-threaded CLI usage is guaranteed |
+| `time.sleep(30)` for service readiness in tests | Quick to write, usually works | Flaky on slow machines, wastes 30s on fast machines, non-deterministic | Never -- use poll-based readiness checks |
+| Bundling a second TEI instance for "self-contained" | True isolation | 2.6GB extra RAM on 16GB server, CPU contention | Only on servers with 32GB+ RAM |
+| Skip NER in background trickle indexer | 30% faster indexing, less CPU contention | Knowledge graph has fewer entities for those files | Acceptable as deliberate tradeoff -- run NER enrichment pass later |
+| No connection retry in FalkorDB adapter | Simpler code | Single transient failure kills entire index run | Never for network services -- always add retry |
 
-**Why it matters:**
-If the re-index fails at minute 45 (FalkorDB connection drops, OOM, etc.), 45 minutes of work is lost. The graph store is empty but metadata and vectors are populated. The system is in an inconsistent state.
+## Integration Gotchas
 
-**Prevention:**
-- **Embedding and NER are already done** -- the current vectors and metadata are valid and don't need rebuilding. Only the graph needs repopulation.
-- Write a **graph-only re-index** command that reads chunks from metadata, re-runs extraction, and populates the new FalkorDB graph without touching vectors or BM25. This reduces the re-index from 59 minutes to ~28 minutes (NER + graph population).
-- Better yet: if extraction results are cached (they aren't currently), skip NER entirely and just repopulate the graph from stored entities/relations. This would take ~10 minutes.
-- Run the re-index overnight with `nohup` or via a systemd timer.
+| Integration | Common Mistake | Correct Approach |
+|-------------|----------------|------------------|
+| FalkorDB in compose | No healthcheck; API starts before FalkorDB is ready | `healthcheck: redis-cli ping` + `depends_on: condition: service_healthy` + `start_period: 30s` |
+| TEI as external dep | Including TEI as a bundled service, doubling RAM | Keep as external shared service; add startup readiness probe in API lifespan handler |
+| TEI healthcheck | Hitting `/` (HTML page, always 200) | Hit `/health` which returns actual model readiness status |
+| Docker Compose `include` | Assuming included services share parent's default network | Included files have their own project directory and network namespace; need explicit shared network config |
+| FalkorDB persistence | No volume mount; graph data lost on container restart | Mount `/data` to a named volume; enable `--appendonly yes` for AOF persistence |
+| SQLite shared between threads | Single connection from `__init__` used across threads | One connection per thread, WAL mode, `busy_timeout=5000` |
+| BM25 pickle file | Read and write from different threads without coordination | Atomic write via temp file + `os.rename()`; reader retries on `EOFError` |
+| FalkorDB graph name in tests | Using `dotmd` (production) instead of `dotmd_test` | Always use separate graph name for test fixtures via env var |
+| Background indexer resume | Assume indexer starts from scratch after restart | FileTracker fingerprints persist to SQLite; indexer must resume from last indexed file |
 
-**Phase to address:** Phase 1 -- migration planning. Decide the re-index strategy before writing the adapter.
+## Performance Traps
 
----
+| Trap | Symptoms | Prevention | When It Breaks |
+|------|----------|------------|----------------|
+| Full BM25 rebuild per trickle-indexed file | RAM spikes, indexing slows as corpus grows | Batch rebuilds every N files or time interval | Noticeable at ~10k chunks (>1s rebuild), painful at 100k+ |
+| Concurrent TEI requests on CPU-bound server | No throughput gain, added code complexity | Benchmark first; pipeline HTTP overlap only if measurable gap | Immediately -- TEI is already compute-bound at bs=4 |
+| GLiNER NER on every background-indexed file | CPU pegged 100% for hours, API search degrades | Skip NER for trickle indexing or use lowest CPU priority | At ~50+ files when NER takes ~4s/chunk |
+| Loading all 188k chunks into memory for BM25 | Memory usage proportional to total corpus size | Stream chunks or cap in-memory size | At ~100k+ chunks, memory may exceed container limit |
+| Background indexer and search competing for CPU | Both run GLiNER/reranker (CPU-bound) simultaneously | Indexer skips reranker (it's search-only); use `--cpu-shares 2` for indexer container | Any time background indexer runs NER while searches use cross-encoder |
 
-## Minor Pitfalls
+## Security Mistakes
 
-### Pitfall 11: `get_graph_data()` Is Not in the Protocol
+| Mistake | Risk | Prevention |
+|---------|------|------------|
+| TEI exposed externally in self-contained stack | TEI has no auth; anyone can embed arbitrary text, potential DoS | Bind TEI to internal Docker network only; never expose port to host |
+| FalkorDB without password | Any container on shared network can read/write graph | Acceptable on single-user server. Add `--requirepass` if stack is ever exposed |
+| Test fixtures with production data paths | Tests could accidentally modify or delete production index | Test compose uses separate volumes, separate graph name, separate index dir |
+| Smoke tests leaving test data in production FalkorDB | Orphaned test nodes pollute production graph search | Always use separate `DOTMD_FALKORDB_GRAPH_NAME=dotmd_test`; clean up in teardown |
 
-**What goes wrong:**
-`LadybugDBGraphStore.get_graph_data()` is called by `DotMDService.graph_data()` (service.py line 276) but `get_graph_data` is not part of `GraphStoreProtocol` in `base.py`. The FalkorDB adapter won't be required to implement it by the Protocol, but the service will crash at runtime when calling it.
+## UX Pitfalls
 
-**Prevention:**
-Either add `get_graph_data()` to `GraphStoreProtocol` or handle it as an optional method with `hasattr()` check. Adding it to the Protocol is cleaner.
+| Pitfall | User Impact | Better Approach |
+|---------|-------------|-----------------|
+| Background indexer with no progress visibility | User doesn't know if indexing is running, stuck, or finished | `dotmd status` shows "Background indexing: 1,234/13,515 files (9.1%), ~6h remaining" |
+| Silent failure when TEI is unreachable | Container starts, appears healthy, but search returns empty results | Fail loudly at startup. Log `CRITICAL: TEI unreachable at {url}`. Add `/health` endpoint that checks all dependencies |
+| Smoke test output shows only pass/fail | Developer has no idea which engine or fusion step broke | Tests log actual search results, scores, and engine attribution on failure |
+| Background indexer restarts from scratch after container restart | Hours of progress lost | FileTracker fingerprints persist on disk volume; verify resume works across restarts |
+| `docker compose up` fails with cryptic network error | User doesn't know TEI needs to be running separately | Clear error message: "TEI service not found on embeddings_default network. Start it with: cd /opt/docker/embeddings && docker compose up -d" |
 
-**Phase to address:** Phase 1 -- Protocol update.
+## "Looks Done But Isn't" Checklist
 
----
-
-### Pitfall 12: FalkorDB Memory on 16GB Shared Server
-
-**What goes wrong:**
-FalkorDB currently uses ~10MB RSS for the `knowledgebase` graph. The dotMD graph has 3,456 entities and 19,667 edges -- roughly 4x the knowledgebase graph. Expected memory: ~40-50MB additional. This is fine. But if the graph grows significantly (more files, denser NER extraction), FalkorDB and TEI (2.6GB) and the dotMD container together may pressure the 16GB limit.
-
-**Prevention:**
-Monitor `docker stats` after re-index. Set `maxmemory` on the FalkorDB Redis instance if needed. The current scale (227 files, ~20K edges) is well within limits.
-
-**Phase to address:** Not blocking; monitor during Phase 1 testing.
-
----
-
-## Phase-Specific Warnings
-
-| Phase Topic | Likely Pitfall | Mitigation |
-|-------------|---------------|------------|
-| FalkorDB adapter implementation | Porting LadybugDB Cypher verbatim (Pitfall 1) | Write from scratch against Protocol, test each query |
-| FalkorDB adapter implementation | Porting `_find_node_label` N-query pattern (Pitfall 8) | Use label-agnostic MATCH for edges |
-| FalkorDB adapter implementation | No indexes on id property (Pitfall 7) | `CREATE INDEX` in adapter init |
-| Config + pipeline integration | Pipeline hardcodes LadybugDB (Pitfall 9) | Follow vector_backend pattern exactly |
-| Docker networking | Containers on different networks (Pitfall 4) | Add graphiti_default as external network |
-| Graph name safety | Collision with knowledgebase graph (Pitfall 3) | Config validation, startup assertion |
-| BM25 hybrid fix | Reranker threshold killing BM25 results (Pitfall 2) | Lower threshold, preserve dropped results |
-| BM25 hybrid fix | Score attribution lost after blending (Pitfall 5) | Add reranker_score field to SearchResult |
-| Migration re-index | 59-minute full re-index risk (Pitfall 10) | Graph-only re-index, run overnight |
-| Connection resilience | No retry on Redis timeout (Pitfall 6) | Connection pool + retry decorator |
-
----
-
-## "Looks Done But Isn't" Checklist (v1.2)
-
-- [ ] **FalkorDB adapter:** After indexing 3 test files, `GRAPH.QUERY dotmd "MATCH (n) RETURN count(n)"` returns expected node count -- not zero, not in the knowledgebase graph
-- [ ] **Graph name isolation:** `GRAPH.QUERY knowledgebase "MATCH (n) RETURN count(n)"` returns same count as before dotMD migration -- Graphiti data untouched
-- [ ] **Neighbor traversal:** `get_neighbors("some_chunk_id")` returns Section nodes reachable via Entity nodes, not Entity/Tag/File nodes directly
-- [ ] **Index creation:** `GRAPH.QUERY dotmd "CALL db.indexes()"` shows indexes on all node labels
-- [ ] **BM25 in hybrid:** `dotmd search "specific_term" --mode hybrid` returns results that include `bm25` in `matched_engines`
-- [ ] **Reranker preservation:** Results with `bm25_score` set but low reranker score still appear (with lower ranking, not absent)
-- [ ] **Network connectivity:** `dotmd search` from Docker returns graph results, not just semantic+BM25
-- [ ] **Concurrent access:** Run `POST /index` while `GET /search` is in-flight -- no connection errors, no data corruption
-- [ ] **Container restart recovery:** Restart FalkorDB container, verify dotMD reconnects automatically on next query
-
----
+- [ ] **Self-contained compose:** `docker compose down && docker compose up` from clean state -- API starts successfully with no manual intervention (except TEI running separately)
+- [ ] **Self-contained compose:** FalkorDB data survives container restart -- `docker compose restart falkordb`, then `/status` shows same entity/edge counts
+- [ ] **Self-contained compose:** TEI model cached in named volume -- second start (no download) completes in <30 seconds
+- [ ] **WAL mode:** Enabled on ALL SQLite databases -- verify with `PRAGMA journal_mode` on both `metadata.db` and `vec.db`
+- [ ] **Background indexer:** Survives container restart -- stop and restart, verify indexer resumes from last indexed file
+- [ ] **Background indexer:** Doesn't block search -- run search query WHILE background indexing is active, verify response in <500ms
+- [ ] **Background indexer:** BM25 stays consistent -- search for a term only in recently-indexed files during active indexing
+- [ ] **Background indexer:** Handles individual file failures -- corrupt markdown file doesn't crash the entire indexer
+- [ ] **Speed optimization:** Actually faster -- measure end-to-end throughput before and after. If concurrent TEI shows <10% improvement, revert the complexity
+- [ ] **Smoke tests:** Run without affecting production -- verify tests use separate FalkorDB graph name and index directory
+- [ ] **Smoke tests:** Pass 10/10 times in a row -- no timing-dependent flakiness
+- [ ] **Smoke tests:** Complete in <120 seconds -- slow enough to be thorough, fast enough to actually run
 
 ## Recovery Strategies
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| Wrong graph name (wrote to knowledgebase) | HIGH | Restore Graphiti data from backup; drop dotmd graph if created; fix config; re-index |
-| Reranker kills all BM25 results | LOW | Change `DOTMD_RERANK_SCORE_THRESHOLD=-11` in env; restart container |
-| FalkorDB connection lost mid-index | MEDIUM | Graph partially populated; run graph-only re-index |
-| No indexes, slow graph search | LOW | Run `CREATE INDEX` statements manually via redis-cli; adapter restart creates them |
-| Docker networking not configured | LOW | Add network to docker-compose.yml; `docker compose up -d` |
-| Pipeline still using LadybugDB | LOW | Set `DOTMD_GRAPH_BACKEND=falkordb` in env; restart; verify via graph_data endpoint |
+| SQLite corruption from concurrent access | MEDIUM | Delete `metadata.db` and `vec.db`, run `dotmd index --force`. Index data is derived from source files |
+| BM25 pickle corruption | LOW | Delete `bm25_index.pkl`, restart API or run any index operation (triggers full rebuild) |
+| FalkorDB graph inconsistency | MEDIUM | `dotmd clear` then `dotmd index --force`. Graph is rebuilt from source files |
+| Container OOM from duplicate TEI | LOW | Remove bundled TEI, revert to external network reference. `docker compose down && docker compose up` |
+| Flaky tests polluting production graph | HIGH if undetected | Check `DOTMD_FALKORDB_GRAPH_NAME` in test config. If tests used `dotmd`, manually drop test data via `redis-cli GRAPH.DELETE dotmd_test` |
+| Background indexer stuck in crash loop | LOW | Check logs for failing file path. Skip it or fix parsing. Indexer should log file path on failure and continue to next |
+| Event loop blocked by sync indexer | LOW | Restart container. Fix: move indexer to separate process or thread with proper isolation |
+| BM25 rebuild OOM at scale | MEDIUM | Reduce batch commit interval (rebuild less frequently). Set container memory limit with swap. Consider streaming BM25 rebuild |
 
----
+## Pitfall-to-Phase Mapping
+
+| Pitfall | Prevention Phase | Verification |
+|---------|------------------|--------------|
+| Event loop blocking (P1) | Background Trickle Indexer | Search query returns in <500ms during active background indexing |
+| SQLite write contention (P2) | Production Packaging (WAL) + Background Indexer (isolation) | `PRAGMA journal_mode` returns `wal` on all databases; concurrent read+write test passes |
+| Startup ordering race (P3) | Production Packaging | `docker compose down && docker compose up` succeeds on first try from clean state |
+| TEI RAM duplication (P4) | Production Packaging | `docker stats` shows only one TEI container; total RAM <12GB |
+| Pointless TEI concurrency (P5) | Speed Optimization | Benchmark 1 vs 2 vs 3 concurrent requests; only add concurrency if >15% throughput gain |
+| BM25 full rebuild per file (P6) | Background Trickle Indexer | No `EOFError` in logs during 1-hour indexing run; BM25 results present throughout |
+| Flaky smoke tests (P7) | Smoke Tests | Tests pass 10/10 consecutive runs; complete in <120 seconds |
 
 ## Sources
 
-- Direct analysis of `backend/src/dotmd/storage/graph.py` -- LadybugDB adapter, `label()` usage, `_REL_TABLE_MAP`, `_find_node_label` pattern
-- Direct analysis of `backend/src/dotmd/api/service.py` -- reranker blending logic, BM25 kill chain (lines 186-233)
-- Direct analysis of `backend/src/dotmd/search/reranker.py` -- score threshold filtering (line 128-132)
-- Direct analysis of `backend/src/dotmd/ingestion/pipeline.py` -- hardcoded `LadybugDBGraphStore` (line 87)
-- Direct analysis of `backend/src/dotmd/core/config.py` -- missing graph_backend config
-- [FalkorDB Cypher known limitations](https://docs.falkordb.com/cypher/known-limitations.html) -- LIMIT/eager ops, index limitations
-- [FalkorDB MERGE docs](https://docs.falkordb.com/cypher/merge.html) -- full path matching, duplicate node creation risk
-- [FalkorDB MATCH docs](https://docs.falkordb.com/cypher/match.html) -- variable-length path syntax confirmed
-- [FalkorDB functions docs](https://docs.falkordb.com/cypher/functions.html) -- `labels()` (plural), not `label()`
-- [FalkorDB Python client](https://github.com/FalkorDB/falkordb-py) -- `select_graph()`, `query()`, `ro_query()`, async support
-- [FalkorDB Cypher coverage](https://docs.falkordb.com/cypher/cypher-support.html) -- subset of openCypher, parameterized queries
-- [cross-encoder/ms-marco-MiniLM-L-6-v2 score range issue](https://github.com/huggingface/sentence-transformers/issues/1058) -- raw logits, negative scores normal, ranking-only not filtering
-- [Hybrid search fusion best practices](https://ashutoshkumars1ngh.medium.com/hybrid-search-done-right-fixing-rag-retrieval-failures-using-bm25-hnsw-reciprocal-rank-fusion-a73596652d22) -- RRF over score combination
-- Production docker-compose at `/opt/docker/dotmd/docker-compose.yml` -- network topology
-- `docker inspect graphiti-falkordb-1` -- network aliases, IP, DNS names
-- `docker exec graphiti-falkordb-1 redis-cli GRAPH.LIST` -- confirms `knowledgebase` graph exists
-- `docker exec graphiti-falkordb-1 redis-cli INFO memory` -- 10MB RSS current usage
-- `.planning/RETROSPECTIVE.md` -- LadybugDB lock hit 3 times in v1.1
-- `.planning/todos/pending/2026-03-24-migrate-graph-store-from-ladybugdb-to-falkordb.md` -- migration strategy notes
+- [Docker Compose startup order](https://docs.docker.com/compose/how-tos/startup-order/) -- `depends_on` conditions: `service_started`, `service_healthy`, `service_completed_successfully`
+- [Docker Compose Include](https://docs.docker.com/compose/how-tos/multiple-compose-files/include/) -- modular compose, project directory isolation, resource merging
+- [FalkorDB Docker docs](https://docs.falkordb.com/operations/docker.html) -- healthcheck (`redis-cli ping`), persistence (`--appendonly yes`), `start_period: 30s`
+- [TEI CLI arguments](https://huggingface.co/docs/text-embeddings-inference/en/cli_arguments) -- `max_concurrent_requests=512`, `max_batch_tokens=16384`, token-based dynamic batching
+- [SQLite WAL mode](https://www.sqlite.org/wal.html) -- concurrent readers during writes, checkpoint starvation risk with long-running readers
+- [SQLite concurrent writes and "database is locked"](https://tenthousandmeters.com/blog/sqlite-concurrent-writes-and-database-is-locked-errors/) -- WAL vs rollback journal, busy_timeout, write lock scope
+- [FastAPI BackgroundTasks event loop blocking](https://github.com/fastapi/fastapi/discussions/11210) -- sync tasks in async context, `run_in_threadpool` vs `run_in_executor`
+- [FastAPI concurrency and async/await](https://fastapi.tiangolo.com/async/) -- GIL, def vs async def behavior
+- [GLiNER inference speedup](https://github.com/urchade/GLiNER/issues/88) -- batch processing, `model.to('cuda')` vs `.cuda()`, CPU can be 3x faster than V100
+- [GLiNER CPU performance (300x slower)](https://github.com/theirstory/gliner-spacy/discussions/28) -- CPU reality for NER workloads
+- [pytest-docker](https://github.com/avast/pytest-docker) -- Docker-based integration test fixtures
+- [pytest flaky tests](https://docs.pytest.org/en/stable/explanation/flaky.html) -- insufficient environment isolation as root cause
+- Codebase analysis: `service.py` (shared DotMDService singleton), `pipeline.py` (sync pipeline, BM25 full rebuild), `semantic.py` (sequential TEI calls), `sqlite_vec.py` (no WAL, single connection), `server.py` (lifespan handler), `config.py` (Settings)
+- Production deployment: `/opt/docker/dotmd/docker-compose.yml` (external networks), `/opt/docker/embeddings/docker-compose.yml` (TEI cpu-1.6, 4GB limit, shared service)
+- v1.3 plans: `.claude/projects/.../memory/project_v13_plans.md` -- bs=4 same as bs=32 empirical finding
 
 ---
-*Pitfalls research for: dotMD v1.2 FalkorDB migration + BM25 hybrid fix*
-*Researched: 2026-03-26*
+*Pitfalls research for: dotMD v1.3 -- Production Packaging, Background Indexing, Speed Optimization, Smoke Tests*
+*Researched: 2026-03-27*
