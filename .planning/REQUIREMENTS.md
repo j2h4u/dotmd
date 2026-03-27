@@ -21,11 +21,6 @@ Requirements for FalkorDB migration and BM25 hybrid fix.
 
 ## Future Requirements
 
-### Graph Backend
-
-- **GRAPH-F1**: LadybugDB adapter removal (after FalkorDB proven stable in production)
-- **GRAPH-F2**: pandas moved to optional dependency (only used by LadybugDB)
-
 ### Search Quality
 
 - **SEARCH-F1**: Per-engine attribution logging (which engine contributed each result)
@@ -37,7 +32,7 @@ Requirements for FalkorDB migration and BM25 hybrid fix.
 |---------|--------|
 | Data export/import migration | Re-index with --force is simpler and already proven (~59 min) |
 | Graph-only re-index (skip NER) | Extraction results not persisted separately; would need new infrastructure |
-| LadybugDB removal in this milestone | Keep as fallback until FalkorDB proven stable |
+| LadybugDB removal | Keep as alternative backend for embedded/upstream scenarios |
 | GPU acceleration | No GPU on current hardware |
 
 ## Traceability
