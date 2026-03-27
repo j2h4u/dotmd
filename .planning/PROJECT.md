@@ -33,10 +33,13 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 - ✓ Background trickle indexer — FTS5 incremental BM25, TOML config, watchdog + polling, progress reporting — Validated in Phase 10: Background Trickle Indexer
 
 ### Active
-- [ ] Indexing speed optimization — concurrent TEI requests, batch NER, throughput auto-tuning
+
+(none — all v1.3 requirements validated or closed)
 
 ### Out of Scope
 
+- Concurrent TEI requests — benchmarked 2026-03-28, no gain (0.7→0.8 t/s within noise, TEI saturates all cores on single request)
+- GLiNER batch NER — benchmarked 2026-03-28, batching slower than sequential (0.72 vs 0.53-0.61 t/s) and OOM at bs=8 on 16GB
 - GPU acceleration — no GPU on current hardware, Jetson/Mac Mini is future consideration
 - LadybugDB removal — keep as alternative embedded backend and for upstream compatibility
 - Full QMD-style query expansion/reranking — different product philosophy

@@ -24,8 +24,8 @@ Requirements for v1.3 milestone. Each maps to roadmap phases.
 
 ### Speed Optimization
 
-- [x] **SPEED-01**: Benchmark measures end-to-end texts/sec for concurrent TEI requests (1, 2, 3 parallel) and reports whether concurrency improves throughput
-- [x] **SPEED-02**: Benchmark measures GLiNER batch vs sequential NER throughput and reports whether batching improves speed
+- [x] **SPEED-01**: Benchmark measures end-to-end texts/sec for concurrent TEI requests (1, 2, 3 parallel) and reports whether concurrency improves throughput — **Result (2026-03-28): No benefit.** workers=1: 0.7 t/s, workers=2: 0.7 t/s, workers=3: 0.8 t/s (within stddev 0.09–0.14). TEI already saturates all cores on a single request.
+- [x] **SPEED-02**: Benchmark measures GLiNER batch vs sequential NER throughput and reports whether batching improves speed — **Result (2026-03-28): Batching hurts.** Sequential: 0.72 t/s, batch bs=1: 0.53, bs=4: 0.61, bs=8: killed (OOM, 20GB swap on 16GB server). Overhead exceeds any parallelism gain.
 
 ### Background Indexer
 
@@ -42,8 +42,8 @@ Deferred to future milestone. Tracked but not in current roadmap.
 
 ### Speed Implementation
 
-- **SPEED-03**: Concurrent TEI requests (implement if benchmark shows gain)
-- **SPEED-04**: GLiNER batch NER (implement if benchmark shows gain)
+- ~~**SPEED-03**: Concurrent TEI requests~~ — Closed: benchmark showed no gain (1.12x within noise)
+- ~~**SPEED-04**: GLiNER batch NER~~ — Closed: benchmark showed batching is slower + OOM at bs=8
 - **SPEED-05**: TEI throughput auto-tuning with persistent calibration
 
 ### Testing Enhancements
