@@ -31,4 +31,9 @@ ENV DOTMD_DATA_DIR=/data
 
 VOLUME ["/data", "/dotmd-index"]
 
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
 ENTRYPOINT ["dotmd"]
