@@ -29,11 +29,11 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 - ✓ Docker networking for FalkorDB connectivity — Validated in Phase 6: Docker Integration + Migration
 - ✓ Full re-index with FalkorDB (229 files, 3520 entities, 20269 edges) — Validated in Phase 6
 - ✓ Production packaging — parameterized compose with bundled profiles, env-driven config, production include: pattern — Validated in Phase 7: Production Packaging
+- ✓ Smoke tests — 5 external HTTP tests covering semantic/BM25/graph/hybrid/API — Validated in Phase 8: Smoke Tests
 
 ### Active
 - [ ] Background trickle indexer — process pending files at low priority with progress reporting
 - [ ] Indexing speed optimization — concurrent TEI requests, batch NER, throughput auto-tuning
-- [ ] Smoke tests — automated verification of search engines, hybrid fusion, API, BM25 regression guard
 
 ### Out of Scope
 
@@ -116,7 +116,7 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 
 ## Current State
 
-v1.2 shipped. FalkorDB is production graph backend. Voicenotes indexed (229 files, 3520 entities). Home directory (~13k files) not yet indexed — pending background trickle indexer. Search works across semantic, BM25, and graph engines with hybrid fusion. Deployment currently depends on external TEI and graphiti_default network — not self-contained.
+v1.2 shipped. FalkorDB is production graph backend. Voicenotes indexed (229 files, 3520 entities). Home directory (~13k files) not yet indexed — pending background trickle indexer. Search works across semantic, BM25, and graph engines with hybrid fusion. Phase 7 complete — self-contained compose stack with bundled profiles. Phase 8 complete — smoke test suite validates all engines and API.
 
 ## Evolution
 
@@ -136,4 +136,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-27 after v1.3 milestone start — production packaging, background indexing, speed optimization, smoke tests*
+*Last updated: 2026-03-27 after Phase 8 complete — smoke tests validated*
