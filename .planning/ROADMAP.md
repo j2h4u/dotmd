@@ -39,7 +39,7 @@ See: `.planning/milestones/v1.2-ROADMAP.md`
 - [x] **Phase 7: Production Packaging** - Self-contained docker-compose stack with healthchecks, env config, and WAL mode (completed 2026-03-27)
 - [ ] **Phase 8: Smoke Tests** - Automated regression safety net covering all search engines and API
 - [ ] **Phase 9: Speed Benchmarks** - Empirical measurement of TEI concurrency and NER batching gains
-- [ ] **Phase 10: Background Trickle Indexer** - Gradual indexing of full 13,500-file corpus at low priority
+- [x] **Phase 10: Background Trickle Indexer** - Gradual indexing of full 13,500-file corpus at low priority (completed 2026-03-27)
 
 ## Phase Details
 
@@ -91,12 +91,12 @@ Plans:
   3. Sending SIGTERM to the container finishes the current file and shuts down cleanly -- no corrupt state in SQLite or FTS5
   4. BM25 search is incremental via FTS5 -- each file becomes searchable immediately after indexing (no batch rebuild needed)
   5. CPU pressure is controllable via configurable pause interval and docker cpu-shares
-**Plans:** 3/4 plans executed
+**Plans:** 4/4 plans complete
 Plans:
 - [x] 10-01-PLAN.md — Replace rank_bm25 with SQLite FTS5 for incremental BM25 search
 - [x] 10-02-PLAN.md — Config.toml support + multi-path file discovery with glob/exclude
 - [x] 10-03-PLAN.md — TrickleIndexer background loop with watchdog filesystem watching
-- [ ] 10-04-PLAN.md — Trickle progress reporting via status API and CLI
+- [x] 10-04-PLAN.md — Trickle progress reporting via status API and CLI
 
 ## Progress
 
@@ -113,7 +113,7 @@ Plans:
 | 7. Production Packaging | v1.3 | 2/2 | Complete   | 2026-03-27 |
 | 8. Smoke Tests | v1.3 | 0/1 | Planned | - |
 | 9. Speed Benchmarks | v1.3 | 0/1 | Planned | - |
-| 10. Background Trickle Indexer | v1.3 | 3/4 | In Progress|  |
+| 10. Background Trickle Indexer | v1.3 | 4/4 | Complete   | 2026-03-27 |
 
 ---
 *Roadmap created: 2026-03-26*

@@ -30,7 +30,7 @@ Requirements for v1.3 milestone. Each maps to roadmap phases.
 ### Background Indexer
 
 - [x] **BGIDX-01**: Background indexer discovers and processes unindexed files one at a time while API serves queries
-- [ ] **BGIDX-02**: `dotmd status` reports background indexing progress ("indexing 1,234/13,515 files")
+- [x] **BGIDX-02**: `dotmd status` reports background indexing progress ("indexing 1,234/13,515 files")
 - [x] **BGIDX-03**: Background indexer shuts down gracefully on SIGTERM (finishes current file, does not corrupt state)
 - [x] **BGIDX-04**: BM25 index rebuilds batched (every N files) with atomic pickle swap to prevent reader corruption
 - [x] **BGIDX-05**: Configurable pause interval between files to control CPU pressure
@@ -84,7 +84,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SPEED-01 | Phase 9 | Complete |
 | SPEED-02 | Phase 9 | Complete |
 | BGIDX-01 | Phase 10 | Complete |
-| BGIDX-02 | Phase 10 | Pending |
+| BGIDX-02 | Phase 10 | Complete |
 | BGIDX-03 | Phase 10 | Complete |
 | BGIDX-04 | Phase 10 | Complete |
 | BGIDX-05 | Phase 10 | Complete |
