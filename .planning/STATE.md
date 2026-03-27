@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Production Packaging & Background Indexing
-status: completed
-last_updated: "2026-03-27T19:30:46.275Z"
+status: executing
+last_updated: "2026-03-27T19:33:07.900Z"
 last_activity: 2026-03-27
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 8
-  completed_plans: 5
-  percent: 100
+  completed_plans: 6
+  percent: 63
 ---
 
 # GSD State
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 **v1.3 — Production Packaging & Background Indexing**
 
 Phase: 10 of 10 (background trickle indexer)
-Plan: 2 of 4 (config & file discovery complete)
+Plan: 3 of 4 (config & file discovery complete)
 Status: Executing Phase 10
 Last activity: 2026-03-27
 
@@ -49,6 +49,7 @@ Progress: [██████░░░░] 63%
 | Phase 07 P02 | 5min | 2 tasks | 5 files |
 | Phase 09-speed-benchmarks P01 | 3min | 2 tasks | 2 files |
 | Phase 10 P02 | 2min | 2 tasks | 3 files |
+| Phase 10 P01 | 4min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -67,6 +68,8 @@ Recent decisions affecting current work:
 - [Phase 09-speed-benchmarks]: Standalone benchmark scripts with no dotmd imports -- test TEI HTTP and GLiNER model directly
 - [Phase 10 P02]: TOML config loaded conditionally (only when file exists) -- no startup failure without config
 - [Phase 10 P02]: Exclude patterns pruned during os.walk (not post-filtered) for performance on large directory trees
+- [Phase 10]: FTS5 shares metadata store SQLite connection (WAL mode) instead of separate file
+- [Phase 10]: unicode61 tokenizer for FTS5 to handle bilingual RU/EN content
 
 ### Pending Todos
 
