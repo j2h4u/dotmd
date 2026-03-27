@@ -21,8 +21,21 @@ Add a background indexing mode that continuously processes pending files at low 
 - **Trickle mode**: process one file at a time with configurable pauses between files
 - **Priority**: run with low cpu_shares so search/serve stays responsive
 - **FileTracker integration**: already has content hashes — use to discover unindexed files
-- **Auto-tune TEI batch size**: measure throughput (texts/sec) across different batch sizes, pick the one with best integral performance (not just per-batch speed)
 - **Graceful coexistence**: background indexer and API server share the same stores without conflicts (FalkorDB is network-based, sqlite-vec supports concurrent reads)
 - **Progress visibility**: `dotmd status` should show background indexing progress ("indexing 1,234/13,515 files")
 
 Could be implemented as a separate CLI command (`dotmd index --background`) or as an always-on feature of `dotmd serve`.
+
+## Indexing speed optimization
+
+Separate from background mode — general speedups that benefit all indexing:
+
+### TEI throughput auto-tuning
+- Measure **end-to-end texts/sec** (not per-batch time) across different batch sizes
+- Persist calibration result to `~/.dotmd/tei_calibration.json` — reuse on next run, re-calibrate if stale or TEI errors
+- Empirical finding: bs=4 and bs=32 give similar throughput (~0.5-1.3 texts/sec) — TEI inference is the bottleneck, not HTTP overhead
+
+### Low-hanging fruit for speed
+- **Concurrent TEI requests**: send 2-3 batches in parallel instead of sequential — TEI supports request queuing internally, pipeline stalls on I/O wait between batches
+- **Batch NER (GLiNER)**: currently processes chunks one at a time, GLiNER supports batch inference
+- **Skip unchanged chunks**: already works in incremental mode, but verify it covers all edge cases
