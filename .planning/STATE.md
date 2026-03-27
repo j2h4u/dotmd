@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.2
-milestone_name: milestone
+milestone: v1.3
+milestone_name: Production Packaging & Background Indexing
 status: planning
-stopped_at: Phase 06 plan 01 checkpoint — awaiting overnight re-index
-last_updated: "2026-03-27T11:58:59.795Z"
+stopped_at: ""
+last_updated: "2026-03-27"
 last_activity: 2026-03-27
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 4
-  completed_plans: 4
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
   percent: 0
 ---
 
@@ -18,39 +18,19 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-26)
+See: .planning/PROJECT.md (updated 2026-03-27)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 06 — docker-integration-migration
+**Current focus:** Defining requirements for v1.3
 
 ## Current Milestone
 
-**v1.2 — FalkorDB Migration & Search Fix**
+**v1.3 — Production Packaging & Background Indexing**
 
-Phase: 06 of 6 (docker integration + migration)
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-03-27
-
-Progress: [░░░░░░░░░░] 0%
-
-## Performance Metrics
-
-**Velocity:**
-
-- Total plans completed: 0 (v1.2)
-- Average duration: —
-- Total execution time: —
-
-**By Phase:**
-
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| 4. FalkorDB Adapter + Config | — | — | — |
-| 5. BM25 Hybrid Fix | — | — | — |
-| 6. Docker Integration + Migration | — | — | — |
-| Phase 04 P02 | 2min | 2 tasks | 2 files |
-| Phase 05 P01 | 5min | 2 tasks | 5 files |
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-03-27 — Milestone v1.3 started
 
 ## Accumulated Context
 
@@ -68,18 +48,12 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None yet.
+- Background trickle indexer (.planning/todos/pending/2026-03-27-background-trickle-indexer.md)
+- Smoke tests (.planning/todos/pending/2026-03-27-smoke-tests.md)
 
 ### Blockers/Concerns
 
-- BM25 root cause is analyzed but not empirically confirmed — Phase 5 should start with diagnostic logging before implementing a fix
-- FalkorDB `params` kwarg API should be verified with quick REPL test before writing all adapter methods
-
-## Session Continuity
-
-Last session: 2026-03-26T23:00:14.536Z
-Stopped at: Phase 06 plan 01 checkpoint — awaiting overnight re-index
-Resume file: .planning/phases/06-docker-integration-migration/06-01-SUMMARY.md
+None yet.
 
 ---
-*Last updated: 2026-03-26*
+*Last updated: 2026-03-27*

@@ -31,7 +31,10 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 
 ### Active
 
-None — v1.2 milestone complete.
+- [ ] Production packaging — self-contained docker-compose stack (dotMD + TEI + FalkorDB), env-based config, no manual steps beyond `docker compose up`
+- [ ] Background trickle indexer — process pending files at low priority with progress reporting
+- [ ] Indexing speed optimization — concurrent TEI requests, batch NER, throughput auto-tuning
+- [ ] Smoke tests — automated verification of search engines, hybrid fusion, API, BM25 regression guard
 
 ### Out of Scope
 
@@ -102,9 +105,19 @@ None — v1.2 milestone complete.
 - **v1.1** — Incremental Indexing (Phases 1-3, shipped 2026-03-26)
 - **v1.2** — FalkorDB Migration & Search Fix (Phases 4-6, shipped 2026-03-27)
 
+## Current Milestone: v1.3 Production Packaging & Background Indexing
+
+**Goal:** Turn dotMD from a developer prototype into a self-contained production service — docker compose up, point at paths, it indexes and serves search. Plus background indexing for large corpora and smoke tests for regression safety.
+
+**Target features:**
+- Production packaging — self-contained docker-compose stack (dotMD + TEI + FalkorDB)
+- Background trickle indexer — gradual indexing of full 13,500-file corpus
+- Indexing speed optimization — concurrent TEI, batch NER, throughput auto-tuning
+- Smoke tests — regression safety for search pipeline
+
 ## Current State
 
-v1.2 shipped. FalkorDB is production graph backend. Voicenotes indexed (229 files, 3520 entities). Home directory (~13k files) not yet indexed — pending background trickle indexer (v1.3 candidate). Search works across semantic, BM25, and graph engines with hybrid fusion.
+v1.2 shipped. FalkorDB is production graph backend. Voicenotes indexed (229 files, 3520 entities). Home directory (~13k files) not yet indexed — pending background trickle indexer. Search works across semantic, BM25, and graph engines with hybrid fusion. Deployment currently depends on external TEI and graphiti_default network — not self-contained.
 
 ## Evolution
 
@@ -124,4 +137,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-27 after v1.2 milestone — FalkorDB migration complete, BM25 hybrid fix shipped, 5553 LOC Python*
+*Last updated: 2026-03-27 after v1.3 milestone start — production packaging, background indexing, speed optimization, smoke tests*
