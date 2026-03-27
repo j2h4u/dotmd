@@ -101,3 +101,11 @@ class IndexStats(BaseModel):
     deleted_files: int = 0
     unchanged_files: int = 0
     data_dir: str | None = None
+
+    # Trickle indexer progress (per D-15, BGIDX-02)
+    trickle_status: str | None = None  # "idle", "backlog", "watching", "stopping", or None if not running
+    trickle_indexed: int | None = None  # files indexed so far in current run
+    trickle_total: int | None = None  # total files to index in current run
+    trickle_current_file: str | None = None  # file currently being processed
+    trickle_files_per_hour: float | None = None  # throughput rate
+    trickle_eta_minutes: float | None = None  # estimated time remaining

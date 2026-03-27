@@ -273,20 +273,24 @@ class DotMDService:
 
         return results
 
-    def status(self) -> IndexStats | None:
-        """Return the current index statistics, or ``None`` if not yet indexed.
+    def status(self) -> IndexStats:
+        """Return the current index statistics.
+
+        Always returns an ``IndexStats`` instance (never ``None``) so that
+        trickle indexer progress is available even before any explicit
+        ``dotmd index`` command has been run.
 
         When a previous data_dir is known and the directory still exists,
         runs a live file diff to populate pending change counts.
 
         Returns
         -------
-        IndexStats | None
-            The most recent index statistics.
+        IndexStats
+            The most recent index statistics enriched with trickle state.
         """
         stats = self._pipeline.metadata_store.get_stats()
         if stats is None:
-            return None
+            stats = IndexStats()
         # Change detection: run live diff if data_dir known
         if stats.data_dir:
             data_path = Path(stats.data_dir)
@@ -302,6 +306,24 @@ class DotMDService:
                     stats.unchanged_files = len(diff.unchanged)
                 except Exception as e:
                     logger.warning("Change detection failed: %s", e)
+
+        # Trickle indexer progress (per D-15, BGIDX-02)
+        trickle_state = self._trickle_indexer.state
+        stats.trickle_status = trickle_state.status
+        stats.trickle_indexed = trickle_state.indexed_count
+        stats.trickle_total = trickle_state.total_files
+        stats.trickle_current_file = trickle_state.current_file
+        stats.trickle_files_per_hour = (
+            round(trickle_state.files_per_hour, 1)
+            if trickle_state.files_per_hour > 0
+            else None
+        )
+        stats.trickle_eta_minutes = (
+            round(trickle_state.eta_minutes, 1)
+            if trickle_state.eta_minutes is not None
+            else None
+        )
+
         return stats
 
     def graph_data(self) -> dict:
