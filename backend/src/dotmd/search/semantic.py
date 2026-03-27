@@ -52,12 +52,14 @@ class SemanticSearchEngine:
         model_name: str = _DEFAULT_MODEL,
         score_floor: float = 0.0,
         embedding_url: str | None = None,
+        tei_batch_size: int = 32,
     ) -> None:
         self._vector_store = vector_store
         self._model_name = model_name
         self._model: SentenceTransformer | None = None
         self._score_floor = score_floor
         self._embedding_url = embedding_url.rstrip("/") if embedding_url else None
+        self._tei_batch_size = tei_batch_size
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -71,22 +73,51 @@ class SemanticSearchEngine:
             self._model = SentenceTransformer(self._model_name)
         return self._model
 
+    def _probe_tei_batch_size(self, sample_text: str) -> int:
+        """Find the largest batch size TEI accepts without 413."""
+        import httpx
+
+        bs = self._tei_batch_size
+        while bs > 1:
+            try:
+                resp = httpx.post(
+                    f"{self._embedding_url}/embed",
+                    json={"inputs": [sample_text] * bs, "truncate": True},
+                    timeout=30.0,
+                )
+                resp.raise_for_status()
+                logger.info("TEI batch size probe: bs=%d OK", bs)
+                return bs
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 413:
+                    bs //= 2
+                    logger.info("TEI batch size probe: 413, trying bs=%d", bs)
+                    continue
+                raise
+        return 1
+
     def _encode_via_tei(self, inputs: str | list[str]) -> list[list[float]]:
         """Call a TEI-compatible ``/embed`` endpoint.
 
-        Batches are sent in chunks of ``_TEI_BATCH_SIZE`` to avoid
-        413 Payload Too Large errors from the embedding server.
+        Probes the max batch size on first call, then uses it for all
+        subsequent batches.
         """
         import httpx
 
         if isinstance(inputs, str):
             inputs = [inputs]
 
+        if not hasattr(self, "_tei_bs_probed"):
+            self._tei_batch_size = self._probe_tei_batch_size(inputs[0])
+            self._tei_bs_probed = True
+
         results: list[list[float]] = []
-        total_batches = (len(inputs) + self._TEI_BATCH_SIZE - 1) // self._TEI_BATCH_SIZE
-        for batch_idx, i in enumerate(range(0, len(inputs), self._TEI_BATCH_SIZE)):
-            batch = inputs[i : i + self._TEI_BATCH_SIZE]
-            logger.info("TEI batch %d/%d (%d texts)", batch_idx + 1, total_batches, len(batch))
+        bs = self._tei_batch_size
+        total_batches = (len(inputs) + bs - 1) // bs
+        for batch_idx, i in enumerate(range(0, len(inputs), bs)):
+            batch = inputs[i : i + bs]
+            if batch_idx % 200 == 0 or batch_idx == total_batches - 1:
+                logger.info("TEI batch %d/%d (%d texts, bs=%d)", batch_idx + 1, total_batches, len(batch), bs)
             response = httpx.post(
                 f"{self._embedding_url}/embed",
                 json={"inputs": batch, "truncate": True},
@@ -94,10 +125,8 @@ class SemanticSearchEngine:
             )
             response.raise_for_status()
             results.extend(response.json())
-        logger.info("TEI embedding complete: %d vectors", len(results))
+        logger.info("TEI embedding complete: %d vectors (bs=%d)", len(results), bs)
         return results
-
-    _TEI_BATCH_SIZE = 4
 
     @property
     def uses_remote_embeddings(self) -> bool:

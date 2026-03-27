@@ -47,6 +47,7 @@ class DotMDService:
             self._settings.embedding_model,
             score_floor=self._settings.semantic_score_floor,
             embedding_url=self._settings.embedding_url,
+            tei_batch_size=self._settings.tei_batch_size,
         )
         self._bm25_engine = BM25SearchEngine(self._settings.bm25_path)
         self._graph_engine = GraphSearchEngine(

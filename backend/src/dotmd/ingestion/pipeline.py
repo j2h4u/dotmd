@@ -109,6 +109,7 @@ class IndexingPipeline:
             self._vector_store,
             settings.embedding_model,
             embedding_url=settings.embedding_url,
+            tei_batch_size=settings.tei_batch_size,
         )
         self._bm25_engine = BM25SearchEngine(settings.bm25_path)
 

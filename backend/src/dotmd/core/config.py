@@ -55,6 +55,10 @@ class Settings(BaseSettings):
         "date_time",
     ]
 
+    # Initial TEI batch size for embedding requests. Auto-tuned down on 413 errors.
+    # Small batches (4-8) are often faster on CPU due to lower TEI queue/inference time.
+    tei_batch_size: int = 4
+
     # Search
     default_top_k: int = 10
     fusion_k: int = 60  # RRF constant
