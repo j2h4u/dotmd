@@ -3,17 +3,22 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, TomlConfigSettingsSource
 
 
 class Settings(BaseSettings):
     """Global configuration for dotMD.
 
     Values can be set via environment variables prefixed with DOTMD_,
-    e.g. DOTMD_DATA_DIR=/path/to/md/files.
+    a TOML config file at ~/.dotmd/config.toml, or programmatically.
+
+    Priority order (highest wins): init_settings > env vars > TOML file > defaults.
     """
 
-    model_config = {"env_prefix": "DOTMD_"}
+    model_config = {
+        "env_prefix": "DOTMD_",
+        "toml_file": str(Path.home() / ".dotmd" / "config.toml"),
+    }
 
     # Paths
     data_dir: Path = Path(".")
@@ -67,6 +72,16 @@ class Settings(BaseSettings):
     semantic_score_floor: float = 0.4  # minimum cosine similarity to keep
     snippet_length: int = 300  # display snippet character limit
 
+    # Indexing paths (multi-path discovery)
+    # Directories (full recursive .md scan) or glob patterns (e.g., "/home/**/README.md")
+    indexing_paths: list[str] = []
+    # Exclude patterns -- glob patterns to filter out (e.g., "**/node_modules")
+    indexing_exclude: list[str] = ["**/node_modules", "**/.git", "**/__pycache__"]
+
+    # Trickle indexer settings
+    trickle_pause_seconds: float = 1.0
+    poll_interval_seconds: float = 3600.0  # 1 hour fallback poll
+
     # Graph
     graph_max_hops: int = 2
     read_only: bool = False
@@ -76,6 +91,32 @@ class Settings(BaseSettings):
     falkordb_url: str = "redis://localhost:6379"
     # FalkorDB graph name. Must differ from Graphiti's "knowledgebase" graph.
     falkordb_graph_name: str = "dotmd"
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Set priority: init > env > dotenv > file_secret > TOML > defaults."""
+        toml_path = Path(cls.model_config.get("toml_file", ""))
+        sources: list[PydanticBaseSettingsSource] = [
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            file_secret_settings,
+        ]
+        if toml_path.exists():
+            sources.append(TomlConfigSettingsSource(settings_cls))
+        return tuple(sources)
+
+    @property
+    def config_path(self) -> Path:
+        """Path to the TOML config file."""
+        return Path(self.model_config.get("toml_file", str(self.index_dir / "config.toml")))
 
     @property
     def lancedb_path(self) -> Path:
