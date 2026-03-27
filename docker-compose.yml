@@ -8,7 +8,9 @@ services:
       - ${DOTMD_DATA_VOLUME:-.}/data:/data
       - dotmd-index:/dotmd-index
       - dotmd-hf-models:/root/.cache/huggingface
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
     command: ["serve", "--host", "0.0.0.0"]
 
   tei:
