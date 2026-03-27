@@ -43,6 +43,12 @@ app = FastAPI(
 )
 
 
+@app.get("/health")
+async def health() -> dict:
+    """Liveness probe -- confirms FastAPI is up and responding."""
+    return {"status": "ok"}
+
+
 # -- Request / response models ------------------------------------------------
 
 class IndexRequest(BaseModel):
