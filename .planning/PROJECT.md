@@ -28,10 +28,9 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 - ✓ Pipeline integration for backend selection — Validated in Phase 4
 - ✓ Docker networking for FalkorDB connectivity — Validated in Phase 6: Docker Integration + Migration
 - ✓ Full re-index with FalkorDB (229 files, 3520 entities, 20269 edges) — Validated in Phase 6
+- ✓ Production packaging — parameterized compose with bundled profiles, env-driven config, production include: pattern — Validated in Phase 7: Production Packaging
 
 ### Active
-
-- [ ] Production packaging — self-contained docker-compose stack (dotMD + TEI + FalkorDB), env-based config, no manual steps beyond `docker compose up`
 - [ ] Background trickle indexer — process pending files at low priority with progress reporting
 - [ ] Indexing speed optimization — concurrent TEI requests, batch NER, throughput auto-tuning
 - [ ] Smoke tests — automated verification of search engines, hybrid fusion, API, BM25 regression guard
