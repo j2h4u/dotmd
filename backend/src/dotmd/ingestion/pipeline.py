@@ -29,7 +29,7 @@ from dotmd.extraction.structural import StructuralExtractor
 from dotmd.ingestion.chunker import chunk_file
 from dotmd.ingestion.file_tracker import FileDiff, FileTracker
 from dotmd.ingestion.reader import discover_files, read_file
-from dotmd.search.bm25 import BM25SearchEngine
+from dotmd.search.bm25 import FTS5SearchEngine
 from dotmd.search.semantic import SemanticSearchEngine
 from dotmd.storage.base import GraphStoreProtocol, VectorStoreProtocol
 from dotmd.storage.metadata import SQLiteMetadataStore
@@ -111,7 +111,7 @@ class IndexingPipeline:
             embedding_url=settings.embedding_url,
             tei_batch_size=settings.tei_batch_size,
         )
-        self._bm25_engine = BM25SearchEngine(settings.bm25_path)
+        self._bm25_engine = FTS5SearchEngine(self._metadata_store._conn)
 
         # -- extractors --------------------------------------------------------
         self._structural_extractor = StructuralExtractor()
@@ -183,7 +183,7 @@ class IndexingPipeline:
 
     def clear(self) -> None:
         """Delete all data from every backing store."""
-        self._metadata_store.delete_all()
+        self._metadata_store.delete_all()  # also clears chunks_fts
         self._vector_store.delete_all()
         self._graph_store.delete_all()
 
@@ -294,11 +294,11 @@ class IndexingPipeline:
             )
             logger.info("[%s] vector_store: %d vectors (%.2fs)", run_id, len(new_chunks), time.perf_counter() - t0)
 
-        # BM25 always full rebuild (IP-04)
-        t0 = time.perf_counter()
-        all_chunks = self._metadata_store.get_all_chunks()
-        self._bm25_engine.build_index(all_chunks)
-        logger.info("[%s] bm25: %d chunks (%.2fs)", run_id, len(all_chunks), time.perf_counter() - t0)
+        # FTS5 incremental update (replaces full BM25 rebuild)
+        if new_chunks:
+            t0 = time.perf_counter()
+            self._bm25_engine.add_chunks(new_chunks)
+            logger.info("[%s] fts5: %d chunks (%.2fs)", run_id, len(new_chunks), time.perf_counter() - t0)
 
         # Extraction (structural + NER + key-terms) on NEW chunks only
         t0 = time.perf_counter()
@@ -310,8 +310,9 @@ class IndexingPipeline:
         self._populate_graph(files_to_ingest, new_chunks, extraction_result)
         logger.info("[%s] graph: %d files, %d chunks (%.1fs)", run_id, len(files_to_ingest), len(new_chunks), time.perf_counter() - t0)
 
-        # Acronym rebuild from ALL chunks (same as BM25 -- always full)
+        # Acronym rebuild from ALL chunks (always full corpus)
         t0 = time.perf_counter()
+        all_chunks = self._metadata_store.get_all_chunks()
         acronym_dict = extract_acronyms_from_chunks(all_chunks)
         if acronym_dict:
             import json
@@ -367,6 +368,9 @@ class IndexingPipeline:
         # 2. Delete vectors (needs chunk_ids from step 1)
         if chunk_ids:
             self._vector_store.delete_vectors_by_chunk_ids(chunk_ids)
+        # 2.5 Delete from FTS5 index
+        if chunk_ids:
+            self._bm25_engine.remove_chunks(chunk_ids)
         # 3. Delete metadata chunks
         self._metadata_store.delete_chunks_by_file(file_path)
         # 4. Delete graph subgraph
@@ -490,8 +494,8 @@ class IndexingPipeline:
         return self._semantic_engine
 
     @property
-    def bm25_engine(self) -> BM25SearchEngine:
-        """Return the BM25 search engine instance."""
+    def bm25_engine(self) -> FTS5SearchEngine:
+        """Return the FTS5 search engine instance."""
         return self._bm25_engine
 
     @property

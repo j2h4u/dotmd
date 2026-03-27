@@ -12,7 +12,6 @@ dependencies = [
     "click>=8.0",
     "sentence-transformers>=3.0",
     "sqlite-vec>=0.1.6",
-    "rank-bm25>=0.2",
     "real_ladybug>=0.1",
     "FalkorDB>=1.6.0",
     "gliner>=0.2",

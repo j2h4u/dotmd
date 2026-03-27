@@ -256,6 +256,11 @@ class SQLiteMetadataStore:
         """Remove all chunks and statistics from the store."""
         self._conn.execute("DELETE FROM chunks")
         self._conn.execute("DELETE FROM stats")
+        # Clear FTS5 index if it exists
+        try:
+            self._conn.execute("DELETE FROM chunks_fts")
+        except sqlite3.OperationalError:
+            pass  # FTS5 table not yet created
         self._conn.commit()
 
     # -- helpers ------------------------------------------------------------

@@ -1,111 +1,147 @@
 """BM25 (sparse keyword) search engine for dotMD.
 
-Builds and persists a ``BM25Okapi`` index over tokenised chunks,
-then uses it to rank documents by lexical relevance at query time.
+Uses SQLite FTS5 for incremental full-text search over chunks.
+Each chunk is INSERT-ed immediately, eliminating full-corpus rebuilds.
 """
 
 from __future__ import annotations
 
 import logging
-import pickle
-from dataclasses import dataclass, field
-from pathlib import Path
-
-import numpy as np
-from rank_bm25 import BM25Okapi
+import re
+import sqlite3
 
 from dotmd.core.models import Chunk
-from dotmd.utils.text import tokenize
 
 logger = logging.getLogger(__name__)
 
+_CREATE_FTS5 = """
+CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+    chunk_id UNINDEXED,
+    text,
+    tokenize = 'unicode61'
+)
+"""
 
-@dataclass
-class _BM25Data:
-    """Serialisable container for the BM25 index and its chunk-id mapping."""
 
-    bm25: BM25Okapi
-    chunk_ids: list[str] = field(default_factory=list)
+def _sanitize_fts5_query(query: str) -> str:
+    """Sanitize a user query for safe FTS5 MATCH usage.
+
+    Removes FTS5 special characters and wraps each word in double
+    quotes so that they are treated as literal terms.
+    """
+    # Remove FTS5 special characters
+    cleaned = re.sub(r'["\(\)\*:]', "", query)
+    words = cleaned.split()
+    if not words:
+        return ""
+    return " ".join(f'"{w}"' for w in words)
 
 
-class BM25SearchEngine:
-    """Sparse keyword search engine using BM25Okapi.
+class FTS5SearchEngine:
+    """Full-text search engine backed by SQLite FTS5.
 
-    The index is serialised as a pickle file so it can be loaded
-    without re-tokenising the entire corpus on every startup.
+    Replaces the former pickle-based BM25 search engine.  The FTS5
+    virtual table lives in the same SQLite database as chunk metadata,
+    sharing the WAL-mode connection.
 
     Parameters
     ----------
-    index_path:
-        Filesystem path where the pickle file is (or will be) stored.
+    conn:
+        An open ``sqlite3.Connection`` (typically the metadata store's
+        connection, already in WAL mode).
     """
 
-    def __init__(self, index_path: Path) -> None:
-        self._index_path = index_path
-        self._data: _BM25Data | None = None
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+        self._conn.execute(_CREATE_FTS5)
+        self._conn.commit()
 
     # ------------------------------------------------------------------
-    # Index lifecycle
+    # Incremental add / remove
     # ------------------------------------------------------------------
 
-    def build_index(self, chunks: list[Chunk]) -> None:
-        """Tokenise *chunks*, build a BM25 index, and persist to disk.
+    def add_chunks(self, chunks: list[Chunk]) -> None:
+        """Insert or replace chunks in the FTS5 index.
 
         Parameters
         ----------
         chunks:
-            The chunks to index.  Each chunk's :attr:`text` field is
-            tokenised using :func:`dotmd.utils.text.tokenize`.
+            Chunks to add.  Existing entries with the same ``chunk_id``
+            are replaced.
         """
         if not chunks:
-            logger.warning("build_index called with an empty chunk list; skipping.")
             return
-
-        corpus: list[list[str]] = [tokenize(c.text) for c in chunks]
-        chunk_ids: list[str] = [c.chunk_id for c in chunks]
-
-        bm25 = BM25Okapi(corpus)
-        self._data = _BM25Data(bm25=bm25, chunk_ids=chunk_ids)
-
-        self._index_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._index_path.open("wb") as fh:
-            pickle.dump(self._data, fh, protocol=pickle.HIGHEST_PROTOCOL)
-
-        logger.info(
-            "BM25 index built (%d chunks) and saved to %s",
-            len(chunk_ids),
-            self._index_path,
+        rows = [(c.chunk_id, c.text) for c in chunks]
+        self._conn.executemany(
+            "INSERT OR REPLACE INTO chunks_fts(chunk_id, text) VALUES (?, ?)",
+            rows,
         )
+        self._conn.commit()
+        logger.debug("FTS5: added %d chunks", len(chunks))
+
+    def remove_chunks(self, chunk_ids: list[str]) -> None:
+        """Remove chunks from the FTS5 index by their identifiers.
+
+        Parameters
+        ----------
+        chunk_ids:
+            List of chunk identifiers to delete.
+        """
+        if not chunk_ids:
+            return
+        self._conn.executemany(
+            "DELETE FROM chunks_fts WHERE chunk_id = ?",
+            [(cid,) for cid in chunk_ids],
+        )
+        self._conn.commit()
+        logger.debug("FTS5: removed %d chunks", len(chunk_ids))
+
+    # ------------------------------------------------------------------
+    # Compatibility wrappers
+    # ------------------------------------------------------------------
 
     def load_index(self) -> None:
-        """Load a previously-built index from disk.
+        """One-time migration: populate FTS5 from the ``chunks`` table.
 
-        If the index file does not exist, a warning is logged and the
-        engine remains uninitialised (subsequent searches return empty
-        results).
+        If the FTS5 table is empty but the ``chunks`` table has data,
+        all chunk texts are copied over.  This provides a seamless
+        upgrade path from the old pickle-based BM25 index.
         """
-        if not self._index_path.exists():
-            logger.warning(
-                "BM25 index file not found at %s; searches will return empty results.",
-                self._index_path,
-            )
+        fts_count = self._conn.execute(
+            "SELECT COUNT(*) FROM chunks_fts"
+        ).fetchone()[0]
+
+        try:
+            chunks_count = self._conn.execute(
+                "SELECT COUNT(*) FROM chunks"
+            ).fetchone()[0]
+        except sqlite3.OperationalError:
+            # chunks table doesn't exist yet
+            logger.info("FTS5: no chunks table found; skipping migration")
             return
 
-        with self._index_path.open("rb") as fh:
-            self._data = pickle.load(fh)  # noqa: S301
+        if fts_count == 0 and chunks_count > 0:
+            self._conn.execute(
+                "INSERT INTO chunks_fts(chunk_id, text) "
+                "SELECT chunk_id, text FROM chunks"
+            )
+            self._conn.commit()
+            logger.info("FTS5: migrated %d chunks from metadata", chunks_count)
+        elif fts_count > 0:
+            logger.info("FTS5: index already populated (%d chunks)", fts_count)
+        else:
+            logger.info("FTS5: no chunks to index yet")
 
-        logger.info(
-            "BM25 index loaded from %s (%d chunks)",
-            self._index_path,
-            len(self._data.chunk_ids) if self._data else 0,
-        )
+    def build_index(self, chunks: list[Chunk]) -> None:
+        """Compatibility wrapper -- delegates to :meth:`add_chunks`."""
+        self.add_chunks(chunks)
 
     # ------------------------------------------------------------------
     # Search
     # ------------------------------------------------------------------
 
     def search(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
-        """Tokenise *query* and return the top-k BM25 results.
+        """Search the FTS5 index and return ``(chunk_id, score)`` pairs.
 
         Parameters
         ----------
@@ -118,29 +154,21 @@ class BM25SearchEngine:
         -------
         list[tuple[str, float]]
             A list of ``(chunk_id, score)`` pairs ordered by
-            descending BM25 score.  Returns an empty list if the
-            index has not been built or loaded.
+            descending relevance.  Returns an empty list if the query
+            is empty or an FTS5 syntax error occurs.
         """
-        if self._data is None:
-            logger.debug("BM25 index not loaded; returning empty results.")
+        sanitized = _sanitize_fts5_query(query)
+        if not sanitized:
             return []
 
-        tokenized_query = tokenize(query)
-        if not tokenized_query:
+        try:
+            cur = self._conn.execute(
+                "SELECT chunk_id, -rank AS score "
+                "FROM chunks_fts WHERE chunks_fts MATCH ? "
+                "ORDER BY rank LIMIT ?",
+                (sanitized, top_k),
+            )
+            return [(row[0], row[1]) for row in cur.fetchall()]
+        except sqlite3.OperationalError as exc:
+            logger.warning("FTS5 search error for query %r: %s", query, exc)
             return []
-
-        scores: np.ndarray = self._data.bm25.get_scores(tokenized_query)
-
-        # Retrieve indices of the top-k scores in descending order.
-        k = min(top_k, len(scores))
-        top_indices = np.argpartition(scores, -k)[-k:]
-        top_indices = top_indices[np.argsort(scores[top_indices])[::-1]]
-
-        results: list[tuple[str, float]] = []
-        for idx in top_indices:
-            score = float(scores[idx])
-            if score <= 0.0:
-                continue
-            results.append((self._data.chunk_ids[idx], score))
-
-        return results
