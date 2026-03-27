@@ -54,7 +54,7 @@ See: `.planning/milestones/v1.2-ROADMAP.md`
   4. SQLite databases operate in WAL mode -- concurrent reads during writes do not return "database is locked"
 **Plans:** 2 plans
 Plans:
-- [ ] 07-01-PLAN.md — Health endpoint, WAL pragma, Dockerfile HEALTHCHECK
+- [x] 07-01-PLAN.md — Health endpoint, WAL pragma, Dockerfile HEALTHCHECK
 - [ ] 07-02-PLAN.md — Parameterized compose stack, .env.example, production deployment
 
 ### Phase 8: Smoke Tests
