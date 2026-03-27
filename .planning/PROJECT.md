@@ -116,7 +116,7 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 
 ## Current State
 
-v1.2 shipped. FalkorDB is production graph backend. Voicenotes indexed (229 files, 3520 entities). Home directory (~13k files) not yet indexed — pending background trickle indexer. Search works across semantic, BM25, and graph engines with hybrid fusion. Phase 7 complete — self-contained compose stack with bundled profiles. Phase 8 complete — smoke test suite validates all engines and API.
+v1.2 shipped. FalkorDB is production graph backend. Voicenotes indexed (229 files, 3520 entities). Home directory (~13k files) not yet indexed — pending background trickle indexer. Search works across semantic, BM25, and graph engines with hybrid fusion. Phase 7 complete — self-contained compose stack with bundled profiles. Phase 8 complete — smoke test suite validates all engines and API. Phase 9 complete — TEI concurrency and GLiNER batching benchmark scripts ready for empirical throughput measurement.
 
 ## Evolution
 
@@ -136,4 +136,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-27 after Phase 8 complete — smoke tests validated*
+*Last updated: 2026-03-27 after Phase 9 complete — speed benchmark scripts*
