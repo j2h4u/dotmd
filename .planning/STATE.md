@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Production Packaging & Background Indexing
-status: planning
-last_updated: "2026-03-27T14:01:54.455Z"
+status: executing
+last_updated: "2026-03-27T14:16:06.285Z"
 last_activity: 2026-03-27
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 0
-  percent: 0
+  completed_plans: 2
+  percent: 100
 ---
 
 # GSD State
@@ -27,11 +27,11 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 **v1.3 — Production Packaging & Background Indexing**
 
 Phase: 7 of 10 (Production Packaging) — first of 4 phases in v1.3
-Plan: —
-Status: Ready to plan
+Plan: 02 of 02 (checkpoint:human-verify pending)
+Status: Executing — awaiting Task 3 human verification
 Last activity: 2026-03-27
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -46,6 +46,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1-6 (v1.1+v1.2) | 10 | — | — |
+| Phase 07 P02 | 5min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -58,6 +59,9 @@ Recent decisions affecting current work:
 - [v1.2]: Removed cross-encoder score threshold — all fusion candidates survive reranking
 - [Research]: Do NOT bundle second TEI instance — reuse shared TEI, document dependency
 - [Research]: Benchmark TEI concurrency before implementing — bs=4 equals bs=32 suggests compute-bound
+- [Phase 07]: Compose profiles for optional bundled services (TEI, FalkorDB) -- depends_on removed due to v5.1 profile incompatibility
+- [Phase 07]: Production uses include: directive referencing repo compose as single source of truth
+- [Phase 07]: Port override via DOTMD_PORT env var (not compose override ports) to avoid list merge
 
 ### Pending Todos
 

@@ -9,9 +9,9 @@ Requirements for v1.3 milestone. Each maps to roadmap phases.
 
 ### Production Packaging
 
-- [ ] **PACK-01**: Service deploys via single `docker compose up` with all dependencies declared (dotMD + TEI reference + FalkorDB)
+- [x] **PACK-01**: Service deploys via single `docker compose up` with all dependencies declared (dotMD + TEI reference + FalkorDB)
 - [x] **PACK-02**: Healthchecks on TEI (`/health`) and FalkorDB (`redis-cli ping`) with `depends_on: condition: service_healthy`
-- [ ] **PACK-03**: All configuration via environment variables with documented defaults in example `.env`
+- [x] **PACK-03**: All configuration via environment variables with documented defaults in example `.env`
 - [x] **PACK-04**: SQLite WAL mode enabled on all databases (metadata.db, vec.db) for concurrent read/write safety
 
 ### Smoke Tests
@@ -72,9 +72,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PACK-01 | Phase 7 | Pending |
+| PACK-01 | Phase 7 | Complete |
 | PACK-02 | Phase 7 | Complete |
-| PACK-03 | Phase 7 | Pending |
+| PACK-03 | Phase 7 | Complete |
 | PACK-04 | Phase 7 | Complete |
 | TEST-01 | Phase 8 | Pending |
 | TEST-02 | Phase 8 | Pending |

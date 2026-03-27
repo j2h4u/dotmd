@@ -36,7 +36,7 @@ See: `.planning/milestones/v1.2-ROADMAP.md`
 
 ## Phases
 
-- [ ] **Phase 7: Production Packaging** - Self-contained docker-compose stack with healthchecks, env config, and WAL mode
+- [x] **Phase 7: Production Packaging** - Self-contained docker-compose stack with healthchecks, env config, and WAL mode (completed 2026-03-27)
 - [ ] **Phase 8: Smoke Tests** - Automated regression safety net covering all search engines and API
 - [ ] **Phase 9: Speed Benchmarks** - Empirical measurement of TEI concurrency and NER batching gains
 - [ ] **Phase 10: Background Trickle Indexer** - Gradual indexing of full 13,500-file corpus at low priority
@@ -52,10 +52,10 @@ See: `.planning/milestones/v1.2-ROADMAP.md`
   2. Healthchecks on TEI and FalkorDB gate service startup -- API does not start until dependencies report healthy
   3. All configuration lives in environment variables with an `.env.example` documenting every option and its default
   4. SQLite databases operate in WAL mode -- concurrent reads during writes do not return "database is locked"
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 Plans:
 - [x] 07-01-PLAN.md — Health endpoint, WAL pragma, Dockerfile HEALTHCHECK
-- [ ] 07-02-PLAN.md — Parameterized compose stack, .env.example, production deployment
+- [x] 07-02-PLAN.md — Parameterized compose stack, .env.example, production deployment
 
 ### Phase 8: Smoke Tests
 **Goal**: Automated tests verify all search engines and API work correctly against the running stack
@@ -101,7 +101,7 @@ Plans:
 | 4. FalkorDB Adapter + Config | v1.2 | 2/2 | Complete | 2026-03-27 |
 | 5. BM25 Hybrid Fix | v1.2 | 1/1 | Complete | 2026-03-27 |
 | 6. Docker Integration + Migration | v1.2 | 1/1 | Complete | 2026-03-27 |
-| 7. Production Packaging | v1.3 | 0/2 | Planned | - |
+| 7. Production Packaging | v1.3 | 2/2 | Complete   | 2026-03-27 |
 | 8. Smoke Tests | v1.3 | 0/? | Not started | - |
 | 9. Speed Benchmarks | v1.3 | 0/? | Not started | - |
 | 10. Background Trickle Indexer | v1.3 | 0/? | Not started | - |
