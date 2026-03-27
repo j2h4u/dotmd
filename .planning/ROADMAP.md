@@ -52,7 +52,10 @@ See: `.planning/milestones/v1.2-ROADMAP.md`
   2. Healthchecks on TEI and FalkorDB gate service startup -- API does not start until dependencies report healthy
   3. All configuration lives in environment variables with an `.env.example` documenting every option and its default
   4. SQLite databases operate in WAL mode -- concurrent reads during writes do not return "database is locked"
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 07-01-PLAN.md — Health endpoint, WAL pragma, Dockerfile HEALTHCHECK
+- [ ] 07-02-PLAN.md — Parameterized compose stack, .env.example, production deployment
 
 ### Phase 8: Smoke Tests
 **Goal**: Automated tests verify all search engines and API work correctly against the running stack
@@ -98,11 +101,11 @@ See: `.planning/milestones/v1.2-ROADMAP.md`
 | 4. FalkorDB Adapter + Config | v1.2 | 2/2 | Complete | 2026-03-27 |
 | 5. BM25 Hybrid Fix | v1.2 | 1/1 | Complete | 2026-03-27 |
 | 6. Docker Integration + Migration | v1.2 | 1/1 | Complete | 2026-03-27 |
-| 7. Production Packaging | v1.3 | 0/? | Not started | - |
+| 7. Production Packaging | v1.3 | 0/2 | Planned | - |
 | 8. Smoke Tests | v1.3 | 0/? | Not started | - |
 | 9. Speed Benchmarks | v1.3 | 0/? | Not started | - |
 | 10. Background Trickle Indexer | v1.3 | 0/? | Not started | - |
 
 ---
 *Roadmap created: 2026-03-26*
-*Last updated: 2026-03-27 after v1.3 roadmap created*
+*Last updated: 2026-03-27 after Phase 7 planning complete*
