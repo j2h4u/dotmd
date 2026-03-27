@@ -113,7 +113,7 @@ Plans:
 | 7. Production Packaging | v1.3 | 2/2 | Complete   | 2026-03-27 |
 | 8. Smoke Tests | v1.3 | 0/1 | Planned | - |
 | 9. Speed Benchmarks | v1.3 | 0/1 | Planned | - |
-| 10. Background Trickle Indexer | v1.3 | 4/4 | Complete   | 2026-03-27 |
+| 10. Background Trickle Indexer | v1.3 | 4/4 | Complete    | 2026-03-27 |
 
 ---
 *Roadmap created: 2026-03-26*
