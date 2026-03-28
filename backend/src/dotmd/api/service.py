@@ -291,21 +291,34 @@ class DotMDService:
         stats = self._pipeline.metadata_store.get_stats()
         if stats is None:
             stats = IndexStats()
-        # Change detection: run live diff if data_dir known
-        if stats.data_dir:
-            data_path = Path(stats.data_dir)
-            if data_path.is_dir():
-                try:
+        # Change detection: run live diff against all known paths
+        try:
+            if self._settings.indexing_paths:
+                from dotmd.ingestion.reader import discover_files_multi
+
+                files = discover_files_multi(
+                    self._settings.indexing_paths,
+                    self._settings.indexing_exclude,
+                )
+            elif stats.data_dir:
+                data_path = Path(stats.data_dir)
+                if data_path.is_dir():
                     from dotmd.ingestion.reader import discover_files
 
                     files = discover_files(data_path)
-                    diff = self._pipeline.file_tracker.diff(files)
-                    stats.new_files = len(diff.new)
-                    stats.modified_files = len(diff.modified)
-                    stats.deleted_files = len(diff.deleted)
-                    stats.unchanged_files = len(diff.unchanged)
-                except Exception as e:
-                    logger.warning("Change detection failed: %s", e)
+                else:
+                    files = []
+            else:
+                files = []
+
+            if files:
+                diff = self._pipeline.file_tracker.diff(files)
+                stats.new_files = len(diff.new)
+                stats.modified_files = len(diff.modified)
+                stats.deleted_files = len(diff.deleted)
+                stats.unchanged_files = len(diff.unchanged)
+        except Exception as e:
+            logger.warning("Change detection failed: %s", e)
 
         # Trickle indexer progress (per D-15, BGIDX-02)
         trickle_state = self._trickle_indexer.state

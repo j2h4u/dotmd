@@ -137,6 +137,11 @@ class TrickleIndexer:
             ", ".join(self._settings.indexing_paths),
         )
 
+        # Reset counters once at startup (not on every poll cycle)
+        self._state._start_time = time.monotonic()
+        self._state.indexed_count = 0
+        self._state.total_chunks_done = 0
+
         try:
             # Phase 1: Process existing backlog
             await self._process_backlog(shutdown)
@@ -185,7 +190,6 @@ class TrickleIndexer:
         unindexed.sort(key=lambda fi: fi.last_modified, reverse=True)
 
         self._state.total_files = len(unindexed)
-        self._state.indexed_count = 0
         logger.info(
             "Backlog: %d new, %d modified, %d already indexed, %d total discovered",
             len(diff.new),
@@ -197,7 +201,6 @@ class TrickleIndexer:
         if not unindexed:
             return
 
-        self._state._start_time = time.monotonic()
         succeeded = 0
         failed = 0
 
