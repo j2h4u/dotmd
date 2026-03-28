@@ -218,7 +218,6 @@ class IndexingPipeline:
         t0 = time.perf_counter()
         for path_str in diff.deleted:
             self._purge_file(path_str)
-            self._file_tracker.remove_fingerprint(path_str)
         if diff.deleted:
             logger.info("[%s] purge_deleted: %d files (%.2fs)", run_id, len(diff.deleted), time.perf_counter() - t0)
 
@@ -375,6 +374,8 @@ class IndexingPipeline:
         self._metadata_store.delete_chunks_by_file(file_path)
         # 4. Delete graph subgraph
         self._graph_store.delete_file_subgraph(file_path)
+        # 5. Remove fingerprint
+        self._file_tracker.remove_fingerprint(file_path)
 
     # ------------------------------------------------------------------
     # Extraction helpers

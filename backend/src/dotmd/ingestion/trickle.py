@@ -195,7 +195,6 @@ class TrickleIndexer:
             for path_str in diff.deleted:
                 try:
                     await asyncio.to_thread(self._pipeline._purge_file, path_str)
-                    self._pipeline.file_tracker.remove_fingerprint(path_str)
                 except Exception:
                     logger.exception("Failed to purge %s", path_str)
             logger.info("Purge complete: %d files removed from all stores", len(diff.deleted))
