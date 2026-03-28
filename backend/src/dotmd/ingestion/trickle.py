@@ -189,11 +189,23 @@ class TrickleIndexer:
         # Sort by mtime descending -- newest first (per D-14)
         unindexed.sort(key=lambda fi: fi.last_modified, reverse=True)
 
+        # Purge deleted files (in tracker but no longer on disk / now excluded)
+        if diff.deleted:
+            logger.info("Purging %d deleted/excluded files from index", len(diff.deleted))
+            for path_str in diff.deleted:
+                try:
+                    await asyncio.to_thread(self._pipeline._purge_file, path_str)
+                    self._pipeline.file_tracker.remove_fingerprint(path_str)
+                except Exception:
+                    logger.exception("Failed to purge %s", path_str)
+            logger.info("Purge complete: %d files removed from all stores", len(diff.deleted))
+
         self._state.total_files = len(unindexed)
         logger.info(
-            "Backlog: %d new, %d modified, %d already indexed, %d total discovered",
+            "Backlog: %d new, %d modified, %d deleted, %d unchanged, %d total",
             len(diff.new),
             len(diff.modified),
+            len(diff.deleted),
             len(diff.unchanged),
             len(all_files),
         )
