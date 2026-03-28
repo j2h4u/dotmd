@@ -8,7 +8,6 @@ asyncio for lifecycle management within FastAPI's lifespan.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import time
 from dataclasses import dataclass, field
@@ -165,7 +164,7 @@ class TrickleIndexer:
     # ------------------------------------------------------------------
 
     async def _process_backlog(self, shutdown: asyncio.Event) -> None:
-        """Discover and process all unindexed files (newest first per D-14)."""
+        """Discover and process all unindexed files (newest first)."""
         self._state.status = "backlog"
         logger.info(
             "Discovering unindexed files from %d paths...",
@@ -186,7 +185,7 @@ class TrickleIndexer:
         unindexed_paths = set(diff.new) | set(diff.modified)
         unindexed = [fi for fi in all_files if str(fi.path) in unindexed_paths]
 
-        # Sort by mtime descending -- newest first (per D-14)
+        # Sort by mtime descending — newest first
         unindexed.sort(key=lambda fi: fi.last_modified, reverse=True)
 
         # Purge deleted files (in tracker but no longer on disk / now excluded)
@@ -298,10 +297,12 @@ class TrickleIndexer:
                         size_bytes=stat.st_size,
                     )
                     self._state.current_file = path_str
-                    await asyncio.to_thread(self._process_one_file, fi)
-                    self._state.indexed_count += 1
-                    logger.info("Watch: indexed %s", file_path.name)
-                    self._state.current_file = None
+                    try:
+                        await asyncio.to_thread(self._process_one_file, fi)
+                        self._state.indexed_count += 1
+                        logger.info("Watch: indexed %s", file_path.name)
+                    finally:
+                        self._state.current_file = None
                 except Exception:
                     logger.exception("Watch: failed to index %s", path_str)
 
@@ -313,85 +314,33 @@ class TrickleIndexer:
                 )
                 return  # shutdown signaled
             except asyncio.TimeoutError:
-                # Polling fallback: re-scan for files inotify may have missed (per D-03)
+                # Polling fallback: re-scan for files inotify may have missed
                 logger.debug("Polling fallback: re-scanning paths")
-                await self._process_backlog(shutdown)
+                try:
+                    await self._process_backlog(shutdown)
+                except Exception:
+                    logger.exception("Poll-cycle backlog scan failed — will retry next interval")
 
     # ------------------------------------------------------------------
     # Per-file processing (synchronous, runs in thread pool)
     # ------------------------------------------------------------------
 
-    def _process_one_file(self, file_info: FileInfo) -> None:
-        """Process a single file through the full pipeline.
+    def _process_one_file(self, file_info: FileInfo) -> int:
+        """Process a single file through the pipeline.
+
+        Delegates to ``IndexingPipeline.index_file`` which handles purge,
+        chunk, embed, store, extract, graph, and fingerprint.
 
         Runs synchronously in a thread pool to avoid blocking the event loop.
-        Per Pitfall 3 in research: never call synchronous I/O in async function.
         """
-        from dotmd.ingestion.chunker import chunk_file
-        from dotmd.ingestion.reader import read_file
-
         t0 = time.perf_counter()
-        path = file_info.path
-        path_str = str(path)
-
-        # Purge existing data for this file (handles modified files)
-        chunk_ids = self._pipeline.metadata_store.get_chunk_ids_by_file(path_str)
-        if chunk_ids:
-            self._pipeline._purge_file(path_str)
-            logger.debug("Purged %d existing chunks for %s", len(chunk_ids), path.name)
-
-        # Read and chunk
-        content = read_file(path)
-        chunks = chunk_file(
-            path,
-            content,
-            max_tokens=self._settings.max_chunk_tokens,
-            overlap_tokens=self._settings.chunk_overlap_tokens,
-        )
-
-        if not chunks:
-            logger.debug("Skipping %s — empty after chunking", path.name)
-            return 0
-
-        # Save to metadata store
-        self._pipeline.metadata_store.save_chunks(chunks)
-
-        # Add to FTS5 (incremental)
-        self._pipeline.bm25_engine.add_chunks(chunks)
-
-        # Encode and add to vector store
-        t_embed = time.perf_counter()
-        texts = [c.text for c in chunks]
-        embeddings = self._pipeline.semantic_engine.encode_batch(texts)
-        t_embed = time.perf_counter() - t_embed
-        self._pipeline.vector_store.add_chunks(chunks, embeddings, overwrite=True)
-
-        # Extraction
-        extraction = self._pipeline._run_extraction(chunks)
-
-        # Graph population
-        self._pipeline._populate_graph([file_info], chunks, extraction)
-
-        # Update fingerprint
-        stat = path.stat()
-        checksum = hashlib.md5(path.read_bytes()).hexdigest()
-        self._pipeline.file_tracker.save_fingerprint(
-            path_str,
-            stat.st_mtime,
-            stat.st_size,
-            checksum,
-        )
-
+        n_chunks = self._pipeline.index_file(file_info)
         elapsed = time.perf_counter() - t0
-        logger.info(
-            "%s — %d chunks, %d entities, %.1fs (embed %.1fs)",
-            path.name,
-            len(chunks),
-            extraction.total_entities,
-            elapsed,
-            t_embed,
-        )
-        return len(chunks)
+        if n_chunks:
+            logger.info("%s — %d chunks, %.1fs", file_info.path.name, n_chunks, elapsed)
+        else:
+            logger.debug("Skipping %s — empty after chunking", file_info.path.name)
+        return n_chunks
 
     # ------------------------------------------------------------------
     # Observer management
@@ -399,7 +348,7 @@ class TrickleIndexer:
 
     def _start_observer(self) -> None:
         """Start watchdog Observer for all configured directory paths."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         handler = _MarkdownEventHandler(
             loop, self._file_queue, self._settings.indexing_exclude
         )
@@ -416,7 +365,7 @@ class TrickleIndexer:
         self._observer.start()
 
     def _stop_observer(self) -> None:
-        """Stop watchdog Observer cleanly (per Pitfall 6: prevent thread leak)."""
+        """Stop watchdog Observer cleanly to prevent thread leak."""
         if self._observer is not None:
             self._observer.stop()
             self._observer.join(timeout=10)

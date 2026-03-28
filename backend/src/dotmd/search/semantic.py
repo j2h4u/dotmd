@@ -60,6 +60,7 @@ class SemanticSearchEngine:
         self._score_floor = score_floor
         self._embedding_url = embedding_url.rstrip("/") if embedding_url else None
         self._tei_batch_size = tei_batch_size
+        self._tei_bs_probed = False
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -107,7 +108,7 @@ class SemanticSearchEngine:
         if isinstance(inputs, str):
             inputs = [inputs]
 
-        if not hasattr(self, "_tei_bs_probed"):
+        if not self._tei_bs_probed:
             self._tei_batch_size = self._probe_tei_batch_size(inputs[0])
             self._tei_bs_probed = True
 

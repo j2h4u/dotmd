@@ -8,6 +8,7 @@ import click
 
 from dotmd.api.service import DotMDService
 from dotmd.core.config import Settings
+from dotmd.core.models import SearchMode
 from dotmd.utils.logging import setup_logging
 
 
@@ -71,7 +72,7 @@ def index(ctx: click.Context, directory: Path, extract_depth: str, entity_types:
 @click.option("--top", "-n", default=10, help="Number of results to return.")
 @click.option(
     "--mode",
-    type=click.Choice(["semantic", "bm25", "graph", "hybrid"]),
+    type=click.Choice([m.value for m in SearchMode]),
     default="hybrid",
     help="Search mode.",
 )
@@ -107,10 +108,6 @@ def status() -> None:
     service = _get_service(read_only=True)
     stats = service.status()
 
-    if stats is None:
-        click.echo("No index found. Run `dotmd index <directory>` first.")
-        return
-
     click.echo(f"Files:    {stats.total_files}")
     click.echo(f"Chunks:   {stats.total_chunks}")
     click.echo(f"Entities: {stats.total_entities}")
@@ -132,7 +129,7 @@ def status() -> None:
         else:
             click.echo("No changes detected since last index.")
 
-    # Trickle indexer progress (per D-15, BGIDX-02)
+    # Trickle indexer progress
     if stats.trickle_status and stats.trickle_status != "idle":
         click.echo("")  # blank line separator
         if stats.trickle_status == "backlog":

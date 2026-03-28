@@ -1,4 +1,4 @@
-"""BM25 (sparse keyword) search engine for dotMD.
+"""FTS5 keyword search engine for dotMD.
 
 Uses SQLite FTS5 for incremental full-text search over chunks.
 Each chunk is INSERT-ed immediately, eliminating full-corpus rebuilds.
@@ -40,7 +40,7 @@ def _sanitize_fts5_query(query: str) -> str:
 class FTS5SearchEngine:
     """Full-text search engine backed by SQLite FTS5.
 
-    Replaces the former pickle-based BM25 search engine.  The FTS5
+    Replaces the former pickle-based keyword search engine.  The FTS5
     virtual table lives in the same SQLite database as chunk metadata,
     sharing the WAL-mode connection.
 
@@ -105,7 +105,7 @@ class FTS5SearchEngine:
 
         If the FTS5 table is empty but the ``chunks`` table has data,
         all chunk texts are copied over.  This provides a seamless
-        upgrade path from the old pickle-based BM25 index.
+        upgrade path from the old pickle-based keyword index.
         """
         fts_count = self._conn.execute(
             "SELECT COUNT(*) FROM chunks_fts"

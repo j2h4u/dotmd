@@ -45,6 +45,7 @@ class FalkorDBGraphStore:
             self._db = FalkorDB(host=host, port=port)
             self._graph = self._db.select_graph(graph_name)
         except Exception as exc:
+            logger.error("Cannot connect to FalkorDB at %s:%d", host, port, exc_info=True)
             raise ConnectionError(
                 f"Cannot connect to FalkorDB at {url}. "
                 "Is the container running?"
@@ -56,8 +57,8 @@ class FalkorDBGraphStore:
         for label in ("File", "Section", "Entity", "Tag"):
             try:
                 self._graph.query(f"CREATE INDEX FOR (n:{label}) ON (n.id)")
-            except Exception:
-                pass  # Index already exists
+            except Exception:  # noqa: BLE001
+                logger.debug("Index for %s already exists or creation skipped", label)
 
     # -- node creation ------------------------------------------------------
 
@@ -297,8 +298,8 @@ class FalkorDBGraphStore:
                                 props["ner_entities"] = [
                                     str(r[0]) for r in ent_result.result_set
                                 ]
-                        except Exception:
-                            pass
+                        except Exception:  # noqa: BLE001
+                            logger.debug("Failed to enrich Section %s with NER entities", node_id, exc_info=True)
                     nodes.append({
                         "id": str(node_id),
                         "label": label,

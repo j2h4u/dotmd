@@ -14,12 +14,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
 
-from fastapi import FastAPI, Query
+import time
+
+from fastapi import FastAPI, Query, Request
 from pydantic import BaseModel
 
 from dotmd.api.service import DotMDService
 from dotmd.core.config import Settings
-from dotmd.core.models import IndexStats, SearchResult
+from dotmd.core.models import ExtractDepth, IndexStats, SearchMode, SearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +39,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     _service = DotMDService(Settings())
     _service.warmup()
 
-    # Start background trickle indexer (per D-01: built into serve)
+    # Start background trickle indexer
     shutdown_event = asyncio.Event()
     indexer_task = asyncio.create_task(
         _service.trickle_indexer.run(shutdown_event)
@@ -45,13 +47,19 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     yield
 
-    # Signal shutdown, wait for current file to finish (per D-17: graceful)
+    # Signal shutdown, wait for current file to finish
     shutdown_event.set()
     try:
         await asyncio.wait_for(indexer_task, timeout=120)
     except asyncio.TimeoutError:
         logger.warning("Trickle indexer did not stop within 120s -- cancelling")
         indexer_task.cancel()
+        try:
+            await indexer_task
+        except asyncio.CancelledError:
+            pass
+    except Exception:
+        logger.exception("Trickle indexer task failed during shutdown")
     _service = None
 
 
@@ -60,6 +68,23 @@ app = FastAPI(
     description="Markdown knowledgebase search API",
     lifespan=_lifespan,
 )
+
+
+@app.middleware("http")
+async def _log_requests(request: Request, call_next):  # noqa: ANN001
+    """Log every HTTP request with method, path, status, and duration."""
+    t0 = time.perf_counter()
+    response = await call_next(request)
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    log = logger.error if response.status_code >= 500 else logger.info
+    log(
+        "%s %s %d (%.0fms)",
+        request.method,
+        request.url.path,
+        response.status_code,
+        elapsed_ms,
+    )
+    return response
 
 
 @app.get("/health")
@@ -72,7 +97,7 @@ async def health() -> dict:
 
 class IndexRequest(BaseModel):
     directory: str
-    extract_depth: str = "ner"
+    extract_depth: ExtractDepth = ExtractDepth.NER
     entity_types: list[str] | None = None
     force: bool = False
 
@@ -117,7 +142,7 @@ async def index(req: IndexRequest) -> IndexStats:
 async def search(
     q: str = Query(..., description="Search query"),
     top_k: int = Query(10, ge=1, le=100),
-    mode: str = Query("hybrid", pattern="^(semantic|bm25|graph|hybrid)$"),
+    mode: SearchMode = Query(SearchMode.HYBRID),
     rerank: bool = Query(True),
     expand: bool = Query(True),
 ) -> SearchResponse:

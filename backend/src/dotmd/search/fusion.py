@@ -85,7 +85,7 @@ def _truncate(text: str, length: int) -> str:
 # Score field names on SearchResult keyed by canonical engine name.
 _ENGINE_SCORE_FIELDS: dict[str, str] = {
     "semantic": "semantic_score",
-    "bm25": "bm25_score",
+    "keyword": "keyword_score",
     "graph": "graph_score",
 }
 

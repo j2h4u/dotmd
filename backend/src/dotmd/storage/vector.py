@@ -6,9 +6,12 @@ Implements :class:`~dotmd.storage.base.VectorStoreProtocol` using the
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import lancedb  # type: ignore[import-untyped]
+
+logger = logging.getLogger(__name__)
 
 from dotmd.core.models import Chunk
 
@@ -60,9 +63,10 @@ class LanceDBVectorStore:
         """Remove all vectors from the store."""
         try:
             self._db.drop_table(self._table_name)
+        except FileNotFoundError:
+            pass  # Table does not exist yet
         except Exception:  # noqa: BLE001
-            # Table may not exist yet; nothing to delete.
-            pass
+            logger.warning("Failed to delete LanceDB table %s", self._table_name, exc_info=True)
 
     # -- queries ------------------------------------------------------------
 
@@ -88,7 +92,10 @@ class LanceDBVectorStore:
         """
         try:
             table = self._db.open_table(self._table_name)
+        except FileNotFoundError:
+            return []  # No index yet
         except Exception:  # noqa: BLE001
+            logger.warning("Failed to open LanceDB table for search", exc_info=True)
             return []
 
         results = table.search(query_embedding).limit(top_k).to_list()
@@ -102,5 +109,8 @@ class LanceDBVectorStore:
         try:
             table = self._db.open_table(self._table_name)
             return table.count_rows()
+        except FileNotFoundError:
+            return 0  # No index yet
         except Exception:  # noqa: BLE001
+            logger.warning("Failed to count LanceDB vectors", exc_info=True)
             return 0

@@ -10,10 +10,10 @@ import logging
 from pathlib import Path
 
 from dotmd.core.config import Settings
-from dotmd.core.models import IndexStats, SearchResult
+from dotmd.core.models import IndexStats, SearchMode, SearchResult
 from dotmd.ingestion.pipeline import IndexingPipeline
 from dotmd.ingestion.trickle import TrickleIndexer
-from dotmd.search.bm25 import FTS5SearchEngine
+from dotmd.search.fts5 import FTS5SearchEngine
 from dotmd.search.fusion import build_search_results, fuse_results
 from dotmd.search.graph_search import GraphSearchEngine
 from dotmd.search.query import QueryExpander
@@ -50,7 +50,7 @@ class DotMDService:
             embedding_url=self._settings.embedding_url,
             tei_batch_size=self._settings.tei_batch_size,
         )
-        self._bm25_engine = FTS5SearchEngine(self._pipeline.metadata_store._conn)
+        self._keyword_engine = FTS5SearchEngine(self._pipeline.metadata_store._conn)
         self._graph_engine = GraphSearchEngine(
             self._pipeline.graph_store,
             self._pipeline.metadata_store,
@@ -78,7 +78,6 @@ class DotMDService:
 
     @property
     def trickle_indexer(self) -> TrickleIndexer:
-        """Return the trickle indexer instance."""
         return self._trickle_indexer
 
     def warmup(self) -> None:
@@ -86,7 +85,7 @@ class DotMDService:
         logger.info("Warming up models...")
         self._semantic_engine.warmup()
         self._reranker._load_model()
-        self._bm25_engine.load_index()
+        self._keyword_engine.load_index()
         logger.info("Models ready")
 
     def index(self, directory: Path, *, force: bool = False) -> IndexStats:
@@ -114,7 +113,7 @@ class DotMDService:
         self,
         query: str,
         top_k: int = 10,
-        mode: str = "hybrid",
+        mode: SearchMode | str = SearchMode.HYBRID,
         rerank: bool = True,
         expand: bool = True,
     ) -> list[SearchResult]:
@@ -127,7 +126,7 @@ class DotMDService:
         top_k:
             Maximum number of results to return.
         mode:
-            Search strategy.  One of ``"semantic"``, ``"bm25"``,
+            Search strategy.  One of ``"semantic"``, ``"keyword"``,
             ``"graph"``, or ``"hybrid"`` (default).
         rerank:
             If ``True`` the top candidates are re-scored with a
@@ -157,33 +156,32 @@ class DotMDService:
 
         # -- Run search engines based on mode ---------------------------------
         semantic_hits: list[tuple[str, float]] = []
-        bm25_hits: list[tuple[str, float]] = []
+        keyword_hits: list[tuple[str, float]] = []
         graph_hits: list[tuple[str, float]] = []
 
-        if mode in ("semantic", "hybrid"):
+        if mode in (SearchMode.SEMANTIC, SearchMode.HYBRID):
             semantic_hits = self._semantic_engine.search(search_query, top_k=pool_size)
 
-        if mode in ("bm25", "hybrid"):
-            bm25_hits = self._bm25_engine.search(search_query, top_k=pool_size)
+        if mode in (SearchMode.KEYWORD, SearchMode.HYBRID):
+            keyword_hits = self._keyword_engine.search(search_query, top_k=pool_size)
 
-        if mode in ("graph", "hybrid"):
+        if mode in (SearchMode.GRAPH, SearchMode.HYBRID):
             # Graph search needs seed chunk IDs from other engines.
             seed_ids: list[str] = []
-            if mode == "graph":
-                # When running in graph-only mode, first obtain seeds from
-                # both semantic and BM25 engines.
+            if mode == SearchMode.GRAPH:
+                # Graph-only mode: obtain seeds from semantic + keyword first.
                 sem_seeds = self._semantic_engine.search(search_query, top_k=pool_size)
-                bm25_seeds = self._bm25_engine.search(search_query, top_k=pool_size)
+                kw_seeds = self._keyword_engine.search(search_query, top_k=pool_size)
                 seed_ids = list(
                     dict.fromkeys(
-                        cid for cid, _ in sem_seeds + bm25_seeds
+                        cid for cid, _ in sem_seeds + kw_seeds
                     )
                 )
             else:
                 # Hybrid mode: use already-collected hits as seeds.
                 seed_ids = list(
                     dict.fromkeys(
-                        cid for cid, _ in semantic_hits + bm25_hits
+                        cid for cid, _ in semantic_hits + keyword_hits
                     )
                 )
             graph_hits = self._graph_engine.search(
@@ -196,8 +194,8 @@ class DotMDService:
         engine_results: dict[str, list[tuple[str, float]]] = {}
         if semantic_hits:
             engine_results["semantic"] = semantic_hits
-        if bm25_hits:
-            engine_results["bm25"] = bm25_hits
+        if keyword_hits:
+            engine_results["keyword"] = keyword_hits
         if graph_hits:
             engine_results["graph"] = graph_hits
 
@@ -224,41 +222,40 @@ class DotMDService:
                 re_min, re_max = min(re_scores), max(re_scores)
                 re_range = re_max - re_min if re_max > re_min else 1.0
 
-                f_vals = [fused_scores[cid] for cid, _ in reranked if cid in fused_scores]
-                f_min = min(f_vals) if f_vals else 0.0
-                f_max = max(f_vals) if f_vals else 1.0
-                f_range = f_max - f_min if f_max > f_min else 1.0
+                fused_vals = [fused_scores[cid] for cid, _ in reranked if cid in fused_scores]
+                fused_min = min(fused_vals) if fused_vals else 0.0
+                fused_max = max(fused_vals) if fused_vals else 1.0
+                fused_range = fused_max - fused_min if fused_max > fused_min else 1.0
 
                 blended = []
                 for cid, re_score in reranked:
                     norm_re = (re_score - re_min) / re_range
-                    raw_f = fused_scores.get(cid, f_min)
-                    norm_f = (raw_f - f_min) / f_range
-                    blended.append((cid, 0.4 * norm_f + 0.6 * norm_re))
+                    raw_fused = fused_scores.get(cid, fused_min)
+                    norm_fused = (raw_fused - fused_min) / fused_range
+                    blended.append((cid, 0.4 * norm_fused + 0.6 * norm_re))
 
-                # D-02: Merge back fusion candidates not scored by reranker
-                # (beyond pool_size or missing from reranked set)
+                # Merge back fusion candidates not scored by reranker
                 reranked_ids = {cid for cid, _ in blended}
                 for cid, fused_score in fused:
                     if cid not in reranked_ids:
-                        norm_f = (fused_score - f_min) / f_range
-                        blended.append((cid, 0.4 * norm_f))
+                        norm_fused = (fused_score - fused_min) / fused_range
+                        blended.append((cid, 0.4 * norm_fused))
 
                 blended.sort(key=lambda x: x[1], reverse=True)
                 fused = blended
 
-                # D-05: Diagnostic logging for BM25 survival
-                bm25_ids = {cid for cid, _ in bm25_hits}
+                # Diagnostic: how many keyword-only matches survived reranking
+                kw_ids = {cid for cid, _ in keyword_hits}
                 semantic_ids = {cid for cid, _ in semantic_hits}
-                bm25_only_ids = bm25_ids - semantic_ids
-                bm25_in_final = sum(1 for cid, _ in fused if cid in bm25_only_ids)
+                kw_only_ids = kw_ids - semantic_ids
+                kw_in_final = sum(1 for cid, _ in fused if cid in kw_only_ids)
                 logger.debug(
                     "Reranked %d candidates (pool_size=%d, fused=%d); "
-                    "%d BM25-only matches in final list",
+                    "%d keyword-only matches in final list",
                     len(reranked),
                     pool_size,
                     len(fused),
-                    bm25_in_final,
+                    kw_in_final,
                 )
 
         # -- Build final SearchResult list ------------------------------------
@@ -318,9 +315,9 @@ class DotMDService:
                 stats.deleted_files = len(diff.deleted)
                 stats.unchanged_files = len(diff.unchanged)
         except Exception as e:
-            logger.warning("Change detection failed: %s", e)
+            logger.warning("Change detection failed: %s", e, exc_info=True)
 
-        # Trickle indexer progress (per D-15, BGIDX-02)
+        # Trickle indexer progress
         trickle_state = self._trickle_indexer.state
         stats.trickle_status = trickle_state.status
         stats.trickle_indexed = trickle_state.indexed_count
@@ -369,5 +366,5 @@ class DotMDService:
             with open(self._settings.acronyms_path) as f:
                 return json.load(f)
         except Exception as e:
-            logger.warning("Failed to load acronyms: %s", e)
+            logger.warning("Failed to load acronyms: %s", e, exc_info=True)
             return None

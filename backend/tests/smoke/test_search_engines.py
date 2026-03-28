@@ -18,14 +18,14 @@ class TestSearchEngines:
         for result in data["results"]:
             assert "semantic" in result["matched_engines"]
 
-    def test_bm25_returns_results(self, client: httpx.Client):
-        """TEST-02: BM25 search returns results."""
-        r = client.get("/search", params={"q": "test", "top_k": 5, "mode": "bm25"})
+    def test_keyword_returns_results(self, client: httpx.Client):
+        """TEST-02: Keyword (FTS5) search returns results."""
+        r = client.get("/search", params={"q": "test", "top_k": 5, "mode": "keyword"})
         assert r.status_code == 200
         data = r.json()
-        assert data["count"] > 0, "BM25 search returned no results"
+        assert data["count"] > 0, "Keyword search returned no results"
         for result in data["results"]:
-            assert "bm25" in result["matched_engines"]
+            assert "keyword" in result["matched_engines"]
 
     def test_graph_returns_results(self, client: httpx.Client):
         """TEST-03: Graph search returns results."""

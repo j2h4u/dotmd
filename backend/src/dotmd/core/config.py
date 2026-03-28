@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, TomlConfigSettingsSource
 
+from dotmd.core.models import ExtractDepth
+
 
 class Settings(BaseSettings):
     """Global configuration for dotMD.
@@ -35,7 +37,6 @@ class Settings(BaseSettings):
     # Set DOTMD_EMBEDDING_URL in your environment or docker-compose.yml.
     embedding_url: str
 
-    # Vector store backend: "lancedb" (default) or "sqlite-vec"
     vector_backend: Literal["lancedb", "sqlite-vec"] = "sqlite-vec"
 
     # Reranker
@@ -48,7 +49,7 @@ class Settings(BaseSettings):
     chunk_overlap_tokens: int = 50
 
     # Extraction
-    extract_depth: Literal["structural", "ner"] = "ner"
+    extract_depth: ExtractDepth = ExtractDepth.NER
     ner_entity_types: list[str] = [
         "person",
         "organization",
@@ -84,7 +85,6 @@ class Settings(BaseSettings):
     # Graph
     graph_max_hops: int = 2
     read_only: bool = False
-    # Graph backend: "ladybugdb" (default, embedded) or "falkordb" (network, Redis protocol)
     graph_backend: Literal["ladybugdb", "falkordb"] = "ladybugdb"
     # FalkorDB connection URL (Redis protocol). Only used when graph_backend="falkordb".
     falkordb_url: str = "redis://localhost:6379"
@@ -132,10 +132,6 @@ class Settings(BaseSettings):
     @property
     def sqlite_path(self) -> Path:
         return self.index_dir / "metadata.db"
-
-    @property
-    def bm25_path(self) -> Path:
-        return self.index_dir / "bm25_index.pkl"
 
     @property
     def acronyms_path(self) -> Path:

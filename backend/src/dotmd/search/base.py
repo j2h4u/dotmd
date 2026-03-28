@@ -1,6 +1,6 @@
 """Search engine protocol definition for dotMD.
 
-All search engines (semantic, BM25, graph) implement
+All search engines (semantic, keyword/FTS5, graph) implement
 :class:`SearchEngineProtocol` so they can be composed
 by the fusion layer.
 """

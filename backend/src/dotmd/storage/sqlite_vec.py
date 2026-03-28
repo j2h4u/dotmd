@@ -189,7 +189,7 @@ class SQLiteVecVectorStore:
             conn.execute(f"DELETE FROM {self._CONFIG_TABLE}")
             conn.commit()
         except Exception:  # noqa: BLE001
-            pass
+            logger.warning("Failed to delete all vectors", exc_info=True)
 
     # -- queries ------------------------------------------------------------
 
@@ -201,6 +201,7 @@ class SQLiteVecVectorStore:
         try:
             conn = self._get_conn()
         except Exception:  # noqa: BLE001
+            logger.warning("Vector search failed: cannot open connection", exc_info=True)
             return []
 
         if not self._has_index():
@@ -220,6 +221,7 @@ class SQLiteVecVectorStore:
                 (_serialize_f32(query_embedding), top_k),
             ).fetchall()
         except Exception:  # noqa: BLE001
+            logger.warning("Vector search query failed", exc_info=True)
             return []
 
         return [(row[0], 1.0 / (1.0 + row[1])) for row in rows]
@@ -229,4 +231,5 @@ class SQLiteVecVectorStore:
             conn = self._get_conn()
             return conn.execute(f"SELECT COUNT(*) FROM {self._META_TABLE}").fetchone()[0]
         except Exception:  # noqa: BLE001
+            logger.warning("Failed to count vectors", exc_info=True)
             return 0

@@ -28,7 +28,7 @@ from eval.run_hotpotqa import run_evaluation
 @click.option(
     "--mode",
     default="hybrid",
-    type=click.Choice(["semantic", "bm25", "graph", "hybrid"]),
+    type=click.Choice(["semantic", "keyword", "graph", "hybrid"]),
 )
 @click.option("--no-rerank", is_flag=True, help="Disable cross-encoder reranking")
 @click.option("--no-expand", is_flag=True, help="Disable query expansion")

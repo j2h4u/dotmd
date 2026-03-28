@@ -153,7 +153,6 @@ def chunk_file(
 
         current_hierarchy = [h for h in hierarchy[1 : level + 1] if h] if level > 0 else []
 
-        # --- Improvement 1 & 2: include heading + hierarchy in chunk text ---
         # Prepend the full heading path so search engines can match on
         # contextual terms (e.g. "principles" matches each principle chunk).
         body_stripped = body.strip()

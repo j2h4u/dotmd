@@ -1,9 +1,9 @@
-"""Tests for BM25 survival through hybrid search pipeline.
+"""Tests for keyword-only survival through hybrid search pipeline.
 
 Verifies that all RRF fusion candidates survive through reranking:
 - Candidates beyond pool_size are merged back with fusion-only scores
-- BM25-only matches that score low on cross-encoder still appear in results
-- Diagnostic logging reports BM25-only survival counts
+- Keyword-only matches that score low on cross-encoder still appear in results
+- Diagnostic logging reports keyword-only survival counts
 """
 
 import logging
@@ -35,15 +35,15 @@ class TestMergeBackBeyondPoolSize:
         service = _make_service(tmp_path)
 
         # Create 25 unique fused results (pool_size=20, so 5 skip the reranker)
-        # Semantic returns 15 unique chunks, BM25 returns 15 unique (5 overlap)
+        # Semantic returns 15 unique chunks, keyword returns 15 unique (5 overlap)
         semantic_hits = [(f"sem-{i}", 0.9 - i * 0.05) for i in range(15)]
-        bm25_hits = [(f"bm25-{i}", 8.0 - i * 0.3) for i in range(15)]
+        keyword_hits = [(f"kw-{i}", 8.0 - i * 0.3) for i in range(15)]
 
         # Mock search engines
         service._semantic_engine = MagicMock()
         service._semantic_engine.search.return_value = semantic_hits
-        service._bm25_engine = MagicMock()
-        service._bm25_engine.search.return_value = bm25_hits
+        service._keyword_engine = MagicMock()
+        service._keyword_engine.search.return_value = keyword_hits
         service._graph_engine = MagicMock()
         service._graph_engine.search.return_value = []
         service._query_expander = MagicMock()
@@ -94,21 +94,21 @@ class TestMergeBackBeyondPoolSize:
         assert len(call_args[0][1]) == 20  # chunk_ids arg
 
 
-class TestBM25SurvivalThroughReranking:
-    """BM25-only candidates must survive even with low cross-encoder scores."""
+class TestKeywordSurvivalThroughReranking:
+    """Keyword-only candidates must survive even with low cross-encoder scores."""
 
-    def test_bm25_only_candidate_survives_low_reranker_score(self, tmp_path: Path) -> None:
-        """A BM25-only hit scored very low by cross-encoder still appears in final results."""
+    def test_keyword_only_candidate_survives_low_reranker_score(self, tmp_path: Path) -> None:
+        """A keyword-only hit scored very low by cross-encoder still appears in final results."""
         service = _make_service(tmp_path)
 
-        # BM25 finds "b1", semantic finds "s1" -- no overlap
+        # Keyword finds "b1", semantic finds "s1" -- no overlap
         semantic_hits = [("s1", 0.9)]
-        bm25_hits = [("b1", 5.0)]
+        keyword_hits = [("b1", 5.0)]
 
         service._semantic_engine = MagicMock()
         service._semantic_engine.search.return_value = semantic_hits
-        service._bm25_engine = MagicMock()
-        service._bm25_engine.search.return_value = bm25_hits
+        service._keyword_engine = MagicMock()
+        service._keyword_engine.search.return_value = keyword_hits
         service._graph_engine = MagicMock()
         service._graph_engine.search.return_value = []
         service._query_expander = MagicMock()
@@ -146,24 +146,24 @@ class TestBM25SurvivalThroughReranking:
             service.search("test query", top_k=10, mode="hybrid", rerank=True)
 
         fused_ids = {cid for cid, _ in captured_fused}
-        assert "b1" in fused_ids, f"BM25-only candidate 'b1' missing from final fused: {fused_ids}"
+        assert "b1" in fused_ids, f"Keyword-only candidate 'b1' missing from final fused: {fused_ids}"
         assert "s1" in fused_ids, f"Semantic candidate 's1' missing from final fused: {fused_ids}"
 
 
 class TestDiagnosticLogging:
-    """Diagnostic logging reports BM25-only survival count."""
+    """Diagnostic logging reports keyword-only survival count."""
 
-    def test_bm25_survival_logged_at_debug(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
-        """Log message matching 'BM25-only' present in captured logs at DEBUG level."""
+    def test_keyword_survival_logged_at_debug(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+        """Log message matching 'keyword-only' present in captured logs at DEBUG level."""
         service = _make_service(tmp_path)
 
         semantic_hits = [("s1", 0.9)]
-        bm25_hits = [("b1", 5.0)]
+        keyword_hits = [("b1", 5.0)]
 
         service._semantic_engine = MagicMock()
         service._semantic_engine.search.return_value = semantic_hits
-        service._bm25_engine = MagicMock()
-        service._bm25_engine.search.return_value = bm25_hits
+        service._keyword_engine = MagicMock()
+        service._keyword_engine.search.return_value = keyword_hits
         service._graph_engine = MagicMock()
         service._graph_engine.search.return_value = []
         service._query_expander = MagicMock()
@@ -186,7 +186,7 @@ class TestDiagnosticLogging:
         with caplog.at_level(logging.DEBUG, logger="dotmd.api.service"):
             service.search("test query", top_k=10, mode="hybrid", rerank=True)
 
-        bm25_log_messages = [r.message for r in caplog.records if "BM25-only" in r.message]
-        assert len(bm25_log_messages) > 0, (
-            f"Expected log message containing 'BM25-only', got: {[r.message for r in caplog.records]}"
+        kw_log_messages = [r.message for r in caplog.records if "keyword-only" in r.message]
+        assert len(kw_log_messages) > 0, (
+            f"Expected log message containing 'keyword-only', got: {[r.message for r in caplog.records]}"
         )

@@ -1,6 +1,6 @@
 """End-to-end indexing pipeline for dotMD.
 
-Orchestrates file discovery, chunking, embedding, BM25 index construction,
+Orchestrates file discovery, chunking, embedding, FTS5 index construction,
 structural and NER extraction, and knowledge-graph population.
 
 Supports two modes:
@@ -29,7 +29,7 @@ from dotmd.extraction.structural import StructuralExtractor
 from dotmd.ingestion.chunker import chunk_file
 from dotmd.ingestion.file_tracker import FileDiff, FileTracker
 from dotmd.ingestion.reader import discover_files, read_file
-from dotmd.search.bm25 import FTS5SearchEngine
+from dotmd.search.fts5 import FTS5SearchEngine
 from dotmd.search.semantic import SemanticSearchEngine
 from dotmd.storage.base import GraphStoreProtocol, VectorStoreProtocol
 from dotmd.storage.metadata import SQLiteMetadataStore
@@ -111,7 +111,7 @@ class IndexingPipeline:
             embedding_url=settings.embedding_url,
             tei_batch_size=settings.tei_batch_size,
         )
-        self._bm25_engine = FTS5SearchEngine(self._metadata_store._conn)
+        self._keyword_engine = FTS5SearchEngine(self._metadata_store._conn)
 
         # -- extractors --------------------------------------------------------
         self._structural_extractor = StructuralExtractor()
@@ -258,7 +258,7 @@ class IndexingPipeline:
         data_dir: str | None = None,
         run_id: str = "",
     ) -> IndexStats:
-        """Ingest *files_to_ingest* and rebuild BM25/stats from full corpus."""
+        """Ingest *files_to_ingest* and rebuild FTS5/stats from full corpus."""
         # Read and chunk only the files to ingest
         t0 = time.perf_counter()
         new_chunks: list[Chunk] = []
@@ -293,10 +293,10 @@ class IndexingPipeline:
             )
             logger.info("[%s] vector_store: %d vectors (%.2fs)", run_id, len(new_chunks), time.perf_counter() - t0)
 
-        # FTS5 incremental update (replaces full BM25 rebuild)
+        # FTS5 incremental update
         if new_chunks:
             t0 = time.perf_counter()
-            self._bm25_engine.add_chunks(new_chunks)
+            self._keyword_engine.add_chunks(new_chunks)
             logger.info("[%s] fts5: %d chunks (%.2fs)", run_id, len(new_chunks), time.perf_counter() - t0)
 
         # Extraction (structural + NER + key-terms) on NEW chunks only
@@ -315,18 +315,27 @@ class IndexingPipeline:
         acronym_dict = extract_acronyms_from_chunks(all_chunks)
         if acronym_dict:
             import json
+            import tempfile
 
             self._settings.acronyms_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self._settings.acronyms_path, "w") as f:
-                json.dump(acronym_dict, f, indent=2)
+            fd, tmp_path = tempfile.mkstemp(
+                dir=self._settings.acronyms_path.parent, suffix=".tmp",
+            )
+            try:
+                with open(fd, "w") as f:
+                    json.dump(acronym_dict, f, indent=2)
+                Path(tmp_path).replace(self._settings.acronyms_path)
+            except BaseException:
+                Path(tmp_path).unlink(missing_ok=True)
+                raise
         logger.info("[%s] acronyms: %d (%.2fs)", run_id, len(acronym_dict) if acronym_dict else 0, time.perf_counter() - t0)
 
-        # Update fingerprints AFTER successful ingestion (Pitfall 3)
+        # Update fingerprints AFTER successful ingestion
         t0 = time.perf_counter()
         self._update_fingerprints(files_to_ingest)
         logger.info("[%s] fingerprints: %d files (%.2fs)", run_id, len(files_to_ingest), time.perf_counter() - t0)
 
-        # Stats from full store (Pitfall 6)
+        # Stats from full store (incremental: query actual graph counts)
         all_entities_count = extraction_result.total_entities
         all_edges_count = extraction_result.total_relations
         if not overwrite_vectors:
@@ -334,7 +343,7 @@ class IndexingPipeline:
                 all_entities_count = self._graph_store.node_count()
                 all_edges_count = self._graph_store.edge_count()
             except Exception:
-                pass
+                logger.warning("Failed to fetch graph counts for stats", exc_info=True)
 
         _dc = diff_counts or {}
         stats = IndexStats(
@@ -353,6 +362,51 @@ class IndexingPipeline:
         return stats
 
     # ------------------------------------------------------------------
+    # Single-file indexing (used by trickle indexer)
+    # ------------------------------------------------------------------
+
+    def index_file(self, file_info: FileInfo) -> int:
+        """Index a single file through the full pipeline.
+
+        Purges any existing data for the file first, then processes it
+        through all stores.  Used by the trickle indexer for
+        one-at-a-time background processing.
+
+        Returns the number of chunks created.
+        """
+        path_str = str(file_info.path)
+
+        # Purge existing data (handles modified files)
+        chunk_ids = self._metadata_store.get_chunk_ids_by_file(path_str)
+        if chunk_ids:
+            self._purge_file(path_str)
+            logger.debug("Purged %d existing chunks for %s", len(chunk_ids), file_info.path.name)
+
+        content = read_file(file_info.path)
+        chunks = chunk_file(
+            file_info.path,
+            content,
+            max_tokens=self._settings.max_chunk_tokens,
+            overlap_tokens=self._settings.chunk_overlap_tokens,
+        )
+
+        if not chunks:
+            return 0
+
+        self._metadata_store.save_chunks(chunks)
+        self._keyword_engine.add_chunks(chunks)
+
+        texts = [c.text for c in chunks]
+        embeddings = self._semantic_engine.encode_batch(texts)
+        self._vector_store.add_chunks(chunks, embeddings, overwrite=False)
+
+        extraction = self._run_extraction(chunks)
+        self._populate_graph([file_info], chunks, extraction)
+        self._update_fingerprints([file_info])
+
+        return len(chunks)
+
+    # ------------------------------------------------------------------
     # Per-file purge
     # ------------------------------------------------------------------
 
@@ -362,19 +416,12 @@ class IndexingPipeline:
         ORDERING MATTERS: chunk_ids must be fetched from metadata BEFORE
         metadata rows are deleted, because vector deletion needs them.
         """
-        # 1. Get chunk IDs (MUST be before metadata delete)
         chunk_ids = self._metadata_store.get_chunk_ids_by_file(file_path)
-        # 2. Delete vectors (needs chunk_ids from step 1)
         if chunk_ids:
             self._vector_store.delete_vectors_by_chunk_ids(chunk_ids)
-        # 2.5 Delete from FTS5 index
-        if chunk_ids:
-            self._bm25_engine.remove_chunks(chunk_ids)
-        # 3. Delete metadata chunks
+            self._keyword_engine.remove_chunks(chunk_ids)
         self._metadata_store.delete_chunks_by_file(file_path)
-        # 4. Delete graph subgraph
         self._graph_store.delete_file_subgraph(file_path)
-        # 5. Remove fingerprint
         self._file_tracker.remove_fingerprint(file_path)
 
     # ------------------------------------------------------------------
@@ -476,30 +523,24 @@ class IndexingPipeline:
 
     @property
     def metadata_store(self) -> SQLiteMetadataStore:
-        """Return the metadata store instance."""
         return self._metadata_store
 
     @property
     def vector_store(self) -> VectorStoreProtocol:
-        """Return the vector store instance."""
         return self._vector_store
 
     @property
     def graph_store(self) -> GraphStoreProtocol:
-        """Return the graph store instance."""
         return self._graph_store
 
     @property
     def semantic_engine(self) -> SemanticSearchEngine:
-        """Return the semantic search engine instance."""
         return self._semantic_engine
 
     @property
-    def bm25_engine(self) -> FTS5SearchEngine:
-        """Return the FTS5 search engine instance."""
-        return self._bm25_engine
+    def keyword_engine(self) -> FTS5SearchEngine:
+        return self._keyword_engine
 
     @property
     def file_tracker(self) -> FileTracker:
-        """Return the file tracker instance."""
         return self._file_tracker

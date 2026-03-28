@@ -4,9 +4,26 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 
 from pydantic import BaseModel, Field, computed_field
+
+
+class SearchMode(StrEnum):
+    """Available search strategies."""
+
+    SEMANTIC = "semantic"
+    KEYWORD = "keyword"
+    GRAPH = "graph"
+    HYBRID = "hybrid"
+
+
+class ExtractDepth(StrEnum):
+    """Extraction depth levels."""
+
+    STRUCTURAL = "structural"
+    NER = "ner"
 
 
 class FileInfo(BaseModel):
@@ -83,7 +100,7 @@ class SearchResult(BaseModel):
     snippet: str
     fused_score: float
     semantic_score: float | None = None
-    bm25_score: float | None = None
+    keyword_score: float | None = None
     graph_score: float | None = None
     matched_engines: list[str] = Field(default_factory=list)
 
@@ -102,7 +119,7 @@ class IndexStats(BaseModel):
     unchanged_files: int = 0
     data_dir: str | None = None
 
-    # Trickle indexer progress (per D-15, BGIDX-02)
+    # Trickle indexer progress
     trickle_status: str | None = None  # "idle", "backlog", "watching", "stopping", or None if not running
     trickle_indexed: int | None = None  # files indexed so far in current run
     trickle_total: int | None = None  # total files to index in current run

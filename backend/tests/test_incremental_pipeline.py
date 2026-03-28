@@ -73,7 +73,7 @@ def mock_settings(index_dir: Path):
     settings.sqlite_path = index_dir / "metadata.db"
     settings.sqlite_vec_path = index_dir / "vec.db"
     settings.graph_db_path = index_dir / "graphdb"
-    settings.bm25_path = index_dir / "bm25_index.pkl"
+
     settings.acronyms_path = index_dir / "acronyms.json"
     settings.embedding_model = "test-model"
     settings.embedding_url = "http://test:8088"
@@ -309,13 +309,13 @@ class TestNewFileAdded:
         assert stats.total_files == 2  # both files counted
 
 
-class TestBM25RebuildAfterChanges:
-    """BM25 is always rebuilt from all chunks after every incremental run."""
+class TestFTS5UpdateAfterChanges:
+    """FTS5 index is updated incrementally on deletions."""
 
     @patch("dotmd.ingestion.pipeline.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
     @patch("dotmd.ingestion.pipeline.chunk_file")
-    def test_bm25_rebuilt_on_delete(
+    def test_fts5_chunks_removed_on_delete(
         self, mock_chunk_file, mock_read_file, mock_discover, md_dir, mock_settings
     ):
         from dotmd.ingestion.pipeline import IndexingPipeline
@@ -334,22 +334,24 @@ class TestBM25RebuildAfterChanges:
         # First index
         pipeline.index(md_dir)
 
-        # Spy on bm25 build_index
-        pipeline._bm25_engine.build_index = MagicMock()
+        # Spy on FTS5 remove_chunks
+        pipeline._keyword_engine.remove_chunks = MagicMock()
 
         # Delete file a
         (md_dir / "a.md").unlink()
         mock_read_file.reset_mock()
         mock_chunk_file.reset_mock()
-        mock_chunk_file.side_effect = None  # clear exhausted iterator
+        mock_chunk_file.side_effect = None
 
         file_b_again = _make_file_info(str(md_dir / "b.md"), "File B")
         mock_discover.return_value = [file_b_again]
 
         pipeline.index(md_dir)
 
-        # BM25 should be rebuilt even though only a deletion happened
-        assert pipeline._bm25_engine.build_index.call_count == 1
+        # Deleted file's chunks should be removed from FTS5
+        pipeline._keyword_engine.remove_chunks.assert_called_once()
+        removed_ids = pipeline._keyword_engine.remove_chunks.call_args[0][0]
+        assert "a-0" in removed_ids
 
 
 class TestFingerprintTiming:

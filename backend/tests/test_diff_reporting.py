@@ -231,7 +231,7 @@ class TestPipelineIncrementalDiffCounts:
         settings.sqlite_path = index_dir / "metadata.db"
         settings.sqlite_vec_path = index_dir / "vec.db"
         settings.graph_db_path = index_dir / "graphdb"
-        settings.bm25_path = index_dir / "bm25_index.pkl"
+
         settings.acronyms_path = index_dir / "acronyms.json"
         settings.embedding_model = "test-model"
         settings.embedding_url = "http://test:8088"
@@ -314,7 +314,7 @@ class TestPipelineFullIndexDiffCounts:
         settings.sqlite_path = index_dir / "metadata.db"
         settings.sqlite_vec_path = index_dir / "vec.db"
         settings.graph_db_path = index_dir / "graphdb"
-        settings.bm25_path = index_dir / "bm25_index.pkl"
+
         settings.acronyms_path = index_dir / "acronyms.json"
         settings.embedding_model = "test-model"
         settings.embedding_url = "http://test:8088"
@@ -375,7 +375,7 @@ class TestPipelineNoChangesDiffCounts:
         settings.sqlite_path = index_dir / "metadata.db"
         settings.sqlite_vec_path = index_dir / "vec.db"
         settings.graph_db_path = index_dir / "graphdb"
-        settings.bm25_path = index_dir / "bm25_index.pkl"
+
         settings.acronyms_path = index_dir / "acronyms.json"
         settings.embedding_model = "test-model"
         settings.embedding_url = "http://test:8088"
