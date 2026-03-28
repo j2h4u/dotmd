@@ -214,8 +214,11 @@ def _add_file(
         return
 
     try:
-        content = read_file(md_path)
         stat = md_path.stat()
+        if stat.st_size == 0:
+            logger.info("Skipping empty file (0 bytes): %s", md_path)
+            return
+        content = read_file(md_path)
         results.append(
             FileInfo(
                 path=md_path,
