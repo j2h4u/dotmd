@@ -201,6 +201,10 @@ class TrickleIndexer:
         if not unindexed:
             return
 
+        if len(unindexed) <= 5:
+            for fi in unindexed:
+                logger.info("  queued: %s (mtime %s)", fi.path, fi.last_modified.isoformat())
+
         succeeded = 0
         failed = 0
 
