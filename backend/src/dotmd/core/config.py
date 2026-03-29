@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     default_top_k: int = 10
     fusion_k: int = 60  # RRF constant
     rerank_pool_size: int = 20  # candidates to rerank
-    semantic_score_floor: float = 0.62  # BGE-small: <0.62 is noise (empirically verified)
+    semantic_score_floor: float = 0.85  # ratio of top hit: keep results within 85% of best score
     snippet_length: int = 300  # display snippet character limit
 
     # Indexing paths (multi-path discovery)

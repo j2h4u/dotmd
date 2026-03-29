@@ -191,6 +191,13 @@ class SemanticSearchEngine:
         # E5 models require "query: " prefix for retrieval queries.
         query_embedding = self.encode(f"query: {query}")
         results = self._vector_store.search(query_embedding, top_k=top_k)
+        if not results:
+            return results
+        # Relative threshold: keep results within score_floor ratio of the
+        # best hit. Adapts automatically to any model's score distribution
+        # (e.g., E5 scores cluster in 0.7–1.0, other models may differ).
         if self._score_floor > 0.0:
-            results = [(cid, s) for cid, s in results if s >= self._score_floor]
+            top_score = results[0][1]  # results are sorted by descending score
+            threshold = top_score * self._score_floor
+            results = [(cid, s) for cid, s in results if s >= threshold]
         return results
