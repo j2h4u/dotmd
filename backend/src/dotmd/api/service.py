@@ -167,9 +167,9 @@ class DotMDService:
 
         if mode in (SearchMode.GRAPH, SearchMode.HYBRID):
             # Graph search needs seed chunk IDs from other engines.
+            # Without strong seeds, graph traversal produces noise.
             seed_ids: list[str] = []
             if mode == SearchMode.GRAPH:
-                # Graph-only mode: obtain seeds from semantic + keyword first.
                 sem_seeds = self._semantic_engine.search(search_query, top_k=pool_size)
                 kw_seeds = self._keyword_engine.search(search_query, top_k=pool_size)
                 seed_ids = list(
@@ -178,17 +178,21 @@ class DotMDService:
                     )
                 )
             else:
-                # Hybrid mode: use already-collected hits as seeds.
                 seed_ids = list(
                     dict.fromkeys(
                         cid for cid, _ in semantic_hits + keyword_hits
                     )
                 )
-            graph_hits = self._graph_engine.search(
-                search_query,
-                top_k=pool_size,
-                seed_chunk_ids=seed_ids,
-            )
+            if seed_ids:
+                graph_hits = self._graph_engine.search(
+                    search_query,
+                    top_k=pool_size,
+                    seed_chunk_ids=seed_ids,
+                )
+
+        # -- Quality gate: no primary hits → nothing to fuse --------------------
+        if not semantic_hits and not keyword_hits:
+            return []
 
         # -- Fuse results via RRF ---------------------------------------------
         engine_results: dict[str, list[tuple[str, float]]] = {}
