@@ -194,6 +194,87 @@ class IndexingPipeline:
         logger.info("All stores cleared")
 
     # ------------------------------------------------------------------
+    # Granular reindex (rebuild one store from metadata chunks)
+    # ------------------------------------------------------------------
+
+    def reindex_vectors(self) -> int:
+        """Rebuild vector store from stored chunks. Returns chunk count."""
+        all_chunks = self._metadata_store.get_all_chunks()
+        if not all_chunks:
+            logger.info("reindex_vectors: no chunks in metadata")
+            return 0
+        self._vector_store.delete_all()
+        texts = [c.text for c in all_chunks]
+        embeddings = self._semantic_engine.encode_batch(texts)
+        self._vector_store.add_chunks(all_chunks, embeddings, overwrite=True)
+        logger.info("reindex_vectors: %d chunks re-embedded", len(all_chunks))
+        return len(all_chunks)
+
+    def reindex_fts5(self) -> int:
+        """Rebuild FTS5 keyword index from stored chunks. Returns chunk count."""
+        all_chunks = self._metadata_store.get_all_chunks()
+        if not all_chunks:
+            logger.info("reindex_fts5: no chunks in metadata")
+            return 0
+        self._metadata_store._conn.execute("DELETE FROM chunks_fts")
+        self._metadata_store._conn.commit()
+        self._keyword_engine.add_chunks(all_chunks)
+        logger.info("reindex_fts5: %d chunks re-indexed", len(all_chunks))
+        return len(all_chunks)
+
+    def reindex_graph(self) -> int:
+        """Rebuild knowledge graph from stored chunks. Returns chunk count."""
+        all_chunks = self._metadata_store.get_all_chunks()
+        if not all_chunks:
+            logger.info("reindex_graph: no chunks in metadata")
+            return 0
+        self._graph_store.delete_all()
+
+        # File nodes (without checksum — no disk reads)
+        for fp in sorted({str(c.file_path) for c in all_chunks}):
+            self._graph_store.add_file_node(
+                file_path=fp, title=Path(fp).stem, checksum="",
+            )
+
+        # Section nodes + CONTAINS edges
+        for chunk in all_chunks:
+            self._graph_store.add_section_node(
+                chunk_id=chunk.chunk_id,
+                heading=chunk.heading,
+                level=chunk.level,
+                file_path=str(chunk.file_path),
+                text_preview=chunk.text[:200],
+            )
+            self._graph_store.add_edge(
+                source_id=str(chunk.file_path),
+                target_id=chunk.chunk_id,
+                relation_type="CONTAINS",
+            )
+
+        # Extraction + entity/relation nodes and edges
+        extraction = self._run_extraction(all_chunks)
+        for entity in extraction.entities:
+            if entity.type == "tag":
+                self._graph_store.add_tag_node(entity.name)
+            else:
+                self._graph_store.add_entity_node(
+                    name=entity.name, entity_type=entity.type, source=entity.source,
+                )
+        for relation in extraction.relations:
+            self._graph_store.add_edge(
+                source_id=relation.source_id,
+                target_id=relation.target_id,
+                relation_type=relation.relation_type,
+                weight=relation.weight,
+            )
+
+        logger.info(
+            "reindex_graph: %d chunks, %d entities, %d relations",
+            len(all_chunks), extraction.total_entities, extraction.total_relations,
+        )
+        return len(all_chunks)
+
+    # ------------------------------------------------------------------
     # Indexing strategies
     # ------------------------------------------------------------------
 

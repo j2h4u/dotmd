@@ -109,6 +109,34 @@ class DotMDService:
         """
         return self._pipeline.index(directory, force=force)
 
+    def reindex(self, store: str) -> int:
+        """Rebuild a single store from metadata chunks.
+
+        Parameters
+        ----------
+        store:
+            Which store to rebuild: ``"vectors"``, ``"fts5"``,
+            ``"graph"``, or ``"all"``.
+
+        Returns
+        -------
+        int
+            Number of chunks processed.
+        """
+        if store == "all":
+            n = self._pipeline.reindex_fts5()
+            self._pipeline.reindex_vectors()
+            self._pipeline.reindex_graph()
+            return n
+        method = {
+            "vectors": self._pipeline.reindex_vectors,
+            "fts5": self._pipeline.reindex_fts5,
+            "graph": self._pipeline.reindex_graph,
+        }.get(store)
+        if method is None:
+            raise ValueError(f"Unknown store: {store!r}")
+        return method()
+
     def search(
         self,
         query: str,

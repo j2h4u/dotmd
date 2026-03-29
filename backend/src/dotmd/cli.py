@@ -156,6 +156,51 @@ def status() -> None:
             click.echo(f"  Current: {stats.trickle_current_file}")
 
 
+@main.group()
+def reindex() -> None:
+    """Rebuild a specific index from stored chunks.
+
+    Metadata (chunks) is the source of truth — each subcommand
+    rebuilds one derived store without re-reading files from disk.
+    """
+
+
+@reindex.command("vectors")
+def reindex_vectors() -> None:
+    """Rebuild vector embeddings (requires TEI)."""
+    service = _get_service()
+    click.echo("Rebuilding vector index...")
+    n = service.reindex("vectors")
+    click.echo(f"Done. {n} chunks re-embedded.")
+
+
+@reindex.command("fts5")
+def reindex_fts5() -> None:
+    """Rebuild FTS5 keyword index."""
+    service = _get_service()
+    click.echo("Rebuilding FTS5 index...")
+    n = service.reindex("fts5")
+    click.echo(f"Done. {n} chunks re-indexed.")
+
+
+@reindex.command("graph")
+def reindex_graph() -> None:
+    """Rebuild knowledge graph (runs extraction)."""
+    service = _get_service()
+    click.echo("Rebuilding knowledge graph...")
+    n = service.reindex("graph")
+    click.echo(f"Done. {n} chunks processed.")
+
+
+@reindex.command("all")
+def reindex_all() -> None:
+    """Rebuild all derived indexes (vectors + FTS5 + graph)."""
+    service = _get_service()
+    click.echo("Rebuilding all indexes...")
+    n = service.reindex("all")
+    click.echo(f"Done. {n} chunks across all stores.")
+
+
 @main.command()
 def clear() -> None:
     """Clear the entire index."""
