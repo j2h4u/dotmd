@@ -86,7 +86,23 @@ class DotMDService:
         self._semantic_engine.warmup()
         self._reranker._load_model()
         self._keyword_engine.load_index()
+        self._check_embedding_model()
         logger.info("Models ready")
+
+    def _check_embedding_model(self) -> None:
+        """Warn if the configured embedding model differs from the indexed one."""
+        vs = self._pipeline.vector_store
+        if not hasattr(vs, "get_model_name"):
+            return
+        stored = vs.get_model_name()
+        configured = self._settings.embedding_model
+        if stored and stored != configured:
+            logger.warning(
+                "Embedding model mismatch: index was built with %r, "
+                "but %r is configured. Run `dotmd reindex vectors` to rebuild.",
+                stored,
+                configured,
+            )
 
     def index(self, directory: Path, *, force: bool = False) -> IndexStats:
         """Index all markdown files under *directory*.

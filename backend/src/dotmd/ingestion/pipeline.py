@@ -207,6 +207,8 @@ class IndexingPipeline:
         texts = [c.text for c in all_chunks]
         embeddings = self._semantic_engine.encode_batch(texts)
         self._vector_store.add_chunks(all_chunks, embeddings, overwrite=True)
+        if hasattr(self._vector_store, "set_model_name"):
+            self._vector_store.set_model_name(self._settings.embedding_model)
         logger.info("reindex_vectors: %d chunks re-embedded", len(all_chunks))
         return len(all_chunks)
 
@@ -373,6 +375,8 @@ class IndexingPipeline:
                 new_chunks, embeddings, overwrite=overwrite_vectors,
             )
             logger.info("[%s] vector_store: %d vectors (%.2fs)", run_id, len(new_chunks), time.perf_counter() - t0)
+            if hasattr(self._vector_store, "set_model_name"):
+                self._vector_store.set_model_name(self._settings.embedding_model)
 
         # FTS5 incremental update
         if new_chunks:

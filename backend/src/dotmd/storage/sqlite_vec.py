@@ -80,6 +80,23 @@ class SQLiteVecVectorStore:
         ).fetchone()
         return int(row[0]) if row else None
 
+    def get_model_name(self) -> str | None:
+        """Read the stored embedding model name, or None if not recorded."""
+        conn = self._get_conn()
+        row = conn.execute(
+            f"SELECT value FROM {self._CONFIG_TABLE} WHERE key = 'model'",
+        ).fetchone()
+        return row[0] if row else None
+
+    def set_model_name(self, model: str) -> None:
+        """Record which embedding model was used to build this index."""
+        conn = self._get_conn()
+        conn.execute(
+            f"INSERT OR REPLACE INTO {self._CONFIG_TABLE} (key, value) VALUES ('model', ?)",
+            (model,),
+        )
+        conn.commit()
+
     def _create_vec_table(self, dim: int) -> None:
         """Create (or recreate) the vec0 virtual table for the given dimension."""
         conn = self._get_conn()
