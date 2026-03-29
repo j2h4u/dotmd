@@ -208,7 +208,8 @@ class IndexingPipeline:
         embeddings = self._semantic_engine.encode_batch(texts)
         self._vector_store.add_chunks(all_chunks, embeddings, overwrite=True)
         if hasattr(self._vector_store, "set_model_name"):
-            self._vector_store.set_model_name(self._settings.embedding_model)
+            model_id = self._semantic_engine.get_tei_model_id() or self._settings.embedding_model
+            self._vector_store.set_model_name(model_id)
         logger.info("reindex_vectors: %d chunks re-embedded", len(all_chunks))
         return len(all_chunks)
 

@@ -90,18 +90,26 @@ class DotMDService:
         logger.info("Models ready")
 
     def _check_embedding_model(self) -> None:
-        """Warn if the configured embedding model differs from the indexed one."""
+        """Warn if the active embedding model differs from what built the index.
+
+        Compares the model name stored in vec_config (written during indexing)
+        against the model actually served by TEI (queried via /info).
+        This catches silent search degradation when someone swaps the TEI
+        model without re-encoding vectors.
+        """
         vs = self._pipeline.vector_store
         if not hasattr(vs, "get_model_name"):
             return
         stored = vs.get_model_name()
-        configured = self._settings.embedding_model
-        if stored and stored != configured:
+        if not stored:
+            return
+        active = self._semantic_engine.get_tei_model_id()
+        if active and stored != active:
             logger.warning(
                 "Embedding model mismatch: index was built with %r, "
-                "but %r is configured. Run `dotmd reindex vectors` to rebuild.",
+                "but TEI is serving %r. Run `dotmd reindex vectors` to rebuild.",
                 stored,
-                configured,
+                active,
             )
 
     def index(self, directory: Path, *, force: bool = False) -> IndexStats:

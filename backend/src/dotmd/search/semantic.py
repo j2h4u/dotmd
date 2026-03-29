@@ -61,6 +61,27 @@ class SemanticSearchEngine:
         self._embedding_url = embedding_url.rstrip("/") if embedding_url else None
         self._tei_batch_size = tei_batch_size
         self._tei_bs_probed = False
+        self._tei_model_id: str | None = None
+
+    def get_tei_model_id(self) -> str | None:
+        """Return the actual embedding model name.
+
+        When TEI is configured, queries /info for the real model_id
+        (the config value is irrelevant — TEI decides which model to load).
+        When running locally, returns the configured model_name.
+        """
+        if self._tei_model_id:
+            return self._tei_model_id
+        if not self._embedding_url:
+            return self._model_name  # local model, trust config
+        try:
+            resp = httpx.get(f"{self._embedding_url}/info", timeout=5.0)
+            resp.raise_for_status()
+            self._tei_model_id = resp.json().get("model_id")
+            return self._tei_model_id
+        except Exception:
+            logger.debug("Could not query TEI /info", exc_info=True)
+            return None
 
     # ------------------------------------------------------------------
     # Internal helpers
