@@ -173,18 +173,23 @@ class SemanticSearchEngine:
         return embedding.tolist()  # type: ignore[union-attr]
 
     def encode_batch(self, texts: list[str]) -> list[list[float]]:
-        """Encode a batch of texts into dense vectors."""
+        """Encode a batch of document passages into dense vectors.
+
+        Adds the ``"passage: "`` prefix required by E5-family models.
+        """
         if not texts:
             return []
+        prefixed = [f"passage: {t}" for t in texts]
         if self._embedding_url:
-            return self._encode_via_tei(texts)
+            return self._encode_via_tei(prefixed)
         model = self._load_model()
-        embeddings = model.encode(texts, show_progress_bar=False)
+        embeddings = model.encode(prefixed, show_progress_bar=False)
         return [e.tolist() for e in embeddings]  # type: ignore[union-attr]
 
     def search(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
         """Encode *query* and return the most similar chunks."""
-        query_embedding = self.encode(query)
+        # E5 models require "query: " prefix for retrieval queries.
+        query_embedding = self.encode(f"query: {query}")
         results = self._vector_store.search(query_embedding, top_k=top_k)
         if self._score_floor > 0.0:
             results = [(cid, s) for cid, s in results if s >= self._score_floor]
