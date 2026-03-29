@@ -26,14 +26,9 @@ class Settings(BaseSettings):
     data_dir: Path = Path(".")
     index_dir: Path = Path.home() / ".dotmd"
 
-    # Embedding
-    # Previous: sentence-transformers/all-MiniLM-L6-v2 (384-dim, 256 max tokens, speed-optimized)
-    # Current: BAAI/bge-small-en-v1.5 (384-dim, 512 max tokens, retrieval-optimized)
-    # Alternatives: all-mpnet-base-v2 (768-dim, general-purpose), bge-m3 (1024-dim, multilingual)
     # Local SentenceTransformers model — used only when embedding_url is unset.
     # When TEI is configured, the actual model is determined by TEI (query /info).
     embedding_model: str = "BAAI/bge-small-en-v1.5"
-    embedding_dim: int = 384
     # URL to a TEI-compatible embedding server (e.g. http://host:8088).
     # Required — dotMD is designed to run with an external embedding server.
     # Set DOTMD_EMBEDDING_URL in your environment or docker-compose.yml.
