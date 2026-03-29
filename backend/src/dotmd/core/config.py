@@ -65,7 +65,6 @@ class Settings(BaseSettings):
     # Search
     default_top_k: int = 10
     fusion_k: int = 60  # RRF constant
-    graph_rrf_weight: float = 1.5  # boost graph-unique discoveries in RRF
     rerank_pool_size: int = 20  # candidates to rerank
     semantic_score_floor: float = 0.62  # BGE-small: <0.62 is noise (empirically verified)
     snippet_length: int = 300  # display snippet character limit

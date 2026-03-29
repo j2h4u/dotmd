@@ -206,60 +206,48 @@ class DotMDService:
         # -- Determine pool size for reranking --------------------------------
         pool_size = self._settings.rerank_pool_size if rerank else top_k
 
-        # -- Run search engines based on mode ---------------------------------
+        # -- Stage 1: Primary retrieval ----------------------------------------
         semantic_hits: list[tuple[str, float]] = []
         keyword_hits: list[tuple[str, float]] = []
-        graph_hits: list[tuple[str, float]] = []
 
-        if mode in (SearchMode.SEMANTIC, SearchMode.HYBRID):
+        if mode in (SearchMode.SEMANTIC, SearchMode.HYBRID, SearchMode.GRAPH):
             semantic_hits = self._semantic_engine.search(search_query, top_k=pool_size)
 
-        if mode in (SearchMode.KEYWORD, SearchMode.HYBRID):
+        if mode in (SearchMode.KEYWORD, SearchMode.HYBRID, SearchMode.GRAPH):
             keyword_hits = self._keyword_engine.search(search_query, top_k=pool_size)
 
-        if mode in (SearchMode.GRAPH, SearchMode.HYBRID):
-            # Graph search needs seed chunk IDs from other engines.
-            # Without strong seeds, graph traversal produces noise.
-            seed_ids: list[str] = []
-            if mode == SearchMode.GRAPH:
-                sem_seeds = self._semantic_engine.search(search_query, top_k=pool_size)
-                kw_seeds = self._keyword_engine.search(search_query, top_k=pool_size)
-                seed_ids = list(
-                    dict.fromkeys(
-                        cid for cid, _ in sem_seeds + kw_seeds
-                    )
-                )
-            else:
-                seed_ids = list(
-                    dict.fromkeys(
-                        cid for cid, _ in semantic_hits + keyword_hits
-                    )
-                )
-            if seed_ids:
-                graph_hits = self._graph_engine.search(
-                    search_query,
-                    top_k=pool_size,
-                    seed_chunk_ids=seed_ids,
-                )
-
-        # -- Quality gate: no primary hits → nothing to fuse --------------------
         if not semantic_hits and not keyword_hits:
             return []
 
-        # -- Fuse results via RRF ---------------------------------------------
+        # -- Stage 2: RRF fusion (primary engines only) ------------------------
         engine_results: dict[str, list[tuple[str, float]]] = {}
         if semantic_hits:
             engine_results["semantic"] = semantic_hits
         if keyword_hits:
             engine_results["keyword"] = keyword_hits
-        if graph_hits:
-            engine_results["graph"] = graph_hits
 
         fused = fuse_results(
             engine_results,
             k=self._settings.fusion_k,
-            engine_weights={"graph": self._settings.graph_rrf_weight},
         )
+
+        # -- Stage 3: Graph enrichment (post-fusion, not a peer) ---------------
+        if mode in (SearchMode.GRAPH, SearchMode.HYBRID) and fused:
+            seed_ids = [cid for cid, _ in fused[:pool_size]]
+            graph_hits = self._graph_engine.search(
+                search_query, top_k=pool_size, seed_chunk_ids=seed_ids,
+            )
+            if graph_hits:
+                # Graph-discovered chunks get appended below primary results.
+                # Score: fraction of the lowest fused score so they never
+                # outrank direct hits.
+                fused_floor = fused[-1][1] if fused else 0.0
+                fused_ids = {cid for cid, _ in fused}
+                for cid, gscore in graph_hits:
+                    if cid not in fused_ids:
+                        fused.append((cid, fused_floor * 0.5))
+                        fused_ids.add(cid)
+                engine_results["graph"] = graph_hits
 
         # -- Optional reranking -----------------------------------------------
         if rerank and fused:
