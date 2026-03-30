@@ -111,6 +111,14 @@ class DotMDService:
                 stored,
                 active,
             )
+        if hasattr(vs, "get_distance_metric"):
+            metric = vs.get_distance_metric()
+            if metric and metric != "cosine":
+                logger.warning(
+                    "Distance metric mismatch: index uses %r, but code expects 'cosine'. "
+                    "Run `dotmd reindex vectors` to rebuild.",
+                    metric,
+                )
 
     def index(self, directory: Path, *, force: bool = False) -> IndexStats:
         """Index all markdown files under *directory*.

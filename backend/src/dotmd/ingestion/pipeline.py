@@ -210,6 +210,7 @@ class IndexingPipeline:
         if hasattr(self._vector_store, "set_model_name"):
             model_id = self._semantic_engine.get_tei_model_id() or self._settings.embedding_model
             self._vector_store.set_model_name(model_id)
+            self._vector_store.set_distance_metric("cosine")
         logger.info("reindex_vectors: %d chunks re-embedded", len(all_chunks))
         return len(all_chunks)
 

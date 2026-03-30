@@ -97,6 +97,23 @@ class SQLiteVecVectorStore:
         )
         conn.commit()
 
+    def get_distance_metric(self) -> str | None:
+        """Read the stored distance metric, or None if not recorded."""
+        conn = self._get_conn()
+        row = conn.execute(
+            f"SELECT value FROM {self._CONFIG_TABLE} WHERE key = 'metric'",
+        ).fetchone()
+        return row[0] if row else None
+
+    def set_distance_metric(self, metric: str) -> None:
+        """Record which distance metric the vector table uses."""
+        conn = self._get_conn()
+        conn.execute(
+            f"INSERT OR REPLACE INTO {self._CONFIG_TABLE} (key, value) VALUES ('metric', ?)",
+            (metric,),
+        )
+        conn.commit()
+
     def _create_vec_table(self, dim: int) -> None:
         """Create (or recreate) the vec0 virtual table for the given dimension."""
         conn = self._get_conn()
@@ -114,7 +131,7 @@ class SQLiteVecVectorStore:
         conn.execute(f"DROP TABLE IF EXISTS {self._VEC_TABLE}")
         conn.execute(f"""
             CREATE VIRTUAL TABLE {self._VEC_TABLE}
-            USING vec0(embedding float[{dim}])
+            USING vec0(embedding float[{dim}] distance_metric=cosine)
         """)
         conn.execute(
             f"INSERT OR REPLACE INTO {self._CONFIG_TABLE} (key, value) VALUES ('dim', ?)",
@@ -241,7 +258,8 @@ class SQLiteVecVectorStore:
             logger.warning("Vector search query failed", exc_info=True)
             return []
 
-        return [(row[0], 1.0 / (1.0 + row[1])) for row in rows]
+        # distance_metric=cosine → distance is cosine distance (1 - similarity)
+        return [(row[0], 1.0 - row[1]) for row in rows]
 
     def count(self) -> int:
         try:
