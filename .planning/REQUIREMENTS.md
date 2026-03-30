@@ -51,21 +51,21 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| EVAL-01 | — | Pending |
-| EVAL-02 | — | Pending |
-| EMBED-01 | — | Pending |
-| EMBED-02 | — | Pending |
-| EMBED-03 | — | Pending |
-| CHUNK-01 | — | Pending |
-| CHUNK-02 | — | Pending |
-| SCORE-01 | — | Pending |
-| SCORE-02 | — | Pending |
+| EVAL-01 | Phase 11 | Pending |
+| EVAL-02 | Phase 11 | Pending |
+| EMBED-01 | Phase 11 | Pending |
+| EMBED-02 | Phase 11 | Pending |
+| EMBED-03 | Phase 11 | Pending |
+| CHUNK-01 | Phase 12 | Pending |
+| CHUNK-02 | Phase 12 | Pending |
+| SCORE-01 | Phase 12 | Pending |
+| SCORE-02 | Phase 12 | Pending |
 
 **Coverage:**
 - v1.4 requirements: 9 total
-- Mapped to phases: 0
-- Unmapped: 9 (awaiting roadmap)
+- Mapped to phases: 9
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-30*
-*Last updated: 2026-03-30 after initial definition*
+*Last updated: 2026-03-30 after roadmap creation*
