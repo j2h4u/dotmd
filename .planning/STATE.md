@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality Evaluations
 status: executing
-last_updated: "2026-03-30T19:49:57.482Z"
+last_updated: "2026-03-30T19:50:28.915Z"
 last_activity: 2026-03-30
 progress:
   total_phases: 2
@@ -51,6 +51,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 09 | 1 | 3min | 3min |
 | Phase 10 | 4 | 12min | 3min |
 | Phase 11 P02 | 2min | 2 tasks | 6 files |
+| Phase 11-embedding-model-swap P01 | 2min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -64,6 +65,7 @@ Recent decisions affecting current work:
 - [Research]: pplx-embed-context-v1-0.6B is candidate replacement (MIT, 596M, 1024-dim, context-aware, no prefix needed)
 - [v1.4]: Evaluation framework before any model/pipeline changes -- measure first
 - [Phase 11]: Auto-detect E5/BGE prefix need from model name; use_prefix defaults True for backward compat
+- [Phase 11-embedding-model-swap]: GET /search (not POST) for eval scripts -- matches actual API
 
 ### Pending Todos
 

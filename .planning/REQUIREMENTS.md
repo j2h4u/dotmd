@@ -7,8 +7,8 @@
 
 ### Evaluation Framework
 
-- [ ] **EVAL-01**: Reproducible test query set (5+ queries) with expected result annotations covering keyword, semantic, negative, and entity+topic scenarios
-- [ ] **EVAL-02**: A/B comparison script that runs same queries on two branches and reports score/rank differences
+- [x] **EVAL-01**: Reproducible test query set (5+ queries) with expected result annotations covering keyword, semantic, negative, and entity+topic scenarios
+- [x] **EVAL-02**: A/B comparison script that runs same queries on two branches and reports score/rank differences
 
 ### Embedding Model
 
@@ -51,8 +51,8 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| EVAL-01 | Phase 11 | Pending |
-| EVAL-02 | Phase 11 | Pending |
+| EVAL-01 | Phase 11 | Complete |
+| EVAL-02 | Phase 11 | Complete |
 | EMBED-01 | Phase 11 | Pending |
 | EMBED-02 | Phase 11 | Complete |
 | EMBED-03 | Phase 11 | Complete |
