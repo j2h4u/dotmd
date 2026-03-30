@@ -268,6 +268,9 @@ class DotMDService:
                 self._pipeline.metadata_store,
                 top_k=pool_size,
             )
+            # Reranker found nothing relevant — cross-encoder says no match
+            if not reranked:
+                return []
             # Blend reranker scores with fusion scores via min-max normalization
             if reranked:
                 re_scores = [s for _, s in reranked]

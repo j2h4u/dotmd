@@ -32,12 +32,12 @@ def _make_mock_store(n: int = 5) -> MagicMock:
     return store
 
 
-class TestRerankerNoThreshold:
-    """Reranker must return ALL scored candidates regardless of score value."""
+class TestRerankerRelevanceFilter:
+    """Reranker filters out candidates below the relevance floor (logit < 0)."""
 
     @patch("sentence_transformers.CrossEncoder", autospec=True)
-    def test_all_candidates_returned_regardless_of_score(self, MockCE: MagicMock) -> None:
-        """Reranker.rerank() returns ALL scored candidates even with very negative scores."""
+    def test_irrelevant_candidates_filtered(self, MockCE: MagicMock) -> None:
+        """Candidates with cross-encoder logit < 0 are dropped."""
         mock_model = MagicMock()
         mock_model.predict.return_value = np.array([-20.0, -10.0, -5.0, 2.0, 8.0])
         MockCE.return_value = mock_model
@@ -47,20 +47,19 @@ class TestRerankerNoThreshold:
 
         results = reranker.rerank("test query", [f"chunk-{i}" for i in range(5)], mock_store, top_k=10)
 
-        # All 5 must be returned -- no filtering
-        assert len(results) == 5
-        # Sorted descending by score
+        # Only logit >= 0 pass (2.0 and 8.0)
+        assert len(results) == 2
         scores = [s for _, s in results]
-        assert scores == [8.0, 2.0, -5.0, -10.0, -20.0]
-        # All chunk_ids present
+        assert scores == [8.0, 2.0]
+        # Only relevant chunk_ids present (indices 3 and 4 had scores 2.0 and 8.0)
         ids = {cid for cid, _ in results}
-        assert ids == {f"chunk-{i}" for i in range(5)}
+        assert ids == {"chunk-3", "chunk-4"}
 
     @patch("sentence_transformers.CrossEncoder", autospec=True)
     def test_top_k_truncation_works(self, MockCE: MagicMock) -> None:
-        """top_k limits output count (performance limit, not relevance filter)."""
+        """top_k limits output even when more candidates pass relevance floor."""
         mock_model = MagicMock()
-        mock_model.predict.return_value = np.array([-20.0, -10.0, -5.0, 2.0, 8.0])
+        mock_model.predict.return_value = np.array([1.0, 3.0, 5.0, 7.0, 9.0])
         MockCE.return_value = mock_model
 
         reranker = _make_reranker()
@@ -70,7 +69,7 @@ class TestRerankerNoThreshold:
 
         assert len(results) == 3
         scores = [s for _, s in results]
-        assert scores == [8.0, 2.0, -5.0]
+        assert scores == [9.0, 7.0, 5.0]
 
     def test_empty_chunk_ids_returns_empty(self) -> None:
         """Reranker.rerank() with empty chunk_ids returns []."""
