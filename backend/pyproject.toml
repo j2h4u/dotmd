@@ -11,6 +11,8 @@ requires-python = ">=3.12"
 dependencies = [
     "click>=8.0",
     "sentence-transformers>=3.0",
+    "transformers>=4.45",
+    "torch<2.5",
     "sqlite-vec>=0.1.6",
     "real_ladybug>=0.1",
     "FalkorDB>=1.6.0",

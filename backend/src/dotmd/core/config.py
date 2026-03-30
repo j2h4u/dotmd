@@ -34,6 +34,16 @@ class Settings(BaseSettings):
     # Set DOTMD_EMBEDDING_URL in your environment or docker-compose.yml.
     embedding_url: str
 
+    # Context-aware embedding model for document indexing (in-process via transformers).
+    # Used by pplx-embed-context-v1-0.6B for grouped-chunks-per-document encoding.
+    # When empty string, indexing uses the same TEI endpoint as queries (E5 behavior).
+    context_embedding_model: str = ""
+
+    # Whether the active embedding model uses E5-family instruction prefixes.
+    # E5 models require "query: " / "passage: " prefixes. pplx-embed does not.
+    # Auto-detected from embedding_model name if not explicitly set.
+    embedding_uses_prefix: bool | None = None
+
     vector_backend: Literal["lancedb", "sqlite-vec"] = "sqlite-vec"
 
     # Reranker
@@ -112,6 +122,15 @@ class Settings(BaseSettings):
     def config_path(self) -> Path:
         """Path to the TOML config file."""
         return Path(self.model_config.get("toml_file", str(self.index_dir / "config.toml")))
+
+    @property
+    def needs_embedding_prefix(self) -> bool:
+        """Whether the embedding model requires E5-style instruction prefixes."""
+        if self.embedding_uses_prefix is not None:
+            return self.embedding_uses_prefix
+        # Auto-detect: E5 family and BGE models need prefixes, others don't
+        model_lower = self.embedding_model.lower()
+        return "e5" in model_lower or "bge" in model_lower
 
     @property
     def lancedb_path(self) -> Path:
