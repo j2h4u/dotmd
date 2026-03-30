@@ -97,6 +97,17 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 | 11. Embedding Model Swap | v1.4 | 2/3 | In Progress|  |
 | 12. Chunking & Scoring Calibration | v1.4 | 0/? | Not started | - |
 
+## Backlog
+
+### Phase 999.1: Multi-model vector store (BACKLOG)
+
+**Goal:** Store embeddings from multiple models side by side (per chunk, per model column) to enable instant model switching without re-indexing. Currently A/B requires separate index dirs and full re-index per model swap (~1hr). With multi-model storage, switching is just a query parameter.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd:review-backlog when ready)
+
 ---
 *Roadmap created: 2026-03-26*
-*Last updated: 2026-03-30 after v1.4 roadmap created*
+*Last updated: 2026-03-31*
