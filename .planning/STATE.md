@@ -1,37 +1,35 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.3
-milestone_name: Production Packaging & Background Indexing
-status: executing
-last_updated: "2026-03-27T19:53:10.676Z"
-last_activity: 2026-03-27
+milestone: v1.4
+milestone_name: Search Quality Evaluations
+status: defining
+last_updated: "2026-03-30T16:30:00.000Z"
+last_activity: 2026-03-30
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 8
-  completed_plans: 8
-  percent: 63
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # GSD State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-27)
+See: .planning/PROJECT.md (updated 2026-03-30)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 10 — background-trickle-indexer
+**Current focus:** Defining requirements for v1.4
 
 ## Current Milestone
 
-**v1.3 — Production Packaging & Background Indexing**
+**v1.4 — Search Quality Evaluations**
 
-Phase: 10 of 10 (background trickle indexer)
-Plan: Not started
-Status: Executing Phase 10
-Last activity: 2026-03-27
-
-Progress: [██████░░░░] 63%
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-03-30 — Milestone v1.4 started
 
 ## Performance Metrics
 

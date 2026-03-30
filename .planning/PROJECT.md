@@ -107,19 +107,19 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 - **v1.1** — Incremental Indexing (Phases 1-3, shipped 2026-03-26)
 - **v1.2** — FalkorDB Migration & Search Fix (Phases 4-6, shipped 2026-03-27)
 
-## Current Milestone: v1.3 Production Packaging & Background Indexing
+## Current Milestone: v1.4 Search Quality Evaluations
 
-**Goal:** Turn dotMD from a developer prototype into a self-contained production service — docker compose up, point at paths, it indexes and serves search. Plus background indexing for large corpora and smoke tests for regression safety.
+**Goal:** Measurably improve retrieval quality on Russian voicenotes corpus through empirical evaluation of embedding models, chunking strategies, and scoring pipeline.
 
 **Target features:**
-- Production packaging — self-contained docker-compose stack (dotMD + TEI + FalkorDB)
-- Background trickle indexer — gradual indexing of full 13,500-file corpus
-- Indexing speed optimization — concurrent TEI, batch NER, throughput auto-tuning
-- Smoke tests — regression safety for search pipeline
+- A/B evaluation of pplx-embed-context-v1 vs current E5-large (separate branch)
+- Semantic/adaptive chunking for topic-switching transcripts
+- Cross-encoder relevance tuning on real corpus data
+- Reproducible evaluation framework (test queries + expected results)
 
 ## Current State
 
-v1.2 shipped. FalkorDB is production graph backend. Voicenotes indexed (229 files, 3520 entities). Home directory (~13k files) not yet indexed — pending background trickle indexer. Search works across semantic, BM25, and graph engines with hybrid fusion. Phase 7 complete — self-contained compose stack with bundled profiles. Phase 8 complete — smoke test suite validates all engines and API. Phase 9 complete — TEI concurrency and GLiNER batching benchmark scripts ready for empirical throughput measurement.
+v1.3 complete (not yet archived). Quality sweep shipped: error handling, naming (bm25→keyword), enums, observability. Search pipeline fixed: graph→post-fusion enrichment, cosine distance metric, E5 prefixes, cross-encoder quality gate, auto-calibrating score floor. Granular reindex command added. Embedding model mismatch detection via TEI /info. TEI already serves multilingual-e5-large (1024-dim). pplx-embed-context-v1-0.6B researched as candidate replacement (MIT, 596M, same 1024-dim, context-aware, no prefix needed).
 
 ## Evolution
 
