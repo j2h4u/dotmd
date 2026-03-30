@@ -54,6 +54,7 @@ class SemanticSearchEngine:
         embedding_url: str | None = None,
         tei_batch_size: int = 32,
         use_prefix: bool = True,
+        context_model_name: str = "",
     ) -> None:
         self._vector_store = vector_store
         self._model_name = model_name
@@ -64,6 +65,8 @@ class SemanticSearchEngine:
         self._tei_bs_probed = False
         self._tei_model_id: str | None = None
         self._use_prefix = use_prefix
+        self._context_model_name = context_model_name
+        self._context_model = None  # lazy-loaded, unloaded after use
 
     def get_tei_model_id(self) -> str | None:
         """Return the actual embedding model name.
@@ -161,6 +164,88 @@ class SemanticSearchEngine:
         """Pre-load the embedding model (no-op when using a remote server)."""
         if not self._embedding_url:
             self._load_model()
+
+    # ------------------------------------------------------------------
+    # Context-aware encoding (indexing only)
+    # ------------------------------------------------------------------
+
+    @property
+    def has_context_model(self) -> bool:
+        """Whether a context-aware embedding model is configured."""
+        return bool(self._context_model_name)
+
+    def _load_context_model(self):
+        """Load the context-aware embedding model in-process.
+
+        Uses transformers.AutoModel with trust_remote_code=True.
+        The context model is for INDEXING ONLY -- never for queries.
+        Must be explicitly unloaded via unload_context_model() after indexing.
+        """
+        if self._context_model is not None:
+            return self._context_model
+        if not self._context_model_name:
+            raise ValueError("context_model_name not configured")
+        logger.info("Loading context embedding model: %s (this may take 30-60s)", self._context_model_name)
+        from transformers import AutoModel
+        self._context_model = AutoModel.from_pretrained(
+            self._context_model_name,
+            trust_remote_code=True,
+        )
+        logger.info("Context model loaded: %s", self._context_model_name)
+        return self._context_model
+
+    def encode_batch_context(
+        self, grouped_chunks: list[list[str]],
+    ) -> list[list[list[float]]]:
+        """Encode document chunks using the context-aware model.
+
+        The context model takes chunks grouped by document and returns
+        per-chunk embeddings that incorporate surrounding context.
+
+        Parameters
+        ----------
+        grouped_chunks:
+            List of documents, where each document is a list of chunk texts.
+            Example: [["chunk1_docA", "chunk2_docA"], ["chunk1_docB"]]
+
+        Returns
+        -------
+        list[list[list[float]]]
+            Nested list matching input structure. Each innermost list is
+            a 1024-dim float32 embedding vector.
+            Example: result[0][1] = embedding for chunk2 of docA.
+        """
+        if not grouped_chunks:
+            return []
+        model = self._load_context_model()
+        logger.info(
+            "Context encoding: %d documents, %d total chunks",
+            len(grouped_chunks),
+            sum(len(doc) for doc in grouped_chunks),
+        )
+        # model.encode() returns list of numpy arrays, one per document
+        # Each array shape: (num_chunks_in_doc, 1024)
+        raw_embeddings = model.encode(grouped_chunks)
+        # Convert numpy float32 arrays to Python lists
+        import numpy as np
+        result = []
+        for doc_embeddings in raw_embeddings:
+            doc_vectors = []
+            for chunk_vec in doc_embeddings:
+                # Ensure float32 (model may produce int8 natively)
+                vec = np.asarray(chunk_vec, dtype=np.float32)
+                doc_vectors.append(vec.tolist())
+            result.append(doc_vectors)
+        return result
+
+    def unload_context_model(self) -> None:
+        """Free RAM by unloading the context model after indexing."""
+        if self._context_model is not None:
+            del self._context_model
+            self._context_model = None
+            import gc
+            gc.collect()
+            logger.info("Context model unloaded")
 
     # ------------------------------------------------------------------
     # Public API
