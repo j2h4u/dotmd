@@ -52,6 +52,35 @@ class _ExtractionBundle:
     total_relations: int
 
 
+def _group_chunks_by_file(
+    chunks: list[Chunk],
+) -> tuple[list[list[str]], list[list[int]]]:
+    """Group chunk texts by file_path, preserving order.
+
+    Returns
+    -------
+    grouped_texts:
+        List of documents, each a list of chunk texts.
+    index_map:
+        Parallel structure mapping back to original chunk indices.
+        index_map[doc_idx][chunk_idx] = original position in `chunks`.
+    """
+    from collections import OrderedDict
+    groups: OrderedDict[str, list[tuple[int, str]]] = OrderedDict()
+    for i, chunk in enumerate(chunks):
+        key = str(chunk.file_path)
+        if key not in groups:
+            groups[key] = []
+        groups[key].append((i, chunk.text))
+
+    grouped_texts: list[list[str]] = []
+    index_map: list[list[int]] = []
+    for entries in groups.values():
+        grouped_texts.append([text for _, text in entries])
+        index_map.append([idx for idx, _ in entries])
+    return grouped_texts, index_map
+
+
 def _create_vector_store(settings: Settings) -> VectorStoreProtocol:
     """Instantiate the configured vector store backend."""
     if settings.vector_backend == "sqlite-vec":
@@ -111,6 +140,7 @@ class IndexingPipeline:
             embedding_url=settings.embedding_url,
             tei_batch_size=settings.tei_batch_size,
             use_prefix=settings.needs_embedding_prefix,
+            context_model_name=settings.context_embedding_model,
         )
         self._keyword_engine = FTS5SearchEngine(self._metadata_store._conn)
 
@@ -195,6 +225,37 @@ class IndexingPipeline:
         logger.info("All stores cleared")
 
     # ------------------------------------------------------------------
+    # Embedding dispatch (context-aware or flat TEI)
+    # ------------------------------------------------------------------
+
+    def _embed_chunks(self, chunks: list[Chunk]) -> list[list[float]]:
+        """Embed chunks using context model (if configured) or flat TEI batch.
+
+        When context_embedding_model is set, groups chunks by file and uses
+        the context-aware model. Otherwise falls back to flat encode_batch
+        (TEI or local SentenceTransformer).
+        """
+        if not self._semantic_engine.has_context_model:
+            # Flat encoding (E5/TEI path)
+            return self._semantic_engine.encode_batch([c.text for c in chunks])
+
+        # Context-aware encoding: group by document
+        grouped_texts, index_map = _group_chunks_by_file(chunks)
+        logger.info(
+            "Context encoding: %d chunks grouped into %d documents",
+            len(chunks), len(grouped_texts),
+        )
+        grouped_embeddings = self._semantic_engine.encode_batch_context(grouped_texts)
+
+        # Flatten back to original chunk order
+        flat_embeddings: list[list[float]] = [[] for _ in chunks]
+        for doc_idx, doc_indices in enumerate(index_map):
+            for chunk_idx, original_idx in enumerate(doc_indices):
+                flat_embeddings[original_idx] = grouped_embeddings[doc_idx][chunk_idx]
+
+        return flat_embeddings
+
+    # ------------------------------------------------------------------
     # Granular reindex (rebuild one store from metadata chunks)
     # ------------------------------------------------------------------
 
@@ -205,13 +266,14 @@ class IndexingPipeline:
             logger.info("reindex_vectors: no chunks in metadata")
             return 0
         self._vector_store.delete_all()
-        texts = [c.text for c in all_chunks]
-        embeddings = self._semantic_engine.encode_batch(texts)
+        embeddings = self._embed_chunks(all_chunks)
         self._vector_store.add_chunks(all_chunks, embeddings, overwrite=True)
         if hasattr(self._vector_store, "set_model_name"):
             model_id = self._semantic_engine.get_tei_model_id() or self._settings.embedding_model
             self._vector_store.set_model_name(model_id)
             self._vector_store.set_distance_metric("cosine")
+        # Free context model RAM after re-embedding
+        self._semantic_engine.unload_context_model()
         logger.info("reindex_vectors: %d chunks re-embedded", len(all_chunks))
         return len(all_chunks)
 
@@ -367,11 +429,10 @@ class IndexingPipeline:
 
         # Encode and add to vector store
         if new_chunks:
-            texts = [c.text for c in new_chunks]
             t0 = time.perf_counter()
-            embeddings = self._semantic_engine.encode_batch(texts)
+            embeddings = self._embed_chunks(new_chunks)
             t_embed = time.perf_counter() - t0
-            logger.info("[%s] embed: %d chunks (%.1fs, %.0f chunks/s)", run_id, len(texts), t_embed, len(texts) / t_embed if t_embed > 0 else 0)
+            logger.info("[%s] embed: %d chunks (%.1fs, %.0f chunks/s)", run_id, len(new_chunks), t_embed, len(new_chunks) / t_embed if t_embed > 0 else 0)
 
             t0 = time.perf_counter()
             self._vector_store.add_chunks(
@@ -422,6 +483,9 @@ class IndexingPipeline:
         t0 = time.perf_counter()
         self._update_fingerprints(files_to_ingest)
         logger.info("[%s] fingerprints: %d files (%.2fs)", run_id, len(files_to_ingest), time.perf_counter() - t0)
+
+        # Free context model RAM after indexing
+        self._semantic_engine.unload_context_model()
 
         # Stats from full store (incremental: query actual graph counts)
         all_entities_count = extraction_result.total_entities
@@ -484,8 +548,7 @@ class IndexingPipeline:
         self._metadata_store.save_chunks(chunks)
         self._keyword_engine.add_chunks(chunks)
 
-        texts = [c.text for c in chunks]
-        embeddings = self._semantic_engine.encode_batch(texts)
+        embeddings = self._embed_chunks(chunks)
         self._vector_store.add_chunks(chunks, embeddings, overwrite=False)
 
         extraction = self._run_extraction(chunks)
