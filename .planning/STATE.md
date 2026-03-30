@@ -17,7 +17,7 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-30)
+See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
 **Current focus:** v1.4 Phase 11 — Embedding Model Swap
@@ -37,7 +37,7 @@ Progress: [░░░░░░░░░░] 0%
 
 **Velocity:**
 
-- Total plans completed: 14 (across v1.1 + v1.2 + v1.3)
+- Total plans completed: 18 (across v1.1 + v1.2 + v1.3)
 - Average duration: ~3 min
 - Total execution time: —
 

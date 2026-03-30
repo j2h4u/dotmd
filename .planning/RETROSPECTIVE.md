@@ -85,9 +85,55 @@
 - Sessions: 2 (planning in one, execution + debugging in another)
 - Notable: Phase 6 execution done inline (no subagent) — simpler for single-plan phases modifying files outside repo
 
+## Milestone: v1.3 — Production Packaging & Background Indexing
+
+**Shipped:** 2026-03-28
+**Phases:** 4 | **Plans:** 8 | **Tasks:** 16
+
+### What Was Built
+- Production docker-compose with parameterized env vars, bundled profiles (TEI + FalkorDB), health endpoint
+- Production overlay via compose `include:` directive at /opt/docker/dotmd/
+- SQLite WAL mode on all databases for concurrent access
+- External HTTP smoke tests (5 tests, skip-on-unavailable)
+- TEI concurrency benchmark and GLiNER batching benchmark (both closed optimization paths)
+- FTS5 BM25 replacement — SQLite FTS5 replaces rank_bm25+pickle, incremental add/remove
+- Background trickle indexer — watchdog inotify + hourly polling, per-file pipeline, TOML config
+- Trickle progress reporting (rate, ETA) in CLI status and API /status
+
+### What Worked
+- Benchmark-first approach for SPEED-01/02 — avoided implementing optimizations that wouldn't help (concurrent TEI, GLiNER batching)
+- FTS5 sharing metadata store SQLite connection — clean architecture, no separate DB file
+- Compose `include:` pattern for production overlay — single source of truth in repo
+- Worktree isolation for parallel plan execution (Plans 10-01 through 10-04)
+
+### What Was Inefficient
+- Compose v5.1 `depends_on` + profiles interaction undocumented — hit errors that research didn't predict
+- Compose port list merge behavior (append, not replace) — had to discover through debugging
+- Worktrees branched from main missing other plans' changes — required fast-forward merges before starting
+- SPEED-01/02 requirements initially scoped as "optimize" — rescoped to "benchmark and decide" after results
+
+### Patterns Established
+- Benchmark script pattern: synthetic data → warmup → N iterations → stats table → CONCLUSION
+- Smoke tests: external HTTP-only, no dotmd imports, pytest.ini isolation
+- Compose profile pattern: `--profile bundled` for optional bundled services
+- TomlConfigSettingsSource: conditional TOML loading when config.toml exists
+- Watchdog-to-asyncio bridge via loop.call_soon_threadsafe into asyncio.Queue
+
+### Key Lessons
+- Always benchmark before optimizing — both TEI concurrency and GLiNER batching were net negatives
+- Compose `include:` auto-discovers .env at included file directory — use `required: false` on env_file
+- Compose port lists merge by append — use env var interpolation for port overrides, not override files
+- FTS5 unicode61 tokenizer handles bilingual RU/EN well for keyword search
+
+### Cost Observations
+- Model mix: 100% Opus 4.6 (1M context)
+- Sessions: 3 (packaging, benchmarks, trickle indexer)
+- Notable: Phase 10 (4 plans) executed with worktree parallelization — fastest multi-plan phase yet
+
 ## Cross-Milestone Trends
 
 | Milestone | Phases | Plans | Duration | Key Metric |
 |-----------|--------|-------|----------|------------|
 | v1.1 | 3 | 5 | 2 days | Incremental index: <1s (was 50min) |
 | v1.2 | 3 | 4 | 2 days | FalkorDB: concurrent CLI+API, 3520 entities |
+| v1.3 | 4 | 8 | 2 days | Production deploy, trickle indexer live |
