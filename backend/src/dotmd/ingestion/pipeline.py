@@ -110,6 +110,7 @@ class IndexingPipeline:
             settings.embedding_model,
             embedding_url=settings.embedding_url,
             tei_batch_size=settings.tei_batch_size,
+            use_prefix=settings.needs_embedding_prefix,
         )
         self._keyword_engine = FTS5SearchEngine(self._metadata_store._conn)
 

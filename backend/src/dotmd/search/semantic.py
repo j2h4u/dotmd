@@ -53,6 +53,7 @@ class SemanticSearchEngine:
         score_floor: float = 0.0,
         embedding_url: str | None = None,
         tei_batch_size: int = 32,
+        use_prefix: bool = True,
     ) -> None:
         self._vector_store = vector_store
         self._model_name = model_name
@@ -62,6 +63,7 @@ class SemanticSearchEngine:
         self._tei_batch_size = tei_batch_size
         self._tei_bs_probed = False
         self._tei_model_id: str | None = None
+        self._use_prefix = use_prefix
 
     def get_tei_model_id(self) -> str | None:
         """Return the actual embedding model name.
@@ -175,21 +177,23 @@ class SemanticSearchEngine:
     def encode_batch(self, texts: list[str]) -> list[list[float]]:
         """Encode a batch of document passages into dense vectors.
 
-        Adds the ``"passage: "`` prefix required by E5-family models.
+        Adds the ``"passage: "`` prefix required by E5-family models
+        when ``use_prefix`` is True.  pplx-embed models need no prefix.
         """
         if not texts:
             return []
-        prefixed = [f"passage: {t}" for t in texts]
+        if self._use_prefix:
+            texts = [f"passage: {t}" for t in texts]
         if self._embedding_url:
-            return self._encode_via_tei(prefixed)
+            return self._encode_via_tei(texts)
         model = self._load_model()
-        embeddings = model.encode(prefixed, show_progress_bar=False)
+        embeddings = model.encode(texts, show_progress_bar=False)
         return [e.tolist() for e in embeddings]  # type: ignore[union-attr]
 
     def search(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
         """Encode *query* and return the most similar chunks."""
-        # E5 models require "query: " prefix for retrieval queries.
-        query_embedding = self.encode(f"query: {query}")
+        encoded_query = f"query: {query}" if self._use_prefix else query
+        query_embedding = self.encode(encoded_query)
         results = self._vector_store.search(query_embedding, top_k=top_k)
         if not results:
             return results

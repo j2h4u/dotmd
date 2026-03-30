@@ -49,6 +49,7 @@ class DotMDService:
             score_floor=self._settings.semantic_score_floor,
             embedding_url=self._settings.embedding_url,
             tei_batch_size=self._settings.tei_batch_size,
+            use_prefix=self._settings.needs_embedding_prefix,
         )
         self._keyword_engine = FTS5SearchEngine(self._pipeline.metadata_store._conn)
         self._graph_engine = GraphSearchEngine(
