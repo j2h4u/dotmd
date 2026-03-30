@@ -94,7 +94,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 | 8. Smoke Tests | v1.3 | 1/1 | Complete | 2026-03-28 |
 | 9. Speed Benchmarks | v1.3 | 1/1 | Complete | 2026-03-28 |
 | 10. Background Trickle Indexer | v1.3 | 4/4 | Complete | 2026-03-27 |
-| 11. Embedding Model Swap | v1.4 | 0/? | Not started | - |
+| 11. Embedding Model Swap | v1.4 | 2/3 | In Progress|  |
 | 12. Chunking & Scoring Calibration | v1.4 | 0/? | Not started | - |
 
 ---

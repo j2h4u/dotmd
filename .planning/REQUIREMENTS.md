@@ -13,8 +13,8 @@
 ### Embedding Model
 
 - [ ] **EMBED-01**: pplx-embed-context-v1-0.6B integration for document indexing (grouped chunks per document, context-aware embeddings)
-- [ ] **EMBED-02**: pplx-embed-v1-0.6B integration for query encoding (standard single-text embedding)
-- [ ] **EMBED-03**: Self-hosted deployment in Docker (no external API dependency)
+- [x] **EMBED-02**: pplx-embed-v1-0.6B integration for query encoding (standard single-text embedding)
+- [x] **EMBED-03**: Self-hosted deployment in Docker (no external API dependency)
 
 ### Chunking Strategy
 
@@ -54,8 +54,8 @@
 | EVAL-01 | Phase 11 | Pending |
 | EVAL-02 | Phase 11 | Pending |
 | EMBED-01 | Phase 11 | Pending |
-| EMBED-02 | Phase 11 | Pending |
-| EMBED-03 | Phase 11 | Pending |
+| EMBED-02 | Phase 11 | Complete |
+| EMBED-03 | Phase 11 | Complete |
 | CHUNK-01 | Phase 12 | Pending |
 | CHUNK-02 | Phase 12 | Pending |
 | SCORE-01 | Phase 12 | Pending |

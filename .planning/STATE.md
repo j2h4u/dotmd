@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality Evaluations
-status: ready_to_plan
-last_updated: "2026-03-30T17:00:00.000Z"
+status: executing
+last_updated: "2026-03-30T19:49:57.482Z"
 last_activity: 2026-03-30
 progress:
   total_phases: 2
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 3
+  completed_plans: 2
   percent: 0
 ---
 
@@ -20,16 +20,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** v1.4 Phase 11 — Embedding Model Swap
+**Current focus:** Phase 11 — embedding-model-swap
 
 ## Current Milestone
 
 **v1.4 — Search Quality Evaluations**
 
 Phase: 11 of 12 (Embedding Model Swap)
-Plan: —
-Status: Ready to plan
-Last activity: 2026-03-30 — Roadmap created for v1.4
+Plan: 3 plans (11-01 Wave 1, 11-02 Wave 1, 11-03 Wave 2)
+Status: Ready to execute
+Last activity: 2026-03-30
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -50,6 +50,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08 | 1 | — | — |
 | Phase 09 | 1 | 3min | 3min |
 | Phase 10 | 4 | 12min | 3min |
+| Phase 11 P02 | 2min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -62,6 +63,7 @@ Recent decisions affecting current work:
 - [v1.3]: E5 query/passage prefixes applied at embedding time
 - [Research]: pplx-embed-context-v1-0.6B is candidate replacement (MIT, 596M, 1024-dim, context-aware, no prefix needed)
 - [v1.4]: Evaluation framework before any model/pipeline changes -- measure first
+- [Phase 11]: Auto-detect E5/BGE prefix need from model name; use_prefix defaults True for backward compat
 
 ### Pending Todos
 
