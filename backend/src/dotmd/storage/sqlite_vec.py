@@ -40,6 +40,12 @@ class SQLiteVecVectorStore:
     def __init__(self, db_path: Path, table_name: str = "vec_chunks") -> None:
         self._db_path = db_path
         self._VEC_TABLE = table_name
+        # Derive meta/config table names from vec table name for multi-model support.
+        # "vec_chunks" → "vec_meta", "vec_config" (backward compatible)
+        # "vec_chunks_pplx_embed" → "vec_meta_pplx_embed", "vec_config_pplx_embed"
+        suffix = table_name.removeprefix("vec_chunks")
+        self._META_TABLE = f"vec_meta{suffix}"
+        self._CONFIG_TABLE = f"vec_config{suffix}"
         self._conn: sqlite3.Connection | None = None
 
     def _get_conn(self) -> sqlite3.Connection:

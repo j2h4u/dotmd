@@ -1,0 +1,6 @@
+[project]
+name = "dotmd-modal"
+version = "0.1.0"
+description = "Modal GPU functions for dotMD embedding"
+requires-python = ">=3.11"
+dependencies = ["modal"]

@@ -81,12 +81,36 @@ def _group_chunks_by_file(
     return grouped_texts, index_map
 
 
+def _model_to_table_suffix(model_name: str) -> str:
+    """Derive a sqlite table name suffix from an embedding model name.
+
+    'intfloat/multilingual-e5-large' → '_e5_large'
+    'perplexity-ai/pplx-embed-v1-0.6B' → '_pplx_embed_v1'
+    '' or default → '' (backward compatible, uses 'vec_chunks')
+    """
+    import re
+
+    # Models that existed before multi-model support → no suffix (backward compat)
+    _LEGACY_MODELS = {"BAAI/bge-small-en-v1.5", "intfloat/multilingual-e5-large"}
+    if not model_name or model_name in _LEGACY_MODELS:
+        return ""
+    # Take the part after the slash (org/model → model)
+    name = model_name.rsplit("/", 1)[-1]
+    # Strip version suffixes like -0.6B, -v2.1
+    name = re.sub(r"-[\d.]+[BbMm]?$", "", name)
+    # Replace non-alphanumeric with underscore, collapse multiples
+    name = re.sub(r"[^a-zA-Z0-9]+", "_", name).strip("_").lower()
+    return f"_{name}" if name else ""
+
+
 def _create_vector_store(settings: Settings) -> VectorStoreProtocol:
     """Instantiate the configured vector store backend."""
     if settings.vector_backend == "sqlite-vec":
         from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
 
-        return SQLiteVecVectorStore(settings.sqlite_vec_path)
+        suffix = _model_to_table_suffix(settings.embedding_model)
+        table_name = f"vec_chunks{suffix}"
+        return SQLiteVecVectorStore(settings.sqlite_vec_path, table_name=table_name)
 
     from dotmd.storage.vector import LanceDBVectorStore
 

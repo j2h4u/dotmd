@@ -110,7 +110,7 @@ class SemanticSearchEngine:
                 resp = httpx.post(
                     f"{self._embedding_url}/embed",
                     json={"inputs": [sample_text] * bs, "truncate": True},
-                    timeout=30.0,
+                    timeout=120.0,
                 )
                 resp.raise_for_status()
                 logger.info("TEI batch size probe: bs=%d OK", bs)
@@ -148,7 +148,7 @@ class SemanticSearchEngine:
             response = httpx.post(
                 f"{self._embedding_url}/embed",
                 json={"inputs": batch, "truncate": True},
-                timeout=120.0,
+                timeout=600.0,
             )
             response.raise_for_status()
             results.extend(response.json())
@@ -174,30 +174,18 @@ class SemanticSearchEngine:
         """Whether a context-aware embedding model is configured."""
         return bool(self._context_model_name)
 
-    def _load_context_model(self):
-        """Load the context-aware embedding model in-process.
-
-        Uses transformers.AutoModel with trust_remote_code=True.
-        The context model is for INDEXING ONLY -- never for queries.
-        Must be explicitly unloaded via unload_context_model() after indexing.
-        """
-        if self._context_model is not None:
-            return self._context_model
-        if not self._context_model_name:
-            raise ValueError("context_model_name not configured")
-        logger.info("Loading context embedding model: %s (this may take 30-60s)", self._context_model_name)
-        from transformers import AutoModel
-        self._context_model = AutoModel.from_pretrained(
-            self._context_model_name,
-            trust_remote_code=True,
-        )
-        logger.info("Context model loaded: %s", self._context_model_name)
+    def _get_modal_fn(self):
+        """Get a reference to the deployed Modal encode_context function."""
+        if self._context_model is None:
+            from modal.functions import Function
+            self._context_model = Function.from_name("dotmd-embed", "encode_context")
+            logger.info("Connected to Modal function: dotmd-embed/encode_context")
         return self._context_model
 
     def encode_batch_context(
         self, grouped_chunks: list[list[str]],
     ) -> list[list[list[float]]]:
-        """Encode document chunks using the context-aware model.
+        """Encode document chunks using the context-aware model via Modal GPU.
 
         The context model takes chunks grouped by document and returns
         per-chunk embeddings that incorporate surrounding context.
@@ -217,35 +205,32 @@ class SemanticSearchEngine:
         """
         if not grouped_chunks:
             return []
-        model = self._load_context_model()
+        total_chunks = sum(len(doc) for doc in grouped_chunks)
         logger.info(
-            "Context encoding: %d documents, %d total chunks",
-            len(grouped_chunks),
-            sum(len(doc) for doc in grouped_chunks),
+            "Context encoding via Modal: %d documents, %d total chunks",
+            len(grouped_chunks), total_chunks,
         )
-        # model.encode() returns list of numpy arrays, one per document
-        # Each array shape: (num_chunks_in_doc, 1024)
-        raw_embeddings = model.encode(grouped_chunks)
-        # Convert numpy float32 arrays to Python lists
-        import numpy as np
-        result = []
-        for doc_embeddings in raw_embeddings:
-            doc_vectors = []
-            for chunk_vec in doc_embeddings:
-                # Ensure float32 (model may produce int8 natively)
-                vec = np.asarray(chunk_vec, dtype=np.float32)
-                doc_vectors.append(vec.tolist())
-            result.append(doc_vectors)
+        fn = self._get_modal_fn()
+        # Batch to avoid Modal timeout — 10 docs per call
+        # (pplx-embed-context is slow on long texts even on GPU)
+        batch_size = 10
+        result: list[list[list[float]]] = []
+        for i in range(0, len(grouped_chunks), batch_size):
+            batch = grouped_chunks[i : i + batch_size]
+            batch_chunks = sum(len(doc) for doc in batch)
+            logger.info(
+                "Modal batch %d/%d: %d docs, %d chunks",
+                i // batch_size + 1,
+                (len(grouped_chunks) + batch_size - 1) // batch_size,
+                len(batch), batch_chunks,
+            )
+            result.extend(fn.remote(batch))
+        logger.info("Modal context encoding complete: %d documents", len(result))
         return result
 
     def unload_context_model(self) -> None:
-        """Free RAM by unloading the context model after indexing."""
-        if self._context_model is not None:
-            del self._context_model
-            self._context_model = None
-            import gc
-            gc.collect()
-            logger.info("Context model unloaded")
+        """No-op — Modal functions are stateless, nothing to unload."""
+        pass
 
     # ------------------------------------------------------------------
     # Public API
