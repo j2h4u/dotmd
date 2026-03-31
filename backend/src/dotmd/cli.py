@@ -8,6 +8,7 @@ import click
 
 from dotmd.api.service import DotMDService
 from dotmd.core.config import Settings
+from dotmd.core.models import SearchMode
 from dotmd.utils.logging import setup_logging
 
 
@@ -39,15 +40,27 @@ def _get_service(**overrides: object) -> DotMDService:
     default=None,
     help="Comma-separated GLiNER entity types (e.g. 'person,technology,concept').",
 )
-def index(directory: Path, extract_depth: str, entity_types: str | None) -> None:
+@click.option(
+    "--force", "-f",
+    is_flag=True,
+    default=False,
+    help="Force full re-index, bypassing incremental change detection.",
+)
+@click.pass_context
+def index(ctx: click.Context, directory: Path, extract_depth: str, entity_types: str | None, force: bool) -> None:
     """Index all markdown files in DIRECTORY."""
     overrides: dict[str, object] = {"extract_depth": extract_depth}
     if entity_types:
         overrides["ner_entity_types"] = [t.strip() for t in entity_types.split(",")]
 
     service = _get_service(**overrides)
-    click.echo(f"Indexing {directory}...")
-    stats = service.index(directory)
+    mode_label = "full re-index" if force else "incremental"
+    click.echo(f"Indexing {directory} ({mode_label})...")
+    stats = service.index(directory, force=force)
+    click.echo(
+        f"{stats.new_files} new, {stats.modified_files} modified, "
+        f"{stats.deleted_files} deleted, {stats.unchanged_files} unchanged"
+    )
     click.echo(
         f"Done. {stats.total_files} files, {stats.total_chunks} chunks, "
         f"{stats.total_entities} entities, {stats.total_edges} edges."
@@ -59,7 +72,7 @@ def index(directory: Path, extract_depth: str, entity_types: str | None) -> None
 @click.option("--top", "-n", default=10, help="Number of results to return.")
 @click.option(
     "--mode",
-    type=click.Choice(["semantic", "bm25", "graph", "hybrid"]),
+    type=click.Choice([m.value for m in SearchMode]),
     default="hybrid",
     help="Search mode.",
 )
@@ -95,16 +108,97 @@ def status() -> None:
     service = _get_service(read_only=True)
     stats = service.status()
 
-    if stats is None:
-        click.echo("No index found. Run `dotmd index <directory>` first.")
-        return
-
     click.echo(f"Files:    {stats.total_files}")
     click.echo(f"Chunks:   {stats.total_chunks}")
     click.echo(f"Entities: {stats.total_entities}")
     click.echo(f"Edges:    {stats.total_edges}")
+    # Graph backend info
+    settings = Settings()
+    if settings.graph_backend == "falkordb":
+        click.echo(f"Graph:    falkordb @ {settings.falkordb_url}/{settings.falkordb_graph_name}")
+    else:
+        click.echo(f"Graph:    ladybugdb @ {settings.graph_db_path}")
     if stats.last_indexed:
         click.echo(f"Last indexed: {stats.last_indexed.isoformat()}")
+    if stats.data_dir:
+        if stats.new_files or stats.modified_files or stats.deleted_files:
+            click.echo(
+                f"Pending: {stats.new_files} new, {stats.modified_files} modified, "
+                f"{stats.deleted_files} deleted since last index"
+            )
+        else:
+            click.echo("No changes detected since last index.")
+
+    # Trickle indexer progress
+    if stats.trickle_status and stats.trickle_status != "idle":
+        click.echo("")  # blank line separator
+        if stats.trickle_status == "backlog":
+            progress = ""
+            if stats.trickle_total and stats.trickle_total > 0:
+                progress = f" ({stats.trickle_indexed or 0}/{stats.trickle_total} files)"
+            rate = ""
+            if stats.trickle_chunks_per_hour:
+                rate = f" @ {stats.trickle_chunks_per_hour:.0f} chunks/hr ({stats.trickle_files_per_hour:.0f} files/hr)"
+            eta = ""
+            if stats.trickle_eta_minutes is not None:
+                if stats.trickle_eta_minutes < 60:
+                    eta = f", ETA ~{stats.trickle_eta_minutes:.0f}min"
+                else:
+                    hours = stats.trickle_eta_minutes / 60
+                    eta = f", ETA ~{hours:.1f}hr"
+            click.echo(f"Background: indexing{progress}{rate}{eta}")
+        elif stats.trickle_status == "watching":
+            click.echo(f"Background: watching for new files (indexed {stats.trickle_indexed or 0} total)")
+        elif stats.trickle_status == "stopping":
+            click.echo("Background: shutting down...")
+
+        if stats.trickle_current_file:
+            click.echo(f"  Current: {stats.trickle_current_file}")
+
+
+@main.group()
+def reindex() -> None:
+    """Rebuild a specific index from stored chunks.
+
+    Metadata (chunks) is the source of truth — each subcommand
+    rebuilds one derived store without re-reading files from disk.
+    """
+
+
+@reindex.command("vectors")
+def reindex_vectors() -> None:
+    """Rebuild vector embeddings (requires TEI)."""
+    service = _get_service()
+    click.echo("Rebuilding vector index...")
+    n = service.reindex("vectors")
+    click.echo(f"Done. {n} chunks re-embedded.")
+
+
+@reindex.command("fts5")
+def reindex_fts5() -> None:
+    """Rebuild FTS5 keyword index."""
+    service = _get_service()
+    click.echo("Rebuilding FTS5 index...")
+    n = service.reindex("fts5")
+    click.echo(f"Done. {n} chunks re-indexed.")
+
+
+@reindex.command("graph")
+def reindex_graph() -> None:
+    """Rebuild knowledge graph (runs extraction)."""
+    service = _get_service()
+    click.echo("Rebuilding knowledge graph...")
+    n = service.reindex("graph")
+    click.echo(f"Done. {n} chunks processed.")
+
+
+@reindex.command("all")
+def reindex_all() -> None:
+    """Rebuild all derived indexes (vectors + FTS5 + graph)."""
+    service = _get_service()
+    click.echo("Rebuilding all indexes...")
+    n = service.reindex("all")
+    click.echo(f"Done. {n} chunks across all stores.")
 
 
 @main.command()
@@ -133,7 +227,7 @@ def mcp() -> None:
     """Start the MCP (Model Context Protocol) server."""
     from dotmd.mcp_server import mcp as mcp_app
 
-    click.echo("Starting dotMD MCP server...")
+    click.echo("Starting dotMD MCP server...", err=True)
     mcp_app.run()
 
 

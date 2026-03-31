@@ -1,21 +1,44 @@
-x-common: &common
-  build:
-    context: ./backend
-  volumes:
-    - ./data:/data
-    - ./persistence:/dotmd-index
-  environment:
-    - DOTMD_DATA_DIR=/data
-    - DOTMD_INDEX_DIR=/dotmd-index
-    - DOTMD_EXTRACT_DEPTH=ner
-
 services:
   api:
-    <<: *common
+    build:
+      context: ./backend
     ports:
-      - "8000:8000"
+      - "${DOTMD_PORT:-8000}:8000"
+    volumes:
+      - ${DOTMD_DATA_VOLUME:-.}/data:/data
+      - dotmd-index:/dotmd-index
+      - dotmd-hf-models:/root/.cache/huggingface
+    env_file:
+      - path: .env
+        required: false
     command: ["serve", "--host", "0.0.0.0"]
 
-  mcp:
-    <<: *common
-    command: ["mcp"]
+  tei:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+    profiles: [bundled]
+    command: --model-id ${DOTMD_EMBEDDING_MODEL:-BAAI/bge-small-en-v1.5} --dtype float32
+    volumes:
+      - dotmd-hf-models:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 120s
+      retries: 10
+
+  falkordb:
+    image: falkordb/falkordb:latest
+    profiles: [bundled]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    volumes:
+      - falkordb-data:/data
+
+volumes:
+  dotmd-index:
+  dotmd-hf-models:
+  falkordb-data:

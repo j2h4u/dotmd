@@ -1,6 +1,6 @@
 """Graph-based search engine for dotMD.
 
-Expands seed chunk IDs (typically supplied by the semantic or BM25
+Expands seed chunk IDs (typically supplied by the semantic or keyword
 engines via the fusion layer) by traversing the knowledge graph and
 scoring neighbouring section nodes.
 """
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class GraphSearchEngine:
     """Search engine that exploits the knowledge graph for relevance signals.
 
-    Unlike :class:`SemanticSearchEngine` and :class:`BM25SearchEngine`,
+    Unlike :class:`SemanticSearchEngine` and :class:`FTS5SearchEngine`,
     this engine does **not** operate on the raw query text.  Instead it
     requires a set of *seed* chunk IDs (produced by another engine) and
     discovers related sections by walking the graph.

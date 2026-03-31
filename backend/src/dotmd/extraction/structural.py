@@ -6,8 +6,11 @@ markdown links, and heading hierarchy.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 import yaml
 
@@ -160,6 +163,7 @@ class StructuralExtractor:
         try:
             data: Any = yaml.safe_load(raw_yaml)
         except yaml.YAMLError:
+            logger.debug("Malformed YAML frontmatter in chunk %s", chunk_id, exc_info=True)
             return
 
         if not isinstance(data, dict):

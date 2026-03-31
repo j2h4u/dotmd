@@ -37,7 +37,7 @@ def search(
     Args:
         query: Natural-language search query.
         top_k: Maximum number of results to return.
-        mode: Search strategy — "semantic", "bm25", "graph", or "hybrid".
+        mode: Search strategy — "semantic", "keyword", "graph", or "hybrid".
         rerank: Whether to rerank results with a cross-encoder.
 
     Returns:
@@ -70,13 +70,7 @@ def index(directory: str) -> dict:
     """
     service = _get_service()
     stats = service.index(Path(directory))
-    return {
-        "total_files": stats.total_files,
-        "total_chunks": stats.total_chunks,
-        "total_entities": stats.total_entities,
-        "total_edges": stats.total_edges,
-        "last_indexed": stats.last_indexed.isoformat() if stats.last_indexed else None,
-    }
+    return stats.model_dump(mode="json")
 
 
 @mcp.tool()
@@ -84,19 +78,10 @@ def status() -> dict:
     """Get current index statistics.
 
     Returns:
-        Index stats or a message indicating no index exists.
+        Index statistics including trickle indexer progress.
     """
     service = _get_service()
-    stats = service.status()
-    if stats is None:
-        return {"message": "No index found. Run the 'index' tool first."}
-    return {
-        "total_files": stats.total_files,
-        "total_chunks": stats.total_chunks,
-        "total_entities": stats.total_entities,
-        "total_edges": stats.total_edges,
-        "last_indexed": stats.last_indexed.isoformat() if stats.last_indexed else None,
-    }
+    return service.status().model_dump(mode="json")
 
 
 if __name__ == "__main__":

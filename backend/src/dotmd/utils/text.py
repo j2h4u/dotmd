@@ -6,10 +6,10 @@ import re
 
 
 # ---------------------------------------------------------------------------
-# Canonical noise-filtering used by BM25, TF-IDF, and key-term extraction.
+# Canonical noise-filtering used by FTS5, TF-IDF, and key-term extraction.
 #
 # ALL filtering logic lives here so callers just use ``is_noise_token()``.
-# The function handles both lowercase tokens (BM25/TF-IDF) and uppercase
+# The function handles both lowercase tokens (FTS5/TF-IDF) and uppercase
 # tokens (acronym extraction) via case-insensitive lookup.
 # ---------------------------------------------------------------------------
 
@@ -111,7 +111,7 @@ _HEX_COLOR_RE = re.compile(r"^[0-9a-f]{3,8}$")
 def is_noise_token(token: str) -> bool:
     """Return True if *token* is a stop word, hex color, or skip-listed.
 
-    Works for both lowercase tokens (BM25/TF-IDF) and uppercase tokens
+    Works for both lowercase tokens (FTS5/TF-IDF) and uppercase tokens
     (acronym extraction).  This is the single source of truth for all
     noise filtering across the codebase.
     """
@@ -130,7 +130,7 @@ def is_noise_token(token: str) -> bool:
 
 
 def tokenize(text: str) -> list[str]:
-    """Whitespace + punctuation tokenizer with stop-word removal for BM25."""
+    """Whitespace + punctuation tokenizer with stop-word removal for FTS5."""
     text = text.lower()
     tokens = re.findall(r"\b\w+\b", text)
     return [t for t in tokens if not is_noise_token(t)]

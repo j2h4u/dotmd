@@ -8,16 +8,22 @@ Thin HTTP layer over :class:`DotMDService`.  Start with::
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
 
-from fastapi import FastAPI, Query
+import time
+
+from fastapi import FastAPI, Query, Request
 from pydantic import BaseModel
 
 from dotmd.api.service import DotMDService
 from dotmd.core.config import Settings
-from dotmd.core.models import IndexStats, SearchResult
+from dotmd.core.models import ExtractDepth, IndexStats, SearchMode, SearchResult
+
+logger = logging.getLogger(__name__)
 
 _service: DotMDService | None = None
 
@@ -30,9 +36,30 @@ def _get_service() -> DotMDService:
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _service  # noqa: PLW0603
-    _service = DotMDService(Settings(read_only=True))
+    _service = DotMDService(Settings())
     _service.warmup()
+
+    # Start background trickle indexer
+    shutdown_event = asyncio.Event()
+    indexer_task = asyncio.create_task(
+        _service.trickle_indexer.run(shutdown_event)
+    )
+
     yield
+
+    # Signal shutdown, wait for current file to finish
+    shutdown_event.set()
+    try:
+        await asyncio.wait_for(indexer_task, timeout=120)
+    except asyncio.TimeoutError:
+        logger.warning("Trickle indexer did not stop within 120s -- cancelling")
+        indexer_task.cancel()
+        try:
+            await indexer_task
+        except asyncio.CancelledError:
+            pass
+    except Exception:
+        logger.exception("Trickle indexer task failed during shutdown")
     _service = None
 
 
@@ -43,12 +70,36 @@ app = FastAPI(
 )
 
 
+@app.middleware("http")
+async def _log_requests(request: Request, call_next):  # noqa: ANN001
+    """Log every HTTP request with method, path, status, and duration."""
+    t0 = time.perf_counter()
+    response = await call_next(request)
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    log = logger.error if response.status_code >= 500 else logger.info
+    log(
+        "%s %s %d (%.0fms)",
+        request.method,
+        request.url.path,
+        response.status_code,
+        elapsed_ms,
+    )
+    return response
+
+
+@app.get("/health")
+async def health() -> dict:
+    """Liveness probe -- confirms FastAPI is up and responding."""
+    return {"status": "ok"}
+
+
 # -- Request / response models ------------------------------------------------
 
 class IndexRequest(BaseModel):
     directory: str
-    extract_depth: str = "ner"
+    extract_depth: ExtractDepth = ExtractDepth.NER
     entity_types: list[str] | None = None
+    force: bool = False
 
 
 class SearchResponse(BaseModel):
@@ -84,18 +135,14 @@ class GraphResponse(BaseModel):
 @app.post("/index", response_model=IndexStats)
 async def index(req: IndexRequest) -> IndexStats:
     """Index all markdown files under the given directory."""
-    overrides: dict[str, object] = {"extract_depth": req.extract_depth}
-    if req.entity_types is not None:
-        overrides["ner_entity_types"] = req.entity_types
-    service = DotMDService(Settings(**overrides))  # type: ignore[arg-type]
-    return service.index(Path(req.directory))
+    return _get_service().index(Path(req.directory), force=req.force)
 
 
 @app.get("/search", response_model=SearchResponse)
 async def search(
     q: str = Query(..., description="Search query"),
     top_k: int = Query(10, ge=1, le=100),
-    mode: str = Query("hybrid", pattern="^(semantic|bm25|graph|hybrid)$"),
+    mode: SearchMode = Query(SearchMode.HYBRID),
     rerank: bool = Query(True),
     expand: bool = Query(True),
 ) -> SearchResponse:
@@ -110,9 +157,9 @@ async def search(
     return SearchResponse(query=q, results=results, count=len(results))
 
 
-@app.get("/status", response_model=IndexStats | None)
-async def status() -> IndexStats | None:
-    """Return current index statistics."""
+@app.get("/status", response_model=IndexStats)
+async def status() -> IndexStats:
+    """Return current index statistics and trickle indexer progress."""
     return _get_service().status()
 
 

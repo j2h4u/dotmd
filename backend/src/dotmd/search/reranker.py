@@ -23,6 +23,10 @@ class Reranker:
     :meth:`rerank` so that import time stays fast and GPU/CPU resources
     are only consumed when actually needed.
 
+    The reranker reorders candidates by cross-encoder score and filters
+    out results below a relevance threshold (raw logit < 0 by default,
+    corresponding to sigmoid < 0.5).
+
     Optionally applies a length penalty to downrank very short chunks
     (e.g., navigation tables) that may be keyword-dense but lack content.
 
@@ -41,13 +45,16 @@ class Reranker:
         model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
         length_penalty: bool = True,
         min_length: int = 100,
-        score_threshold: float = -8.0,
+        relevance_floor: float = 0.0,
     ) -> None:
         self._model_name = model_name
         self._model: Any | None = None
         self._length_penalty = length_penalty
         self._min_length = min_length
-        self._score_threshold = score_threshold
+        # Cross-encoder logit threshold: scores below this are filtered out.
+        # Default 0.0 = sigmoid(0) = 0.5 — the natural decision boundary
+        # for ms-marco cross-encoders trained with binary relevance labels.
+        self._relevance_floor = relevance_floor
 
     # ------------------------------------------------------------------
     # Internals
@@ -128,7 +135,15 @@ class Reranker:
         scored = [
             (cid, float(score))
             for (cid, _text), score in zip(id_text_pairs, scores)
-            if score >= self._score_threshold
+            if score >= self._relevance_floor
         ]
         scored.sort(key=lambda x: x[1], reverse=True)
+        if scored:
+            logger.debug(
+                "Reranker: %d/%d passed relevance floor (%.1f), top=%.2f, min=%.2f",
+                len(scored), len(id_text_pairs), self._relevance_floor,
+                scored[0][1], scored[-1][1],
+            )
+        else:
+            logger.debug("Reranker: all %d candidates below relevance floor (%.1f)", len(id_text_pairs), self._relevance_floor)
         return scored[:top_k]

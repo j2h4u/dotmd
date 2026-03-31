@@ -53,15 +53,23 @@ ON CONFLICT(chunk_id) DO UPDATE SET
     char_offset       = excluded.char_offset
 """
 
+_CREATE_INDEX_FILE_PATH = "CREATE INDEX IF NOT EXISTS idx_chunks_file_path ON chunks(file_path)"
+
 _UPSERT_STATS = """
-INSERT INTO stats (id, total_files, total_chunks, total_entities, total_edges, last_indexed)
-VALUES (1, ?, ?, ?, ?, ?)
+INSERT INTO stats (id, total_files, total_chunks, total_entities, total_edges, last_indexed,
+                   new_files, modified_files, deleted_files, unchanged_files, data_dir)
+VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
-    total_files    = excluded.total_files,
-    total_chunks   = excluded.total_chunks,
-    total_entities = excluded.total_entities,
-    total_edges    = excluded.total_edges,
-    last_indexed   = excluded.last_indexed
+    total_files     = excluded.total_files,
+    total_chunks    = excluded.total_chunks,
+    total_entities  = excluded.total_entities,
+    total_edges     = excluded.total_edges,
+    last_indexed    = excluded.last_indexed,
+    new_files       = excluded.new_files,
+    modified_files  = excluded.modified_files,
+    deleted_files   = excluded.deleted_files,
+    unchanged_files = excluded.unchanged_files,
+    data_dir        = excluded.data_dir
 """
 
 
@@ -82,10 +90,25 @@ class SQLiteMetadataStore:
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
-        self._conn = sqlite3.connect(str(db_path))
+        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute(_CREATE_CHUNKS)
+        self._conn.execute(_CREATE_INDEX_FILE_PATH)
         self._conn.execute(_CREATE_STATS)
+        # Idempotent schema migration: add diff-reporting columns
+        for col, typedef in [
+            ("new_files", "INTEGER NOT NULL DEFAULT 0"),
+            ("modified_files", "INTEGER NOT NULL DEFAULT 0"),
+            ("deleted_files", "INTEGER NOT NULL DEFAULT 0"),
+            ("unchanged_files", "INTEGER NOT NULL DEFAULT 0"),
+            ("data_dir", "TEXT"),
+        ]:
+            try:
+                self._conn.execute(
+                    f"ALTER TABLE stats ADD COLUMN {col} {typedef}"
+                )
+            except sqlite3.OperationalError:
+                pass  # Column already exists
         self._conn.commit()
 
     # -- chunks -------------------------------------------------------------
@@ -140,6 +163,23 @@ class SQLiteMetadataStore:
         )
         return [self._row_to_chunk(row) for row in cur.fetchall()]
 
+    def get_chunk_ids_by_file(self, file_path: str) -> list[str]:
+        """Return all chunk_ids for a given file path."""
+        cur = self._conn.execute(
+            "SELECT chunk_id FROM chunks WHERE file_path = ?",
+            (file_path,),
+        )
+        return [row[0] for row in cur.fetchall()]
+
+    def delete_chunks_by_file(self, file_path: str) -> int:
+        """Delete all chunks belonging to a file. Returns count deleted."""
+        cur = self._conn.execute(
+            "DELETE FROM chunks WHERE file_path = ?",
+            (file_path,),
+        )
+        self._conn.commit()
+        return cur.rowcount
+
     # -- stats --------------------------------------------------------------
 
     def save_stats(self, stats: IndexStats) -> None:
@@ -155,16 +195,42 @@ class SQLiteMetadataStore:
                 stats.total_entities,
                 stats.total_edges,
                 last_indexed,
+                stats.new_files,
+                stats.modified_files,
+                stats.deleted_files,
+                stats.unchanged_files,
+                stats.data_dir,
             ),
         )
         self._conn.commit()
 
     def get_stats(self) -> IndexStats | None:
         """Retrieve the most recent index statistics."""
-        cur = self._conn.execute(
-            "SELECT total_files, total_chunks, total_entities, total_edges, last_indexed "
-            "FROM stats WHERE id = 1"
-        )
+        try:
+            cur = self._conn.execute(
+                "SELECT total_files, total_chunks, total_entities, total_edges, last_indexed, "
+                "new_files, modified_files, deleted_files, unchanged_files, data_dir "
+                "FROM stats WHERE id = 1"
+            )
+        except sqlite3.OperationalError:
+            # Old schema without diff columns -- fall back to base query
+            cur = self._conn.execute(
+                "SELECT total_files, total_chunks, total_entities, total_edges, last_indexed "
+                "FROM stats WHERE id = 1"
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            last_indexed = (
+                datetime.fromisoformat(row[4]) if row[4] else None
+            )
+            return IndexStats(
+                total_files=row[0],
+                total_chunks=row[1],
+                total_entities=row[2],
+                total_edges=row[3],
+                last_indexed=last_indexed,
+            )
         row = cur.fetchone()
         if row is None:
             return None
@@ -177,6 +243,11 @@ class SQLiteMetadataStore:
             total_entities=row[2],
             total_edges=row[3],
             last_indexed=last_indexed,
+            new_files=row[5],
+            modified_files=row[6],
+            deleted_files=row[7],
+            unchanged_files=row[8],
+            data_dir=row[9],
         )
 
     # -- housekeeping -------------------------------------------------------
@@ -185,6 +256,11 @@ class SQLiteMetadataStore:
         """Remove all chunks and statistics from the store."""
         self._conn.execute("DELETE FROM chunks")
         self._conn.execute("DELETE FROM stats")
+        # Clear FTS5 index if it exists
+        try:
+            self._conn.execute("DELETE FROM chunks_fts")
+        except sqlite3.OperationalError:
+            pass  # FTS5 table not yet created
         self._conn.commit()
 
     # -- helpers ------------------------------------------------------------

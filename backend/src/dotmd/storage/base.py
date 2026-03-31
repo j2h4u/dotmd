@@ -31,6 +31,8 @@ class VectorStoreProtocol(Protocol):
         self,
         chunks: list[Chunk],
         embeddings: list[list[float]],
+        *,
+        overwrite: bool = True,
     ) -> None:
         """Upsert *chunks* with their corresponding *embeddings*.
 
@@ -40,6 +42,10 @@ class VectorStoreProtocol(Protocol):
             The chunk objects to store.
         embeddings:
             A parallel list of embedding vectors, one per chunk.
+        overwrite:
+            When ``True`` (default), all existing vectors are deleted
+            before inserting.  When ``False``, new vectors are appended
+            to existing ones.
         """
         ...
 
@@ -67,6 +73,21 @@ class VectorStoreProtocol(Protocol):
 
     def delete_all(self) -> None:
         """Remove **all** vectors from the store."""
+        ...
+
+    def delete_vectors_by_chunk_ids(self, chunk_ids: list[str]) -> int:
+        """Delete vectors for the given chunk IDs.
+
+        Parameters
+        ----------
+        chunk_ids:
+            The chunk identifiers whose vectors should be removed.
+
+        Returns
+        -------
+        int
+            The number of vectors actually deleted.
+        """
         ...
 
     def count(self) -> int:
@@ -203,12 +224,37 @@ class GraphStoreProtocol(Protocol):
         """Remove **all** nodes and edges from the graph."""
         ...
 
+    def delete_file_subgraph(self, file_path: str) -> None:
+        """Delete File and Section nodes for a file path.
+
+        Entity and Tag nodes are preserved because they may be
+        referenced by other files.
+
+        Parameters
+        ----------
+        file_path:
+            The path of the file whose subgraph should be removed.
+        """
+        ...
+
     def node_count(self) -> int:
         """Return the total number of nodes in the graph."""
         ...
 
     def edge_count(self) -> int:
         """Return the total number of edges in the graph."""
+        ...
+
+    def get_graph_data(self) -> dict:
+        """Return all nodes and edges for visualization.
+
+        Returns
+        -------
+        dict
+            A dictionary with ``'nodes'`` and ``'edges'`` keys.
+            Each node: ``{'id': str, 'label': str, 'properties': dict}``.
+            Each edge: ``{'source': str, 'target': str, 'relation_type': str, 'weight': float}``.
+        """
         ...
 
 
@@ -283,6 +329,36 @@ class MetadataStoreProtocol(Protocol):
         -------
         IndexStats | None
             The statistics if available, otherwise ``None``.
+        """
+        ...
+
+    def get_chunk_ids_by_file(self, file_path: str) -> list[str]:
+        """Return all chunk_ids for a given file path.
+
+        Parameters
+        ----------
+        file_path:
+            The file path to look up.
+
+        Returns
+        -------
+        list[str]
+            Chunk identifiers belonging to the file.
+        """
+        ...
+
+    def delete_chunks_by_file(self, file_path: str) -> int:
+        """Delete all chunks belonging to a file.
+
+        Parameters
+        ----------
+        file_path:
+            The file path whose chunks should be removed.
+
+        Returns
+        -------
+        int
+            The number of chunks deleted.
         """
         ...
 

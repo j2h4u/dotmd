@@ -232,21 +232,40 @@ class LadybugDBGraphStore:
 
     # -- housekeeping -------------------------------------------------------
 
+    def delete_file_subgraph(self, file_path: str) -> None:
+        """Delete all Section nodes for a file and the File node itself.
+
+        Entity and Tag nodes are preserved (shared across files).
+        DETACH DELETE removes the node AND all its connected edges
+        across all relationship tables.
+        """
+        with self._connection() as conn:
+            # 1. Delete Section nodes (+ edges: SECTION_ENTITY, SECTION_TAG,
+            #    SECTION_SECTION, and the FILE_SECTION edge from the parent File)
+            conn.execute(
+                "MATCH (s:Section {file_path: $fp}) DETACH DELETE s",
+                parameters={"fp": file_path},
+            )
+            # 2. Delete File node (+ edges: FILE_TAG, FILE_ENTITY,
+            #    any remaining FILE_SECTION edges)
+            conn.execute(
+                "MATCH (f:File {id: $fp}) DETACH DELETE f",
+                parameters={"fp": file_path},
+            )
+
     def delete_all(self) -> None:
         """Remove all nodes and edges from the graph."""
         with self._connection() as conn:
-            for stmt in reversed(_SCHEMA_INIT):
-                table_name = stmt.split("IF NOT EXISTS")[1].strip().split("(")[0].strip() if "IF NOT EXISTS" in stmt else None
-                if table_name:
-                    try:
-                        conn.execute(f"MATCH ()-[r:{table_name}]->() DELETE r")
-                    except Exception:
-                        pass
+            for rel_table in _REL_TABLE_MAP.values():
+                try:
+                    conn.execute(f"MATCH ()-[r:{rel_table}]->() DELETE r")
+                except Exception:
+                    logger.warning("Failed to delete edges from %s", rel_table, exc_info=True)
             for label in ("File", "Section", "Entity", "Tag"):
                 try:
                     conn.execute(f"MATCH (n:{label}) DELETE n")
                 except Exception:
-                    pass
+                    logger.warning("Failed to delete %s nodes", label, exc_info=True)
 
     def get_graph_data(self) -> dict:
         """Return all nodes and edges for visualization."""
@@ -322,7 +341,7 @@ class LadybugDBGraphStore:
                     df = result.get_as_df()
                     total += int(df.iloc[0, 0])
                 except Exception:
-                    pass
+                    logger.warning("Failed to count %s nodes", label, exc_info=True)
         return total
 
     def edge_count(self) -> int:
@@ -335,5 +354,5 @@ class LadybugDBGraphStore:
                     df = result.get_as_df()
                     total += int(df.iloc[0, 0])
                 except Exception:
-                    pass
+                    logger.warning("Failed to count %s edges", rel_table, exc_info=True)
         return total
