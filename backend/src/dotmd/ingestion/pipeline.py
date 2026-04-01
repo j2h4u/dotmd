@@ -384,24 +384,57 @@ class IndexingPipeline:
     # Embedding
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _enrich_for_embedding(text: str) -> str:
+        """Prepend document title to chunk text for better semantic matching.
+
+        Extracts title from YAML frontmatter (if present) and prepends it.
+        This gives the embedding model document-level context without
+        changing stored chunk text or FTS5 index.
+
+        For docs with heading hierarchy (already prepended by chunker),
+        this is a no-op (no frontmatter).
+        """
+        if not text.startswith("---"):
+            return text
+        end = text.find("---", 3)
+        if end == -1:
+            return text
+        # Quick title extraction without yaml parser
+        title = ""
+        for line in text[3:end].split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("title:"):
+                title = stripped[6:].strip().strip("'\"")
+                break
+        if not title:
+            return text
+        return f"{title}\n\n{text}"
+
     def _embed_chunks(
         self, chunks: list[Chunk],
     ) -> tuple[list[list[float]], dict[str, str]]:
-        """Embed chunks with text_hash reuse.
+        """Embed chunks with context prefix injection and text_hash reuse.
+
+        Each chunk's text is enriched with document title (from frontmatter)
+        before encoding. The text_hash is computed on the ENRICHED text so
+        that cache reuse is correct (same text + same title = same embedding).
 
         Returns ``(embeddings, text_hashes)`` where *text_hashes* maps
-        ``chunk_id → md5_hex``.  Existing embeddings are looked up by
-        content hash before encoding, so identical text across strategies
-        or re-indexing runs avoids redundant TEI calls.
-
-        Assumes flat encoding only (context-aware code removed).
+        ``chunk_id → md5_hex``.
         """
         if not chunks:
             return [], {}
 
+        # Enrich texts with document title prefix for embedding
+        enriched_texts: dict[str, str] = {
+            c.chunk_id: self._enrich_for_embedding(c.text) for c in chunks
+        }
+
+        # text_hash on enriched text (prefix changes embedding → different hash)
         text_hashes: dict[str, str] = {
-            c.chunk_id: hashlib.md5(c.text.encode()).hexdigest()
-            for c in chunks
+            cid: hashlib.md5(text.encode()).hexdigest()
+            for cid, text in enriched_texts.items()
         }
 
         # Lookup existing embeddings by text_hash (same model, any strategy)
@@ -424,7 +457,9 @@ class IndexingPipeline:
                 to_encode_indices.append(i)
 
         if to_encode_indices:
-            texts_to_encode = [chunks[i].text for i in to_encode_indices]
+            texts_to_encode = [
+                enriched_texts[chunks[i].chunk_id] for i in to_encode_indices
+            ]
             new_embeddings = self._semantic_engine.encode_batch(texts_to_encode)
             for j, idx in enumerate(to_encode_indices):
                 embeddings[idx] = new_embeddings[j]
