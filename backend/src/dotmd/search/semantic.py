@@ -126,8 +126,10 @@ class SemanticSearchEngine:
         """Call a TEI-compatible ``/embed`` endpoint.
 
         Probes the max batch size on first call, then uses it for all
-        subsequent batches.
+        subsequent batches.  Logs progress with ETA every 50 batches.
         """
+        import time
+
         import httpx
 
         if isinstance(inputs, str):
@@ -140,10 +142,11 @@ class SemanticSearchEngine:
         results: list[list[float]] = []
         bs = self._tei_batch_size
         total_batches = (len(inputs) + bs - 1) // bs
+        t_start = time.perf_counter()
+        log_interval = max(1, min(50, total_batches // 20))  # ~20 log lines total
+
         for batch_idx, i in enumerate(range(0, len(inputs), bs)):
             batch = inputs[i : i + bs]
-            if batch_idx % 200 == 0 or batch_idx == total_batches - 1:
-                logger.info("TEI batch %d/%d (%d texts, bs=%d)", batch_idx + 1, total_batches, len(batch), bs)
             response = httpx.post(
                 f"{self._embedding_url}/embed",
                 json={"inputs": batch, "truncate": True},
@@ -151,7 +154,27 @@ class SemanticSearchEngine:
             )
             response.raise_for_status()
             results.extend(response.json())
-        logger.info("TEI embedding complete: %d vectors (bs=%d)", len(results), bs)
+
+            if batch_idx % log_interval == 0 or batch_idx == total_batches - 1:
+                done = batch_idx + 1
+                elapsed = time.perf_counter() - t_start
+                rate = done / elapsed if elapsed > 0 else 0
+                remaining = (total_batches - done) / rate if rate > 0 else 0
+                if remaining < 60:
+                    eta = f"ETA ~{remaining:.0f}s"
+                else:
+                    eta = f"ETA ~{remaining / 60:.1f}min"
+                logger.info(
+                    "TEI %d/%d (%.0f%%) %.1f batches/s, %s",
+                    done, total_batches, done / total_batches * 100,
+                    rate, eta,
+                )
+
+        elapsed = time.perf_counter() - t_start
+        logger.info(
+            "TEI complete: %d vectors in %.1fs (%.1f vectors/s, bs=%d)",
+            len(results), elapsed, len(results) / elapsed if elapsed > 0 else 0, bs,
+        )
         return results
 
     @property
