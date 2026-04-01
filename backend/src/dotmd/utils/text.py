@@ -137,8 +137,12 @@ def tokenize(text: str) -> list[str]:
 
 
 def estimate_tokens(text: str) -> int:
-    """Rough token count estimate (~4 chars per token)."""
-    return max(1, len(text) // 4)
+    """Rough token count estimate using UTF-8 byte length.
+
+    UTF-8 bytes ÷ 4 gives a better approximation than char count
+    for multilingual text: Cyrillic ~3 bytes/token, Latin ~1 byte/token.
+    """
+    return max(1, len(text.encode("utf-8")) // 4)
 
 
 def clean_text(text: str) -> str:

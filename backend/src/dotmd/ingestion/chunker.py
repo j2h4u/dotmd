@@ -22,6 +22,36 @@ def _make_chunk_id(file_path: Path, chunk_index: int) -> str:
     return hashlib.md5(payload.encode()).hexdigest()
 
 
+# Matches transcript speaker turns: [00:12:34] **Speaker Name:**
+_SPEAKER_TURN_RE = re.compile(r"\n(?=\[\d{2}:\d{2}:\d{2}\]\s*\*\*)")
+
+
+def _pre_split_segments(text: str) -> list[str]:
+    """Break text into natural segments before sentence splitting.
+
+    Transcript speaker turns and paragraph breaks are stronger boundaries
+    than sentence-level punctuation.  Returns segments that the existing
+    ``_split_with_overlap`` groups into token-budget chunks.
+
+    Detection order:
+    1. Speaker turns (``[HH:MM:SS] **Name:**``) — meetings with diarization
+    2. Double newlines — personal voicenotes, paragraph breaks
+    3. Fallback — return text as-is (docs without structure)
+    """
+    # Meetings: split on speaker turn boundaries
+    if len(_SPEAKER_TURN_RE.findall(text)) >= 3:
+        segments = _SPEAKER_TURN_RE.split(text)
+        return [s.strip() for s in segments if s.strip()]
+
+    # Personal voicenotes / other: split on double newlines
+    if text.count("\n\n") >= 3:
+        segments = text.split("\n\n")
+        return [s.strip() for s in segments if s.strip()]
+
+    # Docs or short text: no pre-splitting needed
+    return [text] if text.strip() else []
+
+
 def _split_with_overlap(
     text: str,
     max_tokens: int,
@@ -29,14 +59,23 @@ def _split_with_overlap(
 ) -> list[str]:
     """Split *text* into pieces that each fit within *max_tokens*.
 
-    Uses sentence boundaries where possible.  When a single sentence
-    exceeds *max_tokens* it is included as-is (never discarded).
-    Consecutive pieces share approximately *overlap_tokens* worth of
-    trailing context from the previous piece.
+    First breaks text into natural segments (speaker turns, paragraphs),
+    then groups them into token-budget chunks with overlap.  Falls back
+    to sentence splitting for segments that exceed the budget.
     """
-    sentences = split_sentences(text)
-    if not sentences:
+    segments = _pre_split_segments(text)
+    if not segments:
         return [text] if text.strip() else []
+
+    # Flatten: if any segment is still too large, sentence-split it
+    sentences: list[str] = []
+    for seg in segments:
+        if estimate_tokens(seg) <= max_tokens:
+            sentences.append(seg)
+        else:
+            # Segment too large — break into sentences
+            sub = split_sentences(seg)
+            sentences.extend(sub if sub else [seg])
 
     pieces: list[str] = []
     current_sentences: list[str] = []
