@@ -251,6 +251,21 @@ class FalkorDBGraphStore:
             params={"fp": file_path},
         )
 
+    def get_all_entity_names(self) -> list[str]:
+        """Return all entity names in the graph."""
+        result = self._graph.ro_query(
+            "MATCH (e:Entity) RETURN e.id"
+        )
+        return [str(row[0]) for row in result.result_set]
+
+    def get_chunks_by_entity(self, entity_name: str) -> list[str]:
+        """Return chunk_ids for sections connected to an entity."""
+        result = self._graph.ro_query(
+            "MATCH (e:Entity {id: $name})--(s:Section) RETURN s.id",
+            params={"name": entity_name},
+        )
+        return [str(row[0]) for row in result.result_set]
+
     def delete_all(self) -> None:
         """Remove all nodes and edges from the graph."""
         self._graph.query("MATCH (n) DETACH DELETE n")
