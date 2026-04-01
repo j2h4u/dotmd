@@ -13,8 +13,8 @@ from dotmd.core.config import Settings
 from dotmd.core.models import IndexStats, SearchMode, SearchResult
 from dotmd.ingestion.pipeline import IndexingPipeline
 from dotmd.ingestion.trickle import TrickleIndexer
-from dotmd.search.fts5 import FTS5SearchEngine
 from dotmd.search.fusion import build_search_results, fuse_results
+from dotmd.search.graph_direct import GraphDirectEngine
 from dotmd.search.graph_search import GraphSearchEngine
 from dotmd.search.query import QueryExpander
 from dotmd.search.reranker import Reranker
@@ -42,7 +42,7 @@ class DotMDService:
         # Indexing pipeline (also creates storage backends and extractors).
         self._pipeline = IndexingPipeline(self._settings)
 
-        # Search engines -- reuse stores created by the pipeline.
+        # Search engines -- reuse stores and shared connection from pipeline.
         self._semantic_engine = SemanticSearchEngine(
             self._pipeline.vector_store,
             self._settings.embedding_model,
@@ -50,11 +50,15 @@ class DotMDService:
             embedding_url=self._settings.embedding_url,
             tei_batch_size=self._settings.tei_batch_size,
             use_prefix=self._settings.needs_embedding_prefix,
+            query_instruction=self._settings.needs_query_instruction,
         )
-        self._keyword_engine = FTS5SearchEngine(self._pipeline.metadata_store._conn)
+        self._keyword_engine = self._pipeline.keyword_engine
         self._graph_engine = GraphSearchEngine(
             self._pipeline.graph_store,
             self._pipeline.metadata_store,
+        )
+        self._graph_direct_engine = GraphDirectEngine(
+            self._pipeline.graph_store,
         )
 
         # Load acronym dictionary if available
@@ -87,6 +91,7 @@ class DotMDService:
         self._semantic_engine.warmup()
         self._reranker._load_model()
         self._keyword_engine.load_index()
+        self._graph_direct_engine.load_catalog()
         self._check_embedding_model()
         logger.info("Models ready")
 
@@ -218,6 +223,7 @@ class DotMDService:
         # -- Stage 1: Primary retrieval ----------------------------------------
         semantic_hits: list[tuple[str, float]] = []
         keyword_hits: list[tuple[str, float]] = []
+        graph_direct_hits: list[tuple[str, float]] = []
 
         if mode in (SearchMode.SEMANTIC, SearchMode.HYBRID, SearchMode.GRAPH):
             semantic_hits = self._semantic_engine.search(search_query, top_k=pool_size)
@@ -225,15 +231,23 @@ class DotMDService:
         if mode in (SearchMode.KEYWORD, SearchMode.HYBRID, SearchMode.GRAPH):
             keyword_hits = self._keyword_engine.search(search_query, top_k=pool_size)
 
-        if not semantic_hits and not keyword_hits:
+        # Graph-direct: entity matching (pre-fusion peer, not seed-based)
+        if mode in (SearchMode.GRAPH, SearchMode.HYBRID):
+            graph_direct_hits = self._graph_direct_engine.search(
+                query, top_k=pool_size,
+            )
+
+        if not semantic_hits and not keyword_hits and not graph_direct_hits:
             return []
 
-        # -- Stage 2: RRF fusion (primary engines only) ------------------------
+        # -- Stage 2: RRF fusion (all primary engines) -------------------------
         engine_results: dict[str, list[tuple[str, float]]] = {}
         if semantic_hits:
             engine_results["semantic"] = semantic_hits
         if keyword_hits:
             engine_results["keyword"] = keyword_hits
+        if graph_direct_hits:
+            engine_results["graph_direct"] = graph_direct_hits
 
         fused = fuse_results(
             engine_results,
@@ -365,7 +379,7 @@ class DotMDService:
                 files = []
 
             if files:
-                diff = self._pipeline.file_tracker.diff(files)
+                diff = self._pipeline.chunk_tracker.diff(files)
                 stats.new_files = len(diff.new)
                 stats.modified_files = len(diff.modified)
                 stats.deleted_files = len(diff.deleted)
@@ -401,8 +415,29 @@ class DotMDService:
         """Return all graph nodes and edges for visualization."""
         return self._pipeline.graph_store.get_graph_data()
 
+    def drop_vectors(self) -> None:
+        """Drop vec tables + embed fingerprints for current (strategy, model).
+
+        Chunks, FTS5, and graph remain intact so BM25 and graph search
+        continue to work.
+        """
+        self._pipeline.drop_vectors()
+
+    def drop_chunks(self) -> None:
+        """Drop chunks + FTS5 + graph + ALL vec for current strategy.
+
+        CASCADE operation: everything derived from chunks under the
+        current strategy is removed.
+        """
+        self._pipeline.drop_chunks()
+
     def clear(self) -> None:
-        """Remove all indexed data from every backing store."""
+        """Remove all indexed data from every backing store.
+
+        .. deprecated::
+            Use :meth:`drop_vectors` or :meth:`drop_chunks` for granular
+            cleanup.  Retained temporarily for backward compatibility.
+        """
         self._pipeline.clear()
 
     def _load_acronyms(self) -> dict[str, list[str]] | None:

@@ -19,6 +19,7 @@ from watchdog.events import PatternMatchingEventHandler
 from watchdog.observers import Observer
 
 from dotmd.core.models import FileInfo
+from dotmd.ingestion.lock import indexing_lock
 
 if TYPE_CHECKING:
     from dotmd.core.config import Settings
@@ -73,6 +74,9 @@ class _MarkdownEventHandler(PatternMatchingEventHandler):
     def on_modified(self, event):  # noqa: ANN001
         self._enqueue(event.src_path)
 
+    def on_deleted(self, event):  # noqa: ANN001
+        self._enqueue(event.src_path)
+
     def _enqueue(self, path_str: str) -> None:
         now = time.monotonic()
         # Debounce: ignore events within 2 seconds for same file
@@ -110,6 +114,7 @@ class TrickleIndexer:
         self._state = TrickleState()
         self._file_queue: asyncio.Queue[str] = asyncio.Queue()
         self._observer: Observer | None = None
+        self._needs_vacuum: bool = False
 
     @property
     def state(self) -> TrickleState:
@@ -118,6 +123,10 @@ class TrickleIndexer:
 
     async def run(self, shutdown: asyncio.Event) -> None:
         """Main entry point: process backlog, then watch for new files.
+
+        Acquires an exclusive file lock for the entire session so that
+        CLI commands (``dotmd index --force``, ``dotmd reset``) cannot
+        run concurrently.  To use those commands, stop the server first.
 
         Parameters
         ----------
@@ -130,6 +139,13 @@ class TrickleIndexer:
             await shutdown.wait()
             return
 
+        # Lock must be acquired before any indexing work.  flock is a
+        # synchronous syscall — safe to call directly in an async function.
+        with indexing_lock(self._settings.index_dir):
+            await self._run_locked(shutdown)
+
+    async def _run_locked(self, shutdown: asyncio.Event) -> None:
+        """Body of run(), executed while holding the indexing lock."""
         logger.info(
             "Trickle indexer starting — %d paths configured: %s",
             len(self._settings.indexing_paths),
@@ -142,6 +158,11 @@ class TrickleIndexer:
         self._state.total_chunks_done = 0
 
         try:
+            # Startup health checks
+            await self._startup_checks()
+            if shutdown.is_set():
+                return
+
             # Phase 1: Process existing backlog
             await self._process_backlog(shutdown)
             if shutdown.is_set():
@@ -158,6 +179,54 @@ class TrickleIndexer:
                 "Trickle indexer stopped (indexed %d files)",
                 self._state.indexed_count,
             )
+
+    # ------------------------------------------------------------------
+    # Startup checks (integrity + orphan cleanup)
+    # ------------------------------------------------------------------
+
+    async def _startup_checks(self) -> None:
+        """Run integrity check and orphan cleanup at startup."""
+        # 1. PRAGMA integrity_check — early corruption detection
+        try:
+            result = await asyncio.to_thread(
+                lambda: self._pipeline.conn.execute(
+                    "PRAGMA integrity_check"
+                ).fetchone(),
+            )
+            if result and result[0] != "ok":
+                logger.error(
+                    "SQLite integrity check FAILED: %s — continuing anyway",
+                    result[0],
+                )
+            else:
+                logger.info("SQLite integrity check: ok")
+        except Exception:
+            logger.exception("SQLite integrity check error — continuing anyway")
+
+        # 2. Orphan cleanup — remove indexed data for files no longer on disk
+        try:
+            from dotmd.ingestion.reader import discover_files_multi
+
+            all_files = await asyncio.to_thread(
+                discover_files_multi,
+                self._settings.indexing_paths,
+                self._settings.indexing_exclude,
+            )
+            discovered_paths = {str(fi.path) for fi in all_files}
+
+            files_rm, chunks_rm, vecs_rm = await asyncio.to_thread(
+                self._pipeline.purge_orphaned_files, discovered_paths,
+            )
+            if files_rm:
+                logger.info(
+                    "Orphan cleanup: removed %d files (%d chunks, %d vectors)",
+                    files_rm, chunks_rm, vecs_rm,
+                )
+                self._needs_vacuum = True
+            else:
+                logger.info("Orphan cleanup: no orphans found")
+        except Exception:
+            logger.exception("Orphan cleanup failed — continuing anyway")
 
     # ------------------------------------------------------------------
     # Backlog processing
@@ -285,8 +354,26 @@ class TrickleIndexer:
                 try:
                     path_str = self._file_queue.get_nowait()
                     file_path = Path(path_str)
-                    if not file_path.exists() or not file_path.is_file():
+
+                    # File deleted — purge from all stores
+                    if not file_path.exists():
+                        try:
+                            await asyncio.to_thread(
+                                self._pipeline._purge_file, path_str,
+                            )
+                            logger.info(
+                                "Watch: purged deleted %s", Path(path_str).name,
+                            )
+                            self._needs_vacuum = True
+                        except Exception:
+                            logger.exception(
+                                "Watch: failed to purge %s", path_str,
+                            )
                         continue
+
+                    if not file_path.is_file():
+                        continue
+
                     stat = file_path.stat()
                     fi = FileInfo(
                         path=file_path,
@@ -305,6 +392,18 @@ class TrickleIndexer:
                         self._state.current_file = None
                 except Exception:
                     logger.exception("Watch: failed to index %s", path_str)
+
+            # Deferred VACUUM: run when idle, after orphan cleanup or deletions
+            if self._needs_vacuum:
+                try:
+                    logger.info("Running VACUUM (deferred)")
+                    await asyncio.to_thread(
+                        self._pipeline.conn.execute, "VACUUM",
+                    )
+                    self._needs_vacuum = False
+                    logger.info("VACUUM complete")
+                except Exception:
+                    logger.exception("VACUUM failed — will retry next idle")
 
             # Wait for shutdown or poll interval timeout
             try:

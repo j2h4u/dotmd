@@ -14,8 +14,8 @@ from dotmd.core.models import Chunk
 
 logger = logging.getLogger(__name__)
 
-_CREATE_FTS5 = """
-CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+_CREATE_FTS5_TPL = """
+CREATE VIRTUAL TABLE IF NOT EXISTS {table} USING fts5(
     chunk_id UNINDEXED,
     text,
     tokenize = 'unicode61'
@@ -49,11 +49,17 @@ class FTS5SearchEngine:
     conn:
         An open ``sqlite3.Connection`` (typically the metadata store's
         connection, already in WAL mode).
+    table_name:
+        Name of the FTS5 virtual table.  Defaults to ``"chunks_fts"``
+        for backward compatibility.  Use a strategy-specific name
+        (e.g. ``"chunks_fts_heading_512_50"``) for multi-strategy
+        isolation.
     """
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: sqlite3.Connection, table_name: str = "chunks_fts") -> None:
         self._conn = conn
-        self._conn.execute(_CREATE_FTS5)
+        self._table = table_name
+        self._conn.execute(_CREATE_FTS5_TPL.format(table=self._table))
         self._conn.commit()
 
     # ------------------------------------------------------------------
@@ -73,7 +79,7 @@ class FTS5SearchEngine:
             return
         rows = [(c.chunk_id, c.text) for c in chunks]
         self._conn.executemany(
-            "INSERT OR REPLACE INTO chunks_fts(chunk_id, text) VALUES (?, ?)",
+            f"INSERT OR REPLACE INTO {self._table}(chunk_id, text) VALUES (?, ?)",
             rows,
         )
         self._conn.commit()
@@ -90,7 +96,7 @@ class FTS5SearchEngine:
         if not chunk_ids:
             return
         self._conn.executemany(
-            "DELETE FROM chunks_fts WHERE chunk_id = ?",
+            f"DELETE FROM {self._table} WHERE chunk_id = ?",
             [(cid,) for cid in chunk_ids],
         )
         self._conn.commit()
@@ -108,25 +114,29 @@ class FTS5SearchEngine:
         upgrade path from the old pickle-based keyword index.
         """
         fts_count = self._conn.execute(
-            "SELECT COUNT(*) FROM chunks_fts"
+            f"SELECT COUNT(*) FROM {self._table}"
         ).fetchone()[0]
+
+        # Derive the chunks table name from the FTS table name.
+        # "chunks_fts" -> "chunks", "chunks_fts_heading_512_50" -> "chunks_heading_512_50"
+        chunks_table = self._table.replace("_fts", "", 1)
 
         try:
             chunks_count = self._conn.execute(
-                "SELECT COUNT(*) FROM chunks"
+                f"SELECT COUNT(*) FROM {chunks_table}"
             ).fetchone()[0]
         except sqlite3.OperationalError:
             # chunks table doesn't exist yet
-            logger.info("FTS5: no chunks table found; skipping migration")
+            logger.info("FTS5: no %s table found; skipping migration", chunks_table)
             return
 
         if fts_count == 0 and chunks_count > 0:
             self._conn.execute(
-                "INSERT INTO chunks_fts(chunk_id, text) "
-                "SELECT chunk_id, text FROM chunks"
+                f"INSERT INTO {self._table}(chunk_id, text) "
+                f"SELECT chunk_id, text FROM {chunks_table}"
             )
             self._conn.commit()
-            logger.info("FTS5: migrated %d chunks from metadata", chunks_count)
+            logger.info("FTS5: migrated %d chunks from %s", chunks_count, chunks_table)
         elif fts_count > 0:
             logger.info("FTS5: index already populated (%d chunks)", fts_count)
         else:
@@ -163,9 +173,9 @@ class FTS5SearchEngine:
 
         try:
             cur = self._conn.execute(
-                "SELECT chunk_id, -rank AS score "
-                "FROM chunks_fts WHERE chunks_fts MATCH ? "
-                "ORDER BY rank LIMIT ?",
+                f"SELECT chunk_id, -rank AS score "
+                f"FROM {self._table} WHERE {self._table} MATCH ? "
+                f"ORDER BY rank LIMIT ?",
                 (sanitized, top_k),
             )
             return [(row[0], row[1]) for row in cur.fetchall()]

@@ -94,6 +94,32 @@ class VectorStoreProtocol(Protocol):
         """Return the total number of stored vectors."""
         ...
 
+    def lookup_embeddings_by_text_hash(
+        self,
+        text_hashes: list[str],
+    ) -> dict[str, list[float]]:
+        """Find existing embeddings by text content hash.
+
+        Returns ``{text_hash: embedding}`` for hashes found in the store.
+        Used for embedding reuse when switching chunk strategy — identical
+        text encoded with the same model yields the same vector.
+
+        This is an **optional** capability.  Backends that do not support
+        it return an empty dict (the default), and the pipeline falls back
+        to re-encoding.
+
+        Parameters
+        ----------
+        text_hashes:
+            Content hashes to look up.
+
+        Returns
+        -------
+        dict[str, list[float]]
+            Mapping of ``{text_hash: embedding}`` for hashes found.
+        """
+        return {}
+
 
 # ---------------------------------------------------------------------------
 # Graph store
@@ -219,6 +245,14 @@ class GraphStoreProtocol(Protocol):
             A list of ``(node_id, relation_type, weight)`` tuples.
         """
         ...
+
+    def get_all_entity_names(self) -> list[str]:
+        """Return all entity names in the graph."""
+        return []
+
+    def get_chunks_by_entity(self, entity_name: str) -> list[str]:
+        """Return chunk_ids for sections connected to an entity."""
+        return []
 
     def delete_all(self) -> None:
         """Remove **all** nodes and edges from the graph."""

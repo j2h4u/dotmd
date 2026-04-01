@@ -54,7 +54,7 @@ class SemanticSearchEngine:
         embedding_url: str | None = None,
         tei_batch_size: int = 32,
         use_prefix: bool = True,
-        context_model_name: str = "",
+        query_instruction: str = "",
     ) -> None:
         self._vector_store = vector_store
         self._model_name = model_name
@@ -65,8 +65,7 @@ class SemanticSearchEngine:
         self._tei_bs_probed = False
         self._tei_model_id: str | None = None
         self._use_prefix = use_prefix
-        self._context_model_name = context_model_name
-        self._context_model = None  # lazy-loaded, unloaded after use
+        self._query_instruction = query_instruction
 
     def get_tei_model_id(self) -> str | None:
         """Return the actual embedding model name.
@@ -166,73 +165,6 @@ class SemanticSearchEngine:
             self._load_model()
 
     # ------------------------------------------------------------------
-    # Context-aware encoding (indexing only)
-    # ------------------------------------------------------------------
-
-    @property
-    def has_context_model(self) -> bool:
-        """Whether a context-aware embedding model is configured."""
-        return bool(self._context_model_name)
-
-    def _get_modal_fn(self):
-        """Get a reference to the deployed Modal encode_context function."""
-        if self._context_model is None:
-            from modal.functions import Function
-            self._context_model = Function.from_name("dotmd-embed", "encode_context")
-            logger.info("Connected to Modal function: dotmd-embed/encode_context")
-        return self._context_model
-
-    def encode_batch_context(
-        self, grouped_chunks: list[list[str]],
-    ) -> list[list[list[float]]]:
-        """Encode document chunks using the context-aware model via Modal GPU.
-
-        The context model takes chunks grouped by document and returns
-        per-chunk embeddings that incorporate surrounding context.
-
-        Parameters
-        ----------
-        grouped_chunks:
-            List of documents, where each document is a list of chunk texts.
-            Example: [["chunk1_docA", "chunk2_docA"], ["chunk1_docB"]]
-
-        Returns
-        -------
-        list[list[list[float]]]
-            Nested list matching input structure. Each innermost list is
-            a 1024-dim float32 embedding vector.
-            Example: result[0][1] = embedding for chunk2 of docA.
-        """
-        if not grouped_chunks:
-            return []
-        total_chunks = sum(len(doc) for doc in grouped_chunks)
-        logger.info(
-            "Context encoding via Modal: %d documents, %d total chunks",
-            len(grouped_chunks), total_chunks,
-        )
-        fn = self._get_modal_fn()
-        # Batch to avoid Modal timeout — 10 docs per call
-        # (pplx-embed-context is slow on long texts even on GPU)
-        batch_size = 10
-        result: list[list[list[float]]] = []
-        for i in range(0, len(grouped_chunks), batch_size):
-            batch = grouped_chunks[i : i + batch_size]
-            batch_chunks = sum(len(doc) for doc in batch)
-            logger.info(
-                "Modal batch %d/%d: %d docs, %d chunks",
-                i // batch_size + 1,
-                (len(grouped_chunks) + batch_size - 1) // batch_size,
-                len(batch), batch_chunks,
-            )
-            result.extend(fn.remote(batch))
-        logger.info("Modal context encoding complete: %d documents", len(result))
-        return result
-
-    def unload_context_model(self) -> None:
-        """No-op — Modal functions are stateless, nothing to unload."""
-        pass
-
-    # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
@@ -262,7 +194,12 @@ class SemanticSearchEngine:
 
     def search(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
         """Encode *query* and return the most similar chunks."""
-        encoded_query = f"query: {query}" if self._use_prefix else query
+        if self._query_instruction:
+            encoded_query = f"{self._query_instruction}\nQuery: {query}"
+        elif self._use_prefix:
+            encoded_query = f"query: {query}"
+        else:
+            encoded_query = query
         query_embedding = self.encode(encoded_query)
         results = self._vector_store.search(query_embedding, top_k=top_k)
         if not results:

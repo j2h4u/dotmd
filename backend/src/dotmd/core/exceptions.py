@@ -31,3 +31,7 @@ class ExtractionError(DotMDError):
 
 class ConfigError(DotMDError):
     """Raised when configuration is invalid."""
+
+
+class IndexingLockError(DotMDError):
+    """Raised when indexing lock cannot be acquired."""

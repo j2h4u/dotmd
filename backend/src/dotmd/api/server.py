@@ -108,10 +108,6 @@ class SearchResponse(BaseModel):
     count: int
 
 
-class MessageResponse(BaseModel):
-    message: str
-
-
 class GraphNode(BaseModel):
     id: str
     label: str
@@ -161,13 +157,6 @@ async def search(
 async def status() -> IndexStats:
     """Return current index statistics and trickle indexer progress."""
     return _get_service().status()
-
-
-@app.post("/clear", response_model=MessageResponse)
-async def clear() -> MessageResponse:
-    """Remove all indexed data."""
-    _get_service().clear()
-    return MessageResponse(message="Index cleared")
 
 
 @app.get("/graph", response_model=GraphResponse)

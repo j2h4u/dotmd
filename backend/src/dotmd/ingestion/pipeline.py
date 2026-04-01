@@ -8,17 +8,25 @@ Supports two modes:
   deleted files are purged; unchanged files are skipped entirely.
 - **Full** (``force=True``): all stores are cleared and every file is
   re-indexed from scratch.
+
+Table naming is two-dimensional: ``(chunk_strategy, embedding_model)``.
+Chunk-derived tables use ``_{strategy}`` suffix.  Vector tables use
+``_{strategy}_{model}`` suffix.  This enables safe multi-model and
+multi-strategy experimentation without data collision.
 """
 
 from __future__ import annotations
 
 import hashlib
 import logging
+import sqlite3
 import time
 import uuid
 from dataclasses import dataclass as _dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+import sqlite_vec  # type: ignore[import-untyped]
 
 from dotmd.core.config import Settings
 from dotmd.core.models import Chunk, ExtractionResult, FileInfo, IndexStats
@@ -52,69 +60,28 @@ class _ExtractionBundle:
     total_relations: int
 
 
-def _group_chunks_by_file(
-    chunks: list[Chunk],
-) -> tuple[list[list[str]], list[list[int]]]:
-    """Group chunk texts by file_path, preserving order.
-
-    Returns
-    -------
-    grouped_texts:
-        List of documents, each a list of chunk texts.
-    index_map:
-        Parallel structure mapping back to original chunk indices.
-        index_map[doc_idx][chunk_idx] = original position in `chunks`.
-    """
-    from collections import OrderedDict
-    groups: OrderedDict[str, list[tuple[int, str]]] = OrderedDict()
-    for i, chunk in enumerate(chunks):
-        key = str(chunk.file_path)
-        if key not in groups:
-            groups[key] = []
-        groups[key].append((i, chunk.text))
-
-    grouped_texts: list[list[str]] = []
-    index_map: list[list[int]] = []
-    for entries in groups.values():
-        grouped_texts.append([text for _, text in entries])
-        index_map.append([idx for idx, _ in entries])
-    return grouped_texts, index_map
-
-
 def _model_to_table_suffix(model_name: str) -> str:
     """Derive a sqlite table name suffix from an embedding model name.
 
-    'intfloat/multilingual-e5-large' → '_e5_large'
-    'perplexity-ai/pplx-embed-v1-0.6B' → '_pplx_embed_v1'
-    '' or default → '' (backward compatible, uses 'vec_chunks')
+    'intfloat/multilingual-e5-large' → '_multilingual_e5_large'
+    'Qwen/Qwen3-Embedding-0.6B' → '_qwen3_embedding'
+    'BAAI/bge-small-en-v1.5' → '_bge_small_en_v1'
+
+    All models get a suffix — no legacy exceptions.
+    Version stripping kept for now (removal deferred to migration phase
+    when tables are renamed).
     """
     import re
 
-    # Models that existed before multi-model support → no suffix (backward compat)
-    _LEGACY_MODELS = {"BAAI/bge-small-en-v1.5", "intfloat/multilingual-e5-large"}
-    if not model_name or model_name in _LEGACY_MODELS:
-        return ""
+    if not model_name:
+        return "_default"
     # Take the part after the slash (org/model → model)
     name = model_name.rsplit("/", 1)[-1]
     # Strip version suffixes like -0.6B, -v2.1
     name = re.sub(r"-[\d.]+[BbMm]?$", "", name)
     # Replace non-alphanumeric with underscore, collapse multiples
     name = re.sub(r"[^a-zA-Z0-9]+", "_", name).strip("_").lower()
-    return f"_{name}" if name else ""
-
-
-def _create_vector_store(settings: Settings) -> VectorStoreProtocol:
-    """Instantiate the configured vector store backend."""
-    if settings.vector_backend == "sqlite-vec":
-        from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
-
-        suffix = _model_to_table_suffix(settings.embedding_model)
-        table_name = f"vec_chunks{suffix}"
-        return SQLiteVecVectorStore(settings.sqlite_vec_path, table_name=table_name)
-
-    from dotmd.storage.vector import LanceDBVectorStore
-
-    return LanceDBVectorStore(settings.lancedb_path)
+    return f"_{name}" if name else "_default"
 
 
 def _create_graph_store(settings: Settings) -> GraphStoreProtocol:
@@ -136,6 +103,11 @@ def _create_graph_store(settings: Settings) -> GraphStoreProtocol:
 class IndexingPipeline:
     """Orchestrates the full indexing workflow from raw files to populated stores.
 
+    All SQLite-backed stores (metadata, vectors, FTS5, fingerprints) share
+    a single ``sqlite3.Connection`` to the unified ``index.db`` database.
+    Table names are derived from ``(chunk_strategy, embedding_model)`` to
+    enable multi-strategy and multi-model isolation.
+
     Parameters
     ----------
     settings:
@@ -149,13 +121,55 @@ class IndexingPipeline:
         # Ensure the index directory exists.
         settings.index_dir.mkdir(parents=True, exist_ok=True)
 
+        # -- Unified SQLite connection ----------------------------------------
+        # ONE connection shared by metadata store, vec store, FTS5, and
+        # file trackers.  sqlite-vec extension loaded once here.
+        self._conn = sqlite3.connect(
+            str(settings.index_db_path), check_same_thread=False,
+        )
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.enable_load_extension(True)
+        sqlite_vec.load(self._conn)
+        self._conn.enable_load_extension(False)
+
+        # -- Strategy + model table name derivation ---------------------------
+        strategy = settings.chunk_strategy
+        model_suffix = _model_to_table_suffix(settings.embedding_model)
+
+        self._strategy = strategy
+        self._model_suffix = model_suffix
+
+        self._chunks_table = f"chunks_{strategy}"
+        self._fts_table = f"chunks_fts_{strategy}"
+        vec_table = f"vec_chunks_{strategy}{model_suffix}"
+        chunk_fp_table = f"chunk_fingerprints_{strategy}"
+        embed_fp_table = f"embed_fingerprints_{strategy}{model_suffix}"
+
         # -- storage backends --------------------------------------------------
-        self._metadata_store = SQLiteMetadataStore(settings.sqlite_path)
-        self._vector_store = _create_vector_store(settings)
+        self._metadata_store = SQLiteMetadataStore(
+            conn=self._conn,
+            table_name=self._chunks_table,
+            fts_table_name=self._fts_table,
+        )
+
+        if settings.vector_backend == "sqlite-vec":
+            from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
+
+            self._vector_store: VectorStoreProtocol = SQLiteVecVectorStore(
+                conn=self._conn, table_name=vec_table,
+            )
+        else:
+            from dotmd.storage.vector import LanceDBVectorStore
+
+            self._vector_store = LanceDBVectorStore(settings.lancedb_path)
+
         self._graph_store = _create_graph_store(settings)
 
-        # -- file tracker (shares metadata store's connection) -----------------
-        self._file_tracker = FileTracker(self._metadata_store._conn)
+        # -- Two file trackers (chunk vs embed fingerprints) -------------------
+        # chunk_tracker: "has this file been chunked under current strategy?"
+        # embed_tracker: "has this file been embedded under current strategy+model?"
+        self._chunk_tracker = FileTracker(self._conn, table_name=chunk_fp_table)
+        self._embed_tracker = FileTracker(self._conn, table_name=embed_fp_table)
 
         # -- search engines (used for encoding during indexing) ----------------
         self._semantic_engine = SemanticSearchEngine(
@@ -164,9 +178,10 @@ class IndexingPipeline:
             embedding_url=settings.embedding_url,
             tei_batch_size=settings.tei_batch_size,
             use_prefix=settings.needs_embedding_prefix,
-            context_model_name=settings.context_embedding_model,
         )
-        self._keyword_engine = FTS5SearchEngine(self._metadata_store._conn)
+        self._keyword_engine = FTS5SearchEngine(
+            self._conn, table_name=self._fts_table,
+        )
 
         # -- extractors --------------------------------------------------------
         self._structural_extractor = StructuralExtractor()
@@ -213,15 +228,37 @@ class IndexingPipeline:
             return stats
 
         t0 = time.perf_counter()
-        diff = self._file_tracker.diff(files)
+        diff = self._chunk_tracker.diff(files)
         logger.info(
-            "[%s] diff: %d new, %d modified, %d deleted, %d unchanged (%.2fs)",
+            "[%s] chunk_diff: %d new, %d modified, %d deleted, %d unchanged (%.2fs)",
             run_id, len(diff.new), len(diff.modified), len(diff.deleted), len(diff.unchanged),
             time.perf_counter() - t0,
         )
 
         if not diff.new and not diff.modified and not diff.deleted:
-            logger.info("[%s] no changes — skipping (%.2fs total)", run_id, time.perf_counter() - t_start)
+            # No chunk-level changes.  Still check if embed-only work needed
+            # (e.g. after a model switch, all files need re-embedding).
+            embed_diff = self._embed_tracker.diff(files)
+            embed_needed = set(embed_diff.new) | set(embed_diff.modified)
+            if not embed_needed:
+                logger.info("[%s] no changes — skipping (%.2fs total)", run_id, time.perf_counter() - t_start)
+                stats = self._metadata_store.get_stats()
+                if stats is None:
+                    stats = IndexStats()
+                stats.new_files = 0
+                stats.modified_files = 0
+                stats.deleted_files = 0
+                stats.unchanged_files = len(diff.unchanged)
+                stats.data_dir = data_dir_str
+                return stats
+
+            # Embed-only: chunks unchanged, but embeddings needed.
+            logger.info(
+                "[%s] chunk_diff: no changes, but %d files need embedding",
+                run_id, len(embed_needed),
+            )
+            embed_only_files = [fi for fi in files if str(fi.path) in embed_needed]
+            self._embed_existing_chunks(embed_only_files, run_id=run_id)
             stats = self._metadata_store.get_stats()
             if stats is None:
                 stats = IndexStats()
@@ -230,6 +267,7 @@ class IndexingPipeline:
             stats.deleted_files = 0
             stats.unchanged_files = len(diff.unchanged)
             stats.data_dir = data_dir_str
+            logger.info("[%s] total: %.1fs (embed-only)", run_id, time.perf_counter() - t_start)
             return stats
 
         stats = self._incremental_index(files, diff, data_dir=data_dir_str, run_id=run_id)
@@ -237,7 +275,13 @@ class IndexingPipeline:
         return stats
 
     def clear(self) -> None:
-        """Delete all data from every backing store."""
+        """Delete all data from every backing store.
+
+        .. deprecated::
+            Use :meth:`drop_vectors` or :meth:`drop_chunks` for granular
+            cleanup.  This method is retained temporarily for backward
+            compatibility and will be removed in Wave 3.
+        """
         self._metadata_store.delete_all()  # also clears chunks_fts
         self._vector_store.delete_all()
         self._graph_store.delete_all()
@@ -248,36 +292,154 @@ class IndexingPipeline:
 
         logger.info("All stores cleared")
 
-    # ------------------------------------------------------------------
-    # Embedding dispatch (context-aware or flat TEI)
-    # ------------------------------------------------------------------
+    def drop_vectors(self) -> None:
+        """Drop vec tables + embed_fingerprints for current (strategy, model).
 
-    def _embed_chunks(self, chunks: list[Chunk]) -> list[list[float]]:
-        """Embed chunks using context model (if configured) or flat TEI batch.
-
-        When context_embedding_model is set, groups chunks by file and uses
-        the context-aware model. Otherwise falls back to flat encode_batch
-        (TEI or local SentenceTransformer).
+        Removes only the vector-layer data.  Chunks, FTS5, and graph remain
+        intact so BM25 and graph search continue to work.
         """
-        if not self._semantic_engine.has_context_model:
-            # Flat encoding (E5/TEI path)
-            return self._semantic_engine.encode_batch([c.text for c in chunks])
+        strategy = self._strategy
+        model_suffix = self._model_suffix
 
-        # Context-aware encoding: group by document
-        grouped_texts, index_map = _group_chunks_by_file(chunks)
+        vec_table = f"vec_chunks_{strategy}{model_suffix}"
+        meta_table = f"vec_meta_{strategy}{model_suffix}"
+        config_table = f"vec_config_{strategy}{model_suffix}"
+        embed_fp_table = f"embed_fingerprints_{strategy}{model_suffix}"
+
+        for table in (vec_table, meta_table, config_table):
+            self._conn.execute(f"DROP TABLE IF EXISTS {table}")
+        try:
+            self._conn.execute(f"DELETE FROM {embed_fp_table}")
+        except sqlite3.OperationalError:
+            pass  # table may not exist yet
+        self._conn.commit()
+
+        # Re-ensure tables so the pipeline can immediately re-index.
+        if hasattr(self._vector_store, "_tables_ensured"):
+            del self._vector_store._tables_ensured
+
         logger.info(
-            "Context encoding: %d chunks grouped into %d documents",
-            len(chunks), len(grouped_texts),
+            "Dropped vectors for strategy=%s model=%s",
+            strategy, model_suffix.lstrip("_"),
         )
-        grouped_embeddings = self._semantic_engine.encode_batch_context(grouped_texts)
 
-        # Flatten back to original chunk order
-        flat_embeddings: list[list[float]] = [[] for _ in chunks]
-        for doc_idx, doc_indices in enumerate(index_map):
-            for chunk_idx, original_idx in enumerate(doc_indices):
-                flat_embeddings[original_idx] = grouped_embeddings[doc_idx][chunk_idx]
+    def drop_chunks(self) -> None:
+        """Drop chunks + FTS5 + graph + ALL vec for current strategy.
 
-        return flat_embeddings
+        This is a CASCADE operation: everything derived from chunks under
+        the current strategy is removed, including vector tables for ALL
+        embedding models.
+        """
+        strategy = self._strategy
+        chunks_table = f"chunks_{strategy}"
+        fts_table = f"chunks_fts_{strategy}"
+        chunk_fp_table = f"chunk_fingerprints_{strategy}"
+
+        # 1. Drop chunks and FTS5
+        self._conn.execute(f"DROP TABLE IF EXISTS {chunks_table}")
+        self._conn.execute(f"DROP TABLE IF EXISTS {fts_table}")
+
+        # 2. Clear chunk fingerprints
+        try:
+            self._conn.execute(f"DELETE FROM {chunk_fp_table}")
+        except sqlite3.OperationalError:
+            pass  # table may not exist
+
+        # 3. CASCADE: drop ALL vec_*_{strategy}_* and embed_fp_{strategy}_*
+        #    Discover tables via sqlite_master.
+        prefix_vec = f"vec_chunks_{strategy}_"
+        prefix_meta = f"vec_meta_{strategy}_"
+        prefix_config = f"vec_config_{strategy}_"
+        prefix_embed_fp = f"embed_fingerprints_{strategy}_"
+
+        tables_dropped = 0
+        rows = self._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+        for (name,) in rows:
+            if (
+                name.startswith(prefix_vec)
+                or name.startswith(prefix_meta)
+                or name.startswith(prefix_config)
+                or name.startswith(prefix_embed_fp)
+            ):
+                self._conn.execute(f"DROP TABLE IF EXISTS {name}")
+                tables_dropped += 1
+
+        self._conn.commit()
+
+        # 4. Delete graph for this strategy
+        self._graph_store.delete_all()
+
+        # 5. Delete acronym dictionary (derived from chunks)
+        if self._settings.acronyms_path.exists():
+            self._settings.acronyms_path.unlink()
+
+        logger.info(
+            "Dropped strategy %s: %d tables cascaded, graph cleared",
+            strategy, tables_dropped,
+        )
+
+    # ------------------------------------------------------------------
+    # Embedding
+    # ------------------------------------------------------------------
+
+    def _embed_chunks(
+        self, chunks: list[Chunk],
+    ) -> tuple[list[list[float]], dict[str, str]]:
+        """Embed chunks with text_hash reuse.
+
+        Returns ``(embeddings, text_hashes)`` where *text_hashes* maps
+        ``chunk_id → md5_hex``.  Existing embeddings are looked up by
+        content hash before encoding, so identical text across strategies
+        or re-indexing runs avoids redundant TEI calls.
+
+        Assumes flat encoding only (context-aware code removed).
+        """
+        if not chunks:
+            return [], {}
+
+        text_hashes: dict[str, str] = {
+            c.chunk_id: hashlib.md5(c.text.encode()).hexdigest()
+            for c in chunks
+        }
+
+        # Lookup existing embeddings by text_hash (same model, any strategy)
+        existing: dict[str, list[float]] = {}
+        if hasattr(self._vector_store, "lookup_embeddings_by_text_hash"):
+            existing = self._vector_store.lookup_embeddings_by_text_hash(
+                list(text_hashes.values()),
+            )
+
+        hits = 0
+        to_encode_indices: list[int] = []
+        embeddings: list[list[float] | None] = [None] * len(chunks)
+
+        for i, chunk in enumerate(chunks):
+            th = text_hashes[chunk.chunk_id]
+            if th in existing:
+                embeddings[i] = existing[th]
+                hits += 1
+            else:
+                to_encode_indices.append(i)
+
+        if to_encode_indices:
+            texts_to_encode = [chunks[i].text for i in to_encode_indices]
+            new_embeddings = self._semantic_engine.encode_batch(texts_to_encode)
+            for j, idx in enumerate(to_encode_indices):
+                embeddings[idx] = new_embeddings[j]
+
+        total = len(chunks)
+        logger.info(
+            "embed: %d chunks, %d cache hits (%.1f%%), %d computed",
+            total,
+            hits,
+            hits / total * 100 if total else 0,
+            len(to_encode_indices),
+        )
+
+        # Type narrowing: all None slots are now filled.
+        return embeddings, text_hashes  # type: ignore[return-value]
 
     # ------------------------------------------------------------------
     # Granular reindex (rebuild one store from metadata chunks)
@@ -290,14 +452,15 @@ class IndexingPipeline:
             logger.info("reindex_vectors: no chunks in metadata")
             return 0
         self._vector_store.delete_all()
-        embeddings = self._embed_chunks(all_chunks)
-        self._vector_store.add_chunks(all_chunks, embeddings, overwrite=True)
+        embeddings, text_hashes = self._embed_chunks(all_chunks)
+        self._vector_store.add_chunks(
+            all_chunks, embeddings, overwrite=True,
+            text_hashes=text_hashes,
+        )
         if hasattr(self._vector_store, "set_model_name"):
             model_id = self._semantic_engine.get_tei_model_id() or self._settings.embedding_model
             self._vector_store.set_model_name(model_id)
             self._vector_store.set_distance_metric("cosine")
-        # Free context model RAM after re-embedding
-        self._semantic_engine.unload_context_model()
         logger.info("reindex_vectors: %d chunks re-embedded", len(all_chunks))
         return len(all_chunks)
 
@@ -307,8 +470,8 @@ class IndexingPipeline:
         if not all_chunks:
             logger.info("reindex_fts5: no chunks in metadata")
             return 0
-        self._metadata_store._conn.execute("DELETE FROM chunks_fts")
-        self._metadata_store._conn.commit()
+        self._conn.execute(f"DELETE FROM {self._fts_table}")
+        self._conn.commit()
         self._keyword_engine.add_chunks(all_chunks)
         logger.info("reindex_fts5: %d chunks re-indexed", len(all_chunks))
         return len(all_chunks)
@@ -372,9 +535,21 @@ class IndexingPipeline:
     def _full_index(
         self, files: list[FileInfo], *, data_dir: str | None = None, run_id: str = "",
     ) -> IndexStats:
-        """Process all files from scratch (used for force=True)."""
-        self.clear()
-        self._file_tracker.clear()
+        """Process all files from scratch (used for force=True).
+
+        Drops vectors and clears fingerprints, then re-processes everything.
+        FTS5 is cleared before re-insert to prevent duplicates (INSERT OR
+        REPLACE handles it, but explicit DELETE is a safety net).
+        """
+        self.drop_vectors()
+        self._chunk_tracker.clear()
+        self._embed_tracker.clear()
+        # Clear FTS5 content before re-indexing (safety net against duplicates).
+        try:
+            self._conn.execute(f"DELETE FROM {self._fts_table}")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass  # FTS5 table may not exist yet
         return self._ingest_and_finalize(
             files, list(files),
             diff_counts={"new": len(files), "modified": 0, "deleted": 0, "unchanged": 0},
@@ -385,7 +560,7 @@ class IndexingPipeline:
         self, all_files: list[FileInfo], diff: FileDiff,
         *, data_dir: str | None = None, run_id: str = "",
     ) -> IndexStats:
-        """Process only changed files."""
+        """Process only changed files (chunk_diff driven)."""
         # 1. Purge deleted files
         t0 = time.perf_counter()
         for path_str in diff.deleted:
@@ -400,13 +575,30 @@ class IndexingPipeline:
         if diff.modified:
             logger.info("[%s] purge_modified: %d files (%.2fs)", run_id, len(diff.modified), time.perf_counter() - t0)
 
-        # 3. Determine files to ingest (new + modified)
+        # 3. Determine files to ingest (new + modified in chunk_diff)
         changed_paths = set(diff.new) | set(diff.modified)
         files_to_ingest = [fi for fi in all_files if str(fi.path) in changed_paths]
 
-        # 4. Ingest changed files + finalize
+        # 4. Check embed_diff for files unchanged in chunk_diff.
+        #    These files already have chunks but may need embedding
+        #    (e.g. after a model switch).
+        unchanged_files = [fi for fi in all_files if str(fi.path) not in changed_paths and str(fi.path) not in set(diff.deleted)]
+        embed_only_files: list[FileInfo] = []
+        if unchanged_files:
+            embed_diff = self._embed_tracker.diff(unchanged_files)
+            embed_needed = set(embed_diff.new) | set(embed_diff.modified)
+            if embed_needed:
+                embed_only_files = [fi for fi in unchanged_files if str(fi.path) in embed_needed]
+                logger.info(
+                    "[%s] embed_diff: %d files need embedding (unchanged chunks)",
+                    run_id, len(embed_only_files),
+                )
+
+        # 5. Ingest changed files + finalize (includes embed-only pass)
         return self._ingest_and_finalize(
-            all_files, files_to_ingest, overwrite_vectors=False,
+            all_files, files_to_ingest,
+            embed_only_files=embed_only_files,
+            overwrite_vectors=False,
             diff_counts={
                 "new": len(diff.new),
                 "modified": len(diff.modified),
@@ -425,12 +617,21 @@ class IndexingPipeline:
         all_files: list[FileInfo],
         files_to_ingest: list[FileInfo],
         *,
+        embed_only_files: list[FileInfo] | None = None,
         overwrite_vectors: bool = True,
         diff_counts: dict[str, int] | None = None,
         data_dir: str | None = None,
         run_id: str = "",
     ) -> IndexStats:
-        """Ingest *files_to_ingest* and rebuild FTS5/stats from full corpus."""
+        """Ingest *files_to_ingest* and rebuild FTS5/stats from full corpus.
+
+        Parameters
+        ----------
+        embed_only_files:
+            Files whose chunks are already stored but need embedding
+            (e.g. after a model switch).  Only the embed phase runs
+            for these files.
+        """
         # Read and chunk only the files to ingest
         t0 = time.perf_counter()
         new_chunks: list[Chunk] = []
@@ -451,16 +652,17 @@ class IndexingPipeline:
             self._metadata_store.save_chunks(new_chunks)
             logger.info("[%s] metadata_save: %d chunks (%.2fs)", run_id, len(new_chunks), time.perf_counter() - t0)
 
-        # Encode and add to vector store
+        # Encode and add to vector store (new chunks)
         if new_chunks:
             t0 = time.perf_counter()
-            embeddings = self._embed_chunks(new_chunks)
+            embeddings, text_hashes = self._embed_chunks(new_chunks)
             t_embed = time.perf_counter() - t0
             logger.info("[%s] embed: %d chunks (%.1fs, %.0f chunks/s)", run_id, len(new_chunks), t_embed, len(new_chunks) / t_embed if t_embed > 0 else 0)
 
             t0 = time.perf_counter()
             self._vector_store.add_chunks(
                 new_chunks, embeddings, overwrite=overwrite_vectors,
+                text_hashes=text_hashes,
             )
             logger.info("[%s] vector_store: %d vectors (%.2fs)", run_id, len(new_chunks), time.perf_counter() - t0)
             if hasattr(self._vector_store, "set_model_name"):
@@ -482,6 +684,21 @@ class IndexingPipeline:
         self._populate_graph(files_to_ingest, new_chunks, extraction_result)
         logger.info("[%s] graph: %d files, %d chunks (%.1fs)", run_id, len(files_to_ingest), len(new_chunks), time.perf_counter() - t0)
 
+        # Update chunk + embed fingerprints AFTER successful chunk ingestion
+        t0 = time.perf_counter()
+        self._update_chunk_fingerprints(files_to_ingest)
+        self._update_embed_fingerprints(files_to_ingest)
+        logger.info("[%s] fingerprints: %d files (%.2fs)", run_id, len(files_to_ingest), time.perf_counter() - t0)
+
+        # Embed-only pass: files with existing chunks that need (re-)embedding
+        if embed_only_files:
+            t0 = time.perf_counter()
+            self._embed_existing_chunks(embed_only_files, run_id=run_id)
+            logger.info(
+                "[%s] embed_only: %d files (%.1fs)",
+                run_id, len(embed_only_files), time.perf_counter() - t0,
+            )
+
         # Acronym rebuild from ALL chunks (always full corpus)
         t0 = time.perf_counter()
         all_chunks = self._metadata_store.get_all_chunks()
@@ -502,14 +719,6 @@ class IndexingPipeline:
                 Path(tmp_path).unlink(missing_ok=True)
                 raise
         logger.info("[%s] acronyms: %d (%.2fs)", run_id, len(acronym_dict) if acronym_dict else 0, time.perf_counter() - t0)
-
-        # Update fingerprints AFTER successful ingestion
-        t0 = time.perf_counter()
-        self._update_fingerprints(files_to_ingest)
-        logger.info("[%s] fingerprints: %d files (%.2fs)", run_id, len(files_to_ingest), time.perf_counter() - t0)
-
-        # Free context model RAM after indexing
-        self._semantic_engine.unload_context_model()
 
         # Stats from full store (incremental: query actual graph counts)
         all_entities_count = extraction_result.total_entities
@@ -542,44 +751,86 @@ class IndexingPipeline:
     # ------------------------------------------------------------------
 
     def index_file(self, file_info: FileInfo) -> int:
-        """Index a single file through the full pipeline.
+        """Index a single file through the two-phase pipeline.
 
-        Purges any existing data for the file first, then processes it
-        through all stores.  Used by the trickle indexer for
-        one-at-a-time background processing.
+        Phase 1 (chunk): check chunk_tracker, re-chunk if needed, save
+        chunk fingerprint.  Phase 2 (embed): check embed_tracker,
+        text_hash lookup, encode misses, save embed fingerprint.
 
-        Returns the number of chunks created.
+        Used by the trickle indexer for one-at-a-time background processing.
+
+        Returns the number of chunks created/updated.
         """
         path_str = str(file_info.path)
+        needs_embed = False
 
-        # Purge existing data (handles modified files)
-        chunk_ids = self._metadata_store.get_chunk_ids_by_file(path_str)
-        if chunk_ids:
-            self._purge_file(path_str)
-            logger.debug("Purged %d existing chunks for %s", len(chunk_ids), file_info.path.name)
+        # --- Phase 1: Chunk ---
+        chunk_diff = self._chunk_tracker.diff([file_info])
+        if path_str in chunk_diff.new or path_str in chunk_diff.modified:
+            # Purge old derived data (FTS5, graph, current vec) but NOT
+            # chunks (overwritten by UPSERT with deterministic IDs).
+            old_chunk_ids = self._metadata_store.get_chunk_ids_by_file(path_str)
+            if old_chunk_ids:
+                self._keyword_engine.remove_chunks(old_chunk_ids)
+                self._vector_store.delete_vectors_by_chunk_ids(old_chunk_ids)
+                self._graph_store.delete_file_subgraph(path_str)
+                logger.debug(
+                    "Purged derived data for %s (%d chunks)",
+                    file_info.path.name, len(old_chunk_ids),
+                )
 
-        content = read_file(file_info.path)
-        chunks = chunk_file(
-            file_info.path,
-            content,
-            max_tokens=self._settings.max_chunk_tokens,
-            overlap_tokens=self._settings.chunk_overlap_tokens,
-        )
+            content = read_file(file_info.path)
+            chunks = chunk_file(
+                file_info.path,
+                content,
+                max_tokens=self._settings.max_chunk_tokens,
+                overlap_tokens=self._settings.chunk_overlap_tokens,
+            )
 
-        if not chunks:
-            return 0
+            if not chunks:
+                # File produced no chunks (empty or filtered out).
+                # Still save fingerprint so we don't re-process next time.
+                self._save_chunk_fingerprint(file_info)
+                return 0
 
-        self._metadata_store.save_chunks(chunks)
-        self._keyword_engine.add_chunks(chunks)
+            # UPSERT chunks — safe with deterministic chunk_ids.
+            self._metadata_store.save_chunks(chunks)
+            self._keyword_engine.add_chunks(chunks)
 
-        embeddings = self._embed_chunks(chunks)
-        self._vector_store.add_chunks(chunks, embeddings, overwrite=False)
+            extraction = self._run_extraction(chunks)
+            self._populate_graph([file_info], chunks, extraction)
 
-        extraction = self._run_extraction(chunks)
-        self._populate_graph([file_info], chunks, extraction)
-        self._update_fingerprints([file_info])
+            # Save chunk fingerprint BEFORE embed (crash-safe split point).
+            self._save_chunk_fingerprint(file_info)
+            needs_embed = True
+        else:
+            # Chunks unchanged — check if embedding needed.
+            chunks = []
 
-        return len(chunks)
+        # --- Phase 2: Embed ---
+        if not needs_embed:
+            embed_diff = self._embed_tracker.diff([file_info])
+            needs_embed = (
+                path_str in embed_diff.new or path_str in embed_diff.modified
+            )
+
+        if needs_embed:
+            # Fetch chunks from DB (guaranteed to exist from phase 1 or prior run).
+            if not chunks:
+                chunk_ids = self._metadata_store.get_chunk_ids_by_file(path_str)
+                chunks = self._metadata_store.get_chunks(chunk_ids) if chunk_ids else []
+
+            if chunks:
+                embeddings, text_hashes = self._embed_chunks(chunks)
+                self._vector_store.add_chunks(
+                    chunks, embeddings, overwrite=False,
+                    text_hashes=text_hashes,
+                )
+
+            # Save embed fingerprint after successful embedding.
+            self._save_embed_fingerprint(file_info)
+
+        return len(chunks) if chunks else 0
 
     # ------------------------------------------------------------------
     # Per-file purge
@@ -590,6 +841,10 @@ class IndexingPipeline:
 
         ORDERING MATTERS: chunk_ids must be fetched from metadata BEFORE
         metadata rows are deleted, because vector deletion needs them.
+
+        Only cleans the CURRENT (strategy, model) pair's vec + fingerprints.
+        Other models' data for this file becomes stale but self-heals when
+        that model's pipeline runs next (embed_diff detects "modified").
         """
         chunk_ids = self._metadata_store.get_chunk_ids_by_file(file_path)
         if chunk_ids:
@@ -597,7 +852,79 @@ class IndexingPipeline:
             self._keyword_engine.remove_chunks(chunk_ids)
         self._metadata_store.delete_chunks_by_file(file_path)
         self._graph_store.delete_file_subgraph(file_path)
-        self._file_tracker.remove_fingerprint(file_path)
+        self._chunk_tracker.remove_fingerprint(file_path)
+        self._embed_tracker.remove_fingerprint(file_path)
+
+    def purge_orphaned_files(
+        self, discovered_paths: set[str],
+    ) -> tuple[int, int, int]:
+        """Remove indexed data for files not in *discovered_paths*.
+
+        Compares ``SELECT DISTINCT file_path`` from the chunks table against
+        the set of paths currently on disk.  Any file_path present in the
+        database but absent from *discovered_paths* is purged from all stores
+        (chunks, FTS5, vectors, graph, fingerprints).
+
+        Processes orphans in batches of 100 to keep transactions bounded.
+
+        Returns ``(files_removed, chunks_removed, vectors_removed)``.
+        """
+        # Discover stored file paths from the chunks table
+        try:
+            rows = self._conn.execute(
+                f"SELECT DISTINCT file_path FROM {self._chunks_table}",
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # Table doesn't exist yet (fresh install)
+            return 0, 0, 0
+
+        stored_paths = {row[0] for row in rows}
+        orphan_paths = stored_paths - discovered_paths
+
+        if not orphan_paths:
+            return 0, 0, 0
+
+        files_removed = 0
+        chunks_removed = 0
+        vectors_removed = 0
+
+        orphan_list = sorted(orphan_paths)
+        batch_size = 100
+
+        for i in range(0, len(orphan_list), batch_size):
+            batch = orphan_list[i : i + batch_size]
+
+            for file_path in batch:
+                chunk_ids = self._metadata_store.get_chunk_ids_by_file(file_path)
+                n_chunks = len(chunk_ids)
+
+                if chunk_ids:
+                    # Delete vectors from ALL vec_meta tables for current model
+                    n_vecs = self._vector_store.delete_vectors_by_chunk_ids(
+                        chunk_ids,
+                    )
+                    vectors_removed += n_vecs if isinstance(n_vecs, int) else n_chunks
+                    self._keyword_engine.remove_chunks(chunk_ids)
+
+                self._metadata_store.delete_chunks_by_file(file_path)
+                self._graph_store.delete_file_subgraph(file_path)
+                self._chunk_tracker.remove_fingerprint(file_path)
+                self._embed_tracker.remove_fingerprint(file_path)
+
+                chunks_removed += n_chunks
+                files_removed += 1
+
+            if i + batch_size < len(orphan_list):
+                logger.debug(
+                    "Orphan cleanup progress: %d/%d files",
+                    files_removed, len(orphan_list),
+                )
+
+        logger.info(
+            "Orphan cleanup: purged %d files (%d chunks, %d vectors)",
+            files_removed, chunks_removed, vectors_removed,
+        )
+        return files_removed, chunks_removed, vectors_removed
 
     # ------------------------------------------------------------------
     # Extraction helpers
@@ -683,18 +1010,71 @@ class IndexingPipeline:
     # Fingerprint management
     # ------------------------------------------------------------------
 
-    def _update_fingerprints(self, files: list[FileInfo]) -> None:
-        """Save fingerprints for successfully ingested files."""
+    def _save_chunk_fingerprint(self, fi: FileInfo) -> None:
+        """Save a single chunk fingerprint."""
+        stat = fi.path.stat()
+        checksum = hashlib.md5(fi.path.read_bytes()).hexdigest()
+        self._chunk_tracker.save_fingerprint(
+            str(fi.path), stat.st_mtime, stat.st_size, checksum,
+        )
+
+    def _save_embed_fingerprint(self, fi: FileInfo) -> None:
+        """Save a single embed fingerprint."""
+        stat = fi.path.stat()
+        checksum = hashlib.md5(fi.path.read_bytes()).hexdigest()
+        self._embed_tracker.save_fingerprint(
+            str(fi.path), stat.st_mtime, stat.st_size, checksum,
+        )
+
+    def _update_chunk_fingerprints(self, files: list[FileInfo]) -> None:
+        """Save chunk fingerprints for successfully chunked files."""
         for fi in files:
-            stat = fi.path.stat()
-            checksum = hashlib.md5(fi.path.read_bytes()).hexdigest()
-            self._file_tracker.save_fingerprint(
-                str(fi.path), stat.st_mtime, stat.st_size, checksum,
+            self._save_chunk_fingerprint(fi)
+
+    def _update_embed_fingerprints(self, files: list[FileInfo]) -> None:
+        """Save embed fingerprints for successfully embedded files."""
+        for fi in files:
+            self._save_embed_fingerprint(fi)
+
+    def _embed_existing_chunks(
+        self,
+        files: list[FileInfo],
+        *,
+        run_id: str = "",
+    ) -> None:
+        """Embed-only pass for files whose chunks already exist in DB.
+
+        Used when embed_diff detects files that need embedding but
+        chunk_diff says they are unchanged (e.g. after a model switch).
+        """
+        for fi in files:
+            path_str = str(fi.path)
+            chunk_ids = self._metadata_store.get_chunk_ids_by_file(path_str)
+            if not chunk_ids:
+                continue
+            chunks = self._metadata_store.get_chunks(chunk_ids)
+            if not chunks:
+                continue
+
+            embeddings, text_hashes = self._embed_chunks(chunks)
+            self._vector_store.add_chunks(
+                chunks, embeddings, overwrite=False,
+                text_hashes=text_hashes,
             )
+            self._save_embed_fingerprint(fi)
+
+        logger.info(
+            "[%s] embed_existing: %d files processed", run_id, len(files),
+        )
 
     # ------------------------------------------------------------------
     # Accessors (used by the service layer)
     # ------------------------------------------------------------------
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        """The shared SQLite connection."""
+        return self._conn
 
     @property
     def metadata_store(self) -> SQLiteMetadataStore:
@@ -717,5 +1097,19 @@ class IndexingPipeline:
         return self._keyword_engine
 
     @property
+    def chunk_tracker(self) -> FileTracker:
+        """Chunk-level file tracker (strategy-scoped)."""
+        return self._chunk_tracker
+
+    @property
+    def embed_tracker(self) -> FileTracker:
+        """Embed-level file tracker (strategy+model-scoped)."""
+        return self._embed_tracker
+
+    @property
     def file_tracker(self) -> FileTracker:
-        return self._file_tracker
+        """Backward-compatible alias for chunk_tracker.
+
+        Used by trickle.py and service.py for file-level change detection.
+        """
+        return self._chunk_tracker

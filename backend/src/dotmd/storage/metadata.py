@@ -15,11 +15,11 @@ from pathlib import Path
 from dotmd.core.models import Chunk, IndexStats
 
 # ---------------------------------------------------------------------------
-# SQL constants
+# SQL templates (table name injected at instance level)
 # ---------------------------------------------------------------------------
 
-_CREATE_CHUNKS = """
-CREATE TABLE IF NOT EXISTS chunks (
+_CREATE_CHUNKS_TPL = """
+CREATE TABLE IF NOT EXISTS {table} (
     chunk_id        TEXT PRIMARY KEY,
     file_path       TEXT    NOT NULL,
     heading_hierarchy TEXT  NOT NULL DEFAULT '[]',
@@ -41,8 +41,8 @@ CREATE TABLE IF NOT EXISTS stats (
 )
 """
 
-_UPSERT_CHUNK = """
-INSERT INTO chunks (chunk_id, file_path, heading_hierarchy, level, text, chunk_index, char_offset)
+_UPSERT_CHUNK_TPL = """
+INSERT INTO {table} (chunk_id, file_path, heading_hierarchy, level, text, chunk_index, char_offset)
 VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(chunk_id) DO UPDATE SET
     file_path         = excluded.file_path,
@@ -53,7 +53,9 @@ ON CONFLICT(chunk_id) DO UPDATE SET
     char_offset       = excluded.char_offset
 """
 
-_CREATE_INDEX_FILE_PATH = "CREATE INDEX IF NOT EXISTS idx_chunks_file_path ON chunks(file_path)"
+_CREATE_INDEX_FILE_PATH_TPL = (
+    "CREATE INDEX IF NOT EXISTS idx_{table}_file_path ON {table}(file_path)"
+)
 
 _UPSERT_STATS = """
 INSERT INTO stats (id, total_files, total_chunks, total_entities, total_edges, last_indexed,
@@ -84,16 +86,43 @@ class SQLiteMetadataStore:
     Parameters
     ----------
     db_path:
-        Path to the SQLite database file.  Parent directories are **not**
-        created automatically.  Use ``:memory:`` for an in-memory store.
+        Path to the SQLite database file.  Ignored when *conn* is provided.
+        Use ``:memory:`` for an in-memory store.
+    table_name:
+        Name of the chunks table.  Defaults to ``"chunks"`` for backward
+        compatibility.  Use a strategy-specific name (e.g.
+        ``"chunks_heading_512_50"``) for multi-strategy isolation.
+    fts_table_name:
+        Name of the FTS5 virtual table managed by
+        :class:`~dotmd.search.fts5.FTS5SearchEngine`.  Only used by
+        :meth:`delete_all` to clear the FTS5 index alongside chunks.
+        Defaults to ``"chunks_fts"``.
+    conn:
+        Pre-existing SQLite connection (shared database mode).  When given,
+        the store reuses this connection instead of opening its own file.
+        The caller is responsible for WAL mode and any extensions.
     """
 
-    def __init__(self, db_path: Path) -> None:
+    def __init__(
+        self,
+        db_path: Path | None = None,
+        table_name: str = "chunks",
+        fts_table_name: str = "chunks_fts",
+        *,
+        conn: sqlite3.Connection | None = None,
+    ) -> None:
         self._db_path = db_path
-        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute(_CREATE_CHUNKS)
-        self._conn.execute(_CREATE_INDEX_FILE_PATH)
+        self._table = table_name
+        self._fts_table = fts_table_name
+        if conn is not None:
+            self._conn = conn
+        else:
+            if db_path is None:
+                raise ValueError("Either db_path or conn must be provided")
+            self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
+            self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute(_CREATE_CHUNKS_TPL.format(table=self._table))
+        self._conn.execute(_CREATE_INDEX_FILE_PATH_TPL.format(table=self._table))
         self._conn.execute(_CREATE_STATS)
         # Idempotent schema migration: add diff-reporting columns
         for col, typedef in [
@@ -127,14 +156,14 @@ class SQLiteMetadataStore:
             )
             for c in chunks
         ]
-        self._conn.executemany(_UPSERT_CHUNK, rows)
+        self._conn.executemany(_UPSERT_CHUNK_TPL.format(table=self._table), rows)
         self._conn.commit()
 
     def get_chunk(self, chunk_id: str) -> Chunk | None:
         """Retrieve a single chunk by its identifier."""
         cur = self._conn.execute(
-            "SELECT chunk_id, file_path, heading_hierarchy, level, text, chunk_index, char_offset "
-            "FROM chunks WHERE chunk_id = ?",
+            f"SELECT chunk_id, file_path, heading_hierarchy, level, text, chunk_index, char_offset "
+            f"FROM {self._table} WHERE chunk_id = ?",
             (chunk_id,),
         )
         row = cur.fetchone()
@@ -150,7 +179,7 @@ class SQLiteMetadataStore:
         placeholders = ",".join("?" for _ in chunk_ids)
         cur = self._conn.execute(
             f"SELECT chunk_id, file_path, heading_hierarchy, level, text, chunk_index, char_offset "
-            f"FROM chunks WHERE chunk_id IN ({placeholders})",
+            f"FROM {self._table} WHERE chunk_id IN ({placeholders})",
             chunk_ids,
         )
         return [self._row_to_chunk(row) for row in cur.fetchall()]
@@ -158,15 +187,15 @@ class SQLiteMetadataStore:
     def get_all_chunks(self) -> list[Chunk]:
         """Return every chunk currently stored."""
         cur = self._conn.execute(
-            "SELECT chunk_id, file_path, heading_hierarchy, level, text, chunk_index, char_offset "
-            "FROM chunks"
+            f"SELECT chunk_id, file_path, heading_hierarchy, level, text, chunk_index, char_offset "
+            f"FROM {self._table}"
         )
         return [self._row_to_chunk(row) for row in cur.fetchall()]
 
     def get_chunk_ids_by_file(self, file_path: str) -> list[str]:
         """Return all chunk_ids for a given file path."""
         cur = self._conn.execute(
-            "SELECT chunk_id FROM chunks WHERE file_path = ?",
+            f"SELECT chunk_id FROM {self._table} WHERE file_path = ?",
             (file_path,),
         )
         return [row[0] for row in cur.fetchall()]
@@ -174,7 +203,7 @@ class SQLiteMetadataStore:
     def delete_chunks_by_file(self, file_path: str) -> int:
         """Delete all chunks belonging to a file. Returns count deleted."""
         cur = self._conn.execute(
-            "DELETE FROM chunks WHERE file_path = ?",
+            f"DELETE FROM {self._table} WHERE file_path = ?",
             (file_path,),
         )
         self._conn.commit()
@@ -254,11 +283,11 @@ class SQLiteMetadataStore:
 
     def delete_all(self) -> None:
         """Remove all chunks and statistics from the store."""
-        self._conn.execute("DELETE FROM chunks")
+        self._conn.execute(f"DELETE FROM {self._table}")
         self._conn.execute("DELETE FROM stats")
         # Clear FTS5 index if it exists
         try:
-            self._conn.execute("DELETE FROM chunks_fts")
+            self._conn.execute(f"DELETE FROM {self._fts_table}")
         except sqlite3.OperationalError:
             pass  # FTS5 table not yet created
         self._conn.commit()

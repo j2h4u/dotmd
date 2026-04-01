@@ -34,15 +34,15 @@ class Settings(BaseSettings):
     # Set DOTMD_EMBEDDING_URL in your environment or docker-compose.yml.
     embedding_url: str
 
-    # Context-aware embedding model for document indexing (in-process via transformers).
-    # Used by pplx-embed-context-v1-0.6B for grouped-chunks-per-document encoding.
-    # When empty string, indexing uses the same TEI endpoint as queries (E5 behavior).
-    context_embedding_model: str = ""
-
     # Whether the active embedding model uses E5-family instruction prefixes.
     # E5 models require "query: " / "passage: " prefixes. pplx-embed does not.
     # Auto-detected from embedding_model name if not explicitly set.
     embedding_uses_prefix: bool | None = None
+
+    # Instruction prefix for query encoding (Qwen3-style models).
+    # If set, queries are encoded as: "<instruction>\nQuery: <query>"
+    # Auto-detected from embedding_model name if not explicitly set.
+    embedding_query_instruction: str | None = None
 
     vector_backend: Literal["lancedb", "sqlite-vec"] = "sqlite-vec"
 
@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     reranker_min_length: int = 50  # chars below which penalty applies
 
     # Chunking
+    chunk_strategy: str = "heading_512_50"
     max_chunk_tokens: int = 512
     chunk_overlap_tokens: int = 50
 
@@ -133,20 +134,41 @@ class Settings(BaseSettings):
         return "e5" in model_lower or "bge" in model_lower
 
     @property
+    def needs_query_instruction(self) -> str:
+        """Instruction string for query encoding, or empty string if not needed.
+
+        Qwen3-Embedding and similar instruction-aware models encode queries as:
+        ``"<instruction>\\nQuery: <query>"`` and documents without any prefix.
+        """
+        if self.embedding_query_instruction is not None:
+            return self.embedding_query_instruction
+        model_lower = self.embedding_model.lower()
+        if "qwen3-embedding" in model_lower:
+            return "Instruct: Given a search query, retrieve relevant passages that answer the query"
+        return ""
+
+    @property
     def lancedb_path(self) -> Path:
         return self.index_dir / "lancedb"
 
     @property
+    def index_db_path(self) -> Path:
+        """Path to the unified SQLite index database (metadata + vec + FTS5)."""
+        return self.index_dir / "index.db"
+
+    # Legacy alias — will be removed after pipeline migration
+    @property
     def sqlite_vec_path(self) -> Path:
-        return self.index_dir / "vec.db"
+        return self.index_db_path
 
     @property
     def graph_db_path(self) -> Path:
-        return self.index_dir / "graphdb"
+        return self.index_dir / f"graphdb_{self.chunk_strategy}"
 
+    # Legacy alias — will be removed after pipeline migration
     @property
     def sqlite_path(self) -> Path:
-        return self.index_dir / "metadata.db"
+        return self.index_db_path
 
     @property
     def acronyms_path(self) -> Path:

@@ -28,16 +28,29 @@ class SQLiteVecVectorStore:
     Parameters
     ----------
     db_path:
-        Path to the SQLite database file.
+        Path to the SQLite database file.  Ignored when *conn* is provided.
     table_name:
         Virtual table name for vector storage.
+    conn:
+        Pre-existing SQLite connection (shared database mode).  When given,
+        the store reuses this connection instead of opening its own file.
+        The caller is responsible for loading the ``sqlite-vec`` extension
+        on the connection before constructing this store.
     """
 
     _VEC_TABLE = "vec_chunks"
     _META_TABLE = "vec_meta"
     _CONFIG_TABLE = "vec_config"
 
-    def __init__(self, db_path: Path, table_name: str = "vec_chunks") -> None:
+    def __init__(
+        self,
+        db_path: Path | None = None,
+        table_name: str = "vec_chunks",
+        *,
+        conn: sqlite3.Connection | None = None,
+    ) -> None:
+        if conn is None and db_path is None:
+            raise ValueError("Either db_path or conn must be provided")
         self._db_path = db_path
         self._VEC_TABLE = table_name
         # Derive meta/config table names from vec table name for multi-model support.
@@ -46,10 +59,15 @@ class SQLiteVecVectorStore:
         suffix = table_name.removeprefix("vec_chunks")
         self._META_TABLE = f"vec_meta{suffix}"
         self._CONFIG_TABLE = f"vec_config{suffix}"
-        self._conn: sqlite3.Connection | None = None
+        # When a shared connection is provided, use it directly.
+        # _owns_conn tracks whether we opened the connection ourselves.
+        self._owns_conn = conn is None
+        self._conn: sqlite3.Connection | None = conn
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
+            # Own-connection mode: open from db_path.
+            assert self._db_path is not None
             self._db_path.parent.mkdir(parents=True, exist_ok=True)
             self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
             self._conn.execute("PRAGMA journal_mode=WAL")  # concurrent read/write safety
@@ -59,6 +77,10 @@ class SQLiteVecVectorStore:
             sqlite_vec.load(self._conn)
             self._conn.enable_load_extension(False)
             self._ensure_tables()
+        elif not hasattr(self, "_tables_ensured"):
+            # Shared-connection mode: tables may not exist yet on first access.
+            self._ensure_tables()
+            self._tables_ensured = True
         return self._conn
 
     def _ensure_tables(self) -> None:
@@ -66,10 +88,13 @@ class SQLiteVecVectorStore:
         assert conn is not None
         conn.execute(f"""
             CREATE TABLE IF NOT EXISTS {self._META_TABLE} (
-                rowid INTEGER PRIMARY KEY,
-                chunk_id TEXT NOT NULL UNIQUE
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                chunk_id TEXT NOT NULL UNIQUE,
+                text_hash TEXT
             )
         """)
+        # Migrate existing tables that lack the text_hash column.
+        self._maybe_add_text_hash_column(conn)
         conn.execute(f"""
             CREATE TABLE IF NOT EXISTS {self._CONFIG_TABLE} (
                 key TEXT PRIMARY KEY,
@@ -77,6 +102,24 @@ class SQLiteVecVectorStore:
             )
         """)
         conn.commit()
+
+    def _maybe_add_text_hash_column(self, conn: sqlite3.Connection) -> None:
+        """Add text_hash column to vec_meta if it doesn't exist (migration)."""
+        try:
+            cols = conn.execute(
+                f"PRAGMA table_info({self._META_TABLE})"
+            ).fetchall()
+            col_names = {row[1] for row in cols}
+            if cols and "text_hash" not in col_names:
+                conn.execute(
+                    f"ALTER TABLE {self._META_TABLE} ADD COLUMN text_hash TEXT"
+                )
+                logger.info("Migrated %s: added text_hash column", self._META_TABLE)
+        except Exception:  # noqa: BLE001
+            # Table might not exist yet (CREATE IF NOT EXISTS hasn't run),
+            # or PRAGMA returned nothing — both are fine, column will be
+            # present after the CREATE statement above.
+            pass
 
     def _get_dim(self) -> int | None:
         """Read the stored embedding dimension, or None if not yet indexed."""
@@ -162,7 +205,16 @@ class SQLiteVecVectorStore:
         embeddings: list[list[float]],
         *,
         overwrite: bool = True,
+        text_hashes: dict[str, str] | None = None,
     ) -> None:
+        """Upsert chunks with their corresponding embeddings.
+
+        Parameters
+        ----------
+        text_hashes:
+            Optional mapping of ``{chunk_id: md5_hex}`` for embedding reuse
+            across chunk strategies.  Stored in vec_meta alongside chunk_id.
+        """
         if not chunks:
             return
 
@@ -176,9 +228,10 @@ class SQLiteVecVectorStore:
             conn.execute(f"DELETE FROM {self._META_TABLE}")
 
         for chunk, embedding in zip(chunks, embeddings):
+            th = text_hashes.get(chunk.chunk_id) if text_hashes else None
             cur = conn.execute(
-                f"INSERT INTO {self._META_TABLE} (chunk_id) VALUES (?)",
-                (chunk.chunk_id,),
+                f"INSERT INTO {self._META_TABLE} (chunk_id, text_hash) VALUES (?, ?)",
+                (chunk.chunk_id, th),
             )
             conn.execute(
                 f"INSERT INTO {self._VEC_TABLE} (rowid, embedding) VALUES (?, ?)",
@@ -232,6 +285,75 @@ class SQLiteVecVectorStore:
             logger.warning("Failed to delete all vectors", exc_info=True)
 
     # -- queries ------------------------------------------------------------
+
+    def lookup_embeddings_by_text_hash(
+        self,
+        text_hashes: list[str],
+    ) -> dict[str, list[float]]:
+        """Find existing embeddings by text content hash.
+
+        Returns ``{text_hash: embedding}`` for hashes found in vec_meta.
+        Used for embedding reuse when switching chunk strategy — same text
+        content encoded with the same model produces identical vectors, so
+        we can skip re-encoding.
+
+        .. note::
+
+            This requires that ``SELECT embedding FROM <vec0_table> WHERE
+            rowid = ?`` works on sqlite-vec virtual tables.  If a future
+            sqlite-vec version breaks this, the method will return an empty
+            dict (logged as warning) and the pipeline must fall back to
+            re-encoding.  This is an acceptable degradation — correctness
+            is preserved, only performance is lost.
+
+        Assumes flat (non-context-aware) encoding only.
+        """
+        if not text_hashes:
+            return {}
+
+        conn = self._get_conn()
+        if not self._has_index():
+            return {}
+
+        result: dict[str, list[float]] = {}
+        # Process in batches to stay within SQLite variable limits.
+        batch_size = 500
+        for i in range(0, len(text_hashes), batch_size):
+            batch = text_hashes[i : i + batch_size]
+            placeholders = ",".join("?" for _ in batch)
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT vm.text_hash, vc.embedding
+                    FROM {self._META_TABLE} vm
+                    JOIN {self._VEC_TABLE} vc ON vm.rowid = vc.rowid
+                    WHERE vm.text_hash IN ({placeholders})
+                    """,
+                    batch,
+                ).fetchall()
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "lookup_embeddings_by_text_hash failed — vec0 may not "
+                    "support direct SELECT on embedding column. "
+                    "Pipeline will fall back to re-encoding.",
+                    exc_info=True,
+                )
+                return {}
+
+            for text_hash, embedding_blob in rows:
+                if text_hash not in result:
+                    # Deserialize binary embedding back to float list.
+                    dim = len(embedding_blob) // 4  # 4 bytes per float32
+                    result[text_hash] = list(
+                        struct.unpack(f"{dim}f", embedding_blob)
+                    )
+
+        logger.debug(
+            "text_hash lookup: %d requested, %d found",
+            len(text_hashes),
+            len(result),
+        )
+        return result
 
     def search(
         self,

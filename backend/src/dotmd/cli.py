@@ -8,6 +8,7 @@ import click
 
 from dotmd.api.service import DotMDService
 from dotmd.core.config import Settings
+from dotmd.core.exceptions import IndexingLockError
 from dotmd.core.models import SearchMode
 from dotmd.utils.logging import setup_logging
 
@@ -56,7 +57,11 @@ def index(ctx: click.Context, directory: Path, extract_depth: str, entity_types:
     service = _get_service(**overrides)
     mode_label = "full re-index" if force else "incremental"
     click.echo(f"Indexing {directory} ({mode_label})...")
-    stats = service.index(directory, force=force)
+    try:
+        stats = service.index(directory, force=force)
+    except IndexingLockError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(1)
     click.echo(
         f"{stats.new_files} new, {stats.modified_files} modified, "
         f"{stats.deleted_files} deleted, {stats.unchanged_files} unchanged"
@@ -103,7 +108,8 @@ def search(query: str, top: int, mode: str, no_rerank: bool, no_expand: bool) ->
 
 
 @main.command()
-def status() -> None:
+@click.option("--verbose", "-V", is_flag=True, help="Show per-strategy/model table details.")
+def status(verbose: bool) -> None:
     """Show index statistics."""
     service = _get_service(read_only=True)
     stats = service.status()
@@ -128,6 +134,53 @@ def status() -> None:
             )
         else:
             click.echo("No changes detected since last index.")
+
+    # Verbose: per-strategy and per-model table details
+    if verbose:
+        conn = service._pipeline.conn
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        ).fetchall()
+
+        # Collect strategies from chunks_* tables
+        strategies: dict[str, tuple[int, int]] = {}  # strategy -> (chunks, files)
+        for (name,) in rows:
+            if name.startswith("chunks_") and not name.startswith("chunks_fts_"):
+                strategy = name[len("chunks_"):]
+                count = conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
+                files = conn.execute(
+                    f"SELECT COUNT(DISTINCT file_path) FROM {name}"
+                ).fetchone()[0]
+                strategies[strategy] = (count, files)
+
+        if strategies:
+            click.echo("")
+            click.echo("Strategies:")
+            for strategy, (chunks, files) in sorted(strategies.items()):
+                click.echo(f"  {strategy}: {chunks} chunks, {files} files")
+
+        # Collect models from vec_meta_* tables
+        models: dict[tuple[str, str], int] = {}  # (strategy, model) -> vectors
+        for (name,) in rows:
+            if name.startswith("vec_meta_"):
+                suffix = name[len("vec_meta_"):]
+                # suffix is {strategy}_{model} — find the split point
+                # by matching against known strategies
+                for strategy in strategies:
+                    prefix = strategy + "_"
+                    if suffix.startswith(prefix):
+                        model = suffix[len(prefix):]
+                        count = conn.execute(
+                            f"SELECT COUNT(*) FROM {name}"
+                        ).fetchone()[0]
+                        models[(strategy, model)] = count
+                        break
+
+        if models:
+            click.echo("")
+            click.echo("Models per strategy:")
+            for (strategy, model), vectors in sorted(models.items()):
+                click.echo(f"  {strategy} / {model}: {vectors} vectors")
 
     # Trickle indexer progress
     if stats.trickle_status and stats.trickle_status != "idle":
@@ -170,7 +223,11 @@ def reindex_vectors() -> None:
     """Rebuild vector embeddings (requires TEI)."""
     service = _get_service()
     click.echo("Rebuilding vector index...")
-    n = service.reindex("vectors")
+    try:
+        n = service.reindex("vectors")
+    except IndexingLockError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(1)
     click.echo(f"Done. {n} chunks re-embedded.")
 
 
@@ -179,7 +236,11 @@ def reindex_fts5() -> None:
     """Rebuild FTS5 keyword index."""
     service = _get_service()
     click.echo("Rebuilding FTS5 index...")
-    n = service.reindex("fts5")
+    try:
+        n = service.reindex("fts5")
+    except IndexingLockError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(1)
     click.echo(f"Done. {n} chunks re-indexed.")
 
 
@@ -188,7 +249,11 @@ def reindex_graph() -> None:
     """Rebuild knowledge graph (runs extraction)."""
     service = _get_service()
     click.echo("Rebuilding knowledge graph...")
-    n = service.reindex("graph")
+    try:
+        n = service.reindex("graph")
+    except IndexingLockError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(1)
     click.echo(f"Done. {n} chunks processed.")
 
 
@@ -197,18 +262,49 @@ def reindex_all() -> None:
     """Rebuild all derived indexes (vectors + FTS5 + graph)."""
     service = _get_service()
     click.echo("Rebuilding all indexes...")
-    n = service.reindex("all")
+    try:
+        n = service.reindex("all")
+    except IndexingLockError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(1)
     click.echo(f"Done. {n} chunks across all stores.")
 
 
-@main.command()
-def clear() -> None:
-    """Clear the entire index."""
-    if not click.confirm("This will delete the entire index. Continue?"):
+@main.group()
+def reset() -> None:
+    """Drop model vectors or chunk strategy data."""
+
+
+@reset.command("model")
+@click.argument("name")
+def reset_model(name: str) -> None:
+    """Drop vectors and embed fingerprints for a model."""
+    if not click.confirm(f"This will delete all vectors for model '{name}'. Continue?"):
         return
     service = _get_service()
-    service.clear()
-    click.echo("Index cleared.")
+    try:
+        service.drop_vectors()
+    except IndexingLockError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(1)
+    click.echo(f"Dropped vectors for model '{name}'.")
+
+
+@reset.command("strategy")
+@click.argument("name")
+def reset_strategy(name: str) -> None:
+    """Drop ALL data for a chunk strategy (chunks, FTS5, graph, vectors)."""
+    if not click.confirm(
+        f"This will delete ALL data for strategy '{name}' including all vectors. Continue?"
+    ):
+        return
+    service = _get_service()
+    try:
+        service.drop_chunks()
+    except IndexingLockError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(1)
+    click.echo(f"Dropped strategy '{name}' and all associated data.")
 
 
 @main.command()

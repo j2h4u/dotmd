@@ -28,7 +28,7 @@ from dotmd.core.models import FileInfo
 # ---------------------------------------------------------------------------
 
 _CREATE_FINGERPRINTS = """
-CREATE TABLE IF NOT EXISTS file_fingerprints (
+CREATE TABLE IF NOT EXISTS {table} (
     file_path   TEXT PRIMARY KEY,
     mtime       REAL    NOT NULL,
     size_bytes  INTEGER NOT NULL,
@@ -65,14 +65,19 @@ class FileTracker:
     ----------
     conn:
         An open :class:`sqlite3.Connection`.  The tracker creates its
-        own table (``file_fingerprints``) but shares the connection
-        (and therefore the database file) with other components such
-        as :class:`~dotmd.storage.metadata.SQLiteMetadataStore`.
+        own table but shares the connection (and therefore the database
+        file) with other components such as
+        :class:`~dotmd.storage.metadata.SQLiteMetadataStore`.
+    table_name:
+        Name of the fingerprints table.  Use a model-specific suffix
+        (e.g. ``"file_fingerprints_e5_large"``) so each embedding model
+        maintains independent change-detection state.
     """
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: sqlite3.Connection, table_name: str = "file_fingerprints") -> None:
         self._conn = conn
-        self._conn.execute(_CREATE_FINGERPRINTS)
+        self._table = table_name
+        self._conn.execute(_CREATE_FINGERPRINTS.format(table=self._table))
         self._conn.commit()
 
     # -- diff ---------------------------------------------------------------
@@ -89,7 +94,7 @@ class FileTracker:
         """
         # Load all stored fingerprints: {path: (mtime, size, checksum)}
         cur = self._conn.execute(
-            "SELECT file_path, mtime, size_bytes, checksum FROM file_fingerprints"
+            f"SELECT file_path, mtime, size_bytes, checksum FROM {self._table}"
         )
         stored: dict[str, tuple[float, int, str]] = {
             row[0]: (row[1], row[2], row[3]) for row in cur.fetchall()
@@ -121,7 +126,7 @@ class FileTracker:
                 # Content unchanged, just metadata drift (e.g. touch)
                 # Update stored mtime/size silently
                 self._conn.execute(
-                    "UPDATE file_fingerprints SET mtime = ?, size_bytes = ? "
+                    f"UPDATE {self._table} SET mtime = ?, size_bytes = ? "
                     "WHERE file_path = ?",
                     (stat.st_mtime, stat.st_size, path_str),
                 )
@@ -148,7 +153,7 @@ class FileTracker:
     ) -> None:
         """Insert or replace a file fingerprint."""
         self._conn.execute(
-            "INSERT OR REPLACE INTO file_fingerprints "
+            f"INSERT OR REPLACE INTO {self._table} "
             "(file_path, mtime, size_bytes, checksum, indexed_at) "
             "VALUES (?, ?, ?, ?, ?)",
             (
@@ -164,12 +169,12 @@ class FileTracker:
     def remove_fingerprint(self, file_path: str) -> None:
         """Delete the fingerprint for a single file."""
         self._conn.execute(
-            "DELETE FROM file_fingerprints WHERE file_path = ?",
+            f"DELETE FROM {self._table} WHERE file_path = ?",
             (file_path,),
         )
         self._conn.commit()
 
     def clear(self) -> None:
         """Remove all stored fingerprints."""
-        self._conn.execute("DELETE FROM file_fingerprints")
+        self._conn.execute(f"DELETE FROM {self._table}")
         self._conn.commit()
