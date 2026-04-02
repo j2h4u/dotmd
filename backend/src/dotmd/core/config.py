@@ -88,6 +88,7 @@ class Settings(BaseSettings):
 
     # Trickle indexer settings
     poll_interval_seconds: float = 3600.0  # 1 hour fallback poll
+    profile_indexing: bool = False  # DOTMD_PROFILE_INDEXING=true → per-phase timing in logs
 
     # Graph
     graph_max_hops: int = 2

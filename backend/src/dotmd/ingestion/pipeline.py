@@ -863,22 +863,28 @@ class IndexingPipeline:
         """
         path_str = str(file_info.path)
         needs_embed = False
+        prof = self._settings.profile_indexing  # gate: DOTMD_PROFILE_INDEXING=true
 
         # --- Phase 1: Chunk ---
+        if prof:
+            t_file = time.perf_counter()
+
         chunk_diff = self._chunk_tracker.diff([file_info])
         if path_str in chunk_diff.new or path_str in chunk_diff.modified:
             # Purge old derived data (FTS5, graph, current vec) but NOT
             # chunks (overwritten by UPSERT with deterministic IDs).
+            if prof:
+                t0 = time.perf_counter()
             old_chunk_ids = self._metadata_store.get_chunk_ids_by_file(path_str)
             if old_chunk_ids:
                 self._keyword_engine.remove_chunks(old_chunk_ids)
                 self._vector_store.delete_vectors_by_chunk_ids(old_chunk_ids)
                 self._graph_store.delete_file_subgraph(path_str)
-                logger.debug(
-                    "Purged derived data for %s (%d chunks)",
-                    file_info.path.name, len(old_chunk_ids),
-                )
+            if prof:
+                logger.info("[prof] %s purge: %.2fs", file_info.path.name, time.perf_counter() - t0)
 
+            if prof:
+                t0 = time.perf_counter()
             content = read_file(file_info.path)
             chunks = chunk_file(
                 file_info.path,
@@ -887,29 +893,39 @@ class IndexingPipeline:
                 overlap_tokens=self._settings.chunk_overlap_tokens,
                 kind=file_info.kind,
             )
+            if prof:
+                logger.info("[prof] %s chunk: %d chunks, %.2fs", file_info.path.name, len(chunks), time.perf_counter() - t0)
 
             if not chunks:
-                # File produced no chunks (empty or filtered out).
-                # Still save fingerprint so we don't re-process next time.
                 self._save_chunk_fingerprint(file_info)
                 return 0
 
-            # UPSERT chunks — safe with deterministic chunk_ids.
+            if prof:
+                t0 = time.perf_counter()
             self._metadata_store.save_chunks(chunks)
             _trickle_tags = file_info.frontmatter.get("tags", [])
             _trickle_tags_csv = ", ".join(str(t) for t in _trickle_tags) if _trickle_tags else ""
             _trickle_meta = {str(file_info.path): (file_info.title, _trickle_tags_csv)}
             self._keyword_engine.add_chunks(chunks, file_meta=_trickle_meta)
+            if prof:
+                logger.info("[prof] %s save+fts5: %.2fs", file_info.path.name, time.perf_counter() - t0)
 
+            if prof:
+                t0 = time.perf_counter()
             extraction = self._run_extraction(chunks)
+            if prof:
+                logger.info("[prof] %s extraction: %d entities, %.2fs", file_info.path.name, extraction.total_entities, time.perf_counter() - t0)
+
+            if prof:
+                t0 = time.perf_counter()
             self._populate_graph([file_info], chunks, extraction)
             self._frontmatter_to_graph([file_info])
+            if prof:
+                logger.info("[prof] %s graph: %.2fs", file_info.path.name, time.perf_counter() - t0)
 
-            # Save chunk fingerprint BEFORE embed (crash-safe split point).
             self._save_chunk_fingerprint(file_info)
             needs_embed = True
         else:
-            # Chunks unchanged — check if embedding needed.
             chunks = []
 
         # --- Phase 2: Embed + metadata refresh ---
@@ -923,23 +939,29 @@ class IndexingPipeline:
             needs_embed = (
                 path_str in embed_diff.new or path_str in embed_diff.modified
             )
-            metadata_only = needs_embed  # True = triggered by metadata, not content
+            metadata_only = needs_embed
 
         if needs_embed:
-            # Fetch chunks from DB (guaranteed to exist from phase 1 or prior run).
             if not chunks:
                 chunk_ids = self._metadata_store.get_chunk_ids_by_file(path_str)
                 chunks = self._metadata_store.get_chunks(chunk_ids) if chunk_ids else []
 
             if chunks:
+                if prof:
+                    t0 = time.perf_counter()
                 embeddings, text_hashes = self._embed_chunks(chunks)
+                if prof:
+                    logger.info("[prof] %s embed: %d chunks, %.2fs", file_info.path.name, len(chunks), time.perf_counter() - t0)
+
+                if prof:
+                    t0 = time.perf_counter()
                 self._vector_store.add_chunks(
                     chunks, embeddings, overwrite=False,
                     text_hashes=text_hashes,
                 )
+                if prof:
+                    logger.info("[prof] %s vec_store: %.2fs", file_info.path.name, time.perf_counter() - t0)
 
-                # Metadata-only change: also refresh FTS5 and graph
-                # (Phase 1 already handles these when content changes)
                 if metadata_only:
                     file_meta = self._build_file_meta_from_fileinfo([file_info])
                     self._keyword_engine.add_chunks(chunks, file_meta=file_meta)
@@ -949,8 +971,14 @@ class IndexingPipeline:
                         file_info.path.name,
                     )
 
-            # Save embed fingerprint after successful embedding.
             self._save_embed_fingerprint(file_info)
+
+        if prof:
+            logger.info(
+                "[prof] %s TOTAL: %d chunks, %.2fs",
+                file_info.path.name, len(chunks) if chunks else 0,
+                time.perf_counter() - t_file,
+            )
 
         return len(chunks) if chunks else 0
 
