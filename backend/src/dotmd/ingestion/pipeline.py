@@ -695,10 +695,15 @@ class IndexingPipeline:
             if hasattr(self._vector_store, "set_model_name"):
                 self._vector_store.set_model_name(self._settings.embedding_model)
 
-        # FTS5 incremental update
+        # FTS5 incremental update — pass title + tags for column-weighted ranking
         if new_chunks:
             t0 = time.perf_counter()
-            self._keyword_engine.add_chunks(new_chunks)
+            file_meta: dict[str, tuple[str, str]] = {}
+            for fi in files_to_ingest:
+                tags = fi.frontmatter.get("tags", [])
+                tags_csv = ", ".join(str(t) for t in tags) if tags else ""
+                file_meta[str(fi.path)] = (fi.title, tags_csv)
+            self._keyword_engine.add_chunks(new_chunks, file_meta=file_meta)
             logger.info("[%s] fts5: %d chunks (%.2fs)", run_id, len(new_chunks), time.perf_counter() - t0)
 
         # Extraction (structural + NER + key-terms) on NEW chunks only
@@ -824,7 +829,10 @@ class IndexingPipeline:
 
             # UPSERT chunks — safe with deterministic chunk_ids.
             self._metadata_store.save_chunks(chunks)
-            self._keyword_engine.add_chunks(chunks)
+            _trickle_tags = file_info.frontmatter.get("tags", [])
+            _trickle_tags_csv = ", ".join(str(t) for t in _trickle_tags) if _trickle_tags else ""
+            _trickle_meta = {str(file_info.path): (file_info.title, _trickle_tags_csv)}
+            self._keyword_engine.add_chunks(chunks, file_meta=_trickle_meta)
 
             extraction = self._run_extraction(chunks)
             self._populate_graph([file_info], chunks, extraction)

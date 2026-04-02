@@ -18,9 +18,19 @@ _CREATE_FTS5_TPL = """
 CREATE VIRTUAL TABLE IF NOT EXISTS {table} USING fts5(
     chunk_id UNINDEXED,
     text,
+    title,
+    tags,
     tokenize = 'unicode61'
 )
 """
+
+# ADR: FTS5 column weights are 1x text, 5x title, 3x tags.
+# Title gets highest boost (5x) because a title match is the strongest
+# relevance signal -- the entire document is about that term.
+# Tags get 3x because they are curated metadata indicating topical relevance
+# but a tag match is weaker than a title match (file may only be tangentially
+# related to a tag). Body text gets baseline 1x.
+_BM25_WEIGHTS = "1.0, 5.0, 3.0"
 
 
 _COMPOUND_RE = re.compile(r"(\w+)['\u2019\u2018/\-\u2013\u2014](\w+)")
@@ -83,6 +93,27 @@ class FTS5SearchEngine:
     def __init__(self, conn: sqlite3.Connection, table_name: str = "chunks_fts") -> None:
         self._conn = conn
         self._table = table_name
+        self._ensure_fts5_schema()
+
+    def _ensure_fts5_schema(self) -> None:
+        """Create or migrate the FTS5 table to include title + tags columns.
+
+        FTS5 does not support ALTER TABLE, so if the schema is outdated
+        (missing title/tags columns) we drop and recreate.
+        """
+        # Check if table exists at all
+        exists = self._conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
+            (self._table,),
+        ).fetchone()[0]
+
+        if exists:
+            cols = {r[1] for r in self._conn.execute(f"PRAGMA table_info({self._table})").fetchall()}
+            if "title" not in cols or "tags" not in cols:
+                logger.info("FTS5: migrating %s to add title+tags columns", self._table)
+                self._conn.execute(f"DROP TABLE {self._table}")
+                self._conn.commit()
+
         self._conn.execute(_CREATE_FTS5_TPL.format(table=self._table))
         self._conn.commit()
 
@@ -90,7 +121,11 @@ class FTS5SearchEngine:
     # Incremental add / remove
     # ------------------------------------------------------------------
 
-    def add_chunks(self, chunks: list[Chunk]) -> None:
+    def add_chunks(
+        self,
+        chunks: list[Chunk],
+        file_meta: dict[str, tuple[str, str]] | None = None,
+    ) -> None:
         """Insert or replace chunks in the FTS5 index.
 
         Parameters
@@ -98,12 +133,20 @@ class FTS5SearchEngine:
         chunks:
             Chunks to add.  Existing entries with the same ``chunk_id``
             are replaced.
+        file_meta:
+            Optional mapping of ``file_path_str -> (title, tags_csv)``
+            for populating the title and tags FTS5 columns.
         """
         if not chunks:
             return
-        rows = [(c.chunk_id, _expand_compounds(c.text)) for c in chunks]
+        _meta = file_meta or {}
+        rows = []
+        for c in chunks:
+            title, tags_csv = _meta.get(str(c.file_path), ("", ""))
+            rows.append((c.chunk_id, _expand_compounds(c.text), title, tags_csv))
         self._conn.executemany(
-            f"INSERT OR REPLACE INTO {self._table}(chunk_id, text) VALUES (?, ?)",
+            f"INSERT OR REPLACE INTO {self._table}(chunk_id, text, title, tags) "
+            f"VALUES (?, ?, ?, ?)",
             rows,
         )
         self._conn.commit()
@@ -156,8 +199,8 @@ class FTS5SearchEngine:
 
         if fts_count == 0 and chunks_count > 0:
             self._conn.execute(
-                f"INSERT INTO {self._table}(chunk_id, text) "
-                f"SELECT chunk_id, text FROM {chunks_table}"
+                f"INSERT INTO {self._table}(chunk_id, text, title, tags) "
+                f"SELECT chunk_id, text, '', '' FROM {chunks_table}"
             )
             self._conn.commit()
             logger.info("FTS5: migrated %d chunks from %s", chunks_count, chunks_table)
@@ -166,9 +209,13 @@ class FTS5SearchEngine:
         else:
             logger.info("FTS5: no chunks to index yet")
 
-    def build_index(self, chunks: list[Chunk]) -> None:
+    def build_index(
+        self,
+        chunks: list[Chunk],
+        file_meta: dict[str, tuple[str, str]] | None = None,
+    ) -> None:
         """Compatibility wrapper -- delegates to :meth:`add_chunks`."""
-        self.add_chunks(chunks)
+        self.add_chunks(chunks, file_meta=file_meta)
 
     # ------------------------------------------------------------------
     # Search
@@ -197,9 +244,9 @@ class FTS5SearchEngine:
 
         try:
             cur = self._conn.execute(
-                f"SELECT chunk_id, -rank AS score "
+                f"SELECT chunk_id, -bm25({self._table}, {_BM25_WEIGHTS}) AS score "
                 f"FROM {self._table} WHERE {self._table} MATCH ? "
-                f"ORDER BY rank LIMIT ?",
+                f"ORDER BY bm25({self._table}, {_BM25_WEIGHTS}) LIMIT ?",
                 (sanitized, top_k),
             )
             return [(row[0], row[1]) for row in cur.fetchall()]
