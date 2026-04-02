@@ -77,8 +77,8 @@ class FileInfo(BaseModel):
         """MD5 of raw file bytes including frontmatter. Reads from disk on every access.
 
         Used only for graph File nodes (informational). For change detection,
-        use ``reader.content_checksum()`` which excludes frontmatter.
-        Raises ``FileNotFoundError`` if the file no longer exists.
+        use ``reader.chunk_checksum()`` (body+kind) or ``reader.embed_checksum()``
+        (body+kind+title+tags). Raises ``FileNotFoundError`` if the file no longer exists.
         """
         return hashlib.md5(self.path.read_bytes()).hexdigest()
 

@@ -17,11 +17,13 @@ The two-stage detection strategy avoids unnecessary I/O:
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 
 from dotmd.core.models import FileInfo
-from dotmd.ingestion.reader import content_checksum
+from dotmd.ingestion.reader import chunk_checksum
 
 # ---------------------------------------------------------------------------
 # SQL constants
@@ -74,9 +76,26 @@ class FileTracker:
         maintains independent change-detection state.
     """
 
-    def __init__(self, conn: sqlite3.Connection, table_name: str = "file_fingerprints") -> None:
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        table_name: str = "file_fingerprints",
+        checksum_fn: Callable[[Path], str] = chunk_checksum,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        checksum_fn:
+            ADR: Two-fingerprint architecture. Each tracker uses a different
+            checksum function to detect different kinds of changes:
+            - chunk_tracker uses ``chunk_checksum`` (body + kind) → re-chunking
+            - embed_tracker uses ``embed_checksum`` (body + kind + title + tags) → re-embedding + FTS5 + graph
+            This lets metadata-only changes (title/tags) trigger the lighter
+            embed path without unnecessary re-chunking.
+        """
         self._conn = conn
         self._table = table_name
+        self._checksum_fn = checksum_fn
         self._conn.execute(_CREATE_FINGERPRINTS.format(table=self._table))
         self._conn.commit()
 
@@ -120,8 +139,7 @@ class FileTracker:
                 continue
 
             # Slow path: mtime or size differ -> compute checksum
-            # Hash body+kind only (frontmatter changes don't trigger reindex)
-            current_checksum = content_checksum(fi.path)
+            current_checksum = self._checksum_fn(fi.path)
 
             if current_checksum == s_checksum:
                 # Content unchanged, just metadata drift (e.g. touch)

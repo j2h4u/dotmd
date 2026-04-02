@@ -37,7 +37,7 @@ from dotmd.extraction.structural import StructuralExtractor
 from dotmd.ingestion.chunker import chunk_file
 from dotmd.ingestion.content_handlers import get_handler
 from dotmd.ingestion.file_tracker import FileDiff, FileTracker
-from dotmd.ingestion.reader import content_checksum, discover_files, parse_frontmatter, read_file
+from dotmd.ingestion.reader import chunk_checksum, discover_files, embed_checksum, parse_frontmatter, read_file
 from dotmd.search.fts5 import FTS5SearchEngine
 from dotmd.search.semantic import SemanticSearchEngine
 from dotmd.storage.base import GraphStoreProtocol, VectorStoreProtocol
@@ -166,11 +166,18 @@ class IndexingPipeline:
 
         self._graph_store = _create_graph_store(settings)
 
-        # -- Two file trackers (chunk vs embed fingerprints) -------------------
-        # chunk_tracker: "has this file been chunked under current strategy?"
-        # embed_tracker: "has this file been embedded under current strategy+model?"
-        self._chunk_tracker = FileTracker(self._conn, table_name=chunk_fp_table)
-        self._embed_tracker = FileTracker(self._conn, table_name=embed_fp_table)
+        # -- Two file trackers with different checksum formulas -----------------
+        # ADR: Two-fingerprint architecture for granular change detection.
+        # chunk_tracker: hash(body + kind) → detects content/kind changes → re-chunk
+        # embed_tracker: hash(body + kind + title + tags) → also detects metadata
+        #   changes → re-embed + FTS5 + graph (skip re-chunking)
+        # This prevents 26hr full reindex when only tags/title change.
+        self._chunk_tracker = FileTracker(
+            self._conn, table_name=chunk_fp_table, checksum_fn=chunk_checksum,
+        )
+        self._embed_tracker = FileTracker(
+            self._conn, table_name=embed_fp_table, checksum_fn=embed_checksum,
+        )
 
         # -- search engines (used for encoding during indexing) ----------------
         self._semantic_engine = SemanticSearchEngine(
@@ -909,12 +916,18 @@ class IndexingPipeline:
             # Chunks unchanged — check if embedding needed.
             chunks = []
 
-        # --- Phase 2: Embed ---
+        # --- Phase 2: Embed + metadata refresh ---
+        # ADR: embed_tracker uses embed_checksum (body+kind+title+tags).
+        # When only title/tags changed (chunk_diff=unchanged, embed_diff=modified),
+        # we skip re-chunking but still re-embed, update FTS5 columns, and
+        # refresh graph metadata. This is the "lightweight metadata update" path.
+        metadata_only = False
         if not needs_embed:
             embed_diff = self._embed_tracker.diff([file_info])
             needs_embed = (
                 path_str in embed_diff.new or path_str in embed_diff.modified
             )
+            metadata_only = needs_embed  # True = triggered by metadata, not content
 
         if needs_embed:
             # Fetch chunks from DB (guaranteed to exist from phase 1 or prior run).
@@ -928,6 +941,17 @@ class IndexingPipeline:
                     chunks, embeddings, overwrite=False,
                     text_hashes=text_hashes,
                 )
+
+                # Metadata-only change: also refresh FTS5 and graph
+                # (Phase 1 already handles these when content changes)
+                if metadata_only:
+                    file_meta = self._build_file_meta_from_fileinfo([file_info])
+                    self._keyword_engine.add_chunks(chunks, file_meta=file_meta)
+                    self._frontmatter_to_graph([file_info])
+                    logger.info(
+                        "Metadata-only update for %s: FTS5 + graph + embeddings refreshed",
+                        file_info.path.name,
+                    )
 
             # Save embed fingerprint after successful embedding.
             self._save_embed_fingerprint(file_info)
@@ -1190,7 +1214,13 @@ class IndexingPipeline:
         return file_meta
 
     def _save_fingerprint(self, tracker: FileTracker, fi: FileInfo) -> None:
-        """Save a file fingerprint using content-only checksum (excludes frontmatter)."""
+        """Save a file fingerprint using the tracker's checksum function.
+
+        ADR: Each tracker has its own checksum formula (injected at construction).
+        chunk_tracker uses chunk_checksum (body+kind), embed_tracker uses
+        embed_checksum (body+kind+title+tags). This method delegates to the
+        tracker's formula so fingerprints match the diff() comparison.
+        """
         try:
             stat = fi.path.stat()
         except OSError:
@@ -1198,7 +1228,7 @@ class IndexingPipeline:
             return
         tracker.save_fingerprint(
             str(fi.path), stat.st_mtime, stat.st_size,
-            content_checksum(fi.path),
+            tracker._checksum_fn(fi.path),
         )
 
     def _save_chunk_fingerprint(self, fi: FileInfo) -> None:

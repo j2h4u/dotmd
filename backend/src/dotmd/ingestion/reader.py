@@ -9,7 +9,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from dotmd.core.models import DocKind, FileInfo
 
@@ -42,16 +42,49 @@ def parse_frontmatter(content: str) -> tuple[dict, str]:
         return {}, content
 
 
-def content_checksum(path: Path) -> str:
-    """Compute checksum of file content excluding frontmatter.
+def chunk_checksum(path: Path) -> str:
+    """Checksum for chunk-level change detection: hash(body + kind).
 
-    Hashes ``body + kind`` so that frontmatter-only changes (title, date,
-    participants) don't trigger reindexing, but content or kind changes do.
+    ADR: Two-fingerprint architecture. This checksum controls whether a file
+    needs RE-CHUNKING. It hashes only body text + kind because:
+    - body change → chunks change → must re-chunk
+    - kind change → pre-split strategy changes → must re-chunk
+    - title/tags change → chunks unchanged → skip re-chunking (cheap)
+
+    Title/tags changes are detected by ``embed_checksum()`` which controls
+    the lighter re-embed + FTS5 + graph update path.
+
+    See also: ``embed_checksum()`` for the metadata-aware counterpart.
     """
     content = read_file(path)
     frontmatter, body = parse_frontmatter(content)
     kind = frontmatter.get("kind", DocKind.DOCUMENT)
     payload = f"{kind}\n{body}"
+    return hashlib.md5(payload.encode()).hexdigest()
+
+
+def embed_checksum(path: Path) -> str:
+    """Checksum for embed-level change detection: hash(body + kind + title + tags).
+
+    ADR: This checksum controls whether a file needs RE-EMBEDDING, FTS5 update,
+    and graph metadata refresh. It includes title and tags because:
+    - title → appears in embedding enrichment prefix AND FTS5 title column (5x weight)
+    - tags → appear in embedding enrichment prefix AND FTS5 tags column (3x weight)
+      AND graph entity nodes (via _frontmatter_to_graph)
+
+    When embed_checksum changes but chunk_checksum doesn't, only Phase 2 runs:
+    re-embed + FTS5 update + graph refresh. NER is skipped (body unchanged).
+
+    This prevents stale metadata in search results when user renames a document
+    or updates tags without changing the content.
+    """
+    content = read_file(path)
+    frontmatter, body = parse_frontmatter(content)
+    kind = frontmatter.get("kind", DocKind.DOCUMENT)
+    title = str(frontmatter.get("title", ""))
+    tags = frontmatter.get("tags", [])
+    tags_str = ",".join(sorted(str(t) for t in tags)) if tags else ""
+    payload = f"{kind}\n{title}\n{tags_str}\n{body}"
     return hashlib.md5(payload.encode()).hexdigest()
 
 
