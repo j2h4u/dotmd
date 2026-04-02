@@ -35,8 +35,9 @@ from dotmd.extraction.keyterms import KeyTermExtractor
 from dotmd.extraction.ner import NERExtractor
 from dotmd.extraction.structural import StructuralExtractor
 from dotmd.ingestion.chunker import chunk_file
+from dotmd.ingestion.content_handlers import get_handler
 from dotmd.ingestion.file_tracker import FileDiff, FileTracker
-from dotmd.ingestion.reader import discover_files, read_file
+from dotmd.ingestion.reader import content_checksum, discover_files, parse_frontmatter, read_file
 from dotmd.search.fts5 import FTS5SearchEngine
 from dotmd.search.semantic import SemanticSearchEngine
 from dotmd.storage.base import GraphStoreProtocol, VectorStoreProtocol
@@ -384,41 +385,30 @@ class IndexingPipeline:
     # Embedding
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _enrich_for_embedding(text: str) -> str:
-        """Prepend document title to chunk text for better semantic matching.
+    def _enrich_for_embedding(self, chunk: Chunk, fm_cache: dict[Path, dict]) -> str:
+        """Enrich chunk text for embedding using kind-appropriate handler.
 
-        Extracts title from YAML frontmatter (if present) and prepends it.
-        This gives the embedding model document-level context without
-        changing stored chunk text or FTS5 index.
-
-        For docs with heading hierarchy (already prepended by chunker),
-        this is a no-op (no frontmatter).
+        Reads frontmatter from the source file (cached per-file) and
+        delegates to the handler's ``enrich`` function.
         """
-        if not text.startswith("---"):
-            return text
-        end = text.find("---", 3)
-        if end == -1:
-            return text
-        # Quick title extraction without yaml parser
-        title = ""
-        for line in text[3:end].split("\n"):
-            stripped = line.strip()
-            if stripped.startswith("title:"):
-                title = stripped[6:].strip().strip("'\"")
-                break
-        if not title:
-            return text
-        return f"{title}\n\n{text}"
+        file_path = chunk.file_path
+        if file_path not in fm_cache:
+            try:
+                content = read_file(file_path)
+                fm_cache[file_path], _ = parse_frontmatter(content)
+            except OSError:
+                fm_cache[file_path] = {}
+        handler = get_handler(chunk.kind)
+        return handler.enrich(chunk.text, fm_cache[file_path])
 
     def _embed_chunks(
         self, chunks: list[Chunk],
     ) -> tuple[list[list[float]], dict[str, str]]:
         """Embed chunks with context prefix injection and text_hash reuse.
 
-        Each chunk's text is enriched with document title (from frontmatter)
-        before encoding. The text_hash is computed on the ENRICHED text so
-        that cache reuse is correct (same text + same title = same embedding).
+        Each chunk's text is enriched via kind-appropriate handler before
+        encoding. The text_hash is computed on the ENRICHED text so that
+        cache reuse is correct (same text + same title = same embedding).
 
         Returns ``(embeddings, text_hashes)`` where *text_hashes* maps
         ``chunk_id → md5_hex``.
@@ -426,9 +416,10 @@ class IndexingPipeline:
         if not chunks:
             return [], {}
 
-        # Enrich texts with document title prefix for embedding
+        # Enrich texts using kind-aware handlers (frontmatter cached per file)
+        fm_cache: dict[Path, dict] = {}
         enriched_texts: dict[str, str] = {
-            c.chunk_id: self._enrich_for_embedding(c.text) for c in chunks
+            c.chunk_id: self._enrich_for_embedding(c, fm_cache) for c in chunks
         }
 
         # text_hash on enriched text (prefix changes embedding → different hash)
@@ -677,6 +668,7 @@ class IndexingPipeline:
                 content,
                 max_tokens=self._settings.max_chunk_tokens,
                 overlap_tokens=self._settings.chunk_overlap_tokens,
+                kind=file_info.kind,
             )
             new_chunks.extend(file_chunks)
         logger.info("[%s] chunk: %d chunks from %d files (%.2fs)", run_id, len(new_chunks), len(files_to_ingest), time.perf_counter() - t0)
@@ -717,6 +709,7 @@ class IndexingPipeline:
         # Graph population for new chunks
         t0 = time.perf_counter()
         self._populate_graph(files_to_ingest, new_chunks, extraction_result)
+        self._frontmatter_to_graph(files_to_ingest)
         logger.info("[%s] graph: %d files, %d chunks (%.1fs)", run_id, len(files_to_ingest), len(new_chunks), time.perf_counter() - t0)
 
         # Update chunk + embed fingerprints AFTER successful chunk ingestion
@@ -820,6 +813,7 @@ class IndexingPipeline:
                 content,
                 max_tokens=self._settings.max_chunk_tokens,
                 overlap_tokens=self._settings.chunk_overlap_tokens,
+                kind=file_info.kind,
             )
 
             if not chunks:
@@ -834,6 +828,7 @@ class IndexingPipeline:
 
             extraction = self._run_extraction(chunks)
             self._populate_graph([file_info], chunks, extraction)
+            self._frontmatter_to_graph([file_info])
 
             # Save chunk fingerprint BEFORE embed (crash-safe split point).
             self._save_chunk_fingerprint(file_info)
@@ -1002,6 +997,60 @@ class IndexingPipeline:
             total_relations=len(all_relations),
         )
 
+    def _frontmatter_to_graph(self, files: list[FileInfo]) -> None:
+        """Inject frontmatter tags and kind-specific metadata into graph.
+
+        ADR: Tags go directly to graph bypassing NER/structural extraction.
+        Frontmatter tags are author-curated metadata with explicit semantics
+        (e.g. ``person:Alice`` declares a PERSON entity). Running them through
+        NER would be redundant and lossy -- NER might misclassify or miss them.
+        The colon namespace convention (``type:name``) gives us typed entities
+        for free without any ML model overhead.
+
+        Kind-specific extraction (e.g. ``participants`` for meeting_transcript)
+        follows the same principle: structured fields have known semantics.
+        """
+        for fi in files:
+            if not fi.frontmatter:
+                continue
+            file_path_str = str(fi.path)
+
+            # --- Tags with optional namespace ---------------------------
+            tags = fi.frontmatter.get("tags", [])
+            for tag in tags:
+                tag_str = str(tag)
+                parts = tag_str.split(":", 1)
+                if len(parts) == 2 and parts[0].strip():
+                    entity_type = parts[0].strip().upper()
+                    name = parts[1].strip()
+                else:
+                    entity_type = "TAG"
+                    name = tag_str
+                self._graph_store.add_entity_node(
+                    name=name, entity_type=entity_type, source="frontmatter",
+                )
+                self._graph_store.add_edge(
+                    source_id=file_path_str,
+                    target_id=name,
+                    relation_type="HAS_TAG",
+                )
+
+            # --- Kind-specific metadata ---------------------------------
+            if fi.kind == "meeting_transcript":
+                participants = fi.frontmatter.get("participants", [])
+                for p in participants:
+                    p_name = str(p).strip()
+                    if not p_name:
+                        continue
+                    self._graph_store.add_entity_node(
+                        name=p_name, entity_type="PERSON", source="frontmatter",
+                    )
+                    self._graph_store.add_edge(
+                        source_id=file_path_str,
+                        target_id=p_name,
+                        relation_type="HAS_PARTICIPANT",
+                    )
+
     def _populate_graph(
         self,
         files: list[FileInfo],
@@ -1050,21 +1099,19 @@ class IndexingPipeline:
     # Fingerprint management
     # ------------------------------------------------------------------
 
-    def _save_chunk_fingerprint(self, fi: FileInfo) -> None:
-        """Save a single chunk fingerprint."""
+    def _save_fingerprint(self, tracker: FileTracker, fi: FileInfo) -> None:
+        """Save a file fingerprint using content-only checksum (excludes frontmatter)."""
         stat = fi.path.stat()
-        checksum = hashlib.md5(fi.path.read_bytes()).hexdigest()
-        self._chunk_tracker.save_fingerprint(
-            str(fi.path), stat.st_mtime, stat.st_size, checksum,
+        tracker.save_fingerprint(
+            str(fi.path), stat.st_mtime, stat.st_size,
+            content_checksum(fi.path),
         )
 
+    def _save_chunk_fingerprint(self, fi: FileInfo) -> None:
+        self._save_fingerprint(self._chunk_tracker, fi)
+
     def _save_embed_fingerprint(self, fi: FileInfo) -> None:
-        """Save a single embed fingerprint."""
-        stat = fi.path.stat()
-        checksum = hashlib.md5(fi.path.read_bytes()).hexdigest()
-        self._embed_tracker.save_fingerprint(
-            str(fi.path), stat.st_mtime, stat.st_size, checksum,
-        )
+        self._save_fingerprint(self._embed_tracker, fi)
 
     def _update_chunk_fingerprints(self, files: list[FileInfo]) -> None:
         """Save chunk fingerprints for successfully chunked files."""

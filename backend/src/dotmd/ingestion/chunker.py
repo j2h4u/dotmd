@@ -6,8 +6,11 @@ import hashlib
 import logging
 import re
 from pathlib import Path
+from typing import Callable
 
 from dotmd.core.models import Chunk
+from dotmd.ingestion.content_handlers import get_handler, split_default
+from dotmd.ingestion.reader import parse_frontmatter
 from dotmd.utils.text import estimate_tokens, split_sentences
 
 logger = logging.getLogger(__name__)
@@ -22,48 +25,19 @@ def _make_chunk_id(file_path: Path, chunk_index: int) -> str:
     return hashlib.md5(payload.encode()).hexdigest()
 
 
-# Matches transcript speaker turns: [00:12:34] **Speaker Name:**
-_SPEAKER_TURN_RE = re.compile(r"\n(?=\[\d{2}:\d{2}:\d{2}\]\s*\*\*)")
-
-
-def _pre_split_segments(text: str) -> list[str]:
-    """Break text into natural segments before sentence splitting.
-
-    Transcript speaker turns and paragraph breaks are stronger boundaries
-    than sentence-level punctuation.  Returns segments that the existing
-    ``_split_with_overlap`` groups into token-budget chunks.
-
-    Detection order:
-    1. Speaker turns (``[HH:MM:SS] **Name:**``) — meetings with diarization
-    2. Double newlines — personal voicenotes, paragraph breaks
-    3. Fallback — return text as-is (docs without structure)
-    """
-    # Meetings: split on speaker turn boundaries
-    if len(_SPEAKER_TURN_RE.findall(text)) >= 3:
-        segments = _SPEAKER_TURN_RE.split(text)
-        return [s.strip() for s in segments if s.strip()]
-
-    # Personal voicenotes / other: split on double newlines
-    if text.count("\n\n") >= 3:
-        segments = text.split("\n\n")
-        return [s.strip() for s in segments if s.strip()]
-
-    # Docs or short text: no pre-splitting needed
-    return [text] if text.strip() else []
-
-
 def _split_with_overlap(
     text: str,
     max_tokens: int,
     overlap_tokens: int,
+    pre_split: Callable[[str], list[str]] = split_default,
 ) -> list[str]:
     """Split *text* into pieces that each fit within *max_tokens*.
 
-    First breaks text into natural segments (speaker turns, paragraphs),
-    then groups them into token-budget chunks with overlap.  Falls back
+    First breaks text into natural segments using *pre_split*, then
+    groups them into token-budget chunks with overlap.  Falls back
     to sentence splitting for segments that exceed the budget.
     """
-    segments = _pre_split_segments(text)
+    segments = pre_split(text)
     if not segments:
         return [text] if text.strip() else []
 
@@ -149,33 +123,44 @@ def chunk_file(
     content: str,
     max_tokens: int = 512,
     overlap_tokens: int = 50,
+    kind: str = "document",
 ) -> list[Chunk]:
     """Split a markdown document into semantically meaningful chunks.
 
-    The algorithm first splits on ATX headings (``#`` through ``######``),
-    tracking the heading hierarchy so each chunk knows its context.
-    Sections that exceed *max_tokens* are further split at sentence
-    boundaries with *overlap_tokens* of shared context between consecutive
-    sub-chunks.
+    The algorithm first strips YAML frontmatter, then splits on ATX
+    headings (``#`` through ``######``), tracking the heading hierarchy
+    so each chunk knows its context.  Sections that exceed *max_tokens*
+    are further split using the kind-appropriate pre-split strategy,
+    with *overlap_tokens* of shared context between consecutive sub-chunks.
 
     Parameters
     ----------
     file_path:
         Path to the source file (used for IDs and metadata, not read here).
     content:
-        Full text content of the markdown file.
+        Full text content of the markdown file (frontmatter will be stripped).
     max_tokens:
         Soft upper bound on chunk size expressed as estimated tokens.
     overlap_tokens:
         Number of overlapping tokens between consecutive sub-chunks created
         by sentence splitting.
+    kind:
+        Document kind from frontmatter (e.g. ``"meeting_transcript"``).
+        Selects the pre-split strategy for large sections.
 
     Returns
     -------
     list[Chunk]
         Ordered list of chunks covering the entire document.
     """
-    sections = _parse_sections(content)
+    # ADR: Strip YAML frontmatter before chunking so raw YAML never leaks
+    # into chunk text. Frontmatter metadata reaches search engines through
+    # structured channels (graph entities, FTS5 columns, embedding prefix)
+    # rather than as accidental text content that pollutes BM25/embeddings.
+    _, body = parse_frontmatter(content)
+
+    handler = get_handler(kind)
+    sections = _parse_sections(body)
     chunks: list[Chunk] = []
     chunk_index = 0
 
@@ -219,12 +204,16 @@ def chunk_file(
                     text=section_text,
                     chunk_index=chunk_index,
                     char_offset=char_offset,
+                    kind=kind,
                 )
             )
             chunk_index += 1
         else:
-            # Section too large – sentence-split with overlap.
-            sub_texts = _split_with_overlap(section_text, max_tokens, overlap_tokens)
+            # Section too large – split using kind-appropriate strategy.
+            sub_texts = _split_with_overlap(
+                section_text, max_tokens, overlap_tokens,
+                pre_split=handler.pre_split,
+            )
             for sub_text in sub_texts:
                 chunks.append(
                     Chunk(
@@ -235,6 +224,7 @@ def chunk_file(
                         text=sub_text,
                         chunk_index=chunk_index,
                         char_offset=char_offset,
+                        kind=kind,
                     )
                 )
                 chunk_index += 1

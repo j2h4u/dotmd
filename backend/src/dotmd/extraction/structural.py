@@ -1,18 +1,17 @@
 """Structural extraction from markdown syntax.
 
-Extracts entities and relations from wikilinks, tags, YAML frontmatter,
-markdown links, and heading hierarchy.
+Extracts entities and relations from wikilinks, tags, markdown links,
+and heading hierarchy.  Frontmatter extraction moved to pipeline-level
+``_frontmatter_to_graph()`` which injects typed entities directly from
+parsed FileInfo metadata.
 """
 
 from __future__ import annotations
 
 import logging
 import re
-from typing import Any
 
 logger = logging.getLogger(__name__)
-
-import yaml
 
 from dotmd.core.models import Chunk, Entity, ExtractionResult, Relation
 
@@ -21,9 +20,6 @@ from dotmd.core.models import Chunk, Entity, ExtractionResult, Relation
 _WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
 _INLINE_TAG_RE = re.compile(r"(?:^|(?<=\s))#([A-Za-z_][\w/-]*)", re.MULTILINE)
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+\.md(?:#[^)]*)?)\)")
-_FRONTMATTER_RE = re.compile(r"\A---\n(.*?\n)---\n", re.DOTALL)
-
-
 class StructuralExtractor:
     """Extract entities and relations from markdown structural elements.
 
@@ -31,7 +27,6 @@ class StructuralExtractor:
     - ``[[wikilinks]]`` — creates a *link* entity and a ``LINKS_TO`` relation.
     - Inline ``#tags`` (not heading lines) — creates a *tag* entity and a
       ``HAS_TAG`` relation.
-    - YAML front-matter — creates entities for each key-value pair.
     - Markdown links to ``.md`` files — creates a *link* entity and a
       ``LINKS_TO`` relation.
     - Heading hierarchy — creates ``PARENT_OF`` relations between parent and
@@ -107,11 +102,6 @@ class StructuralExtractor:
                     )
                 )
 
-            # --- YAML frontmatter --------------------------------------------
-            fm_match = _FRONTMATTER_RE.match(text)
-            if fm_match:
-                self._extract_frontmatter(fm_match.group(1), cid, entities, relations)
-
             # --- Markdown links to .md files ----------------------------------
             for match in _MD_LINK_RE.finditer(text):
                 link_text = match.group(1)
@@ -148,44 +138,3 @@ class StructuralExtractor:
 
         return ExtractionResult(entities=entities, relations=relations)
 
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _extract_frontmatter(
-        raw_yaml: str,
-        chunk_id: str,
-        entities: list[Entity],
-        relations: list[Relation],
-    ) -> None:
-        """Parse YAML frontmatter and append entities/relations."""
-        try:
-            data: Any = yaml.safe_load(raw_yaml)
-        except yaml.YAMLError:
-            logger.debug("Malformed YAML frontmatter in chunk %s", chunk_id, exc_info=True)
-            return
-
-        if not isinstance(data, dict):
-            return
-
-        for key, value in data.items():
-            values = value if isinstance(value, list) else [value]
-            for val in values:
-                if val is None:
-                    continue
-                entity = Entity(
-                    name=str(val),
-                    type=str(key),
-                    source="structural",
-                    chunk_ids=[chunk_id],
-                )
-                entities.append(entity)
-                relations.append(
-                    Relation(
-                        source_id=chunk_id,
-                        target_id=str(val),
-                        relation_type="HAS_FRONTMATTER",
-                        properties={"key": str(key)},
-                    )
-                )
