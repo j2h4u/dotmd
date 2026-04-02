@@ -7,7 +7,7 @@
 - [x] **v1.1 Incremental Indexing** — Phases 1-3 (shipped 2026-03-26)
 - [x] **v1.2 FalkorDB Migration & Search Fix** — Phases 4-6 (shipped 2026-03-27)
 - [x] **v1.3 Production Packaging & Background Indexing** — Phases 7-10 (shipped 2026-03-28)
-- [ ] **v1.4 Search Quality Evaluations** — Phases 11-12 (in progress)
+- [x] **v1.4 Search Quality & Architecture** — Phases 11-13 (shipped 2026-04-02)
 
 <details>
 <summary>v1.1 Incremental Indexing (Phases 1-3) — SHIPPED 2026-03-26</summary>
@@ -43,71 +43,69 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 
 </details>
 
-## v1.4 Search Quality Evaluations
+<details>
+<summary>v1.4 Search Quality & Architecture (Phases 11-13) — SHIPPED 2026-04-02</summary>
 
-**Milestone Goal:** Measurably improve retrieval quality on Russian voicenotes corpus through empirical evaluation of embedding models, chunking strategies, and scoring pipeline.
+### Phase 11: Embedding Model Evaluation
+- [x] E5-large vs Qwen3-Embedding-0.6B A/B comparison
+- [x] Multi-model vector store (per-model tables, both models coexist)
+- [x] Context-aware encoding evaluated and removed (dead code, model-specific)
+- **Decision:** E5-large retained (better Russian semantic quality). Qwen3 index preserved for future comparison.
 
-## Phases
+### Phase 12: Indexing Integrity Rework
+- [x] Unified database: metadata.db + vec.db → single index.db
+- [x] Two-dimensional table naming: (chunk_strategy × embedding_model)
+- [x] Split fingerprints: chunk_fingerprints + embed_fingerprints
+- [x] Embedding reuse via text_hash column in vec_meta
+- [x] fcntl.flock exclusive lock (prevents parallel indexing)
+- [x] Orphan cleanup at trickle startup + deferred VACUUM
+- [x] Watchdog on_deleted handler
+- [x] CLI: dotmd reset --model/--strategy (replaces dotmd clear)
+- [x] One-time migration (zero recompute)
+- **Impact:** 429MB → 67MB storage, 0 orphans (was 98.8% dead data)
 
-- [ ] **Phase 11: Embedding Model Swap** - pplx-embed integration on feature branch, A/B comparison with saved E5-large baseline
-- [ ] **Phase 12: Chunking & Scoring Calibration** - Semantic chunking for topic-switching transcripts and score pipeline recalibration
+### Phase 13: Content-Aware Chunking & Search
+- [x] Speaker-turn pre-splitting for meeting transcripts
+- [x] UTF-8 token estimation (Cyrillic-aware)
+- [x] Context prefix injection (document title in embeddings)
+- [x] Graph-first entity-direct retrieval (RRF peer engine)
+- [x] FTS5 compound decompounding (hyphenated words)
+- [x] FTS5 prefix matching
+- [x] TEI progress logging with ETA
+- [x] MCP server: removed index tool, clean snippets, headings, graph counts
+- **Impact:** 2990 → 7927 chunks (transcripts properly split). "Николай Сенин" rank 6 → rank 1. "инфоцыган" now findable.
 
-## Phase Details
+### Backlog items completed:
+- [x] 999.1 Multi-model vector store — absorbed into Phase 12
 
-### Phase 11: Embedding Model Swap
-**Goal**: pplx-embed models replace E5-large on a feature branch; A/B comparison against saved baseline decides whether to merge
-**Depends on**: Phase 10 (working indexed corpus). Baseline saved in `.planning/research/SEARCH-BASELINE.md`
-**Requirements**: EVAL-01, EVAL-02, EMBED-01, EMBED-02, EMBED-03
-**Success Criteria** (what must be TRUE):
-  1. Documents indexed using pplx-embed-context-v1-0.6B with grouped chunks per document (context-aware embeddings)
-  2. Search queries encoded using pplx-embed-v1-0.6B (standard single-text, no prefix needed)
-  3. pplx-embed runs self-hosted in Docker — no external API dependency
-  4. Same test queries from baseline run on feature branch; results compared manually
-  5. Decision made: merge (significantly better) or discard branch (marginal/worse)
-**Plans**: TBD
-
-### Phase 12: Chunking & Scoring Calibration
-**Goal**: Chunk boundaries follow topic shifts in transcripts; scoring pipeline calibrated for new model
-**Depends on**: Phase 11 (embedding model integrated, A/B shows improvement worth keeping)
-**Requirements**: CHUNK-01, CHUNK-02, SCORE-01, SCORE-02
-**Success Criteria** (what must be TRUE):
-  1. Semantic chunker splits at topic boundaries using embedding similarity — voicenote transcripts produce chunks aligned to topic shifts
-  2. Chunk strategy configurable per content type (voicenotes vs markdown)
-  3. Cross-encoder threshold calibrated from real corpus score distributions
-  4. Semantic score floor recalibrated for new model's characteristics
-  5. Search quality on test queries improved or not degraded vs Phase 11
-**Plans**: TBD
+</details>
 
 ## Progress
 
-**Execution Order:** Phase 11 -> 12 -> 13
-
-| Phase | Milestone | Plans Complete | Status | Completed |
-|-------|-----------|----------------|--------|-----------|
-| 1. sqlite-vec Migration | v1.1 | 2/2 | Complete | 2026-03-26 |
-| 2. Incremental Pipeline | v1.1 | 2/2 | Complete | 2026-03-26 |
-| 3. CLI & API Polish | v1.1 | 2/2 | Complete | 2026-03-26 |
-| 4. FalkorDB Adapter + Config | v1.2 | 2/2 | Complete | 2026-03-27 |
-| 5. BM25 Hybrid Fix | v1.2 | 1/1 | Complete | 2026-03-27 |
-| 6. Docker Integration + Migration | v1.2 | 1/1 | Complete | 2026-03-27 |
-| 7. Production Packaging | v1.3 | 2/2 | Complete | 2026-03-27 |
-| 8. Smoke Tests | v1.3 | 1/1 | Complete | 2026-03-28 |
-| 9. Speed Benchmarks | v1.3 | 1/1 | Complete | 2026-03-28 |
-| 10. Background Trickle Indexer | v1.3 | 4/4 | Complete | 2026-03-27 |
-| 11. Embedding Model Swap | v1.4 | 2/3 | In Progress|  |
-| 12. Chunking & Scoring Calibration | v1.4 | 0/? | Not started | - |
+| Phase | Milestone | Status | Completed |
+|-------|-----------|--------|-----------|
+| 1. sqlite-vec Migration | v1.1 | Complete | 2026-03-26 |
+| 2. Incremental Pipeline | v1.1 | Complete | 2026-03-26 |
+| 3. CLI & API Polish | v1.1 | Complete | 2026-03-26 |
+| 4. FalkorDB Adapter + Config | v1.2 | Complete | 2026-03-27 |
+| 5. BM25 Hybrid Fix | v1.2 | Complete | 2026-03-27 |
+| 6. Docker Integration + Migration | v1.2 | Complete | 2026-03-27 |
+| 7. Production Packaging | v1.3 | Complete | 2026-03-27 |
+| 8. Smoke Tests | v1.3 | Complete | 2026-03-28 |
+| 9. Speed Benchmarks | v1.3 | Complete | 2026-03-28 |
+| 10. Background Trickle Indexer | v1.3 | Complete | 2026-03-27 |
+| 11. Embedding Model Evaluation | v1.4 | Complete | 2026-04-01 |
+| 12. Indexing Integrity Rework | v1.4 | Complete | 2026-04-02 |
+| 13. Content-Aware Chunking & Search | v1.4 | Complete | 2026-04-02 |
 
 ## Backlog
 
-### Phase 999.1: Multi-model vector store (BACKLOG)
-
-**Goal:** Store embeddings from multiple models side by side (per chunk, per model column) to enable instant model switching without re-indexing. Currently A/B requires separate index dirs and full re-index per model swap (~1hr). With multi-model storage, switching is just a query parameter.
-**Requirements:** TBD
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (promote with /gsd:review-backlog when ready)
+No active backlog items. Future ideas:
+- Semantic chunking (split by topic similarity, not just structure)
+- Doc-level chunks (whole-document embeddings for broad queries)
+- Query-time NER via GLiNER (complement entity catalog string matching)
+- Telegram/chat history as additional data source
 
 ---
 *Roadmap created: 2026-03-26*
-*Last updated: 2026-03-31*
+*Last updated: 2026-04-02*
