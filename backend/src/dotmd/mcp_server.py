@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
@@ -56,21 +55,6 @@ def search(
         }
         for r in results
     ]
-
-
-@mcp.tool()
-def index(directory: str) -> dict:
-    """Index all markdown files in a directory.
-
-    Args:
-        directory: Path to the directory containing markdown files.
-
-    Returns:
-        Index statistics (total files, chunks, entities, edges).
-    """
-    service = _get_service()
-    stats = service.index(Path(directory))
-    return stats.model_dump(mode="json")
 
 
 @mcp.tool()

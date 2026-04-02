@@ -919,6 +919,11 @@ class IndexingPipeline:
         if not orphan_paths:
             return 0, 0, 0
 
+        logger.info(
+            "Orphan cleanup: %d stored files, %d discovered, %d orphans to remove",
+            len(stored_paths), len(discovered_paths), len(orphan_paths),
+        )
+
         files_removed = 0
         chunks_removed = 0
         vectors_removed = 0
@@ -950,9 +955,9 @@ class IndexingPipeline:
                 files_removed += 1
 
             if i + batch_size < len(orphan_list):
-                logger.debug(
-                    "Orphan cleanup progress: %d/%d files",
-                    files_removed, len(orphan_list),
+                logger.info(
+                    "Orphan cleanup progress: %d/%d files (%d chunks)",
+                    files_removed, len(orphan_list), chunks_removed,
                 )
 
         logger.info(

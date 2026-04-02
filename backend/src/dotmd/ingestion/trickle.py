@@ -213,6 +213,10 @@ class TrickleIndexer:
                 self._settings.indexing_exclude,
             )
             discovered_paths = {str(fi.path) for fi in all_files}
+            logger.info(
+                "Orphan cleanup: checking %d discovered files against index...",
+                len(discovered_paths),
+            )
 
             files_rm, chunks_rm, vecs_rm = await asyncio.to_thread(
                 self._pipeline.purge_orphaned_files, discovered_paths,
