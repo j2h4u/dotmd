@@ -3,7 +3,7 @@
 ## Project Status
 
 dotMD is a **heavily modified fork** of an upstream markdown knowledgebase search tool.
-The upstream project appears abandoned — no meaningful activity since mid-2025.
+The upstream project appears inactive — last commit January 2026 ("docs update").
 We treat this as our own project with independent development direction.
 
 ## Branches
