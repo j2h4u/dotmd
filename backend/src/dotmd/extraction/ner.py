@@ -7,7 +7,7 @@ from collections import Counter
 from itertools import combinations
 from typing import TYPE_CHECKING, Any
 
-from dotmd.core.models import Chunk, Entity, ExtractionResult, Relation
+from dotmd.core.models import Chunk, Entity, ExtractDepth, ExtractionResult, Relation
 
 if TYPE_CHECKING:
     from gliner import GLiNER  # type: ignore[import-untyped]
@@ -110,7 +110,7 @@ class NERExtractor:
                     entity = Entity(
                         name=name,
                         type=etype,
-                        source="ner",
+                        source=ExtractDepth.NER,
                         chunk_ids=[chunk.chunk_id],
                     )
                     seen_entities[key] = entity

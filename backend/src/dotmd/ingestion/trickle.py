@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from watchdog.events import PatternMatchingEventHandler
 from watchdog.observers import Observer
 
-from dotmd.core.models import FileInfo
+from dotmd.core.models import FileInfo, TrickleStatus
 from dotmd.ingestion.lock import indexing_lock
 
 if TYPE_CHECKING:
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 class TrickleState:
     """Observable state of the background indexer."""
 
-    status: str = "idle"  # "idle", "backlog", "watching", "stopping"
+    status: str = TrickleStatus.IDLE
     indexed_count: int = 0
     total_files: int = 0
     current_file: str | None = None
@@ -135,7 +135,7 @@ class TrickleIndexer:
         """
         if not self._settings.indexing_paths:
             logger.info("Trickle indexer idle — no indexing_paths in config")
-            self._state.status = "idle"
+            self._state.status = TrickleStatus.IDLE
             await shutdown.wait()
             return
 
@@ -174,7 +174,7 @@ class TrickleIndexer:
             logger.exception("Trickle indexer crashed")
         finally:
             self._stop_observer()
-            self._state.status = "stopping"
+            self._state.status = TrickleStatus.STOPPING
             logger.info(
                 "Trickle indexer stopped (indexed %d files)",
                 self._state.indexed_count,
@@ -238,7 +238,7 @@ class TrickleIndexer:
 
     async def _process_backlog(self, shutdown: asyncio.Event) -> None:
         """Discover and process all unindexed files (newest first)."""
-        self._state.status = "backlog"
+        self._state.status = TrickleStatus.BACKLOG
         logger.info(
             "Discovering unindexed files from %d paths...",
             len(self._settings.indexing_paths),
@@ -344,7 +344,7 @@ class TrickleIndexer:
 
     async def _watch_mode(self, shutdown: asyncio.Event) -> None:
         """Watch configured paths for new files via inotify + polling fallback."""
-        self._state.status = "watching"
+        self._state.status = TrickleStatus.WATCHING
         logger.info(
             "Entering watch mode (poll interval: %ds)",
             int(self._settings.poll_interval_seconds),

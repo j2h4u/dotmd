@@ -7,8 +7,14 @@ for embedding.  Unknown or missing kinds fall back to the default handler.
 
 from __future__ import annotations
 
+import logging
 import re
+from collections.abc import Callable
 from typing import NamedTuple
+
+from dotmd.core.models import DocKind
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Pre-split functions
@@ -72,8 +78,8 @@ def enrich_with_title_and_tags(text: str, frontmatter: dict) -> str:
 class ContentHandler(NamedTuple):
     """Dispatch pair for a document kind."""
 
-    pre_split: callable  # (text: str) -> list[str]
-    enrich: callable  # (text: str, frontmatter: dict) -> str
+    pre_split: Callable[[str], list[str]]
+    enrich: Callable[[str, dict], str]
 
 
 DEFAULT_HANDLER = ContentHandler(
@@ -82,11 +88,11 @@ DEFAULT_HANDLER = ContentHandler(
 )
 
 HANDLERS: dict[str, ContentHandler] = {
-    "meeting_transcript": ContentHandler(
+    DocKind.MEETING_TRANSCRIPT: ContentHandler(
         pre_split=split_by_speaker_turns,
         enrich=enrich_with_title_and_tags,
     ),
-    "voicenote": ContentHandler(
+    DocKind.VOICENOTE: ContentHandler(
         pre_split=split_by_paragraphs,
         enrich=enrich_with_title_and_tags,
     ),
@@ -95,4 +101,8 @@ HANDLERS: dict[str, ContentHandler] = {
 
 def get_handler(kind: str) -> ContentHandler:
     """Look up the handler for *kind*, falling back to the default."""
-    return HANDLERS.get(kind, DEFAULT_HANDLER)
+    handler = HANDLERS.get(kind)
+    if handler is None:
+        logger.debug("No handler for kind=%r, using default", kind)
+        return DEFAULT_HANDLER
+    return handler

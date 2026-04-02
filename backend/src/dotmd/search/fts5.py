@@ -102,15 +102,19 @@ class FTS5SearchEngine:
         (missing title/tags columns) we drop and recreate.
         """
         # Check if table exists at all
-        exists = self._conn.execute(
+        table_exists = self._conn.execute(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
             (self._table,),
         ).fetchone()[0]
 
-        if exists:
-            cols = {r[1] for r in self._conn.execute(f"PRAGMA table_info({self._table})").fetchall()}
-            if "title" not in cols or "tags" not in cols:
-                logger.info("FTS5: migrating %s to add title+tags columns", self._table)
+        if table_exists:
+            col_names = {r[1] for r in self._conn.execute(f"PRAGMA table_info({self._table})").fetchall()}
+            if "title" not in col_names or "tags" not in col_names:
+                row_count = self._conn.execute(f"SELECT COUNT(*) FROM {self._table}").fetchone()[0]
+                logger.info(
+                    "FTS5: dropping and recreating %s to add title+tags columns (%d rows will be lost, run reindex_fts5 to repopulate)",
+                    self._table, row_count,
+                )
                 self._conn.execute(f"DROP TABLE {self._table}")
                 self._conn.commit()
 
@@ -139,10 +143,10 @@ class FTS5SearchEngine:
         """
         if not chunks:
             return
-        _meta = file_meta or {}
+        file_meta = file_meta or {}
         rows = []
         for c in chunks:
-            title, tags_csv = _meta.get(str(c.file_path), ("", ""))
+            title, tags_csv = file_meta.get(str(c.file_path), ("", ""))
             rows.append((c.chunk_id, _expand_compounds(c.text), title, tags_csv))
         self._conn.executemany(
             f"INSERT OR REPLACE INTO {self._table}(chunk_id, text, title, tags) "

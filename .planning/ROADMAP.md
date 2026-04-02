@@ -110,6 +110,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 ## Backlog
 
 No active backlog items. Future ideas:
+- Replace MD5 with a better hash (blake2b?) for chunk_id and content_checksum — MD5 collision resistance is broken, defense-in-depth
 - Semantic chunking (split by topic similarity, not just structure)
 - Doc-level chunks (whole-document embeddings for broad queries)
 - Query-time NER via GLiNER (complement entity catalog string matching)

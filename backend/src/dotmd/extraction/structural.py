@@ -11,9 +11,9 @@ from __future__ import annotations
 import logging
 import re
 
-logger = logging.getLogger(__name__)
+from dotmd.core.models import Chunk, Entity, ExtractDepth, ExtractionResult, Relation, RelationType
 
-from dotmd.core.models import Chunk, Entity, ExtractionResult, Relation
+logger = logging.getLogger(__name__)
 
 # --- Regex patterns -----------------------------------------------------------
 
@@ -67,7 +67,7 @@ class StructuralExtractor:
                 entity = Entity(
                     name=target,
                     type="link",
-                    source="structural",
+                    source=ExtractDepth.STRUCTURAL,
                     chunk_ids=[cid],
                 )
                 entities.append(entity)
@@ -90,7 +90,7 @@ class StructuralExtractor:
                 entity = Entity(
                     name=tag,
                     type="tag",
-                    source="structural",
+                    source=ExtractDepth.STRUCTURAL,
                     chunk_ids=[cid],
                 )
                 entities.append(entity)
@@ -98,7 +98,7 @@ class StructuralExtractor:
                     Relation(
                         source_id=cid,
                         target_id=tag,
-                        relation_type="HAS_TAG",
+                        relation_type=RelationType.HAS_TAG,
                     )
                 )
 
@@ -109,7 +109,7 @@ class StructuralExtractor:
                 entity = Entity(
                     name=href,
                     type="link",
-                    source="structural",
+                    source=ExtractDepth.STRUCTURAL,
                     chunk_ids=[cid],
                 )
                 entities.append(entity)

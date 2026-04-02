@@ -7,12 +7,11 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
-from fnmatch import fnmatch
 from pathlib import Path
 
 import yaml
 
-from dotmd.core.models import FileInfo
+from dotmd.core.models import DocKind, FileInfo
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +33,12 @@ def parse_frontmatter(content: str) -> tuple[dict, str]:
     raw = content[3:end]
     body = content[end + 3:].lstrip("\n")
     try:
-        fm = yaml.safe_load(raw)
-        if not isinstance(fm, dict):
+        frontmatter = yaml.safe_load(raw)
+        if not isinstance(frontmatter, dict):
             return {}, content
-        return fm, body
+        return frontmatter, body
     except yaml.YAMLError:
-        logger.debug("Failed to parse frontmatter, treating as plain content")
+        logger.warning("Malformed YAML frontmatter, treating as plain content", exc_info=True)
         return {}, content
 
 
@@ -50,8 +49,8 @@ def content_checksum(path: Path) -> str:
     participants) don't trigger reindexing, but content or kind changes do.
     """
     content = read_file(path)
-    fm, body = parse_frontmatter(content)
-    kind = fm.get("kind", "document")
+    frontmatter, body = parse_frontmatter(content)
+    kind = frontmatter.get("kind", DocKind.DOCUMENT)
     payload = f"{kind}\n{body}"
     return hashlib.md5(payload.encode()).hexdigest()
 
@@ -101,18 +100,18 @@ def discover_files(directory: Path) -> list[FileInfo]:
             continue
         try:
             content = read_file(md_path)
-            fm, _ = parse_frontmatter(content)
+            frontmatter, _ = parse_frontmatter(content)
             stat = md_path.stat()
             results.append(
                 FileInfo(
                     path=md_path,
-                    title=_extract_title(content, md_path, fm),
+                    title=_extract_title(content, md_path, frontmatter),
                     last_modified=datetime.fromtimestamp(
                         stat.st_mtime, tz=timezone.utc
                     ),
                     size_bytes=stat.st_size,
-                    kind=fm.get("kind", "document"),
-                    frontmatter=fm,
+                    kind=frontmatter.get("kind", DocKind.DOCUMENT),
+                    frontmatter=frontmatter,
                 )
             )
         except OSError:
@@ -264,15 +263,15 @@ def _add_file(
             logger.info("Skipping empty file (0 bytes): %s", md_path)
             return
         content = read_file(md_path)
-        fm, _ = parse_frontmatter(content)
+        frontmatter, _ = parse_frontmatter(content)
         results.append(
             FileInfo(
                 path=md_path,
-                title=_extract_title(content, md_path, fm),
+                title=_extract_title(content, md_path, frontmatter),
                 last_modified=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
                 size_bytes=stat.st_size,
-                kind=fm.get("kind", "document"),
-                frontmatter=fm,
+                kind=frontmatter.get("kind", DocKind.DOCUMENT),
+                frontmatter=frontmatter,
             )
         )
         seen.add(resolved)

@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import Callable
 
-from dotmd.core.models import Chunk
+from dotmd.core.models import Chunk, DocKind
 from dotmd.ingestion.content_handlers import get_handler, split_default
 from dotmd.ingestion.reader import parse_frontmatter
 from dotmd.utils.text import estimate_tokens, split_sentences
@@ -123,7 +123,7 @@ def chunk_file(
     content: str,
     max_tokens: int = 512,
     overlap_tokens: int = 50,
-    kind: str = "document",
+    kind: str = DocKind.DOCUMENT,
 ) -> list[Chunk]:
     """Split a markdown document into semantically meaningful chunks.
 
@@ -168,7 +168,7 @@ def chunk_file(
     # Index 0 is unused (level 0 = no heading); indices 1-6 correspond to
     # ``#`` through ``######``.
     hierarchy: list[str] = [""] * 7
-    for level, heading, body, char_offset in sections:
+    for level, heading, section_body, char_offset in sections:
         if level > 0:
             hierarchy[level] = heading
             # Clear deeper headings when a higher-level heading appears.
@@ -179,7 +179,7 @@ def chunk_file(
 
         # Prepend the full heading path so search engines can match on
         # contextual terms (e.g. "principles" matches each principle chunk).
-        body_stripped = body.strip()
+        body_stripped = section_body.strip()
         if not body_stripped and not heading:
             continue
 

@@ -9,7 +9,7 @@ import click
 from dotmd.api.service import DotMDService
 from dotmd.core.config import Settings
 from dotmd.core.exceptions import IndexingLockError
-from dotmd.core.models import SearchMode
+from dotmd.core.models import SearchMode, TrickleStatus
 from dotmd.utils.logging import setup_logging
 
 
@@ -192,9 +192,9 @@ def status(verbose: bool) -> None:
                 click.echo(f"  {strategy} / {model}: {vectors} vectors")
 
     # Trickle indexer progress
-    if stats.trickle_status and stats.trickle_status != "idle":
+    if stats.trickle_status and stats.trickle_status != TrickleStatus.IDLE:
         click.echo("")  # blank line separator
-        if stats.trickle_status == "backlog":
+        if stats.trickle_status == TrickleStatus.BACKLOG:
             progress = ""
             if stats.trickle_total and stats.trickle_total > 0:
                 progress = f" ({stats.trickle_indexed or 0}/{stats.trickle_total} files)"
@@ -209,9 +209,9 @@ def status(verbose: bool) -> None:
                     hours = stats.trickle_eta_minutes / 60
                     eta = f", ETA ~{hours:.1f}hr"
             click.echo(f"Background: indexing{progress}{rate}{eta}")
-        elif stats.trickle_status == "watching":
+        elif stats.trickle_status == TrickleStatus.WATCHING:
             click.echo(f"Background: watching for new files (indexed {stats.trickle_indexed or 0} total)")
-        elif stats.trickle_status == "stopping":
+        elif stats.trickle_status == TrickleStatus.STOPPING:
             click.echo("Background: shutting down...")
 
         if stats.trickle_current_file:

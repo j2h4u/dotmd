@@ -29,7 +29,7 @@ from pathlib import Path
 import sqlite_vec  # type: ignore[import-untyped]
 
 from dotmd.core.config import Settings
-from dotmd.core.models import Chunk, ExtractionResult, FileInfo, IndexStats
+from dotmd.core.models import Chunk, DocKind, EntityType, ExtractDepth, ExtractionResult, FileInfo, IndexStats, RelationType
 from dotmd.extraction.acronyms import extract_acronyms_from_chunks
 from dotmd.extraction.keyterms import KeyTermExtractor
 from dotmd.extraction.ner import NERExtractor
@@ -188,7 +188,7 @@ class IndexingPipeline:
         self._structural_extractor = StructuralExtractor()
         self._keyterm_extractor = KeyTermExtractor()
         self._ner_extractor: NERExtractor | None = None
-        if settings.extract_depth == "ner":
+        if settings.extract_depth == ExtractDepth.NER:
             self._ner_extractor = NERExtractor(settings.ner_entity_types)
 
     # ------------------------------------------------------------------
@@ -397,6 +397,7 @@ class IndexingPipeline:
                 content = read_file(file_path)
                 fm_cache[file_path], _ = parse_frontmatter(content)
             except OSError:
+                logger.warning("Cannot read %s for enrichment, embedding without metadata", file_path)
                 fm_cache[file_path] = {}
         handler = get_handler(chunk.kind)
         return handler.enrich(chunk.text, fm_cache[file_path])
@@ -498,7 +499,8 @@ class IndexingPipeline:
             return 0
         self._conn.execute(f"DELETE FROM {self._fts_table}")
         self._conn.commit()
-        self._keyword_engine.add_chunks(all_chunks)
+        file_meta = self._build_file_meta(all_chunks)
+        self._keyword_engine.add_chunks(all_chunks, file_meta=file_meta)
         logger.info("reindex_fts5: %d chunks re-indexed", len(all_chunks))
         return len(all_chunks)
 
@@ -510,10 +512,17 @@ class IndexingPipeline:
             return 0
         self._graph_store.delete_all()
 
-        # File nodes (without checksum — no disk reads)
+        # File nodes — read frontmatter for proper title (not just filename)
         for fp in sorted({str(c.file_path) for c in all_chunks}):
+            title = Path(fp).stem
+            try:
+                content = read_file(Path(fp))
+                frontmatter, _ = parse_frontmatter(content)
+                title = frontmatter.get("title", title)
+            except OSError:
+                pass
             self._graph_store.add_file_node(
-                file_path=fp, title=Path(fp).stem, checksum="",
+                file_path=fp, title=str(title), checksum="",
             )
 
         # Section nodes + CONTAINS edges
@@ -528,7 +537,7 @@ class IndexingPipeline:
             self._graph_store.add_edge(
                 source_id=str(chunk.file_path),
                 target_id=chunk.chunk_id,
-                relation_type="CONTAINS",
+                relation_type=RelationType.CONTAINS,
             )
 
         # Extraction + entity/relation nodes and edges
@@ -658,81 +667,125 @@ class IndexingPipeline:
             (e.g. after a model switch).  Only the embed phase runs
             for these files.
         """
-        # Read and chunk only the files to ingest
-        t0 = time.perf_counter()
-        new_chunks: list[Chunk] = []
-        for file_info in files_to_ingest:
-            content = read_file(file_info.path)
-            file_chunks = chunk_file(
-                file_info.path,
-                content,
-                max_tokens=self._settings.max_chunk_tokens,
-                overlap_tokens=self._settings.chunk_overlap_tokens,
-                kind=file_info.kind,
+        new_chunks = self._chunk_files(files_to_ingest, run_id)
+
+        if new_chunks:
+            self._save_and_embed_chunks(
+                new_chunks, files_to_ingest,
+                overwrite_vectors=overwrite_vectors, run_id=run_id,
             )
-            new_chunks.extend(file_chunks)
-        logger.info("[%s] chunk: %d chunks from %d files (%.2fs)", run_id, len(new_chunks), len(files_to_ingest), time.perf_counter() - t0)
 
-        # Save chunks to metadata
-        if new_chunks:
-            t0 = time.perf_counter()
-            self._metadata_store.save_chunks(new_chunks)
-            logger.info("[%s] metadata_save: %d chunks (%.2fs)", run_id, len(new_chunks), time.perf_counter() - t0)
+        extraction_result = self._extract_and_populate_graph(
+            files_to_ingest, new_chunks, run_id,
+        )
 
-        # Encode and add to vector store (new chunks)
-        if new_chunks:
-            t0 = time.perf_counter()
-            embeddings, text_hashes = self._embed_chunks(new_chunks)
-            t_embed = time.perf_counter() - t0
-            logger.info("[%s] embed: %d chunks (%.1fs, %.0f chunks/s)", run_id, len(new_chunks), t_embed, len(new_chunks) / t_embed if t_embed > 0 else 0)
+        self._save_all_fingerprints(files_to_ingest, run_id)
 
-            t0 = time.perf_counter()
-            self._vector_store.add_chunks(
-                new_chunks, embeddings, overwrite=overwrite_vectors,
-                text_hashes=text_hashes,
-            )
-            logger.info("[%s] vector_store: %d vectors (%.2fs)", run_id, len(new_chunks), time.perf_counter() - t0)
-            if hasattr(self._vector_store, "set_model_name"):
-                self._vector_store.set_model_name(self._settings.embedding_model)
-
-        # FTS5 incremental update — pass title + tags for column-weighted ranking
-        if new_chunks:
-            t0 = time.perf_counter()
-            file_meta: dict[str, tuple[str, str]] = {}
-            for fi in files_to_ingest:
-                tags = fi.frontmatter.get("tags", [])
-                tags_csv = ", ".join(str(t) for t in tags) if tags else ""
-                file_meta[str(fi.path)] = (fi.title, tags_csv)
-            self._keyword_engine.add_chunks(new_chunks, file_meta=file_meta)
-            logger.info("[%s] fts5: %d chunks (%.2fs)", run_id, len(new_chunks), time.perf_counter() - t0)
-
-        # Extraction (structural + NER + key-terms) on NEW chunks only
-        t0 = time.perf_counter()
-        extraction_result = self._run_extraction(new_chunks)
-        logger.info("[%s] extraction: %d entities, %d relations (%.1fs)", run_id, extraction_result.total_entities, extraction_result.total_relations, time.perf_counter() - t0)
-
-        # Graph population for new chunks
-        t0 = time.perf_counter()
-        self._populate_graph(files_to_ingest, new_chunks, extraction_result)
-        self._frontmatter_to_graph(files_to_ingest)
-        logger.info("[%s] graph: %d files, %d chunks (%.1fs)", run_id, len(files_to_ingest), len(new_chunks), time.perf_counter() - t0)
-
-        # Update chunk + embed fingerprints AFTER successful chunk ingestion
-        t0 = time.perf_counter()
-        self._update_chunk_fingerprints(files_to_ingest)
-        self._update_embed_fingerprints(files_to_ingest)
-        logger.info("[%s] fingerprints: %d files (%.2fs)", run_id, len(files_to_ingest), time.perf_counter() - t0)
-
-        # Embed-only pass: files with existing chunks that need (re-)embedding
         if embed_only_files:
             t0 = time.perf_counter()
             self._embed_existing_chunks(embed_only_files, run_id=run_id)
-            logger.info(
-                "[%s] embed_only: %d files (%.1fs)",
-                run_id, len(embed_only_files), time.perf_counter() - t0,
-            )
+            logger.info("[%s] embed_only: %d files (%.1fs)", run_id, len(embed_only_files), time.perf_counter() - t0)
 
-        # Acronym rebuild from ALL chunks (always full corpus)
+        all_chunks = self._rebuild_acronyms(run_id)
+
+        return self._compute_stats(
+            all_files, all_chunks, extraction_result,
+            overwrite_vectors=overwrite_vectors,
+            diff_counts=diff_counts, data_dir=data_dir,
+        )
+
+    # ------------------------------------------------------------------
+    # Ingest sub-phases (extracted from _ingest_and_finalize)
+    # ------------------------------------------------------------------
+
+    def _chunk_files(
+        self, files: list[FileInfo], run_id: str,
+    ) -> list[Chunk]:
+        """Read and chunk files into Chunk objects."""
+        t0 = time.perf_counter()
+        chunks: list[Chunk] = []
+        for fi in files:
+            content = read_file(fi.path)
+            chunks.extend(chunk_file(
+                fi.path, content,
+                max_tokens=self._settings.max_chunk_tokens,
+                overlap_tokens=self._settings.chunk_overlap_tokens,
+                kind=fi.kind,
+            ))
+        logger.info("[%s] chunk: %d chunks from %d files (%.2fs)", run_id, len(chunks), len(files), time.perf_counter() - t0)
+        return chunks
+
+    def _save_and_embed_chunks(
+        self,
+        chunks: list[Chunk],
+        files: list[FileInfo],
+        *,
+        overwrite_vectors: bool = True,
+        run_id: str = "",
+    ) -> None:
+        """Save chunks to metadata, embed, store vectors, update FTS5."""
+        t0 = time.perf_counter()
+        self._metadata_store.save_chunks(chunks)
+        logger.info("[%s] metadata_save: %d chunks (%.2fs)", run_id, len(chunks), time.perf_counter() - t0)
+
+        t0 = time.perf_counter()
+        embeddings, text_hashes = self._embed_chunks(chunks)
+        t_embed = time.perf_counter() - t0
+        logger.info("[%s] embed: %d chunks (%.1fs, %.0f chunks/s)", run_id, len(chunks), t_embed, len(chunks) / t_embed if t_embed > 0 else 0)
+
+        t0 = time.perf_counter()
+        self._vector_store.add_chunks(
+            chunks, embeddings, overwrite=overwrite_vectors,
+            text_hashes=text_hashes,
+        )
+        logger.info("[%s] vector_store: %d vectors (%.2fs)", run_id, len(chunks), time.perf_counter() - t0)
+        if hasattr(self._vector_store, "set_model_name"):
+            self._vector_store.set_model_name(self._settings.embedding_model)
+
+        t0 = time.perf_counter()
+        file_meta = self._build_file_meta_from_fileinfo(files)
+        self._keyword_engine.add_chunks(chunks, file_meta=file_meta)
+        logger.info("[%s] fts5: %d chunks (%.2fs)", run_id, len(chunks), time.perf_counter() - t0)
+
+    def _build_file_meta_from_fileinfo(
+        self, files: list[FileInfo],
+    ) -> dict[str, tuple[str, str]]:
+        """Build FTS5 file_meta from FileInfo objects (no disk reads needed)."""
+        file_meta: dict[str, tuple[str, str]] = {}
+        for fi in files:
+            tags = fi.frontmatter.get("tags", [])
+            tags_str = ", ".join(str(t) for t in tags) if tags else ""
+            file_meta[str(fi.path)] = (fi.title, tags_str)
+        return file_meta
+
+    def _extract_and_populate_graph(
+        self,
+        files: list[FileInfo],
+        chunks: list[Chunk],
+        run_id: str,
+    ) -> _ExtractionBundle:
+        """Run NER/structural extraction and populate graph."""
+        t0 = time.perf_counter()
+        result = self._run_extraction(chunks)
+        logger.info("[%s] extraction: %d entities, %d relations (%.1fs)", run_id, result.total_entities, result.total_relations, time.perf_counter() - t0)
+
+        t0 = time.perf_counter()
+        self._populate_graph(files, chunks, result)
+        self._frontmatter_to_graph(files)
+        logger.info("[%s] graph: %d files, %d chunks (%.1fs)", run_id, len(files), len(chunks), time.perf_counter() - t0)
+        return result
+
+    def _save_all_fingerprints(
+        self, files: list[FileInfo], run_id: str,
+    ) -> None:
+        """Save chunk + embed fingerprints after successful ingestion."""
+        t0 = time.perf_counter()
+        self._update_chunk_fingerprints(files)
+        self._update_embed_fingerprints(files)
+        logger.info("[%s] fingerprints: %d files (%.2fs)", run_id, len(files), time.perf_counter() - t0)
+
+    def _rebuild_acronyms(self, run_id: str) -> list[Chunk]:
+        """Rebuild acronym dictionary from full corpus. Returns all chunks."""
         t0 = time.perf_counter()
         all_chunks = self._metadata_store.get_all_chunks()
         acronym_dict = extract_acronyms_from_chunks(all_chunks)
@@ -752,8 +805,19 @@ class IndexingPipeline:
                 Path(tmp_path).unlink(missing_ok=True)
                 raise
         logger.info("[%s] acronyms: %d (%.2fs)", run_id, len(acronym_dict) if acronym_dict else 0, time.perf_counter() - t0)
+        return all_chunks
 
-        # Stats from full store (incremental: query actual graph counts)
+    def _compute_stats(
+        self,
+        all_files: list[FileInfo],
+        all_chunks: list[Chunk],
+        extraction_result: _ExtractionBundle,
+        *,
+        overwrite_vectors: bool = True,
+        diff_counts: dict[str, int] | None = None,
+        data_dir: str | None = None,
+    ) -> IndexStats:
+        """Build and persist IndexStats from current state."""
         all_entities_count = extraction_result.total_entities
         all_edges_count = extraction_result.total_relations
         if not overwrite_vectors:
@@ -1032,7 +1096,7 @@ class IndexingPipeline:
                     entity_type = parts[0].strip().upper()
                     name = parts[1].strip()
                 else:
-                    entity_type = "TAG"
+                    entity_type = EntityType.TAG
                     name = tag_str
                 self._graph_store.add_entity_node(
                     name=name, entity_type=entity_type, source="frontmatter",
@@ -1040,18 +1104,18 @@ class IndexingPipeline:
                 self._graph_store.add_edge(
                     source_id=file_path_str,
                     target_id=name,
-                    relation_type="HAS_TAG",
+                    relation_type=RelationType.HAS_TAG,
                 )
 
             # --- Kind-specific metadata ---------------------------------
-            if fi.kind == "meeting_transcript":
+            if fi.kind == DocKind.MEETING_TRANSCRIPT:
                 participants = fi.frontmatter.get("participants", [])
                 for p in participants:
                     p_name = str(p).strip()
                     if not p_name:
                         continue
                     self._graph_store.add_entity_node(
-                        name=p_name, entity_type="PERSON", source="frontmatter",
+                        name=p_name, entity_type=EntityType.PERSON, source="frontmatter",
                     )
                     self._graph_store.add_edge(
                         source_id=file_path_str,
@@ -1100,16 +1164,38 @@ class IndexingPipeline:
             self._graph_store.add_edge(
                 source_id=str(chunk.file_path),
                 target_id=chunk.chunk_id,
-                relation_type="CONTAINS",
+                relation_type=RelationType.CONTAINS,
             )
 
     # ------------------------------------------------------------------
     # Fingerprint management
     # ------------------------------------------------------------------
 
+    def _build_file_meta(self, chunks: list[Chunk]) -> dict[str, tuple[str, str]]:
+        """Build file_meta mapping for FTS5 title/tags columns from source files."""
+        file_meta: dict[str, tuple[str, str]] = {}
+        for fp in {str(c.file_path) for c in chunks}:
+            if fp in file_meta:
+                continue
+            try:
+                content = read_file(Path(fp))
+                frontmatter, _ = parse_frontmatter(content)
+                title = str(frontmatter.get("title", Path(fp).stem))
+                tags = frontmatter.get("tags", [])
+                tags_str = ", ".join(str(t) for t in tags) if tags else ""
+                file_meta[fp] = (title, tags_str)
+            except OSError:
+                logger.warning("Cannot read %s for FTS5 metadata, using defaults", fp)
+                file_meta[fp] = (Path(fp).stem, "")
+        return file_meta
+
     def _save_fingerprint(self, tracker: FileTracker, fi: FileInfo) -> None:
         """Save a file fingerprint using content-only checksum (excludes frontmatter)."""
-        stat = fi.path.stat()
+        try:
+            stat = fi.path.stat()
+        except OSError:
+            logger.warning("Cannot stat %s for fingerprint, skipping", fi.path)
+            return
         tracker.save_fingerprint(
             str(fi.path), stat.st_mtime, stat.st_size,
             content_checksum(fi.path),

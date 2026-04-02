@@ -26,6 +26,41 @@ class ExtractDepth(StrEnum):
     NER = "ner"
 
 
+class DocKind(StrEnum):
+    """Document kind from frontmatter ``kind`` field.
+
+    Determines chunking pre-split strategy and enrichment via
+    ``content_handlers.get_handler()``.
+    """
+
+    DOCUMENT = "document"
+    MEETING_TRANSCRIPT = "meeting_transcript"
+    VOICENOTE = "voicenote"
+
+
+class TrickleStatus(StrEnum):
+    """Background trickle indexer lifecycle states."""
+
+    IDLE = "idle"
+    BACKLOG = "backlog"
+    WATCHING = "watching"
+    STOPPING = "stopping"
+
+
+class RelationType(StrEnum):
+    """Edge types in the knowledge graph."""
+
+    CONTAINS = "CONTAINS"
+    HAS_TAG = "HAS_TAG"
+
+
+class EntityType(StrEnum):
+    """Node types for graph entities from frontmatter tags."""
+
+    PERSON = "PERSON"
+    TAG = "TAG"
+
+
 class FileInfo(BaseModel):
     """Metadata about a discovered markdown file."""
 
@@ -33,12 +68,18 @@ class FileInfo(BaseModel):
     title: str
     last_modified: datetime
     size_bytes: int
-    kind: str = "document"
+    kind: str = DocKind.DOCUMENT
     frontmatter: dict = Field(default_factory=dict)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def checksum(self) -> str:
+        """MD5 of raw file bytes including frontmatter. Reads from disk on every access.
+
+        Used only for graph File nodes (informational). For change detection,
+        use ``reader.content_checksum()`` which excludes frontmatter.
+        Raises ``FileNotFoundError`` if the file no longer exists.
+        """
         return hashlib.md5(self.path.read_bytes()).hexdigest()
 
 
@@ -52,7 +93,7 @@ class Chunk(BaseModel):
     text: str
     chunk_index: int
     char_offset: int
-    kind: str = "document"
+    kind: str = DocKind.DOCUMENT
 
     @computed_field  # type: ignore[prop-decorator]
     @property
