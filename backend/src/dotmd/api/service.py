@@ -358,6 +358,18 @@ class DotMDService:
         stats = self._pipeline.metadata_store.get_stats()
         if stats is None:
             stats = IndexStats()
+        # Live counts from actual tables (stats table may be stale/empty)
+        try:
+            conn = self._pipeline.conn
+            chunks_table = self._pipeline._chunks_table
+            stats.total_chunks = conn.execute(
+                f"SELECT COUNT(*) FROM {chunks_table}"
+            ).fetchone()[0]
+            stats.total_files = conn.execute(
+                f"SELECT COUNT(DISTINCT file_path) FROM {chunks_table}"
+            ).fetchone()[0]
+        except Exception:
+            pass
         # Change detection: run live diff against all known paths
         try:
             if self._settings.indexing_paths:

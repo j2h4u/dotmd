@@ -11,7 +11,7 @@ from dotmd.core.config import Settings
 
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("dotmd", instructions="Search and index a markdown knowledgebase.")
+mcp = FastMCP("dotmd", instructions="Search a markdown knowledgebase.")
 
 _service: DotMDService | None = None
 
@@ -49,12 +49,22 @@ def search(
             "chunk_id": r.chunk_id,
             "file_path": str(r.file_path),
             "heading": r.heading_path,
-            "snippet": r.snippet,
+            "snippet": _strip_frontmatter(r.snippet),
             "score": r.fused_score,
             "matched_engines": r.matched_engines,
         }
         for r in results
     ]
+
+
+def _strip_frontmatter(text: str) -> str:
+    """Remove YAML frontmatter from snippet for cleaner display."""
+    if not text.startswith("---"):
+        return text
+    end = text.find("---", 3)
+    if end == -1:
+        return text
+    return text[end + 3:].strip()
 
 
 @mcp.tool()

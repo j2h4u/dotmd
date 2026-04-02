@@ -87,6 +87,7 @@ _ENGINE_SCORE_FIELDS: dict[str, str] = {
     "semantic": "semantic_score",
     "keyword": "keyword_score",
     "graph": "graph_score",
+    "graph_direct": "graph_direct_score",
 }
 
 

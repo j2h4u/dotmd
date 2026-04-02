@@ -102,6 +102,7 @@ class SearchResult(BaseModel):
     semantic_score: float | None = None
     keyword_score: float | None = None
     graph_score: float | None = None
+    graph_direct_score: float | None = None
     matched_engines: list[str] = Field(default_factory=list)
 
 
