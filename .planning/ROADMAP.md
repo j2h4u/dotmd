@@ -7,7 +7,7 @@
 - [x] **v1.1 Incremental Indexing** — Phases 1-3 (shipped 2026-03-26)
 - [x] **v1.2 FalkorDB Migration & Search Fix** — Phases 4-6 (shipped 2026-03-27)
 - [x] **v1.3 Production Packaging & Background Indexing** — Phases 7-10 (shipped 2026-03-28)
-- [x] **v1.4 Search Quality & Architecture** — Phases 11-13 (shipped 2026-04-02)
+- [ ] **v1.4 Search Quality & Architecture** — Phases 11-14
 
 <details>
 <summary>v1.1 Incremental Indexing (Phases 1-3) — SHIPPED 2026-03-26</summary>
@@ -75,6 +75,14 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 - [x] MCP server: removed index tool, clean snippets, headings, graph counts
 - **Impact:** 2990 → 7927 chunks (transcripts properly split). "Николай Сенин" rank 6 → rank 1. "инфоцыган" now findable.
 
+### Phase 14: Frontmatter-Driven Indexing
+- [ ] Strip frontmatter from chunk text, feed parsed dict into each engine structurally
+- [ ] Graph: typed entities from tags namespace directly (bypass NER for known metadata)
+- [ ] FTS5: title + tags as separate columns with bm25 column weights
+- [ ] Embeddings: tags in enrichment prefix
+- [ ] Convention-based per-kind metadata extraction
+- **Goal:** Frontmatter is the structured contract between upstream producers and dotmd indexer
+
 ### Backlog items completed:
 - [x] 999.1 Multi-model vector store — absorbed into Phase 12
 
@@ -97,6 +105,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 | 11. Embedding Model Evaluation | v1.4 | Complete | 2026-04-01 |
 | 12. Indexing Integrity Rework | v1.4 | Complete | 2026-04-02 |
 | 13. Content-Aware Chunking & Search | v1.4 | Complete | 2026-04-02 |
+| 14. Frontmatter-Driven Indexing | v1.4 | In Progress | — |
 
 ## Backlog
 

@@ -16,12 +16,12 @@ The two-stage detection strategy avoids unnecessary I/O:
 
 from __future__ import annotations
 
-import hashlib
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from dotmd.core.models import FileInfo
+from dotmd.ingestion.reader import content_checksum
 
 # ---------------------------------------------------------------------------
 # SQL constants
@@ -120,7 +120,8 @@ class FileTracker:
                 continue
 
             # Slow path: mtime or size differ -> compute checksum
-            current_checksum = hashlib.md5(fi.path.read_bytes()).hexdigest()
+            # Hash body+kind only (frontmatter changes don't trigger reindex)
+            current_checksum = content_checksum(fi.path)
 
             if current_checksum == s_checksum:
                 # Content unchanged, just metadata drift (e.g. touch)

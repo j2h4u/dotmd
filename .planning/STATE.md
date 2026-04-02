@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 Phase: 11 of 12 (Embedding Model Swap)
 Plan: 3 plans (11-01 Wave 1, 11-02 Wave 1, 11-03 Wave 2)
 Status: Ready to execute
-Last activity: 2026-03-30
+Last activity: 2026-04-02 - Completed quick task 260402-vua: Phase 14 Frontmatter-Driven Indexing
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -75,5 +75,11 @@ None for v1.4.
 
 None yet.
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260402-vua | Phase 14: Frontmatter-Driven Indexing | 2026-04-02 | af1794a | [260402-vua-phase-14-frontmatter-driven-indexing](./quick/260402-vua-phase-14-frontmatter-driven-indexing/) |
+
 ---
-*Last updated: 2026-03-30*
+*Last updated: 2026-04-02*

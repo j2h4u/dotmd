@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
 from datetime import datetime, timezone
 from fnmatch import fnmatch
 from pathlib import Path
+
+import yaml
 
 from dotmd.core.models import FileInfo
 
@@ -16,12 +19,51 @@ logger = logging.getLogger(__name__)
 _HEADING_RE = re.compile(r"^#\s+(.+)", re.MULTILINE)
 
 
-def _extract_title(content: str, path: Path) -> str:
+def parse_frontmatter(content: str) -> tuple[dict, str]:
+    """Parse YAML frontmatter from markdown content.
+
+    Returns ``(frontmatter_dict, body)`` where *body* is the content
+    after the closing ``---`` delimiter.  If no valid frontmatter is
+    found, returns an empty dict and the original content unchanged.
+    """
+    if not content.startswith("---"):
+        return {}, content
+    end = content.find("---", 3)
+    if end == -1:
+        return {}, content
+    raw = content[3:end]
+    body = content[end + 3:].lstrip("\n")
+    try:
+        fm = yaml.safe_load(raw)
+        if not isinstance(fm, dict):
+            return {}, content
+        return fm, body
+    except yaml.YAMLError:
+        logger.debug("Failed to parse frontmatter, treating as plain content")
+        return {}, content
+
+
+def content_checksum(path: Path) -> str:
+    """Compute checksum of file content excluding frontmatter.
+
+    Hashes ``body + kind`` so that frontmatter-only changes (title, date,
+    participants) don't trigger reindexing, but content or kind changes do.
+    """
+    content = read_file(path)
+    fm, body = parse_frontmatter(content)
+    kind = fm.get("kind", "document")
+    payload = f"{kind}\n{body}"
+    return hashlib.md5(payload.encode()).hexdigest()
+
+
+def _extract_title(content: str, path: Path, frontmatter: dict | None = None) -> str:
     """Extract a human-readable title from file content or fall back to the filename.
 
-    Looks for the first top-level ``# heading`` in *content*.  If none is
-    found the file stem (filename without extension) is returned instead.
+    Checks frontmatter ``title`` first, then looks for the first top-level
+    ``# heading`` in *content*.  Falls back to filename stem.
     """
+    if frontmatter and frontmatter.get("title"):
+        return str(frontmatter["title"]).strip()
     match = _HEADING_RE.search(content)
     if match:
         return match.group(1).strip()
@@ -59,15 +101,18 @@ def discover_files(directory: Path) -> list[FileInfo]:
             continue
         try:
             content = read_file(md_path)
+            fm, _ = parse_frontmatter(content)
             stat = md_path.stat()
             results.append(
                 FileInfo(
                     path=md_path,
-                    title=_extract_title(content, md_path),
+                    title=_extract_title(content, md_path, fm),
                     last_modified=datetime.fromtimestamp(
                         stat.st_mtime, tz=timezone.utc
                     ),
                     size_bytes=stat.st_size,
+                    kind=fm.get("kind", "document"),
+                    frontmatter=fm,
                 )
             )
         except OSError:
@@ -219,12 +264,15 @@ def _add_file(
             logger.info("Skipping empty file (0 bytes): %s", md_path)
             return
         content = read_file(md_path)
+        fm, _ = parse_frontmatter(content)
         results.append(
             FileInfo(
                 path=md_path,
-                title=_extract_title(content, md_path),
+                title=_extract_title(content, md_path, fm),
                 last_modified=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
                 size_bytes=stat.st_size,
+                kind=fm.get("kind", "document"),
+                frontmatter=fm,
             )
         )
         seen.add(resolved)

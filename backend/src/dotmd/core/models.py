@@ -33,6 +33,8 @@ class FileInfo(BaseModel):
     title: str
     last_modified: datetime
     size_bytes: int
+    kind: str = "document"
+    frontmatter: dict = Field(default_factory=dict)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -50,6 +52,7 @@ class Chunk(BaseModel):
     text: str
     chunk_index: int
     char_offset: int
+    kind: str = "document"
 
     @computed_field  # type: ignore[prop-decorator]
     @property

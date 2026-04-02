@@ -17,7 +17,12 @@ from dotmd.utils.logging import setup_logging
 @click.option("--verbose", "-v", is_flag=True, help="Enable verbose logging.")
 @click.pass_context
 def main(ctx: click.Context, verbose: bool) -> None:
-    """dotMD — Search your markdown knowledgebase."""
+    """dotMD — Search your markdown knowledgebase.
+
+    In normal operation, the background trickle indexer (started with
+    'serve') detects new, modified, and deleted files automatically.
+    Manual indexing commands are only needed for development and debugging.
+    """
     setup_logging(verbose=verbose)
     ctx.ensure_object(dict)
     ctx.obj["verbose"] = verbose
@@ -49,7 +54,11 @@ def _get_service(**overrides: object) -> DotMDService:
 )
 @click.pass_context
 def index(ctx: click.Context, directory: Path, extract_depth: str, entity_types: str | None, force: bool) -> None:
-    """Index all markdown files in DIRECTORY."""
+    """Index all markdown files in DIRECTORY.
+
+    DEV ONLY — in production, trickle indexer handles this automatically.
+    Use for one-off debugging or after schema changes that require a full rebuild.
+    """
     overrides: dict[str, object] = {"extract_depth": extract_depth}
     if entity_types:
         overrides["ner_entity_types"] = [t.strip() for t in entity_types.split(",")]
