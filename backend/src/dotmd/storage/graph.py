@@ -86,6 +86,7 @@ class LadybugDBGraphStore:
 
     def _init_schema(self) -> None:
         """Create node and relationship tables if they don't exist."""
+        assert self._conn is not None  # only called from __init__ when not read_only
         for stmt in _SCHEMA_INIT:
             try:
                 self._conn.execute(stmt)
@@ -356,3 +357,29 @@ class LadybugDBGraphStore:
                 except Exception:
                     logger.warning("Failed to count %s edges", rel_table, exc_info=True)
         return total
+
+    def get_all_entity_names(self) -> list[str]:
+        """Return all entity names in the graph."""
+        with self._connection() as conn:
+            try:
+                result = conn.execute("MATCH (e:Entity) RETURN e.id")
+                df = result.get_as_df()
+                return [str(row["e.id"]) for _, row in df.iterrows()]
+            except Exception:
+                logger.debug("Failed to get entity names", exc_info=True)
+                return []
+
+    def get_chunks_by_entity(self, entity_name: str) -> list[str]:
+        """Return chunk IDs linked to an entity."""
+        with self._connection() as conn:
+            try:
+                result = conn.execute(
+                    "MATCH (s:Section)-[:SECTION_ENTITY]->(e:Entity {id: $name}) "
+                    "RETURN s.id",
+                    parameters={"name": entity_name},
+                )
+                df = result.get_as_df()
+                return [str(row["s.id"]) for _, row in df.iterrows()]
+            except Exception:
+                logger.debug("Failed to get chunks for entity %s", entity_name, exc_info=True)
+                return []

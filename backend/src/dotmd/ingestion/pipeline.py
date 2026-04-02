@@ -250,9 +250,7 @@ class IndexingPipeline:
             embed_needed = set(embed_diff.new) | set(embed_diff.modified)
             if not embed_needed:
                 logger.info("[%s] no changes — skipping (%.2fs total)", run_id, time.perf_counter() - t_start)
-                stats = self._metadata_store.get_stats()
-                if stats is None:
-                    stats = IndexStats()
+                stats = self._metadata_store.get_stats() or IndexStats()
                 stats.new_files = 0
                 stats.modified_files = 0
                 stats.deleted_files = 0
@@ -267,9 +265,7 @@ class IndexingPipeline:
             )
             embed_only_files = [fi for fi in files if str(fi.path) in embed_needed]
             self._embed_existing_chunks(embed_only_files, run_id=run_id)
-            stats = self._metadata_store.get_stats()
-            if stats is None:
-                stats = IndexStats()
+            stats = self._metadata_store.get_stats() or IndexStats()
             stats.new_files = 0
             stats.modified_files = 0
             stats.deleted_files = 0
@@ -493,8 +489,8 @@ class IndexingPipeline:
         )
         if hasattr(self._vector_store, "set_model_name"):
             model_id = self._semantic_engine.get_tei_model_id() or self._settings.embedding_model
-            self._vector_store.set_model_name(model_id)
-            self._vector_store.set_distance_metric("cosine")
+            self._vector_store.set_model_name(model_id)  # type: ignore[attr-defined]
+            self._vector_store.set_distance_metric("cosine")  # type: ignore[attr-defined]
         logger.info("reindex_vectors: %d chunks re-embedded", len(all_chunks))
         return len(all_chunks)
 
@@ -747,7 +743,7 @@ class IndexingPipeline:
         )
         logger.info("[%s] vector_store: %d vectors (%.2fs)", run_id, len(chunks), time.perf_counter() - t0)
         if hasattr(self._vector_store, "set_model_name"):
-            self._vector_store.set_model_name(self._settings.embedding_model)
+            self._vector_store.set_model_name(self._settings.embedding_model)  # type: ignore[attr-defined]
 
         t0 = time.perf_counter()
         file_meta = self._build_file_meta_from_fileinfo(files)

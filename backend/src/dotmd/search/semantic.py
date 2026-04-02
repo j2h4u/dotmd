@@ -79,6 +79,7 @@ class SemanticSearchEngine:
         if not self._embedding_url:
             return self._model_name  # local model, trust config
         try:
+            import httpx
             resp = httpx.get(f"{self._embedding_url}/info", timeout=5.0)
             resp.raise_for_status()
             self._tei_model_id = resp.json().get("model_id")

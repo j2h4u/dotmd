@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from dotmd.core.models import Chunk, Entity, Relation, IndexStats
+from dotmd.core.models import Chunk, IndexStats
 
 # ---------------------------------------------------------------------------
 # Vector store
@@ -33,6 +33,7 @@ class VectorStoreProtocol(Protocol):
         embeddings: list[list[float]],
         *,
         overwrite: bool = True,
+        text_hashes: dict[str, str] | None = None,
     ) -> None:
         """Upsert *chunks* with their corresponding *embeddings*.
 
