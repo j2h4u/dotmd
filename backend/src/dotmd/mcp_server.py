@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from mcp.server.fastmcp import FastMCP
 
@@ -44,27 +45,7 @@ def search(
     """
     service = _get_service()
     results = service.search(query, top_k=top_k, mode=mode, rerank=rerank)
-    return [
-        {
-            "chunk_id": r.chunk_id,
-            "file_path": str(r.file_path),
-            "heading": r.heading_path,
-            "snippet": _strip_frontmatter(r.snippet),
-            "score": r.fused_score,
-            "matched_engines": r.matched_engines,
-        }
-        for r in results
-    ]
-
-
-def _strip_frontmatter(text: str) -> str:
-    """Remove YAML frontmatter from snippet for cleaner display."""
-    if not text.startswith("---"):
-        return text
-    end = text.find("---", 3)
-    if end == -1:
-        return text
-    return text[end + 3:].strip()
+    return [_format_result(r) for r in results]
 
 
 @mcp.tool()
@@ -75,7 +56,72 @@ def status() -> dict:
         Index statistics including trickle indexer progress.
     """
     service = _get_service()
-    return service.status().model_dump(mode="json")
+    stats = service.status().model_dump(mode="json")
+
+    # Enrich with graph counts from FalkorDB
+    try:
+        graph_store = service._pipeline.graph_store
+        stats["total_entities"] = graph_store.node_count()
+        stats["total_edges"] = graph_store.edge_count()
+    except Exception:
+        pass
+
+    # last_indexed from fingerprints if stats table is empty
+    if not stats.get("last_indexed"):
+        try:
+            conn = service._pipeline.conn
+            fp_table = f"chunk_fingerprints_{service._settings.chunk_strategy}"
+            row = conn.execute(
+                f"SELECT max(indexed_at) FROM {fp_table}"
+            ).fetchone()
+            if row and row[0]:
+                stats["last_indexed"] = row[0]
+        except Exception:
+            pass
+
+    return stats
+
+
+# ---------------------------------------------------------------------------
+# Result formatting helpers
+# ---------------------------------------------------------------------------
+
+_FRONTMATTER_RE = re.compile(r"\A---\n.*?\n---\n?", re.DOTALL)
+_TIMESTAMP_RE = re.compile(r"\[\d{2}:\d{2}:\d{2}\]\s*")
+
+
+def _format_result(r) -> dict:
+    """Format a SearchResult for MCP response."""
+    snippet = r.snippet
+
+    # Extract title from frontmatter (for heading fallback)
+    title = ""
+    if snippet.startswith("---"):
+        end = snippet.find("---", 3)
+        if end != -1:
+            for line in snippet[3:end].split("\n"):
+                stripped = line.strip()
+                if stripped.startswith("title:"):
+                    title = stripped[6:].strip().strip("'\"")
+                    break
+
+    # Clean snippet: strip frontmatter, extract first timestamp
+    clean = _FRONTMATTER_RE.sub("", snippet).strip()
+    first_ts = _TIMESTAMP_RE.search(clean)
+    start_time = first_ts.group().strip(" []") if first_ts else None
+    clean = _TIMESTAMP_RE.sub("", clean).strip()
+
+    # heading: use heading_path if available, fallback to frontmatter title
+    heading = r.heading_path or title
+
+    return {
+        "file_path": str(r.file_path),
+        "heading": heading,
+        "snippet": clean,
+        "score": round(r.fused_score, 3),
+        "matched_engines": r.matched_engines,
+        "start_time": start_time,
+    }
 
 
 if __name__ == "__main__":
