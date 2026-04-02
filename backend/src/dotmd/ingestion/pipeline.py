@@ -865,6 +865,14 @@ class IndexingPipeline:
         needs_embed = False
         prof = self._settings.profile_indexing  # gate: DOTMD_PROFILE_INDEXING=true
 
+        # Phase beacon: write current phase to a file so external monitors
+        # (docker stats samplers) can correlate CPU/IO with pipeline phase
+        # in real time, not from post-hoc log parsing.
+        _beacon_path = self._settings.index_dir / ".phase_beacon"
+        def _beacon(phase: str) -> None:
+            if prof:
+                _beacon_path.write_text(f"{file_info.path.name}:{phase}")
+
         # --- Phase 1: Chunk ---
         if prof:
             t_file = time.perf_counter()
@@ -875,6 +883,7 @@ class IndexingPipeline:
             # chunks (overwritten by UPSERT with deterministic IDs).
             if prof:
                 t0 = time.perf_counter()
+            _beacon("purge")
             old_chunk_ids = self._metadata_store.get_chunk_ids_by_file(path_str)
             if old_chunk_ids:
                 self._keyword_engine.remove_chunks(old_chunk_ids)
@@ -883,6 +892,7 @@ class IndexingPipeline:
             if prof:
                 logger.info("[prof] %s purge: %.2fs", file_info.path.name, time.perf_counter() - t0)
 
+            _beacon("chunk")
             if prof:
                 t0 = time.perf_counter()
             content = read_file(file_info.path)
@@ -902,6 +912,7 @@ class IndexingPipeline:
 
             if prof:
                 t0 = time.perf_counter()
+            _beacon("save+fts5")
             self._metadata_store.save_chunks(chunks)
             _trickle_tags = file_info.frontmatter.get("tags", [])
             _trickle_tags_csv = ", ".join(str(t) for t in _trickle_tags) if _trickle_tags else ""
@@ -910,12 +921,14 @@ class IndexingPipeline:
             if prof:
                 logger.info("[prof] %s save+fts5: %.2fs", file_info.path.name, time.perf_counter() - t0)
 
+            _beacon("extraction")
             if prof:
                 t0 = time.perf_counter()
             extraction = self._run_extraction(chunks)
             if prof:
                 logger.info("[prof] %s extraction: %d entities, %.2fs", file_info.path.name, extraction.total_entities, time.perf_counter() - t0)
 
+            _beacon("graph")
             if prof:
                 t0 = time.perf_counter()
             self._populate_graph([file_info], chunks, extraction)
@@ -947,12 +960,14 @@ class IndexingPipeline:
                 chunks = self._metadata_store.get_chunks(chunk_ids) if chunk_ids else []
 
             if chunks:
+                _beacon("embed")
                 if prof:
                     t0 = time.perf_counter()
                 embeddings, text_hashes = self._embed_chunks(chunks)
                 if prof:
                     logger.info("[prof] %s embed: %d chunks, %.2fs", file_info.path.name, len(chunks), time.perf_counter() - t0)
 
+                _beacon("vec_store")
                 if prof:
                     t0 = time.perf_counter()
                 self._vector_store.add_chunks(
@@ -971,8 +986,10 @@ class IndexingPipeline:
                         file_info.path.name,
                     )
 
+            _beacon("fingerprint")
             self._save_embed_fingerprint(file_info)
 
+        _beacon("idle")
         if prof:
             logger.info(
                 "[prof] %s TOTAL: %d chunks, %.2fs",
