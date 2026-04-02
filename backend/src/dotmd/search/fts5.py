@@ -23,18 +23,42 @@ CREATE VIRTUAL TABLE IF NOT EXISTS {table} USING fts5(
 """
 
 
+_COMPOUND_RE = re.compile(r"(\w+)['\u2019\u2018/\-\u2013\u2014](\w+)")
+
+
+def _expand_compounds(text: str) -> str:
+    """Expand compound words for FTS5 indexing.
+
+    For each word containing an intra-word separator (hyphen, apostrophe,
+    slash, dash), appends the joined form so both variants are searchable:
+      "инфо-цыганам" → "инфо-цыганам инфоцыганам"
+      "TCP/IP" → "TCP/IP TCPIP"
+    """
+    expanded = []
+    for m in _COMPOUND_RE.finditer(text):
+        joined = m.group(1) + m.group(2)
+        if joined.lower() not in text.lower():
+            expanded.append(joined)
+    if expanded:
+        return text + " " + " ".join(expanded)
+    return text
+
+
 def _sanitize_fts5_query(query: str) -> str:
     """Sanitize a user query for safe FTS5 MATCH usage.
 
-    Removes FTS5 special characters and wraps each word in double
-    quotes so that they are treated as literal terms.
+    Removes FTS5 special characters. Each word uses prefix matching
+    (``word*``) so partial/compound word variants are found.
+    For example, "инфоцыган" matches "инфоцыганам" via prefix.
     """
     # Remove FTS5 special characters
     cleaned = re.sub(r'["\(\)\*:]', "", query)
     words = cleaned.split()
     if not words:
         return ""
-    return " ".join(f'"{w}"' for w in words)
+    # Use prefix matching so compound word variants are found.
+    # FTS5 prefix syntax: unquoted word followed by *
+    return " ".join(f"{w}*" for w in words)
 
 
 class FTS5SearchEngine:
@@ -77,7 +101,7 @@ class FTS5SearchEngine:
         """
         if not chunks:
             return
-        rows = [(c.chunk_id, c.text) for c in chunks]
+        rows = [(c.chunk_id, _expand_compounds(c.text)) for c in chunks]
         self._conn.executemany(
             f"INSERT OR REPLACE INTO {self._table}(chunk_id, text) VALUES (?, ?)",
             rows,
