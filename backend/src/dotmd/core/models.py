@@ -80,7 +80,7 @@ class FileInfo(BaseModel):
         use ``reader.chunk_checksum()`` (body+kind) or ``reader.embed_checksum()``
         (body+kind+title+tags). Raises ``FileNotFoundError`` if the file no longer exists.
         """
-        return hashlib.md5(self.path.read_bytes()).hexdigest()
+        return hashlib.blake2b(self.path.read_bytes()).hexdigest()
 
 
 class Chunk(BaseModel):

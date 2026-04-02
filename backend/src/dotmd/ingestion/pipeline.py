@@ -428,7 +428,7 @@ class IndexingPipeline:
 
         # text_hash on enriched text (prefix changes embedding → different hash)
         text_hashes: dict[str, str] = {
-            cid: hashlib.md5(text.encode()).hexdigest()
+            cid: hashlib.blake2b(text.encode()).hexdigest()
             for cid, text in enriched_texts.items()
         }
 

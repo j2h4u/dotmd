@@ -76,10 +76,10 @@ def run_migration(
         logger.warning("sqlite-vec extension not available — vec tables will be skipped")
     conn.enable_load_extension(False)
 
-    # Register md5 UDF (not built into SQLite)
+    # Register hash UDF for text_hash computation during migration
     conn.create_function(
         "md5_hash", 1,
-        lambda t: hashlib.md5(t.encode()).hexdigest() if t else None,
+        lambda t: hashlib.blake2b(t.encode()).hexdigest() if t else None,
     )
 
     try:

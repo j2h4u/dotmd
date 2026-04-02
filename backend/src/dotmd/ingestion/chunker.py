@@ -22,7 +22,7 @@ _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
 def _make_chunk_id(file_path: Path, chunk_index: int) -> str:
     """Deterministic chunk identifier from file path and index."""
     payload = f"{file_path}:{chunk_index}"
-    return hashlib.md5(payload.encode()).hexdigest()
+    return hashlib.blake2b(payload.encode()).hexdigest()
 
 
 def _split_with_overlap(

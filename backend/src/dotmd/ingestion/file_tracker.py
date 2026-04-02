@@ -108,7 +108,7 @@ class FileTracker:
 
         **Important:** This method never accesses :pyattr:`FileInfo.checksum`
         (a computed field that reads the full file on every access).  MD5
-        is computed explicitly via :func:`hashlib.md5` only when the fast
+        is computed via the injected ``checksum_fn`` only when the fast
         mtime+size check is inconclusive.
         """
         # Load all stored fingerprints: {path: (mtime, size, checksum)}
