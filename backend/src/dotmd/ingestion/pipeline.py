@@ -871,7 +871,7 @@ class IndexingPipeline:
         _beacon_path = self._settings.index_dir / ".phase_beacon"
         def _beacon(phase: str) -> None:
             if prof:
-                _beacon_path.write_text(f"{file_info.path.name}:{phase}")
+                _beacon_path.write_text(f"{file_info.path}:{phase}")
 
         # --- Phase 1: Chunk ---
         if prof:
@@ -890,7 +890,7 @@ class IndexingPipeline:
                 self._vector_store.delete_vectors_by_chunk_ids(old_chunk_ids)
                 self._graph_store.delete_file_subgraph(path_str)
             if prof:
-                logger.info("[prof] %s purge: %.2fs", file_info.path.name, time.perf_counter() - t0)
+                logger.info("[prof] %s purge: %.2fs", file_info.path, time.perf_counter() - t0)
 
             _beacon("chunk")
             if prof:
@@ -904,7 +904,7 @@ class IndexingPipeline:
                 kind=file_info.kind,
             )
             if prof:
-                logger.info("[prof] %s chunk: %d chunks, %.2fs", file_info.path.name, len(chunks), time.perf_counter() - t0)
+                logger.info("[prof] %s chunk: %d chunks, %.2fs", file_info.path, len(chunks), time.perf_counter() - t0)
 
             if not chunks:
                 self._save_chunk_fingerprint(file_info)
@@ -919,14 +919,14 @@ class IndexingPipeline:
             _trickle_meta = {str(file_info.path): (file_info.title, _trickle_tags_csv)}
             self._keyword_engine.add_chunks(chunks, file_meta=_trickle_meta)
             if prof:
-                logger.info("[prof] %s save+fts5: %.2fs", file_info.path.name, time.perf_counter() - t0)
+                logger.info("[prof] %s save+fts5: %.2fs", file_info.path, time.perf_counter() - t0)
 
             _beacon("extraction")
             if prof:
                 t0 = time.perf_counter()
             extraction = self._run_extraction(chunks)
             if prof:
-                logger.info("[prof] %s extraction: %d entities, %.2fs", file_info.path.name, extraction.total_entities, time.perf_counter() - t0)
+                logger.info("[prof] %s extraction: %d entities, %.2fs", file_info.path, extraction.total_entities, time.perf_counter() - t0)
 
             _beacon("graph")
             if prof:
@@ -934,7 +934,7 @@ class IndexingPipeline:
             self._populate_graph([file_info], chunks, extraction)
             self._frontmatter_to_graph([file_info])
             if prof:
-                logger.info("[prof] %s graph: %.2fs", file_info.path.name, time.perf_counter() - t0)
+                logger.info("[prof] %s graph: %.2fs", file_info.path, time.perf_counter() - t0)
 
             self._save_chunk_fingerprint(file_info)
             needs_embed = True
@@ -965,7 +965,7 @@ class IndexingPipeline:
                     t0 = time.perf_counter()
                 embeddings, text_hashes = self._embed_chunks(chunks)
                 if prof:
-                    logger.info("[prof] %s embed: %d chunks, %.2fs", file_info.path.name, len(chunks), time.perf_counter() - t0)
+                    logger.info("[prof] %s embed: %d chunks, %.2fs", file_info.path, len(chunks), time.perf_counter() - t0)
 
                 _beacon("vec_store")
                 if prof:
@@ -975,7 +975,7 @@ class IndexingPipeline:
                     text_hashes=text_hashes,
                 )
                 if prof:
-                    logger.info("[prof] %s vec_store: %.2fs", file_info.path.name, time.perf_counter() - t0)
+                    logger.info("[prof] %s vec_store: %.2fs", file_info.path, time.perf_counter() - t0)
 
                 if metadata_only:
                     file_meta = self._build_file_meta_from_fileinfo([file_info])
@@ -983,7 +983,7 @@ class IndexingPipeline:
                     self._frontmatter_to_graph([file_info])
                     logger.info(
                         "Metadata-only update for %s: FTS5 + graph + embeddings refreshed",
-                        file_info.path.name,
+                        file_info.path,
                     )
 
             _beacon("fingerprint")
@@ -993,7 +993,7 @@ class IndexingPipeline:
         if prof:
             logger.info(
                 "[prof] %s TOTAL: %d chunks, %.2fs",
-                file_info.path.name, len(chunks) if chunks else 0,
+                file_info.path, len(chunks) if chunks else 0,
                 time.perf_counter() - t_file,
             )
 
