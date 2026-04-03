@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections import Counter
 from itertools import combinations
 from typing import TYPE_CHECKING, Any
+
+import torch
 
 from dotmd.core.models import Chunk, Entity, ExtractDepth, ExtractionResult, Relation
 
@@ -13,6 +16,15 @@ if TYPE_CHECKING:
     from gliner import GLiNER  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
+
+# ADR: Maximize CPU utilization for GLiNER inference.
+# Without this, PyTorch defaults to a heuristic that often underutilizes
+# available cores (observed: 4.5/8 cores on Xeon E3 V2).
+# OMP_NUM_THREADS env var takes precedence if set.
+_cpu_count = os.cpu_count() or 4
+if not os.environ.get("OMP_NUM_THREADS"):
+    torch.set_num_threads(_cpu_count)
+    torch.set_num_interop_threads(max(1, _cpu_count // 2))
 
 _DEFAULT_ENTITY_TYPES: list[str] = [
     "person",
@@ -59,40 +71,41 @@ class NERExtractor:
     def extract(self, chunks: list[Chunk]) -> ExtractionResult:
         """Run GLiNER NER over *chunks* and return entities and relations.
 
+        ADR: Uses batch_predict_entities() with pre-computed label embeddings
+        for ~2.5x speedup over per-chunk predict_entities() calls (sequence
+        packing in GLiNER 0.2.23+). Label embeddings are computed once and
+        reused across all chunks in the batch.
+
         For each chunk the extractor:
 
-        1. Predicts entities using GLiNER zero-shot NER.
+        1. Predicts entities using GLiNER zero-shot NER (batched).
         2. Creates ``Entity`` objects for each unique entity found.
         3. Creates ``CO_OCCURS`` relations between every pair of entities
            found within the same chunk (weight = 1.0).
         4. Creates ``MENTIONS`` relations from the chunk to each entity
            (weight = frequency count of the entity span in the chunk text).
-
-        Args:
-            chunks: List of document chunks to process.
-
-        Returns:
-            Aggregated ``ExtractionResult``.
         """
+        if not chunks:
+            return ExtractionResult()
+
         model = self._get_model()
+
+        # Batch inference: all chunks at once with pre-computed label embeddings.
+        texts = [chunk.text for chunk in chunks]
+        batch_predictions: list[list[dict[str, Any]]] = model.batch_predict_entities(
+            texts,
+            self._entity_types,
+            threshold=self._threshold,
+        )
 
         entities: list[Entity] = []
         relations: list[Relation] = []
-
-        # Track globally unique entities by (normalised_name, type).
         seen_entities: dict[tuple[str, str], Entity] = {}
 
-        for chunk in chunks:
-            predictions: list[dict[str, Any]] = model.predict_entities(
-                chunk.text,
-                self._entity_types,
-                threshold=self._threshold,
-            )
-
+        for chunk, predictions in zip(chunks, batch_predictions):
             if not predictions:
                 continue
 
-            # Count occurrences of each entity span in the chunk.
             span_counter: Counter[str] = Counter()
             chunk_entity_keys: list[tuple[str, str]] = []
 
@@ -120,10 +133,8 @@ class NERExtractor:
                     if chunk.chunk_id not in existing.chunk_ids:
                         existing.chunk_ids.append(chunk.chunk_id)
 
-            # Deduplicate keys within this chunk for relation generation.
             unique_keys = list(dict.fromkeys(chunk_entity_keys))
 
-            # --- CO_OCCURS relations (between entity pairs in the chunk) ------
             for key_a, key_b in combinations(unique_keys, 2):
                 relations.append(
                     Relation(
@@ -134,7 +145,6 @@ class NERExtractor:
                     )
                 )
 
-            # --- MENTIONS relations (chunk → entity) --------------------------
             for key in unique_keys:
                 entity = seen_entities[key]
                 freq = span_counter[entity.name]
@@ -160,5 +170,14 @@ class NERExtractor:
             from gliner import GLiNER  # type: ignore[import-untyped]
 
             self._model = GLiNER.from_pretrained(self._model_name)
-            logger.info("GLiNER model loaded.")
+            # ADR: Cap max sequence length to match our chunk token budget.
+            # GLiNER attention is O(n^2) — shorter max_len = faster inference.
+            # 512 matches our chunk_max_tokens setting.
+            if hasattr(self._model, "config") and hasattr(self._model.config, "max_len"):
+                self._model.config.max_len = 512
+            logger.info(
+                "GLiNER model loaded (threads=%d, max_len=%s).",
+                torch.get_num_threads(),
+                getattr(getattr(self._model, "config", None), "max_len", "?"),
+            )
         return self._model
