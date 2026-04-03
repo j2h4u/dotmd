@@ -35,6 +35,25 @@
 - **Container**: running, profiling enabled, trickle re-indexing 236 files with frontmatter
 - **ETA**: ~13hr for re-indexing (was ~22hr, improved by skipping 204 non-frontmatter files)
 
+### GLiNER Batch + Threading Optimization
+- batch_predict_entities() instead of per-chunk loop
+- torch.set_num_threads(cpu_count) for all cores
+- model.config.max_len=512 to match chunk budget
+- **Result**: 1.2x overall speedup (4.53 vs 5.61 sec/chunk)
+  - Markdown docs: 3.5x (batch packing effective on short texts)
+  - Voicenotes: 0.8-1.3x (long transcripts, less packing benefit)
+  - Small files: overhead makes batch slower
+
+### Dev Workflow: Source Mount
+- docker-compose.override.yml mounts `src/dotmd` from host → code changes need only restart, not rebuild
+- Rebuild only needed for pyproject.toml dependency changes
+
+### Profiling Findings (8-core Xeon E3 V2)
+- embed (TEI HTTP): 84.5% CPU utilization (dotmd idle)
+- extraction (GLiNER): 45.3% utilization (uses ~4.5/8 cores)
+- Overall: 66% utilization, 34% lost
+- Main bottleneck: GLiNER underutilizes CPU (PyTorch threading / no AVX2)
+
 ## Open items for next session
 
 ### 1. Always-on pipeline metrics (user request)
