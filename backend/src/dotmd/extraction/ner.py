@@ -71,7 +71,7 @@ class NERExtractor:
     def extract(self, chunks: list[Chunk]) -> ExtractionResult:
         """Run GLiNER NER over *chunks* and return entities and relations.
 
-        ADR: Uses batch_predict_entities() with pre-computed label embeddings
+        ADR: Uses inference() with pre-computed label embeddings
         for ~2.5x speedup over per-chunk predict_entities() calls (sequence
         packing in GLiNER 0.2.23+). Label embeddings are computed once and
         reused across all chunks in the batch.
@@ -92,7 +92,7 @@ class NERExtractor:
 
         # Batch inference: all chunks at once with pre-computed label embeddings.
         texts = [chunk.text for chunk in chunks]
-        batch_predictions: list[list[dict[str, Any]]] = model.batch_predict_entities(
+        batch_predictions: list[list[dict[str, Any]]] = model.inference(
             texts,
             self._entity_types,
             threshold=self._threshold,

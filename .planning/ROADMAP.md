@@ -109,7 +109,18 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 
 ## Backlog
 
-No active backlog items. Future ideas:
+### Phase 999.2: Pipeline parallelism — overlap GLiNER and TEI across files (BACKLOG)
+
+**Goal:** Eliminate idle time between GLiNER extraction and TEI embedding by running lightweight phases (purge, chunk, save, fts5, graph, fingerprints) concurrently with the heavy phases.
+
+**Architecture decision:** Two async workers + asyncio.Queue(maxsize=1) + asyncio.Semaphore(1) as CPU gate. Expert panel unanimous. Full context in profiling notes: `.planning/notes/profiling-2026-04-02.md`.
+
+**Expected gain:** ~1.5x over current 4.53 s/chunk.
+
+**Plans:**
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+### Future ideas:
 - Replace MD5 with a better hash (blake2b?) for chunk_id and content_checksum — MD5 collision resistance is broken, defense-in-depth
 - Semantic chunking (split by topic similarity, not just structure)
 - Doc-level chunks (whole-document embeddings for broad queries)
