@@ -8,7 +8,7 @@ The two-stage detection strategy avoids unnecessary I/O:
 
 1. If ``mtime`` **and** ``size`` match the stored fingerprint the file is
    classified as **unchanged** without reading any bytes.
-2. Only when ``mtime`` or ``size`` differ is the MD5 checksum computed.
+2. Only when ``mtime`` or ``size`` differ is the blake2b checksum computed.
    If the checksum still matches (e.g. a ``touch`` without content change)
    the file is classified as **unchanged** and the stored mtime/size are
    silently updated.
@@ -107,8 +107,8 @@ class FileTracker:
         Returns a :class:`FileDiff` with four lists of file-path strings.
 
         **Important:** This method never accesses :pyattr:`FileInfo.checksum`
-        (a computed field that reads the full file on every access).  MD5
-        is computed via the injected ``checksum_fn`` only when the fast
+        (a computed field that reads the full file on every access).  The
+        checksum is computed via the injected ``checksum_fn`` only when the fast
         mtime+size check is inconclusive.
         """
         # Load all stored fingerprints: {path: (mtime, size, checksum)}

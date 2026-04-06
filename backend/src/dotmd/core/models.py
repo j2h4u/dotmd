@@ -74,7 +74,7 @@ class FileInfo(BaseModel):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def checksum(self) -> str:
-        """MD5 of raw file bytes including frontmatter. Reads from disk on every access.
+        """blake2b hash of raw file bytes including frontmatter. Reads from disk on every access.
 
         Used only for graph File nodes (informational). For change detection,
         use ``reader.chunk_checksum()`` (body+kind) or ``reader.embed_checksum()``

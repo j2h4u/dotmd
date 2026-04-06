@@ -415,7 +415,7 @@ class IndexingPipeline:
         cache reuse is correct (same text + same title = same embedding).
 
         Returns ``(embeddings, text_hashes)`` where *text_hashes* maps
-        ``chunk_id → md5_hex``.
+        ``chunk_id → text_hash``.
         """
         if not chunks:
             return [], {}

@@ -78,7 +78,7 @@ def run_migration(
 
     # Register hash UDF for text_hash computation during migration
     conn.create_function(
-        "md5_hash", 1,
+        "blake2b_hash", 1,
         lambda t: hashlib.blake2b(t.encode()).hexdigest() if t else None,
     )
 
@@ -265,7 +265,7 @@ def _copy_vectors(
         # Populate text_hash from chunks
         updated = conn.execute(
             f"UPDATE {new_meta} SET text_hash = ("
-            f"SELECT md5_hash(text) FROM chunks_{strategy} "
+            f"SELECT blake2b_hash(text) FROM chunks_{strategy} "
             f"WHERE chunk_id = {new_meta}.chunk_id)"
         ).rowcount
         logger.info("Populated text_hash for %s: %d/%d",

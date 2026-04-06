@@ -212,7 +212,7 @@ class SQLiteVecVectorStore:
         Parameters
         ----------
         text_hashes:
-            Optional mapping of ``{chunk_id: md5_hex}`` for embedding reuse
+            Optional mapping of ``{chunk_id: text_hash}`` for embedding reuse
             across chunk strategies.  Stored in vec_meta alongside chunk_id.
         """
         if not chunks:
