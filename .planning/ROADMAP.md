@@ -135,7 +135,9 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 **Plans:** 0 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 15 to break down)
+- [ ] Plan 1: Global embedding cache by text_hash (skip TEI on file moves)
+- [ ] Plan 2: Extraction cache by (text_hash + model + entity_types_hash) (skip GLiNER on file moves)
+- [ ] Plan 3: Content-based chunk_id + switch to BLAKE3. chunk_id = blake3(file_content_checksum + ":" + chunk_index + ":" + chunk_strategy). Migration: stop → backup → SQL UPDATE all tables → verify → restart. Depends on Plan 1+2 deployed and warm.
 
 ---
 *Roadmap created: 2026-03-26*
