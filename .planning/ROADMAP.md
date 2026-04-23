@@ -106,6 +106,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 | 12. Indexing Integrity Rework | v1.4 | Complete | 2026-04-02 |
 | 13. Content-Aware Chunking & Search | v1.4 | Complete | 2026-04-02 |
 | 14. Frontmatter-Driven Indexing | v1.4 | In Progress | — |
+| 15. Content-addressed caching | v1.4 | Not started | — |
 
 ## Backlog
 
@@ -126,6 +127,15 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 - Doc-level chunks (whole-document embeddings for broad queries)
 - Query-time NER via GLiNER (complement entity catalog string matching)
 - Telegram/chat history as additional data source
+
+### Phase 15: Content-addressed caching: embedding cache, extraction cache, content-based chunk_id
+
+**Goal:** Prevent expensive reindexing (GLiNER + TEI) when files move or mount paths change. Three improvements in order: embedding cache (B) → extraction cache (C) → content-based chunk_id migration (A).
+**Requirements**: TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 15 to break down)
 
 ---
 *Roadmap created: 2026-03-26*

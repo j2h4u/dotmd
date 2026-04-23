@@ -55,6 +55,10 @@ Progress: [░░░░░░░░░░] 0%
 
 ## Accumulated Context
 
+### Roadmap Evolution
+
+- Phase 15 added: Content-addressed caching (embedding cache, extraction cache, content-based chunk_id)
+
 ### Decisions
 
 Decisions are logged in PROJECT.md Key Decisions table.
