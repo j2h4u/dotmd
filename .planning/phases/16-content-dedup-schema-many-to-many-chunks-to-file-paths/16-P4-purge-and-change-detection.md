@@ -7,6 +7,8 @@ depends_on: [16-P1, 16-P3]
 files_modified:
   - backend/src/dotmd/ingestion/pipeline.py
   - backend/src/dotmd/ingestion/trickle.py
+  - backend/src/dotmd/storage/falkordb_graph.py  # conditional on audit branch (b) — see Task 1 Step 1
+  - backend/src/dotmd/search/fts5.py             # conditional on signature tweak — see Task 1 Step 2
 autonomous: true
 requirements: [DEDUP-08]
 must_haves:
@@ -17,9 +19,14 @@ must_haves:
     - "`purge_orphaned_files` scans chunk_file_paths_* for file_paths no longer on disk and purges per file via the decrement-cascade helper."
     - "The entire per-file purge (M2M delete + orphan cascade across chunks_*, vec_meta_*, vec0_*, chunks_fts_*) runs inside ONE sqlite3 transaction; rollback restores pre-purge state exactly."
     - "`graph_store.delete_file_subgraph(file_path)` is called ONLY after DB commit AND only when the file is confirmed gone. Audit of the current implementation is a hard prerequisite in Task 1 — if it removes content-keyed MENTIONS edges, the plan routes through a holder-aware alternative instead."
+    - "`files_modified` declares BOTH `storage/falkordb_graph.py` and `search/fts5.py` as conditional edits (cycle-2 NEW-MED-2 hygiene). falkordb_graph.py is touched ONLY if audit branch (b) is taken; fts5.py may need a conn=-accepting signature tweak."
   artifacts:
     - path: backend/src/dotmd/ingestion/pipeline.py
       provides: "_purge_file rewritten as transactional decrement-then-cascade across all strategies; purge_orphaned_files updated to scan M2M."
+    - path: backend/src/dotmd/storage/falkordb_graph.py
+      provides: "[Conditional — branch (b) only] `delete_chunks_from_graph(chunk_ids)` + `delete_file_node(file_path)` narrow helpers if audit shows `delete_file_subgraph` would strip content-keyed MENTIONS edges for shared chunks."
+    - path: backend/src/dotmd/search/fts5.py
+      provides: "[Conditional — signature tweak only] `remove_chunks(strategy, chunk_ids, *, conn)` — extend signature to accept the caller's connection so FTS cascade runs inside the same transaction as metadata + vec cascades."
   key_links:
     - from: backend/src/dotmd/ingestion/pipeline.py
       to: backend/src/dotmd/storage/metadata.py
@@ -40,7 +47,7 @@ Rewrite the per-file purge from "blind DELETE by file_path from chunks_*" to "de
 
 Purpose: Under M2M semantics, deleting a file must not obliterate a chunk that another file still references. The old purge was 1-to-1 and unsafe. This plan makes purge holder-aware AND atomic.
 
-Output: Updated `_purge_file` and `purge_orphaned_files` with transactional correctness and full cascade coverage; graph_store call sites audited and guarded.
+Output: Updated `_purge_file` and `purge_orphaned_files` with transactional correctness and full cascade coverage; graph_store call sites audited and guarded; fts5.py signature extended if needed; falkordb_graph.py gets narrow helpers only if audit requires branch (b).
 </objective>
 
 <execution_context>
@@ -58,6 +65,7 @@ Output: Updated `_purge_file` and `purge_orphaned_files` with transactional corr
 @backend/src/dotmd/ingestion/trickle.py
 @backend/src/dotmd/storage/metadata.py
 @backend/src/dotmd/storage/sqlite_vec.py
+@backend/src/dotmd/storage/falkordb_graph.py
 @backend/src/dotmd/search/fts5.py
 
 <interfaces>
@@ -68,11 +76,11 @@ From P1 metadata layer (transaction contract: caller owns BEGIN/COMMIT):
 From P1 sqlite_vec helper:
 - `sqlite_vec.delete_by_chunk_ids(strategy, chunk_ids, *, conn)` — removes from vec_meta_* + vec0_*.
 
-From existing FTS5 (may need a small signature tweak to accept conn):
+From existing FTS5 (may need a small signature tweak to accept conn — listed as conditional edit in files_modified):
 - `fts5.remove_chunks(strategy, chunk_ids, *, conn)` — DELETE FROM chunks_fts_<strategy> WHERE chunk_id IN (...).
 
 Graph store contract (Decision #5: no Phase 16 schema change):
-- `graph_store.delete_file_subgraph(file_path)` — MUST be audited in Task 1 before calling. See audit checklist.
+- `graph_store.delete_file_subgraph(file_path)` — MUST be audited in Task 1 before calling. See audit checklist. If audit shows branch (b), add narrow helpers in `falkordb_graph.py` (declared as conditional edit in files_modified).
 
 Fingerprint trackers: `chunk_tracker.remove_fingerprint(file_path)`, `embed_tracker.remove_fingerprint(file_path)` — unchanged.
 
@@ -84,7 +92,7 @@ Wave sequencing: P3 is Wave 3, must land first (both modify pipeline.py and tric
 
 <task type="auto" tdd="true">
   <name>Task 1: Audit graph_store.delete_file_subgraph + rewrite _purge_file as single-transaction decrement + cascade</name>
-  <files>backend/src/dotmd/ingestion/pipeline.py</files>
+  <files>backend/src/dotmd/ingestion/pipeline.py, backend/src/dotmd/storage/falkordb_graph.py, backend/src/dotmd/search/fts5.py</files>
   <behavior>
     STEP 1 — Audit (mandatory first step, addresses Review-MEDIUM from opencode):
       Read the current `delete_file_subgraph` implementation in `backend/src/dotmd/storage/falkordb_graph.py` (or wherever it lives). Document in the task SUMMARY:
@@ -92,12 +100,15 @@ Wave sequencing: P3 is Wave 3, must land first (both modify pipeline.py and tric
         - Whether MENTIONS edges are keyed on (file_path, chunk_id) or on chunk_id alone.
 
       Decision tree:
-        (a) If delete_file_subgraph ONLY removes `File(file_path=X)` node + its direct `HAS_CHUNK` / similar edges: SAFE under M2M — call unchanged.
-        (b) If it removes MENTIONS edges keyed on chunk_id (content-level): NOT SAFE — it would strip MENTIONS for chunks still held by other files. Route through a HOLDER-AWARE alternative: pass in the `orphans` list (chunks whose holder count reached 0) and call a narrower helper `graph_store.delete_chunks_from_graph(orphans) + graph_store.delete_file_node(file_path)` instead of `delete_file_subgraph`.
+        (a) If delete_file_subgraph ONLY removes `File(file_path=X)` node + its direct `HAS_CHUNK` / similar edges: SAFE under M2M — call unchanged. **No edit needed to falkordb_graph.py** — in this branch the `files_modified` entry for falkordb_graph.py becomes a no-op and can be dropped from the commit. Document this in the SUMMARY.
+        (b) If it removes MENTIONS edges keyed on chunk_id (content-level): NOT SAFE — it would strip MENTIONS for chunks still held by other files. Route through a HOLDER-AWARE alternative: pass in the `orphans` list (chunks whose holder count reached 0) and call a narrower helper `graph_store.delete_chunks_from_graph(orphans) + graph_store.delete_file_node(file_path)` instead of `delete_file_subgraph`. **This branch REQUIRES edits to falkordb_graph.py** to add the two narrow helpers.
 
       Decision #5 says "zero graph changes"; that means NO SCHEMA change. Adding a narrower call site if audit demands it is a call-site change, not a schema change, and is required for correctness.
 
-    STEP 2 — New _purge_file logic per file_path (transactional):
+    STEP 2 — FTS5 signature tweak (if needed):
+      Current `fts5.remove_chunks` signature may not accept `conn=`. Extend it to `remove_chunks(strategy, chunk_ids, *, conn)` so the FTS cascade runs inside the pipeline's transaction. Back-compat not required (phase-internal change). This edit is reflected in the `files_modified` list for fts5.py.
+
+    STEP 3 — New _purge_file logic per file_path (transactional):
 
     ```python
     conn = metadata.connection()  # or whatever helper surfaces the shared SQLite conn
@@ -151,19 +162,21 @@ Wave sequencing: P3 is Wave 3, must land first (both modify pipeline.py and tric
     - test_purge_mixed_orphans_and_shared: file A holds X (solo) and Y (shared with B); deleting A cascades X only.
     - test_purge_is_transactional_on_failure: inject failure in vector_store.delete_by_chunk_ids (monkeypatch to raise mid-call); assert (a) conn.rollback executed, (b) chunks_*/M2M/vec_meta_*/FTS all restored to pre-purge row counts, (c) file_path still present in M2M afterward.
     - test_purge_runs_across_all_strategies: a file with chunks in two strategies — both strategies' tables are cleaned in the same transaction.
-    - test_graph_cleanup_failure_does_not_rollback_db (NEW): monkeypatch `graph_store.delete_file_subgraph` to raise after DB commit; assert DB purge persisted and graph failure logged.
-    - test_graph_holder_aware_path_when_audit_flags_unsafe (NEW): if audit found (b) above, verify that shared chunks' MENTIONS edges survive.
+    - test_graph_cleanup_failure_does_not_rollback_db: monkeypatch `graph_store.delete_file_subgraph` to raise after DB commit; assert DB purge persisted and graph failure logged.
+    - test_graph_holder_aware_path_when_audit_flags_unsafe: if audit found (b) above, verify that shared chunks' MENTIONS edges survive.
   </behavior>
   <action>
     Read existing `_purge_file` (pipeline.py:~1053) carefully. Preserve its call-order for graph/fingerprint operations but move them OUTSIDE the DB transaction per the new spec.
 
     DO the audit in Step 1 before writing any code. Record the audit outcome (branch (a) or (b)) in the task SUMMARY. This is a hard prerequisite per Review-MED from opencode. If the result is (b), add `graph_store.delete_chunks_from_graph(chunk_ids)` + `graph_store.delete_file_node(file_path)` to `falkordb_graph.py` as narrow call-site helpers. Decision #5 permits call-site additions; it only forbids schema changes.
 
+    If the FTS5 `remove_chunks` function currently doesn't accept `conn=`, extend its signature (Step 2). Back-compat not required (phase-internal change; rewritten during Phase 16). Update all call sites within this task.
+
     Per Research Open Q #1: orchestration stays in pipeline.py; helpers live in metadata/sqlite_vec/fts5. This plan confirms that shape.
 
     Anti-pattern check (Research): no DB-level CASCADE triggers. Cascade is explicit Python code so migration semantics remain readable.
 
-    Signature change compatibility: if `fts5.remove_chunks` currently doesn't accept `conn=`, extend its signature. Back-compat not required (phase-internal change; rewritten during Phase 16).
+    Files_modified note: `falkordb_graph.py` edit is CONDITIONAL on audit result. If branch (a), do NOT add an empty edit — just document in SUMMARY that the file was read but not modified. If branch (b), the edit ships as described. Either way, `fts5.py` likely gets the signature tweak; if the existing signature already accepts `conn`, drop that edit too and document.
   </action>
   <verify>
     <automated>cd backend && pytest tests/ingestion/test_pipeline_purge.py -x --tb=short</automated>
@@ -172,7 +185,9 @@ Wave sequencing: P3 is Wave 3, must land first (both modify pipeline.py and tric
     - Audit of `delete_file_subgraph` documented in SUMMARY with branch outcome.
     - _purge_file uses single-transaction decrement-cascade pattern with rollback on failure.
     - Graph + fingerprint cleanup run post-commit, best-effort, failures logged.
-    - All seven test cases green (five original + two new review-driven).
+    - If branch (b): falkordb_graph.py gained `delete_chunks_from_graph` + `delete_file_node` narrow helpers. If branch (a): file untouched; SUMMARY documents why.
+    - fts5.py signature extended to accept `conn=` (or SUMMARY documents it already did).
+    - All seven test cases green.
     - Multi-strategy cascade covered.
     - Transaction rollback on mid-cascade failure verified by row-count deltas.
   </done>
@@ -232,7 +247,7 @@ Wave sequencing: P3 is Wave 3, must land first (both modify pipeline.py and tric
 <verification>
 - `pytest tests/ingestion/test_pipeline_purge.py tests/ingestion/test_pipeline_orphan_sweep.py -x` green.
 - Grep: `grep -rn "DELETE FROM chunks_.*WHERE file_path" backend/src/dotmd/ | grep -v '^\s*#'` → 0 lines (column no longer exists).
-- Audit note for `delete_file_subgraph` captured in 16-04-SUMMARY.md.
+- Audit note for `delete_file_subgraph` captured in 16-04-SUMMARY.md, including which branch was taken.
 </verification>
 
 <success_criteria>
@@ -241,12 +256,14 @@ Wave sequencing: P3 is Wave 3, must land first (both modify pipeline.py and tric
 - Orphan sweep operates over M2M table.
 - Single-transaction atomicity proven: failure injection mid-cascade leaves DB exactly as pre-purge.
 - Graph cleanup correctly scoped (audit branch (a) or (b) documented and tested).
+- files_modified declaration honest about conditional falkordb_graph.py / fts5.py edits (cycle-2 NEW-MED-2).
 </success_criteria>
 
 <output>
 Create `.planning/phases/16-content-dedup-schema-many-to-many-chunks-to-file-paths/16-04-SUMMARY.md` with:
 - The new purge flow diagram (single-transaction boundary highlighted).
-- Graph audit result (branch (a) or (b)) and rationale.
+- Graph audit result (branch (a) or (b)) and rationale. If branch (a): confirmation that falkordb_graph.py was read but not modified. If branch (b): the two new helpers and their Cypher queries.
+- FTS5 signature tweak status (modified or already compatible).
 - The grep audits that passed.
 - Post-commit external-state failure handling policy.
 </output>

@@ -7,6 +7,7 @@ depends_on: []
 files_modified:
   - backend/tests/conftest.py
   - backend/tests/fixtures/schema_pre_v16.sql
+  - backend/tests/fixtures/schema_pre_v16.sqlite.dump
   - backend/tests/ingestion/test_migration_v16.py
   - backend/tests/ingestion/test_migration_v16_ops.py
   - backend/tests/ingestion/test_migration_v16_progress.py
@@ -31,7 +32,7 @@ requirements: [DEDUP-10, DEDUP-10b]
 must_haves:
   truths:
     - "Every downstream plan (P1–P5) has a failing test file it must turn green — Wave 1 RED phase."
-    - "Pre-v16 fixture schema is byte-equivalent to the production pre-v16 schema: captured in `backend/tests/fixtures/schema_pre_v16.sql` AND asserted against live pre-v16 shape via `test_fixture_matches_prod_pre_v16_schema` (addresses Review-MED fixture fidelity from both reviewers)."
+    - "Pre-v16 fixture schema is byte-equivalent to the production pre-v16 schema: captured in `backend/tests/fixtures/schema_pre_v16.sql` (canonical DDL source) AND asserted against a committed `schema_pre_v16.sqlite.dump` reference via `test_fixture_schema_byte_matches_reference_dump` — the dump was generated from a live pre-v16 DB (`sqlite3 index.db .schema > schema_pre_v16.sqlite.dump`), committed verbatim, and the fidelity test diffs the fixture's actual `.schema` output against it ignoring whitespace (addresses cycle-2 MEDIUM fidelity from codex: DDL signatures alone are too weak)."
     - "Collision-rich fixture exists: pytest boilerplate + mirrored skills + symlinks + repeated in-file headings; treated as the PRIMARY starting-state fixture (addresses Review-MED from opencode about pre-v15 being production state)."
     - "Empty-strategy + empty-knowledgebase fixtures exist and are no-ops for the migration."
     - "Round-trip top-K parity test proves search results for non-collision chunks unchanged pre- vs post-migration."
@@ -42,7 +43,9 @@ must_haves:
     - path: backend/tests/conftest.py
       provides: "Shared fixtures: tmp_index_db, collision_rich_db (primary), empty_db, post_v15_pre_v16_db (secondary), query_set, assert_db_bytes_unchanged, ALL_TEST_NAMES manifest."
     - path: backend/tests/fixtures/schema_pre_v16.sql
-      provides: "Canonical pre-v16 schema DDL (chunks_* with file_path + chunk_index + char_offset columns, vec_meta_*, vec0_*, chunks_fts_*, migration_v15_state) — copied verbatim from commit bb79455-era DB. Source of truth for fixture fidelity."
+      provides: "Canonical pre-v16 schema DDL used to build the fixture DB via executescript()."
+    - path: backend/tests/fixtures/schema_pre_v16.sqlite.dump
+      provides: "Byte-for-byte reference of `sqlite3 index.db .schema` output from a live pre-v16 DB (commit bb79455-era). The fidelity test diffs the fixture's current .schema output against this file (whitespace-insensitive) to catch any drift (cycle-2 MEDIUM fix)."
     - path: backend/tests/ingestion/test_migration_v16.py
       provides: "Core migration behaviour — DEDUP-01..04 + shadow-column / canonical-semantics / payload-invariant regression guards."
     - path: backend/tests/ingestion/test_migration_v16_invariants.py
@@ -119,8 +122,38 @@ Output: Test module skeletons + the conftest fixture builder + canonical schema 
        - `assert_db_bytes_unchanged(path, before_hash)` for dry-run/verify-only tests.
        - `ALL_TEST_NAMES` manifest: a constant listing every expected test function name — downstream plans reference this by name (Review-LOW from opencode about rename-resilience).
 
-    5. Add fixture-fidelity assertion as a top-level test:
-       - `tests/test_fixture_fidelity.py::test_schema_pre_v16_matches_commit_bb79455_era` — opens `schema_pre_v16.sql`, asserts it contains the expected `CREATE TABLE chunks_<strategy> (...)` signature with `file_path`, `chunk_index`, `char_offset` columns; asserts every strategy mentioned in `Settings.chunk_strategy` is represented. If a future schema change drifts the fixture, this test fires loudly.
+    5. Capture a byte-stable reference dump for fidelity testing (cycle-2 MEDIUM fix):
+       - On a live pre-v16 DB (production `~/.dotmd/index.db` pre-Phase-16, or a freshly built DB from commit bb79455 era), run:
+           sqlite3 index.db .schema > backend/tests/fixtures/schema_pre_v16.sqlite.dump
+       - Commit `schema_pre_v16.sqlite.dump` verbatim (no editing, no whitespace changes). This is the BYTE-LEVEL reference — the complementary `schema_pre_v16.sql` is the SOURCE used to build fixture DBs.
+
+    6. Add a fixture-fidelity test with layered assertions (cycle-2 MEDIUM fix — upgrade from DDL-signature-only to byte-equivalence against a committed reference):
+
+       `tests/test_fixture_fidelity.py`:
+
+       - `test_schema_pre_v16_sql_contains_required_ddl_signatures` (weak check — retained for readability):
+         Opens `schema_pre_v16.sql`, asserts it contains `CREATE TABLE chunks_<strategy> (...)` with `file_path`, `chunk_index`, `char_offset` columns for every strategy mentioned in `Settings.chunk_strategy`; asserts `vec_meta_<strategy>`, `vec0_<strategy>`, `chunks_fts_<strategy>`, `migration_v15_state` tables are all present.
+
+       - `test_fixture_schema_byte_matches_reference_dump` (STRONG check — new, closes cycle-2 MEDIUM):
+         1. Build a temp DB via `executescript(schema_pre_v16.sql)`.
+         2. Capture its current `.schema` output:
+              rows = conn.execute("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name").fetchall()
+              actual = "\n".join(r[0] for r in rows)
+         3. Read the committed reference:
+              reference = Path("backend/tests/fixtures/schema_pre_v16.sqlite.dump").read_text()
+         4. Normalise BOTH sides (strip leading/trailing whitespace per line, collapse internal runs of whitespace) then compare as EQUAL sets of CREATE statements:
+              def normalise(text: str) -> set[str]:
+                  stmts = re.split(r";\s*\n", text.strip())
+                  return {re.sub(r"\s+", " ", s.strip()) for s in stmts if s.strip()}
+              assert normalise(actual) == normalise(reference), (
+                  f"Fixture schema drifted from reference dump.\n"
+                  f"In fixture not in reference: {normalise(actual) - normalise(reference)}\n"
+                  f"In reference not in fixture: {normalise(reference) - normalise(actual)}"
+              )
+         Rationale (codex cycle 2): asserting DDL signatures alone would pass even if column ordering, index definitions, or auxiliary tables drift. Set-equivalence of CREATE statements after whitespace-normalisation catches real divergence while tolerating cosmetic differences (trailing newlines, indentation) that are too brittle for a one-user local project. The alternative — full byte-exact diff — was rejected as too brittle per cycle-2 MEDIUM guidance ("If `.dump` exact-match is too brittle for one-user local, at minimum parse both DDLs via sqlglot or compare CREATE TABLE statement lists set-equivalence").
+
+       - `test_reference_dump_is_committed_and_non_empty`:
+         Verifies `schema_pre_v16.sqlite.dump` exists and has ≥ 10 `CREATE TABLE` statements (sanity floor: chunks_*, vec_meta_*, vec0_*, chunks_fts_*, fingerprints, migration_v15_state across ≥2 strategies).
 
     Do NOT import `migration_v16` here (it doesn't exist yet — that's P1). Fixtures build raw SQL directly. Downstream invariant tests will import `migration_v16.run_invariants` at runtime (P1 delivers it), ensuring single-source-of-truth across CLI / tests.
   </action>
@@ -129,8 +162,9 @@ Output: Test module skeletons + the conftest fixture builder + canonical schema 
   </verify>
   <done>
     - `pytest --collect-only` discovers all test modules listed in `files_modified`.
-    - `backend/tests/fixtures/schema_pre_v16.sql` exists and is byte-stable.
-    - Fixture-fidelity test fires when schema DDL drifts.
+    - `backend/tests/fixtures/schema_pre_v16.sql` exists (canonical DDL source for fixture builds).
+    - `backend/tests/fixtures/schema_pre_v16.sqlite.dump` committed verbatim from a live pre-v16 DB.
+    - Three layered fidelity tests: DDL-signature presence + set-equivalence vs reference dump + non-empty dump sanity floor. Weakest link now fires when schema drifts beyond whitespace.
     - Fixtures defined and usable in downstream tests.
     - pyproject pytest config present.
     - ALL_TEST_NAMES manifest committed.
@@ -312,14 +346,14 @@ Output: Test module skeletons + the conftest fixture builder + canonical schema 
 |-----------|----------|-----------|-------------|-----------------|
 | T-16-17 | Data integrity | a green test suite that misses the real bug | mitigate | fixtures mirror real CONTEXT.md scenarios (pytest cache dupes, mirrored skills, symlinks, repeated in-file headings); divergence test uses deterministic stub embedder; fixture fidelity test guards schema drift |
 | T-16-18 | Denial of service | parity test slow due to reindex | accept | fixture is small (~5 files); deterministic stub embedder is instant |
-| T-16-25 | Data integrity | fixture schema drifts from production pre-v16 | mitigate | `schema_pre_v16.sql` captured verbatim + fidelity test |
+| T-16-25 | Data integrity | fixture schema drifts from production pre-v16 | mitigate | `schema_pre_v16.sql` (canonical DDL) + `schema_pre_v16.sqlite.dump` (live-DB reference, committed verbatim) + set-equivalence fidelity test (cycle-2 MEDIUM fix: stronger than DDL-signature-only) |
 </threat_model>
 
 <verification>
 - `pytest --collect-only` reports ≥ all test names enumerated in Tasks 2+3 with zero collection errors.
 - Running `pytest tests/` produces RED (expected) — downstream plans P1–P5 turn it GREEN.
 - `pyproject.toml` has a `[tool.pytest.ini_options]` section.
-- `backend/tests/fixtures/schema_pre_v16.sql` exists and passes the fidelity test.
+- `backend/tests/fixtures/schema_pre_v16.sql` and `schema_pre_v16.sqlite.dump` exist; fidelity test trio passes.
 </verification>
 
 <success_criteria>
@@ -333,7 +367,7 @@ Output: Test module skeletons + the conftest fixture builder + canonical schema 
 </success_criteria>
 
 <output>
-Create `.planning/phases/16-content-dedup-schema-many-to-many-chunks-to-file-paths/16-06-SUMMARY.md` with: final fixture list, test module map (P# → files), pytest config chosen, schema fidelity approach (reference to schema_pre_v16.sql), ALL_TEST_NAMES manifest location, explicit statement that the suite is RED and this is intentional, per-Review-concern regression-guard coverage table.
+Create `.planning/phases/16-content-dedup-schema-many-to-many-chunks-to-file-paths/16-06-SUMMARY.md` with: final fixture list, test module map (P# → files), pytest config chosen, schema fidelity approach (reference to BOTH `schema_pre_v16.sql` and `schema_pre_v16.sqlite.dump` + the three layered fidelity tests), ALL_TEST_NAMES manifest location, explicit statement that the suite is RED and this is intentional, per-Review-concern regression-guard coverage table.
 </output>
 </content>
 </invoke>

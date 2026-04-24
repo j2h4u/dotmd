@@ -8,6 +8,8 @@ files_modified:
   - backend/src/dotmd/ingestion/pipeline.py
   - backend/src/dotmd/ingestion/trickle.py
   - backend/src/dotmd/storage/lock_constants.py
+  - backend/src/dotmd/ingestion/migration_v16.py
+  - backend/src/dotmd/storage/metadata.py
 autonomous: true
 requirements: [DEDUP-05, DEDUP-07]
 must_haves:
@@ -18,6 +20,7 @@ must_haves:
     - "Indexing a file whose chunks already exist from another file adds M2M associations without touching the existing chunks_* rows."
     - "Lock table name constant lives in `storage/lock_constants.py` — trickle does NOT import from migration_v16 (addresses Review-LOW from opencode about avoiding migration-module dependency in runtime ingestion)."
     - "On chunk_id conflict during ingest, the new payload (text, heading_hierarchy, level) is compared to the existing stored row; mismatch is WARN-logged (addresses Review-HIGH from codex about 'INSERT OR IGNORE silently preserving arbitrary metadata')."
+    - "`migration_v16.py` and `metadata.py` are listed in files_modified because this plan edits both: migration_v16.py switches to `from dotmd.storage.lock_constants import LOCK_TABLE` (cross-wave, depends-on satisfied by P1), and metadata.py gains `get_stored_payload` if P1 did not ship it — per cycle-2 NEW-MED-3 hygiene."
   artifacts:
     - path: backend/src/dotmd/ingestion/pipeline.py
       provides: "Rewritten _index_file that writes via the new metadata M2M surface with payload-consistency assertion on conflict."
@@ -25,15 +28,23 @@ must_haves:
       provides: "Startup advisory-lock check that blocks while migration_v16_lock is held."
     - path: backend/src/dotmd/storage/lock_constants.py
       provides: "Shared `LOCK_TABLE = 'migration_v16_lock'` constant — imported by both migration_v16 and trickle to avoid cross-module runtime dependency."
+    - path: backend/src/dotmd/ingestion/migration_v16.py
+      provides: "Updated import: replaces any module-local LOCK_TABLE constant with `from dotmd.storage.lock_constants import LOCK_TABLE`."
+    - path: backend/src/dotmd/storage/metadata.py
+      provides: "`get_stored_payload(strategy, chunk_id) -> dict | None` helper for P3's conflict-check path — only modified here if P1 Task 1 did not already ship it (P1 commits to shipping it; this entry is defensive declaration for the executor's change-tracker)."
   key_links:
     - from: backend/src/dotmd/ingestion/pipeline.py
       to: backend/src/dotmd/storage/metadata.py
-      via: "insert_chunk (OR IGNORE) + add_file_path (OR IGNORE)"
-      pattern: "insert_chunk|add_file_path"
+      via: "insert_chunk (OR IGNORE) + add_file_path (OR IGNORE) + get_stored_payload (for conflict-check)"
+      pattern: "insert_chunk|add_file_path|get_stored_payload"
     - from: backend/src/dotmd/ingestion/trickle.py
       to: backend/src/dotmd/storage/lock_constants.py
       via: "LOCK_TABLE constant for startup sentinel check"
       pattern: "LOCK_TABLE|migration_v16_lock"
+    - from: backend/src/dotmd/ingestion/migration_v16.py
+      to: backend/src/dotmd/storage/lock_constants.py
+      via: "LOCK_TABLE constant (moved out of migration_v16.py to break cross-module runtime dependency)"
+      pattern: "from dotmd.storage.lock_constants import LOCK_TABLE"
 ---
 
 <objective>
@@ -41,7 +52,7 @@ Rewrite the ingest write path to match the content-addressed schema: INSERT OR I
 
 Purpose: The current UPSERT-DO-UPDATE path silently corrupts data under content-addressed ids; trickle must also refuse to race with a running migration. INSERT OR IGNORE could also silently preserve stale metadata when a buggy chunker produces inconsistent text for the same chunk_id — this plan adds a payload-consistency assertion to surface that case.
 
-Output: Updated `_index_file` + trickle startup guard + shared `lock_constants.py`.
+Output: Updated `_index_file` + trickle startup guard + shared `lock_constants.py` + one-line import update in `migration_v16.py`.
 </objective>
 
 <execution_context>
@@ -62,7 +73,7 @@ Output: Updated `_index_file` + trickle startup guard + shared `lock_constants.p
 From P1:
 - `metadata.insert_chunk(strategy, chunk_id, heading_hierarchy, level, text) -> None` (INSERT OR IGNORE)
 - `metadata.add_file_path(strategy, chunk_id, file_path, chunk_index) -> None` (INSERT OR IGNORE)
-- `metadata.get_stored_payload(strategy, chunk_id) -> dict | None` — fetches text/heading_hierarchy/level for conflict-check (add this thin helper in P1 Task 1 if not already present; if P1 SUMMARY doesn't list it, add it as the first action here).
+- `metadata.get_stored_payload(strategy, chunk_id) -> dict | None` — P1 ships this per the cycle-3 P1 update. If for any reason it is absent when this plan lands, add it in this plan's Task 1 (single SELECT by chunk_id, two-line implementation).
 
 Lock constant (new, shared module):
 - `dotmd.storage.lock_constants.LOCK_TABLE = "migration_v16_lock"`
@@ -77,12 +88,14 @@ Wave sequencing: This plan is Wave 3, depends on P1 only. P4 follows in Wave 4 a
 
 <task type="auto" tdd="true">
   <name>Task 1: Extract lock-table constant + rewrite IndexingPipeline._index_file for M2M write path with payload-consistency check</name>
-  <files>backend/src/dotmd/storage/lock_constants.py, backend/src/dotmd/ingestion/pipeline.py</files>
+  <files>backend/src/dotmd/storage/lock_constants.py, backend/src/dotmd/ingestion/pipeline.py, backend/src/dotmd/ingestion/migration_v16.py, backend/src/dotmd/storage/metadata.py</files>
   <behavior>
     New tiny module `backend/src/dotmd/storage/lock_constants.py`:
       LOCK_TABLE: str = "migration_v16_lock"
 
-    Update migration_v16.py to import LOCK_TABLE from this module (P1 used a module-local constant; replace it with the shared import). This is a small edit to migration_v16 — acceptable because it's still Wave 3 after P1.
+    Update migration_v16.py to import LOCK_TABLE from this module (P1 used a module-local constant; replace it with the shared import). This is a small one-line edit to migration_v16 — acceptable because it's Wave 3 after P1 and P1 is listed in `depends_on`. `migration_v16.py` is now declared in `files_modified` per cycle-2 NEW-MED-3 hygiene.
+
+    Defensive metadata edit: if P1 Task 1 did not ship `get_stored_payload`, add it here first (single SELECT by chunk_id returning `{"text","heading_hierarchy","level"} | None`). P1's cycle-3 update commits to shipping this helper; this plan lists `metadata.py` in `files_modified` defensively so the executor's change-tracker is accurate in either case.
 
     Rewrite `_index_file`:
 
@@ -113,7 +126,7 @@ Wave sequencing: This plan is Wave 3, depends on P1 only. P4 follows in Wave 4 a
     - test_two_files_identical_content_share_chunk: Two files with identical content → one chunks_* row, two M2M rows.
     - test_repeated_heading_in_same_file_creates_two_m2m_rows: File with repeated identical heading+body twice at different chunk_index → two M2M rows sharing chunk_id (PK includes chunk_index, Decision #3).
     - test_vec_meta_not_rewritten_on_reindex: vec_meta_* row count does not grow on re-index of already-embedded chunks (Phase 15 cache still honoured).
-    - test_payload_mismatch_logs_warn_without_overwriting (NEW — Review-HIGH-P3): fixture two files produce a "same chunk_id" collision via monkeypatched chunker emitting different text for the same id; ingest logs WARN; stored row retains first-writer's text.
+    - test_payload_mismatch_logs_warn_without_overwriting (Review-HIGH-P3): fixture two files produce a "same chunk_id" collision via monkeypatched chunker emitting different text for the same id; ingest logs WARN; stored row retains first-writer's text.
   </behavior>
   <action>
     Audit current `_index_file` carefully. Research §Component Responsibilities flags this as the main mutation point. Preserve the DI shape (metadata, vector_store, keyword_engine, graph_store injected at construction).
@@ -122,18 +135,25 @@ Wave sequencing: This plan is Wave 3, depends on P1 only. P4 follows in Wave 4 a
 
     Remove any residual `char_offset` parameters flowing from chunker → pipeline (Decision #8 — closed already in P1 for the chunker; assert it stays gone here).
 
+    Update migration_v16.py's LOCK_TABLE constant: replace any `LOCK_TABLE = "migration_v16_lock"` module-level line with `from dotmd.storage.lock_constants import LOCK_TABLE` near the top of the file. All in-module usages continue to work because the name resolves identically. Run migration_v16's test suite to confirm no regression.
+
     Grep gate (strip comments/blank to avoid self-invalidation):
       grep -n "upsert_chunk\|ON CONFLICT.*DO UPDATE" backend/src/dotmd/ingestion/pipeline.py | grep -v '^\s*#'
     Expected: 0 lines.
+
+    Additional grep verifying the import swap:
+      grep -c "from dotmd.storage.lock_constants import LOCK_TABLE" backend/src/dotmd/ingestion/migration_v16.py
+    Expected: ≥ 1.
   </action>
   <verify>
-    <automated>cd backend && pytest tests/ingestion/test_pipeline_m2m_insert.py -x --tb=short</automated>
+    <automated>cd backend && pytest tests/ingestion/test_pipeline_m2m_insert.py tests/ingestion/test_migration_v16.py -x --tb=short</automated>
   </verify>
   <done>
     - `lock_constants.py` shipped.
-    - migration_v16.py imports LOCK_TABLE from the shared module.
+    - migration_v16.py imports LOCK_TABLE from the shared module (one-line swap; P1's other logic untouched).
+    - metadata.py carries `get_stored_payload` (either from P1 or added defensively here).
     - _index_file writes via insert_chunk + add_file_path only; payload mismatch on conflict WARN-logged without overwrite.
-    - All five behavior tests green.
+    - All five behavior tests green; P1's own test suite still green after the import swap.
     - Grep audit clean.
   </done>
 </task>
@@ -155,7 +175,7 @@ Wave sequencing: This plan is Wave 3, depends on P1 only. P4 follows in Wave 4 a
     - test_refuses_while_locked: insert lock row; start trickle; assert non-zero exit + error log with pid/host/mode.
     - test_starts_when_lock_cleared: no lock row; trickle starts normally.
     - test_starts_when_lock_table_absent: brand-new DB with no migration tables; trickle starts.
-    - test_refuses_on_dry_run_lock (NEW): lock row with mode='dry-run' also blocks trickle (dry-run still holds the lock per P1 Review-MED-6 fix).
+    - test_refuses_on_dry_run_lock: lock row with mode='dry-run' also blocks trickle (dry-run still holds the lock per P1 Review-MED-6 fix).
   </behavior>
   <action>
     Read the current trickle lifecycle to pick the exact hook point; likely `TrickleIndexer.__init__` end or `start()` top. Import LOCK_TABLE from `dotmd.storage.lock_constants` — do NOT import from migration_v16 (addresses Review-LOW about cross-module dependency).
@@ -200,10 +220,11 @@ Wave sequencing: This plan is Wave 3, depends on P1 only. P4 follows in Wave 4 a
 </threat_model>
 
 <verification>
-- `pytest tests/ingestion/test_pipeline_m2m_insert.py tests/ingestion/test_trickle_lock.py -x` green.
+- `pytest tests/ingestion/test_pipeline_m2m_insert.py tests/ingestion/test_trickle_lock.py tests/ingestion/test_migration_v16.py -x` green (migration_v16 still green after the LOCK_TABLE import swap).
 - Grep: `grep -rn "ON CONFLICT.*DO UPDATE\|upsert_chunk" backend/src/dotmd/ | grep -v '^\s*#'` → 0 lines.
 - Grep: `grep -c "from dotmd.ingestion.migration_v16" backend/src/dotmd/ingestion/trickle.py` = 0 (runtime must not depend on migration module).
 - Grep: `grep -c "LOCK_TABLE" backend/src/dotmd/storage/lock_constants.py` ≥ 1.
+- Grep: `grep -c "from dotmd.storage.lock_constants import LOCK_TABLE" backend/src/dotmd/ingestion/migration_v16.py` ≥ 1.
 </verification>
 
 <success_criteria>
@@ -212,10 +233,11 @@ Wave sequencing: This plan is Wave 3, depends on P1 only. P4 follows in Wave 4 a
 - Payload-mismatch on chunk_id conflict is WARN-logged without overwriting.
 - Trickle refuses to start while migration lock is held (any mode); starts cleanly when lock absent or pre-migration.
 - trickle.py does not import from migration_v16.py at runtime.
+- migration_v16.py uses the shared `lock_constants.LOCK_TABLE` (cycle-2 NEW-MED-3 declared cleanly).
 </success_criteria>
 
 <output>
-Create `.planning/phases/16-content-dedup-schema-many-to-many-chunks-to-file-paths/16-03-SUMMARY.md` covering: new ingest pseudocode, payload-consistency check format, trickle startup check placement, operational runbook (stop trickle before `migrate run`), interaction with Phase 15 embedding_cache, clarification that lock-check is guardrail not full mutex.
+Create `.planning/phases/16-content-dedup-schema-many-to-many-chunks-to-file-paths/16-03-SUMMARY.md` covering: new ingest pseudocode, payload-consistency check format, trickle startup check placement, operational runbook (stop trickle before `migrate run`), interaction with Phase 15 embedding_cache, clarification that lock-check is guardrail not full mutex, confirmation of the migration_v16 LOCK_TABLE import swap.
 </output>
 </content>
 </invoke>
