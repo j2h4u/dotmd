@@ -14,6 +14,7 @@ from dotmd.core.models import Chunk, Entity, ExtractDepth, ExtractionResult, Rel
 
 if TYPE_CHECKING:
     from gliner import GLiNER  # type: ignore[import-untyped]
+    from dotmd.storage.cache import ExtractionCache
 
 logger = logging.getLogger(__name__)
 
@@ -58,15 +59,114 @@ class NERExtractor:
         entity_types: list[str] | None = None,
         model_name: str = _DEFAULT_MODEL_NAME,
         threshold: float = 0.5,
+        extraction_cache: "ExtractionCache | None" = None,
     ) -> None:
         self._entity_types: list[str] = entity_types or list(_DEFAULT_ENTITY_TYPES)
         self._model_name: str = model_name
         self._threshold: float = threshold
         self._model: GLiNER | None = None
+        self._extraction_cache: ExtractionCache | None = extraction_cache
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def extract_with_cache(self, chunks: list[Chunk]) -> ExtractionResult:
+        """Run NER extraction with cache lookup. Falls back to extract() when cache is None.
+
+        Cache stores only chunk-id-independent data:
+        - entities: {name, type, source} — no chunk_ids in stored rows
+        - co_occurs: CO_OCCURS relations keyed on entity names
+
+        MENTIONS relations are rebuilt here at read time using current chunk.chunk_id.
+        This makes cached results safe to reuse after Plan 03 chunk_id migration.
+        """
+        if self._extraction_cache is None or not chunks:
+            return self.extract(chunks)
+
+        cached_hits, miss_chunks = self._extraction_cache.lookup_batch(chunks)
+
+        # Build a chunk_id lookup for MENTIONS reconstruction
+        chunk_by_id: dict[str, Chunk] = {c.chunk_id: c for c in chunks}
+
+        entities: list[Entity] = []
+        relations: list[Relation] = []
+        seen_entities: dict[tuple[str, str], Entity] = {}
+
+        # Restore cached results and rebuild MENTIONS at read time
+        for chunk_id, (ents_data, co_occurs_data) in cached_hits.items():
+            chunk = chunk_by_id[chunk_id]
+            span_counter: Counter[str] = Counter()
+
+            for d in ents_data:
+                key = (d["name"].lower(), d["type"].lower())
+                if key not in seen_entities:
+                    entity = Entity(
+                        name=d["name"],
+                        type=d["type"],
+                        source=d["source"],
+                        chunk_ids=[chunk_id],
+                    )
+                    seen_entities[key] = entity
+                    entities.append(entity)
+                else:
+                    existing_entity = seen_entities[key]
+                    if chunk_id not in existing_entity.chunk_ids:
+                        existing_entity.chunk_ids.append(chunk_id)
+                span_counter[d["name"]] += 1
+
+            for d in co_occurs_data:
+                relations.append(Relation(**d))
+
+            # Rebuild MENTIONS using current chunk_id
+            for name, freq in span_counter.items():
+                relations.append(Relation(
+                    source_id=chunk_id,
+                    target_id=name,
+                    relation_type="MENTIONS",
+                    weight=float(freq),
+                ))
+
+        # Run GLiNER only on cache misses
+        new_results_per_chunk: dict[str, tuple[list, list]] = {}
+        if miss_chunks:
+            miss_result = self.extract(miss_chunks)
+
+            # Split miss_result into per-chunk data for cache storage.
+            # extract() returns a combined ExtractionResult — we split it
+            # back into per-chunk cache payloads for storage.
+            entities.extend(miss_result.entities)
+
+            # Separate MENTIONS from CO_OCCURS for per-chunk cache storage
+            for chunk in miss_chunks:
+                chunk_mentions = [
+                    r for r in miss_result.relations
+                    if r.relation_type == "MENTIONS" and r.source_id == chunk.chunk_id
+                ]
+                chunk_co_occurs = [
+                    r for r in miss_result.relations
+                    if r.relation_type == "CO_OCCURS"
+                ]
+                # Entities referenced by this chunk (those that mention this chunk_id)
+                mentioned_names = {r.target_id for r in chunk_mentions}
+                chunk_entities = [
+                    e for e in miss_result.entities
+                    if e.name in mentioned_names
+                ]
+
+                entities_to_cache = [
+                    {"name": e.name, "type": e.type, "source": e.source}
+                    for e in chunk_entities
+                ]
+                co_occurs_to_cache = [r.model_dump() for r in chunk_co_occurs]
+                new_results_per_chunk[chunk.chunk_id] = (entities_to_cache, co_occurs_to_cache)
+
+            relations.extend(miss_result.relations)
+
+            if new_results_per_chunk:
+                self._extraction_cache.store_batch(miss_chunks, new_results_per_chunk)
+
+        return ExtractionResult(entities=entities, relations=relations)
 
     def extract(self, chunks: list[Chunk]) -> ExtractionResult:
         """Run GLiNER NER over *chunks* and return entities and relations.

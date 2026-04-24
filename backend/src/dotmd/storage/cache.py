@@ -14,9 +14,15 @@ caller must call :meth:`clear` before the first lookup.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import sqlite3
 import struct
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from dotmd.core.models import Chunk
 
 logger = logging.getLogger(__name__)
 
@@ -173,3 +179,227 @@ class EmbeddingCache:
             " (text_hash, model_name, embedding) VALUES (?, ?, ?)",
             (text_hash, self._model_name, blob),
         )
+
+
+class ExtractionCache:
+    """Per-chunk extraction cache keyed on (chunk_text, model_name, entity_types, threshold).
+
+    Stores only chunk-id-independent data:
+    - entities_json: [{name, type, source}] — no chunk_ids field
+    - co_occurs_json: [{source_id: entity_name, target_id: entity_name,
+                        relation_type: "CO_OCCURS", weight: 1.0}]
+
+    MENTIONS relations (source_id = chunk_id) are NEVER stored.
+    They are rebuilt at read time using the current chunk.chunk_id.
+
+    Invalidation: full table clear when model_sig changes.
+    model_sig = blake2b(model_name + entity_types_hash + str(threshold)).hexdigest()
+    """
+
+    _BATCH = 500  # max placeholders per IN-clause
+
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        model_name: str,
+        entity_types: list[str],
+        threshold: float,
+    ) -> None:
+        self._conn = conn
+        self._model_name = model_name
+        self._threshold = threshold
+        self._entity_types_hash = hashlib.blake2b(
+            ",".join(sorted(entity_types)).encode()
+        ).hexdigest()
+        self._model_sig = hashlib.blake2b(
+            (model_name + self._entity_types_hash + str(threshold)).encode()
+        ).hexdigest()
+        self.ensure_table()
+
+    # ------------------------------------------------------------------
+    # Schema
+    # ------------------------------------------------------------------
+
+    def ensure_table(self) -> None:
+        """Create cache tables if they do not already exist.
+
+        Does NOT write or read extraction_cache_meta. Table creation is
+        separate from sentinel management.
+        """
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS extraction_cache (
+                cache_key    TEXT PRIMARY KEY,
+                entities_json  TEXT NOT NULL,
+                co_occurs_json TEXT NOT NULL,
+                created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS extraction_cache_meta (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
+        self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Model-change invalidation
+    # ------------------------------------------------------------------
+
+    def should_invalidate(self) -> bool:
+        """Return True if the stored model_sig sentinel differs from the current sig.
+
+        Returns False on a fresh table (no sentinel row yet) — first run,
+        no previous state to invalidate.
+        """
+        row = self._conn.execute(
+            "SELECT value FROM extraction_cache_meta WHERE key = 'model_sig'"
+        ).fetchone()
+        if row is None:
+            return False
+        return row[0] != self._model_sig
+
+    def clear(self) -> None:
+        """Wipe all cached extraction results and write the new model_sig sentinel."""
+        self._conn.execute("DELETE FROM extraction_cache")
+        self._conn.execute("DELETE FROM extraction_cache_meta")
+        self._conn.execute(
+            "INSERT OR REPLACE INTO extraction_cache_meta VALUES ('model_sig', ?)",
+            (self._model_sig,),
+        )
+        self._conn.commit()
+
+    def update_model_sig(self) -> None:
+        """Write (or confirm) the current model_sig into the meta table.
+
+        Called after should_invalidate() returns False to confirm the sentinel.
+        """
+        self._conn.execute(
+            "INSERT OR REPLACE INTO extraction_cache_meta VALUES ('model_sig', ?)",
+            (self._model_sig,),
+        )
+        self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Key derivation
+    # ------------------------------------------------------------------
+
+    def _make_key(self, chunk_text: str) -> str:
+        """Derive a cache key from raw chunk text + model signature.
+
+        Uses raw chunk.text — NOT the pipeline's text_hash (which is for
+        enriched text). This is correct because GLiNER runs on raw text.
+        """
+        chunk_text_hash = hashlib.blake2b(chunk_text.encode()).hexdigest()
+        return hashlib.blake2b(
+            (chunk_text_hash + self._model_sig).encode()
+        ).hexdigest()
+
+    # ------------------------------------------------------------------
+    # Lookup
+    # ------------------------------------------------------------------
+
+    def lookup_batch(
+        self, chunks: list[Chunk]
+    ) -> tuple[dict[str, tuple[list, list]], list[Chunk]]:
+        """Look up a batch of chunks in the extraction cache.
+
+        Parameters
+        ----------
+        chunks:
+            Chunks to look up.
+
+        Returns
+        -------
+        tuple[dict, list]
+            ``(hits_dict, miss_chunks)`` where:
+            - hits_dict maps chunk_id → (entities_raw, co_occurs_raw)
+            - miss_chunks is the list of Chunk objects not found in cache
+        """
+        if not chunks:
+            return {}, []
+
+        # Build key → chunk_id mapping
+        key_to_chunk: dict[str, Chunk] = {}
+        for chunk in chunks:
+            key = self._make_key(chunk.text)
+            key_to_chunk[key] = chunk
+
+        all_keys = list(key_to_chunk.keys())
+        found_keys: dict[str, tuple[list, list]] = {}  # cache_key → (ents, co_occurs)
+
+        try:
+            for i in range(0, len(all_keys), self._BATCH):
+                batch = all_keys[i : i + self._BATCH]
+                placeholders = ",".join("?" * len(batch))
+                rows = self._conn.execute(
+                    f"SELECT cache_key, entities_json, co_occurs_json"
+                    f" FROM extraction_cache WHERE cache_key IN ({placeholders})",
+                    batch,
+                ).fetchall()
+                for cache_key, entities_json, co_occurs_json in rows:
+                    found_keys[cache_key] = (
+                        json.loads(entities_json),
+                        json.loads(co_occurs_json),
+                    )
+        except Exception:
+            logger.warning(
+                "extraction_cache lookup failed — returning empty (graceful degradation)",
+                exc_info=True,
+            )
+            return {}, list(chunks)
+
+        # Build results: map chunk_id for hits, collect misses
+        hits_dict: dict[str, tuple[list, list]] = {}
+        miss_chunks: list[Chunk] = []
+
+        for key, chunk in key_to_chunk.items():
+            if key in found_keys:
+                hits_dict[chunk.chunk_id] = found_keys[key]
+            else:
+                miss_chunks.append(chunk)
+
+        return hits_dict, miss_chunks
+
+    # ------------------------------------------------------------------
+    # Store
+    # ------------------------------------------------------------------
+
+    def store_batch(
+        self,
+        chunks: list[Chunk],
+        results_per_chunk: dict[str, tuple[list, list]],
+    ) -> None:
+        """Persist extraction results for a batch of chunks.
+
+        Parameters
+        ----------
+        chunks:
+            Chunks whose results are being stored.
+        results_per_chunk:
+            Mapping of chunk_id → (entities_raw, co_occurs_raw).
+            entities_raw: list[dict] with keys {name, type, source} (NO chunk_ids).
+            co_occurs_raw: list[dict] CO_OCCURS relations only (no MENTIONS).
+
+        Uses INSERT OR IGNORE so re-storing an existing key is a no-op.
+        Does NOT commit — caller commits.
+        """
+        for chunk in chunks:
+            chunk_id = chunk.chunk_id
+            if chunk_id not in results_per_chunk:
+                continue
+            entities_raw, co_occurs_raw = results_per_chunk[chunk_id]
+            cache_key = self._make_key(chunk.text)
+            self._conn.execute(
+                "INSERT OR IGNORE INTO extraction_cache"
+                " (cache_key, entities_json, co_occurs_json) VALUES (?, ?, ?)",
+                (
+                    cache_key,
+                    json.dumps(entities_raw),
+                    json.dumps(co_occurs_raw),
+                ),
+            )

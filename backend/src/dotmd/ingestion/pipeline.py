@@ -41,7 +41,7 @@ from dotmd.ingestion.reader import chunk_checksum, discover_files, embed_checksu
 from dotmd.search.fts5 import FTS5SearchEngine
 from dotmd.search.semantic import SemanticSearchEngine
 from dotmd.storage.base import GraphStoreProtocol, VectorStoreProtocol
-from dotmd.storage.cache import EmbeddingCache
+from dotmd.storage.cache import EmbeddingCache, ExtractionCache
 from dotmd.storage.metadata import SQLiteMetadataStore
 
 logger = logging.getLogger(__name__)
@@ -195,9 +195,30 @@ class IndexingPipeline:
         # -- extractors --------------------------------------------------------
         self._structural_extractor = StructuralExtractor()
         self._keyterm_extractor = KeyTermExtractor()
+        self._extraction_cache: ExtractionCache | None = None
         self._ner_extractor: NERExtractor | None = None
         if settings.extract_depth == ExtractDepth.NER:
-            self._ner_extractor = NERExtractor(settings.ner_entity_types)
+            entity_types = settings.ner_entity_types or []
+            self._extraction_cache = ExtractionCache(
+                self._conn,
+                settings.ner_model_name,
+                entity_types,
+                threshold=0.5,  # matches NERExtractor default threshold
+            )
+            # should_invalidate() reads sentinel BEFORE any write — correctly detects changes.
+            if self._extraction_cache.should_invalidate():
+                logger.info(
+                    "NER model, entity_types, or threshold changed — clearing extraction_cache"
+                )
+                self._extraction_cache.clear()
+            else:
+                self._extraction_cache.update_model_sig()
+            self._ner_extractor = NERExtractor(
+                entity_types,
+                model_name=settings.ner_model_name,
+                threshold=0.5,
+                extraction_cache=self._extraction_cache,
+            )
 
         # Global embedding cache — keyed on (text_hash, model_name).
         # Survives file moves; invalidated automatically on embedding model change.
@@ -1134,7 +1155,7 @@ class IndexingPipeline:
         )
         ner_result = ExtractionResult()
         if self._ner_extractor is not None and chunks:
-            ner_result = self._ner_extractor.extract(chunks)
+            ner_result = self._ner_extractor.extract_with_cache(chunks)
         keyterm_result = (
             self._keyterm_extractor.extract(chunks) if chunks
             else ExtractionResult()
