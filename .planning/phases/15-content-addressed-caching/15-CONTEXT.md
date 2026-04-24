@@ -30,23 +30,26 @@ Eliminate expensive reindexing (GLiNER + TEI) when files move, mount paths chang
 
 ### Plan 1 — Embedding Cache
 
-- D-01: New table `embedding_cache(text_hash TEXT PRIMARY KEY, embedding BLOB, created_at TEXT)` in index.db
-- D-02: Cache key = `text_hash` (already computed as blake2b of enriched chunk text, stored in vec_meta)
-- D-03: Lookup happens BEFORE calling TEI: if text_hash in embedding_cache → skip HTTP call, reuse vector
-- D-04: On TEI result: store (text_hash, embedding) in embedding_cache
+- D-01: ~~New table `embedding_cache(text_hash TEXT PRIMARY KEY, embedding BLOB, created_at TEXT)` in index.db~~ — superseded by D-26
+- D-02: ~~Cache key = `text_hash` (already computed as blake2b of enriched chunk text, stored in vec_meta)~~ — superseded by D-26
+- D-03: Lookup happens BEFORE calling TEI: if (text_hash, model_name) in embedding_cache → skip HTTP call, reuse vector
+- D-04: ~~On TEI result: store (text_hash, embedding) in embedding_cache~~ — superseded by D-26
 - D-05: No migration needed — new table, populated lazily
 - D-06: No eviction initially — at ~10k chunks, 1024-dim float32 = ~40MB max, acceptable
+- **D-26:** embedding_cache uses composite PK `(text_hash, model_name)` to prevent cross-model vector reuse. Schema: `embedding_cache(text_hash TEXT NOT NULL, model_name TEXT NOT NULL, embedding BLOB NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (text_hash, model_name))`. A companion `embedding_cache_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)` table tracks the current `model_name` sentinel for invalidation detection. On TEI result: store `(text_hash, model_name, embedding)`. Lookup filters by `model_name`. **Supersedes D-01, D-02, D-04.**
 
 ### Plan 2 — Extraction Cache
 
-- D-07: New table `extraction_cache(cache_key TEXT PRIMARY KEY, entities JSON, relations JSON, created_at TEXT)`
-- D-08: Cache key = `blake2b(text_hash + model_name + entity_types_hash)` — compound key, NOT just text_hash
+- D-07: ~~New table `extraction_cache(cache_key TEXT PRIMARY KEY, entities JSON, relations JSON, created_at TEXT)`~~ — superseded by D-28
+- D-08: ~~Cache key = `blake2b(text_hash + model_name + entity_types_hash)` — compound key, NOT just text_hash~~ — superseded by D-27
   - Reason: GLiNER results depend on model version and entity_types list; stale cache on model upgrade = silent wrong results
 - D-09: Lookup happens BEFORE running GLiNER batch inference
-- D-10: On GLiNER result: store (cache_key, entities_json, relations_json)
-- D-11: Invalidation: when NERExtractor loads a model, compare stored `model_name` and `entity_types_hash` against config; if changed → DELETE FROM extraction_cache (full clear, not per-chunk)
+- D-10: ~~On GLiNER result: store (cache_key, entities_json, relations_json)~~ — superseded by D-28
+- D-11: Invalidation: compare stored `model_name`, `entity_types_hash`, and `threshold` against current config; if any changed → DELETE FROM extraction_cache (full clear, not per-chunk)
 - D-12: entity_types_hash = blake2b(sorted(entity_types).join(","))
 - D-13: No migration — new table, populated lazily
+- **D-27:** Extraction cache key includes GLiNER `threshold` in the model signature: `model_sig = blake2b(model_name + entity_types_hash + str(threshold))`. Full cache key formula: `blake2b(chunk_text_hash + model_sig)`. Reason: GLiNER output changes with threshold — stale cached results after threshold change = wrong entity counts. **Supersedes D-08.**
+- **D-28:** extraction_cache stores two separate columns instead of a single `relations JSON` column: `entities_json` (list of Entity dicts) and `co_occurs_json` (list of CO_OCCURS Relation dicts). MENTIONS relations are excluded from the cache entirely and rebuilt at read time from the current `chunk_id` (which is stable after Plan 3). Schema: `extraction_cache(cache_key TEXT PRIMARY KEY, entities_json JSON NOT NULL, co_occurs_json JSON NOT NULL, created_at TEXT NOT NULL)`. **Supersedes D-07, D-10.**
 
 ### Plan 3 — Content-Based chunk_id + BLAKE3
 
@@ -63,6 +66,7 @@ Eliminate expensive reindexing (GLiNER + TEI) when files move, mount paths chang
 - D-19: Post-migration consistency check: every chunk_id in chunks_* must exist in vec_meta_*
 - D-20: Plans 1+2 MUST be deployed and warm (at least one full index cycle) before Plan 3 runs
 - D-21: FTS5 and sqlite_vec are virtual tables — chunk_id update requires DELETE + re-INSERT (not plain UPDATE)
+  - **OVERRIDDEN by research finding:** chunk_id is UNINDEXED in FTS5 tables; plain UPDATE is safe. See RESEARCH.md Finding 1.
 
 ### Architectural Constraints (from expert panel)
 
@@ -72,9 +76,8 @@ Eliminate expensive reindexing (GLiNER + TEI) when files move, mount paths chang
 - D-25: `text_hash` already exists in vec_meta — reuse, don't recompute
 
 ### Claude's Discretion
-- Exact SQL DDL for new tables
 - Where in pipeline.py to insert cache lookups (before GLiNER call in _run_extraction, before TEI call in _embed_chunks)
-- JSON serialization format for extraction_cache entities/relations
+- JSON serialization format for extraction_cache entities/co_occurs
 - Whether to add indexes on cache tables (text_hash is PK, so already indexed)
 
 </decisions>
@@ -108,18 +111,19 @@ Eliminate expensive reindexing (GLiNER + TEI) when files move, mount paths chang
 **Embedding cache lookup (Plan 1):**
 ```python
 # In _embed_chunks(), before encode_batch():
-cached = embedding_cache.lookup(text_hashes)  # {text_hash: vector}
+cached = embedding_cache.lookup(text_hashes)  # {text_hash: vector}, filtered by model_name
 texts_to_encode = [t for h, t in zip(hashes, texts) if h not in cached]
-# ... encode missing ones, store results in embedding_cache
+# ... encode missing ones, store results in embedding_cache with (text_hash, model_name)
 ```
 
 **Extraction cache lookup (Plan 2):**
 ```python
 # In NERExtractor.extract() or _run_extraction():
-cache_key = blake2b(text_hash + model_name + entity_types_hash)
+# model_sig = blake2b(model_name + entity_types_hash + str(threshold))
+# cache_key = blake2b(chunk_text_hash + model_sig)
 if cache_key in extraction_cache:
-    return cached_result
-# ... run GLiNER, store result
+    return cached_result  # entities_json + co_occurs_json; MENTIONS rebuilt at read time
+# ... run GLiNER, store result (entities_json + co_occurs_json only)
 ```
 
 **New chunk_id (Plan 3):**
@@ -137,7 +141,7 @@ UPDATE chunks_{strategy} SET chunk_id = blake3_hash(
     chunk_fingerprints_{strategy}.checksum || ':' || chunk_index || ':' || '{strategy}'
 ) FROM chunk_fingerprints_{strategy}
 WHERE chunks_{strategy}.file_path = chunk_fingerprints_{strategy}.file_path
--- FTS5 and vec tables require DELETE + INSERT
+-- FTS5: plain UPDATE safe (chunk_id is UNINDEXED — D-21 override per RESEARCH.md Finding 1)
 ```
 
 </specifics>
@@ -156,3 +160,4 @@ WHERE chunks_{strategy}.file_path = chunk_fingerprints_{strategy}.file_path
 
 *Phase: 15-content-addressed-caching*
 *Context gathered: 2026-04-24 from session (expert panel 2026-04-23)*
+*Revised: 2026-04-24 — added D-26, D-27, D-28 (checker revision round 1)*

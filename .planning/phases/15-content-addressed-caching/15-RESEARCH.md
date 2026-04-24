@@ -602,7 +602,7 @@ Options:
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Where does CacheStore live in the module hierarchy?**
    - What we know: D-24 says cache tables are in index.db on the shared connection. The pipeline owns the connection.
