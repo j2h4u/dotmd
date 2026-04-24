@@ -133,6 +133,13 @@ Already keyed on `blake3(raw_text + model_sig)` — dedup happens naturally. MEN
 9. **`migration_v15.py` fate — LOCKED: keep as no-op stub this cycle, remove next cycle.**
    Leave `migration_v15.py` in place with a clear deprecation banner ("superseded by migration_v16; this script is a no-op — run `dotmd migrate` instead"). Removal deferred to the release cycle after Phase 16 ships; tracked as a GSD backlog item (not beads — dotMD uses GSD exclusively for project task tracking). Rationale: minor safety net for anyone with a half-run v15 state; zero maintenance cost as a stub.
 
+10. **Payload divergence policy — LOCKED: fail-closed by default, explicit override flag.**
+    Within a collision group, `text` is guaranteed equal (that's why the blake3 matches). `heading_hierarchy` and `level` are not guaranteed equal — same text can legitimately appear under different heading contexts in different files. Policy:
+    - **Default (no flag):** if ANY collision group has differing `heading_hierarchy` or `level`, migration writes a divergence report and aborts non-zero. No silent data loss.
+    - **Override:** operator may pass `--allow-payload-divergence` to `dotmd migrate run` (or set `migration.allow_payload_divergence=true` in config) to proceed with canonical-keep (MIN old chunk_id's metadata wins). Override + each mismatch persisted to `migration_v16_state` for audit.
+    - **`--verify-only` reports divergence count** up-front so the operator knows before committing. Expected count on current KB = 0 (observed duplicates are symlinks/mirrored copies with identical headings).
+    - **Schema unchanged** — `heading_hierarchy`/`level` stay on `chunks_*`. If a future feature surfaces per-holder heading (e.g., breadcrumb per hit, heading-filtered search), promote the fields to the M2M table in a later phase. See backlog 999.8.
+
 ## Open questions (for /gsd:discuss-phase 16)
 
 1. **Canonical file_path for search results** — MIN lexicographic / shortest / closest to data_dir / newest mtime? (pillar of UX)
