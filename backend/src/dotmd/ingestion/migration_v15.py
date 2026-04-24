@@ -39,7 +39,9 @@ def needs_migration_v15(index_db_path: Path) -> bool:
     blake3 hexdigest  =  64 chars (256-bit output).
 
     Checks ALL discovered chunks tables (not just one sample) to correctly
-    handle partially migrated databases.
+    handle partially migrated databases. A table needs migration if it contains
+    ANY chunk_id that is not 64 chars (blake3) — this covers legacy MD5 (32)
+    and blake2b (128) identifiers alike.
     """
     conn = sqlite3.connect(str(index_db_path))
     try:
@@ -50,10 +52,10 @@ def needs_migration_v15(index_db_path: Path) -> bool:
         if not table_rows:
             return False
         for (table_name,) in table_rows:
-            sample = conn.execute(
-                f"SELECT chunk_id FROM {table_name} LIMIT 1"
-            ).fetchone()
-            if sample and len(sample[0]) == 128:
+            non_blake3 = conn.execute(
+                f"SELECT COUNT(*) FROM {table_name} WHERE length(chunk_id) != 64"
+            ).fetchone()[0]
+            if non_blake3 > 0:
                 return True
         return False
     finally:
@@ -111,15 +113,15 @@ def _verify_v15(conn: sqlite3.Connection, strategies: list[str]) -> None:
         else:
             logger.info("FTS PARITY OK: %s <-> %s (%d rows)", chunks_table, fts_table, total)
 
-        # 4. No remaining 128-char IDs (old blake2b format)
+        # 4. No remaining non-blake3 IDs (legacy MD5=32 or blake2b=128)
         old_count = conn.execute(
-            f"SELECT COUNT(*) FROM {chunks_table} WHERE length(chunk_id) = 128"
+            f"SELECT COUNT(*) FROM {chunks_table} WHERE length(chunk_id) != 64"
         ).fetchone()[0]
         if old_count > 0:
-            logger.error("OLD IDs REMAIN: %d 128-char chunk_ids still in %s", old_count, chunks_table)
+            logger.error("OLD IDs REMAIN: %d non-64-char chunk_ids still in %s", old_count, chunks_table)
             errors += 1
         else:
-            logger.info("ID FORMAT OK: no 128-char IDs in %s", chunks_table)
+            logger.info("ID FORMAT OK: all chunk_ids are 64-char blake3 in %s", chunks_table)
 
     if errors:
         raise RuntimeError(
