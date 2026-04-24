@@ -8,6 +8,8 @@ import re
 from pathlib import Path
 from typing import Callable
 
+import blake3 as _blake3
+
 from dotmd.core.models import Chunk, DocKind
 from dotmd.ingestion.content_handlers import get_handler, split_default
 from dotmd.ingestion.reader import parse_frontmatter
@@ -19,10 +21,19 @@ logger = logging.getLogger(__name__)
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
 
 
-def _make_chunk_id(file_path: Path, chunk_index: int) -> str:
-    """Deterministic chunk identifier from file path and index."""
-    payload = f"{file_path}:{chunk_index}"
-    return hashlib.blake2b(payload.encode()).hexdigest()
+def _make_chunk_id(body_checksum: str, chunk_index: int, chunk_strategy: str) -> str:
+    """Content-addressed chunk identifier — path-independent.
+
+    body_checksum is blake2b(kind + body) from chunk_fingerprints_{strategy}.
+    Equivalent to chunk_checksum() in reader.py.
+
+    chunk_strategy prevents collisions between heading_512_50 and
+    contextual_512_50 chunks with the same body content.
+
+    Returns 64-char blake3 hexdigest (down from 128-char blake2b).
+    """
+    payload = f"{body_checksum}:{chunk_index}:{chunk_strategy}"
+    return _blake3.blake3(payload.encode()).hexdigest()
 
 
 def _split_with_overlap(
@@ -124,6 +135,7 @@ def chunk_file(
     max_tokens: int = 512,
     overlap_tokens: int = 50,
     kind: str = DocKind.DOCUMENT,
+    chunk_strategy: str = "heading_512_50",
 ) -> list[Chunk]:
     """Split a markdown document into semantically meaningful chunks.
 
@@ -136,7 +148,7 @@ def chunk_file(
     Parameters
     ----------
     file_path:
-        Path to the source file (used for IDs and metadata, not read here).
+        Path to the source file (used for metadata, not read here).
     content:
         Full text content of the markdown file (frontmatter will be stripped).
     max_tokens:
@@ -147,6 +159,9 @@ def chunk_file(
     kind:
         Document kind from frontmatter (e.g. ``"meeting_transcript"``).
         Selects the pre-split strategy for large sections.
+    chunk_strategy:
+        Strategy name used in chunk_id derivation — prevents ID collisions
+        between heading_512_50 and contextual_512_50 chunks with identical body.
 
     Returns
     -------
@@ -158,6 +173,10 @@ def chunk_file(
     # structured channels (graph entities, FTS5 columns, embedding prefix)
     # rather than as accidental text content that pollutes BM25/embeddings.
     _, body = parse_frontmatter(content)
+
+    # Compute body_checksum for content-addressed chunk IDs.
+    # Formula: blake2b(kind + "\n" + body) — matches chunk_fingerprints_{strategy}.checksum.
+    body_checksum = hashlib.blake2b(f"{kind}\n{body}".encode()).hexdigest()
 
     handler = get_handler(kind)
     sections = _parse_sections(body)
@@ -197,7 +216,7 @@ def chunk_file(
         if token_count <= max_tokens:
             chunks.append(
                 Chunk(
-                    chunk_id=_make_chunk_id(file_path, chunk_index),
+                    chunk_id=_make_chunk_id(body_checksum, chunk_index, chunk_strategy),
                     file_path=file_path,
                     heading_hierarchy=list(current_hierarchy),
                     level=level,
@@ -217,7 +236,7 @@ def chunk_file(
             for sub_text in sub_texts:
                 chunks.append(
                     Chunk(
-                        chunk_id=_make_chunk_id(file_path, chunk_index),
+                        chunk_id=_make_chunk_id(body_checksum, chunk_index, chunk_strategy),
                         file_path=file_path,
                         heading_hierarchy=list(current_hierarchy),
                         level=level,

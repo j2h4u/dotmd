@@ -759,6 +759,7 @@ class IndexingPipeline:
                 max_tokens=self._settings.max_chunk_tokens,
                 overlap_tokens=self._settings.chunk_overlap_tokens,
                 kind=fi.kind,
+                chunk_strategy=self._strategy,
             ))
         logger.info("[%s] chunk: %d chunks from %d files (%.2fs)", run_id, len(chunks), len(files), time.perf_counter() - t0)
         return chunks
@@ -947,6 +948,7 @@ class IndexingPipeline:
                 max_tokens=self._settings.max_chunk_tokens,
                 overlap_tokens=self._settings.chunk_overlap_tokens,
                 kind=file_info.kind,
+                chunk_strategy=self._strategy,
             )
             if prof:
                 logger.info("[prof] %s chunk: %d chunks, %.2fs", file_info.path, len(chunks), time.perf_counter() - t0)
