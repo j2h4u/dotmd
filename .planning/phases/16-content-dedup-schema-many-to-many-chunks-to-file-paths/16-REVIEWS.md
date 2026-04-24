@@ -399,3 +399,170 @@ None material. Both reviewers converged on the same HIGH concerns (flow ordering
 
 ## Overall Risk
 Both reviewers rate **HIGH before fixes**, **MEDIUM after**. Fix the 5 HIGH concerns via `/gsd-plan-phase 16 --reviews` and re-verify before executing.
+
+---
+
+# Cross-AI Plan Review — Phase 16 — CYCLE 2
+
+reviewed_at: 2026-04-24T18:31:19Z
+reviewers: [codex, opencode]
+status: **NEEDS-CYCLE-3** (both reviewers)
+
+## Codex Review (Cycle 2)
+
+## Cycle-1 Concern Verification
+| # | Concern | Status | Evidence (plan + task) |
+|---|---------|--------|-----------------------|
+| HIGH-1 | P1 migration flow must collapse collisions before PK remap | RESOLVED | `16-P1` Task 2 explicitly switches to shadow-column flow: step 3 adds `new_chunk_id`, step 5 detects/collapses collisions, step 6 asserts no duplicate `new_chunk_id`, and only step 8 updates `chunks_<strategy>.chunk_id`. The must-have truth also states “collisions collapsed BEFORE any PK UPDATE.” |
+| HIGH-2 | Wave file-ownership conflicts must be serialized (`P3↔P4`, `P2↔P5`) | PARTIAL | `P4` now has `depends_on: [16-P1, 16-P3]` and sits in wave 4, so `pipeline.py` / `trickle.py` overlap is resolved. But `16-P2` frontmatter still says `wave: 5` while `16-P5` is also `wave: 5`, and `P2` does not depend on `P5` even though its body says P2 is “Wave 6” and sequenced after P5. If tooling reads header metadata, `cli.py` conflict still exists. |
+| HIGH-3 | `MIN(old_chunk_id)` must mean payload source row, not final id | RESOLVED | `16-P1` must-have truth 4 and Task 2 step 5b make this explicit: canonical old id selects the payload source row; step 8 then remaps surviving rows to the final 64-hex blake3 id. |
+| HIGH-4 | New-id derivation must reuse Phase 15 helper, not re-specify the recipe loosely | RESOLVED | `16-P1` must-have truth 11, `<interfaces>`, and Task 2 `<action>` all explicitly import `from dotmd.ingestion.chunker import _make_chunk_id`, and `test_uses_chunker_make_chunk_id_helper` is added as a regression guard. |
+| HIGH-5 | Collision-group invariant check missing | PARTIAL | `16-P1` Task 2 step 5a now fetches `text`, `heading_hierarchy`, and `level` for every member and logs `payload_mismatch` WARNs. That closes the “missing check” gap, but it still continues collapse on mismatch and keeps canonical metadata, so it does not fully protect correctness. |
+| MEDIUM-1 | Dry-run lock behavior was ambiguous | RESOLVED | `16-P1` must-have truth 10 and Task 2 “Dry-run semantics” now explicitly acquire `migration_v16_lock` with `mode='dry-run'`, hold it during the transaction, then release on rollback. |
+| MEDIUM-2 | `delete_file_subgraph` behavior under M2M needed audit | RESOLVED | `16-P4` Task 1 starts with a mandatory audit of `delete_file_subgraph`, defines branch `(a)` safe unchanged call vs `(b)` holder-aware alternative, and makes that audit a hard prerequisite before code changes. |
+| MEDIUM-3 | P4 transaction boundary had to be explicit and end-to-end | RESOLVED | `16-P4` must-have truth 5 and Task 1 step 2 now require one explicit SQLite transaction covering M2M delete, orphan detection, `chunks_*`, `vec_*`, and `chunks_fts_*`; graph/fingerprint cleanup is moved post-commit with warning-only failure handling. |
+| MEDIUM-4 | P6 fixture fidelity to real pre-v16 schema was too weak | PARTIAL | `16-P6` improves this materially: `schema_pre_v16.sql`, `collision_rich_db` as the primary starting fixture, `pre_v15_db` alias, and a fidelity test are all added in Task 1. The remaining gap is that the described fidelity test only asserts expected DDL signatures/strategies, not a stronger automated equivalence check against a known live pre-v16 schema dump. |
+
+## New Concerns (if any)
+- HIGH: `16-P1` Task 2 step 7 cannot correctly remap `chunk_file_paths_*` rows for discarded non-canonical old ids. Step 5d deletes non-canonical rows from `chunks_*`, then step 7 updates M2M rows by looking up `new_chunk_id` in `chunks_*` with `WHERE chunk_id IN (SELECT chunk_id FROM chunks_<strategy>)`. After step 5d, discarded old ids are gone from `chunks_*`, so their M2M rows have no mapping source and will stay on dead old ids. This avoids the specific PK `UNIQUE` error on `chunks_*`, but it does not produce a correct migrated M2M table. The plan needs an explicit persistent old-id→new-id mapping table or shadow table that survives collapse.
+- HIGH: The rewritten plans now explicitly tolerate payload divergence that the schema still cannot represent. `16-P1` Task 2 step 5a and `16-P3` Task 1 only WARN on `text`/`heading_hierarchy`/`level` mismatch and then keep canonical payload, while `heading_hierarchy` and `level` remain stored on `chunks_*` in `16-P1` Task 1. If two holders share a `chunk_id` but differ in those fields, one holder’s metadata is silently discarded. This is no longer just a missing check; it is codified data loss. Either mismatches must abort collapse/ingest, or divergent fields must move to per-holder storage.
+- MEDIUM: Wave sequencing is still internally inconsistent in machine-readable metadata. `16-P2` frontmatter says `wave: 5` and `depends_on: [16-P1, 16-P3, 16-P4]`, but its own body/interface block says P2 is Wave 6 after P5. That should be normalized in header metadata, not just prose.
+- MEDIUM: `16-P4` can require edits outside its declared ownership. Task 1 says that if graph audit branch `(b)` is needed, helpers may be added in `backend/src/dotmd/storage/falkordb_graph.py`, and it may also need a signature tweak in `backend/src/dotmd/search/fts5.py`; neither file is listed in `files_modified`.
+- LOW: `16-P3` Task 1 says it will update `migration_v16.py` to import `LOCK_TABLE`, but `migration_v16.py` is not listed in `P3.files_modified`.
+
+## Overall Risk After Cycle 2
+HIGH — the cycle-1 review did improve the plans substantially: the shadow-column ordering is now correct, dry-run locking is defined, P4 transactionality is explicit, and the graph audit is no longer hand-waved. But two execution-blocking correctness issues remain in the rewritten text itself: `P1` still lacks a viable remap path for M2M rows belonging to discarded old ids, and the plan now explicitly ships “warn and keep canonical” behavior for payload divergence that the current schema cannot faithfully encode. Until those are fixed, the phase can still migrate into a logically inconsistent or semantically lossy state even if implementation follows the plan exactly.
+
+## Execute Readiness Verdict
+NEEDS-CYCLE-3 — fix the `old_id -> new_id` remap design in `P1`, decide a hard policy for payload divergence, and normalize `P2`’s header metadata to the actual wave order.
+
+---
+
+## OpenCode Review (Cycle 2)
+
+## Cycle-1 Concern Verification
+
+| # | Concern | Status | Evidence (plan + task) |
+|---|---------|--------|-----------------------|
+| HIGH-1 | Migration flow ordering: collision collapse must precede PK UPDATE | **RESOLVED** | P1 Task 2 implements explicit shadow-column flow: ADD COLUMN new_chunk_id → compute blake3 → detect collisions → collapse non-canonical → sanity-check uniqueness → remap references → UPDATE PK → DROP columns. Steps 1–10 enumerate the corrected sequence. Test `test_shadow_column_flow_no_pk_violation` regression-guards it. |
+| HIGH-2 | Wave 3 file-ownership conflicts (P3↔P4 pipeline.py, P2↔P5 cli.py) | **RESOLVED** | Plans now use 6 waves with serial execution: W1=P6, W2=P1, W3=P3, W4=P4, W5=P5, W6=P2. P4 `depends_on: [16-P1, 16-P3]` explicitly. P5 must-haves state "P5 lands BEFORE P2." P2 must-haves state "P5's changes already landed." No two plans in the same wave share files. |
+| HIGH-3 | MIN(old chunk_id) semantics ambiguous — payload source vs final id | **RESOLVED** | P1 Task 2 step 5b: `canonical_old_id = MIN(group.old_ids) # "payload-source row", NOT final id`. Must-have truth #4: "FINAL chunk_id of every surviving row is the 64-hex blake3 value, never an old id." Test `test_collision_canonical_is_min_old_id_for_payload_but_final_id_is_blake3`. |
+| HIGH-4 | body_checksum derivation must reuse chunker helper | **RESOLVED** | P1 action section: `from dotmd.ingestion.chunker import _make_chunk_id`. P1 must-have truth: "New-id derivation reuses chunker._make_chunk_id — plan prose does not restate the hash recipe." Test `test_uses_chunker_make_chunk_id_helper` monkeypatches the import and asserts it was called. |
+| HIGH-5 | Collision-group payload invariant assertion missing | **RESOLVED** | P1 Task 2 step 5a: explicit `payload_invariant_check` fetching text/heading_hierarchy/level for every group member, logging WARN on mismatch. Must-have truth #5. Test `test_collision_group_payload_invariant_mismatch_logs_warn`. |
+| MED-1 | P1 dry-run lock semantics ambiguous | **RESOLVED** | P1 Task 2 dry-run section: "Acquires lock with mode='dry-run' (same contention check as real run)." Must-have truth #10. Test `test_dry_run_acquires_and_releases_lock`. P3 Task 2 test `test_refuses_on_dry_run_lock` confirms trickle also blocked by dry-run lock. |
+| MED-2 | P4 delete_file_subgraph may strip content-keyed MENTIONS edges | **RESOLVED** | P4 Task 1 STEP 1 mandates a code audit with explicit decision tree: (a) safe → call unchanged, (b) unsafe → route through holder-aware alternative. Must-have truth: "Audit of the current implementation is a hard prerequisite." Tests `test_graph_holder_aware_path_when_audit_flags_unsafe`. |
+| MED-3 | P4 transactionality of decrement-cascade not explicit | **RESOLVED** | P4 Task 1 code block: single `conn.execute("BEGIN")` wrapping all strategies × {M2M delete, orphan cascade, vec, FTS}, with explicit `ROLLBACK` on exception. Must-have truth: "The entire per-file purge runs inside ONE sqlite3 transaction; rollback restores pre-purge state exactly." Test `test_purge_is_transactional_on_failure`. |
+| MED-4 | P6 fixture fidelity — must mirror pre-v16 schema | **RESOLVED** | P6 Task 1: `schema_pre_v16.sql` captured verbatim from live DB. `test_fixture_fidelity` asserts expected CREATE TABLE signatures. Must-have truth: "Pre-v16 fixture schema is byte-equivalent to the production pre-v16 schema." |
+| MED-5 | collision_rich_db should be primary fixture (not post_v15_pre_v16_db) | **RESOLVED** | P6 Task 1: collision_rich_db documented as PRIMARY, `pre_v15_db` alias added for clarity. Must-have truth: "treated as the PRIMARY starting-state fixture." |
+| LOW-1 | CLI rendering format not in CONTEXT.md | **RESOLVED** | P5 Task 2 explicitly appends a one-line rendering note to CONTEXT.md. Test `test_renders_multi_holder_with_plus_n_suffix` validates the format. |
+| LOW-2 | Batch hydration to avoid O(K) round-trips | **RESOLVED** | P1 Task 1 adds `get_file_paths_for_chunk_ids` (single SELECT with IN clause). P5 Task 1 uses it with test `test_batch_hydration_single_query_per_strategy`. |
+| LOW-3 | Don't assert exact log strings in tests | **RESOLVED** | P2 Task 1: "assert on structured extras (logger calls), not on exact string matching." P6 must-have truth: "Tests assert on helper/report return values, not on exact log strings." |
+
+---
+
+## New Concerns
+
+### HIGH
+
+**NEW-HIGH-1: P1 Task 2 step 7 M2M remap misses non-canonical chunk_ids — creates orphan M2M references and search-invisible files.**
+
+After step 5d collapses non-canonical rows from `chunks_*`, those old chunk_ids no longer exist. Step 7's UPDATE:
+
+```sql
+UPDATE chunk_file_paths SET chunk_id = (
+    SELECT new_chunk_id FROM chunks c WHERE c.chunk_id = chunk_file_paths.chunk_id
+) WHERE chunk_id IN (SELECT chunk_id FROM chunks);
+```
+
+Only touches M2M rows whose `chunk_id` still exists in `chunks_*`. The M2M rows for discarded (non-canonical) chunk_ids are **never remapped** — they point to dead ids.
+
+Consequence: file B (which shared content with canonical file A) has M2M entries pointing to a chunk_id that no longer exists. File B's content becomes invisible to search after migration. Incremental indexing won't fix it (fingerprint tracker says file unchanged). Only a `--force` full re-index recovers.
+
+**Fix:** Add a remap step between 5d and 7 that redirects non-canonical M2M entries to the canonical chunk_id:
+
+```sql
+-- For each collision group:
+UPDATE chunk_file_paths_<strategy>
+SET chunk_id = :canonical_old_id
+WHERE chunk_id IN (<non_canonical_old_ids>);
+```
+
+Then step 7's canonical→blake3 remap covers all rows. Alternatively, step 7 could use a temp mapping table derived from the collision groups (covering both canonical and non-canonical old_ids → canonical new blake3 id).
+
+### MEDIUM
+
+**NEW-MED-1: P2 header says `wave: 5` but P5 is also `wave: 5` — executor would run them in parallel, re-creating the cli.py conflict.**
+
+P2's own interfaces section states: "Wave 6 = P2." P2's objective says "Sequenced AFTER P5 (wave 5)." The intent is clearly wave 6. But the header `wave: 5` contradicts this. The executor likely uses the header field for scheduling.
+
+Additionally, P2's `depends_on: [16-P1, 16-P3, 16-P4]` omits P5. Without an explicit dependency, the scheduler cannot enforce P5→P2 ordering.
+
+**Fix:** Change P2 header to `wave: 6` and add `16-P5` to `depends_on`.
+
+**NEW-MED-2: P3 Task 1 modifies `migration_v16.py` (to import LOCK_TABLE from shared module) but `migration_v16.py` is not in P3's `files_modified` list.**
+
+P3 action says: "Update migration_v16.py to import LOCK_TABLE from this module." This is a cross-wave edit to a P1-owned file. Acceptable in principle (P3 depends on P1), but the files_modified list should be accurate for the executor's change-tracking.
+
+**Fix:** Add `backend/src/dotmd/ingestion/migration_v16.py` to P3's `files_modified`.
+
+### LOW
+
+**NEW-LOW-1: P3 introduces `get_stored_payload` helper that P1 Task 1 doesn't list.**
+
+P3 Task 1 behavior says "add this thin helper in P1 Task 1 if not already present; if P1 SUMMARY doesn't list it, add it as the first action here." P1's artifact list doesn't include it. P3 should explicitly include `backend/src/dotmd/storage/metadata.py` in its `files_modified` if it plans to add this helper (it currently does not list metadata.py).
+
+---
+
+## Overall Risk After Cycle 2
+
+**MEDIUM** — The 5 cycle-1 HIGH concerns are all genuinely resolved. The rewritten plans are materially stronger: shadow-column flow is correct, wave sequencing eliminates file conflicts, canonical semantics are explicit, `_make_chunk_id` is imported, and payload invariant checks are in place. The one remaining correctness gap is the M2M remap bug (NEW-HIGH-1) — a focused fix to step ordering within P1 Task 2 (add one UPDATE between steps 5d and 7). The wave-number header bug in P2 (NEW-MED-1) is cosmetic but would break automated scheduling. After these two fixes, the plan set is execution-ready.
+
+---
+
+## Execute Readiness Verdict
+
+NEEDS-CYCLE-3 — fix NEW-HIGH-1 (M2M remap gap in P1 step 7) and NEW-MED-1 (P2 wave header + missing P5 dependency). Both are narrow, surgical edits to two plans.
+
+---
+
+## Cycle 2 Consensus Summary
+
+### Cycle-1 concerns — verification
+Both reviewers agree: all 5 HIGH cycle-1 concerns RESOLVED. Shadow-column flow is correct, wave sequencing is serial, `_make_chunk_id` is imported, MIN semantics explicit, payload invariant check added. MEDIUM/LOW all RESOLVED or PARTIAL.
+
+### NEW HIGH concerns (must-fix before execute)
+
+**NEW-HIGH-1 — M2M remap gap in P1 Task 2 step 7** (codex + opencode)
+After step 5d DELETEs non-canonical rows from `chunks_*`, the M2M rows that pointed to those discarded old chunk_ids are never remapped. Step 7 only UPDATEs M2M rows whose `chunk_id` still exists in `chunks_*`. Consequence: file B (sharing content with canonical file A) has M2M entries pointing to a dead id — B becomes search-invisible. Fix: add an intermediate step between 5d and 7 that redirects non-canonical M2M entries to the canonical old_id (so step 7's canonical→blake3 remap covers all survivors), OR use a persistent `{old_id → new_id}` mapping table built BEFORE collapse deletes rows.
+
+**NEW-HIGH-2 — Payload divergence policy is codified data loss** (codex)
+Current plans: on `text`/`heading_hierarchy`/`level` mismatch across a collision group, WARN and keep canonical payload. But `heading_hierarchy` and `level` remain stored on `chunks_*` after phase 16. If two holders legitimately differ (same text under different heading contexts), one holder silently loses metadata. Either:
+- (a) abort collapse on divergence,
+- (b) move `heading_hierarchy` + `level` to the M2M table (per-holder storage — schema change, expands scope),
+- (c) accept the loss and document explicitly (current behaviour — requires user sign-off).
+
+### NEW MEDIUM concerns
+
+**NEW-MED-1 — P2 frontmatter inconsistent** (both)
+P2 frontmatter says `wave: 5` but body says wave 6, and P5 is also `wave: 5`. Executor uses frontmatter. Also P2 `depends_on` omits `16-P5`. Would re-create the cli.py conflict. Fix: P2 header → `wave: 6` + add `16-P5` to `depends_on`.
+
+**NEW-MED-2 — P4 may touch files not in files_modified** (codex)
+P4 Task 1 may edit `backend/src/dotmd/storage/falkordb_graph.py` (holder-aware graph path) and tweak `backend/src/dotmd/search/fts5.py`, but neither is listed in `P4.files_modified`. Fix: add both explicitly, or split graph work into its own plan if scope expands.
+
+**NEW-MED-3 — P3 edits P1-owned file without declaring it** (codex + opencode)
+P3 adds import from `lock_constants` to `migration_v16.py`. That's a P1-owned file. Acceptable given P3 depends on P1, but `P3.files_modified` must list it.
+
+**NEW-MED-4 — P6 fidelity test weak** (codex)
+Test asserts expected DDL signatures, not byte-equivalence against a live pre-v16 schema dump. Strengthen: check CREATE-TABLE output byte-matches a committed reference dump.
+
+### Divergent views
+None — concerns are complementary, not conflicting. Codex went deeper on P1 correctness; opencode on frontmatter/metadata hygiene.
+
+## Overall Risk After Cycle 2
+- **Codex:** HIGH (2 HIGH, 2 MEDIUM, 1 LOW outstanding)
+- **OpenCode:** MEDIUM (1 HIGH, 3 MEDIUM, 1 LOW outstanding — opencode didn't flag payload-divergence as HIGH)
+
+Consensus: **HIGH** — NEW-HIGH-1 is a real bug that would produce silently corrupt migrations; NEW-HIGH-2 needs an explicit user decision.
+
+## Execute Readiness Verdict
+**NEEDS-CYCLE-3** — both reviewers converge. Fix NEW-HIGH-1 (M2M remap design), resolve NEW-HIGH-2 (payload divergence policy — user decision), and normalize P2 frontmatter + P3/P4 files_modified hygiene.
