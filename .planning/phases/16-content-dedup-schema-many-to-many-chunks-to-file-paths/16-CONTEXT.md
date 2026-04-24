@@ -26,9 +26,9 @@ Phase 15 delivered blake3 chunk_ids = `blake3(body_checksum:chunk_index:strategy
 chunks_<strategy> (
     chunk_id TEXT PRIMARY KEY,
     heading_hierarchy TEXT,
-    text TEXT,
-    char_offset INTEGER
+    text TEXT
     -- file_path and chunk_index MOVED to M2M table
+    -- char_offset DROPPED (see Decision #8)
 )
 
 chunk_file_paths_<strategy> (
@@ -91,6 +91,48 @@ Already keyed on `blake3(raw_text + model_sig)` — dedup happens naturally. MEN
 - Recreate chunks_* without file_path/chunk_index columns (SQLite CREATE+SELECT+DROP+RENAME)
 - VACUUM
 
+## Decisions (locked 2026-04-24 via /gsd:discuss-phase 16)
+
+1. **Search result shape — LOCKED** — return all file_paths as a list; no "primary/canonical" path.
+   Rationale (user): identical content has no canonical holder. API exposes `file_paths: list[str]` (stable ordering: sorted lexicographically for reproducibility, not semantics). UI/caller decides what to render.
+
+2. **API contract — LOCKED: clean break.**
+   `file_path: str` is replaced by `file_paths: list[str]` in `SearchResult` and anywhere a chunk surfaces. No `also_at` alias, no deprecation window (per global rule: no backward-compat obligations).
+
+3. **chunk_index placement — LOCKED: M2M table only; PK includes chunk_index.**
+   `chunks_*` drops `chunk_index`; it lives in `chunk_file_paths_*(chunk_id, file_path, chunk_index)` with `PRIMARY KEY (chunk_id, file_path, chunk_index)`. Rationale: identical content can legitimately appear multiple times in one file (repeated headings, boilerplate), so `(chunk_id, file_path)` alone is not unique. JOIN cost is negligible with the `(file_path)` index.
+
+4. **Vec collision during migration — LOCKED: keep canonical, discard others, assert divergence.**
+   When N old chunks collapse to one new blake3 id, pick canonical = MIN(old chunk_id) for `vec_meta_*` + `vec0_*` + `chunks_fts_*`. Drop the other vectors. Before discard, compute cosine(canonical, discarded) for each pair in the collision group; log WARN if any pair exceeds 0.01 distance (catches unexpected non-determinism or hash collisions on genuinely different content). Do not abort on divergence — migration continues; operator reviews log post-run. TEI non-determinism on identical text is below retrieval noise floor; averaging adds complexity with zero measurable benefit; recomputing defeats the cache-reuse win that motivated Phase 15.
+
+5. **FalkorDB semantics — LOCKED: zero graph changes in Phase 16.**
+   - `MENTIONS(chunk_id → entity)` stays unchanged (already content-keyed — correct).
+   - `CO_OCCURS(entity → entity)` stays unchanged.
+   - `File` nodes stay as-is (no new `HOLDS` edges). No current query or feature needs `File → chunk_id` traversal. Deferred to backlog item 16.1 if and when a consumer demands it. Rationale (Kaizen): building edge infrastructure with no consumer is gold-plating; `HOLDS` duplication on heavily-mirrored content (e.g., `~/.agents/` copies) would inflate graph size for unused queries.
+
+6. **Transaction strategy — LOCKED: per-strategy checkpoints + advisory lock; no VACUUM in v1.**
+   Reuse the `migration_v15_state` pattern (renamed `migration_v16_state`). Each strategy migrates in its own transaction with a resume marker. Additionally:
+   - **Advisory lock** — migration writes `locked_at` sentinel row on start, clears on success. Trickle checks this row on startup and refuses to run while set. Migration must NOT run concurrently with trickle (DDL vs long-lived connection = deadlock/partial write).
+   - **Skip VACUUM** — VACUUM requires 2× disk and holds write lock for the duration. Document as manual post-migration step, not chained into the run.
+   - **Prefer `ALTER TABLE DROP COLUMN`** (SQLite ≥3.35) over full CREATE+SELECT+DROP+RENAME rebuild where the only schema change is dropping `file_path`/`chunk_index`. Falls back to rebuild only if DROP COLUMN fails.
+
+7. **Test coverage — LOCKED: full edge-case suite + observability + dry-run.**
+   **Data correctness:** modify-one-of-dup-pair, delete-one-of-dup-pair, merge-into-existing, empty-strategy no-op, empty-knowledgebase migration.
+   **Operational:** mid-strategy crash + resume (state marker correctness), trickle-refuses-to-run while lock held, trickle-resumes-correctly post-migration (NOT concurrent *during* DDL).
+   **Invariants:** pre/post row-count deltas match expected collision-collapse, no orphan chunk_ids in vec_meta_* or FTS, all chunk_ids are 64-char blake3, `UNIQUE(file_path, chunk_index)` holds per strategy.
+   **Quality:** vector-divergence assertion during collapse (WARN threshold 0.01 cosine), round-trip top-K property test (fixed query set returns same results pre- vs post-migration for non-collision chunks), `file_paths` list returned in sorted order.
+   **Ops modes:**
+   - `--dry-run` — writes nothing; reports collision counts, divergence stats, disk delta estimate.
+   - `--verify-only` — runs all invariant checks on live DB without mutation.
+   - `migrate status` CLI — reports current state marker, per-strategy progress.
+   - Structured progress logs: rows/sec, ETA, collision count per strategy, tagged `dotmd-migrate` for journald filtering.
+
+8. **`char_offset` — LOCKED: DROP entirely in Phase 16.**
+   Audit (2026-04-24): `char_offset` is written by `chunker.py` and stored in `metadata.py` but read by zero consumers outside the write path (no reference in search/fusion/CLI/MCP/service). Under M2M the value would be correct only for the canonical file, lying for every other holder. Panel verdict: remove from `Chunk` model, from chunker emission, and drop the column from every `chunks_*` strategy. If a future feature needs per-file offsets (e.g., UI "jump to chunk"), reintroduce on the junction table at that time — cheap migration, correct semantics. Aligns with clean-break + YAGNI + no-legacy-compat preferences.
+
+9. **`migration_v15.py` fate — LOCKED: keep as no-op stub this cycle, remove next cycle.**
+   Leave `migration_v15.py` in place with a clear deprecation banner ("superseded by migration_v16; this script is a no-op — run `dotmd migrate` instead"). Removal deferred to v1.5+1 and tracked via a beads ticket with `--defer` so it isn't forgotten. Rationale: minor safety net for anyone with a half-run v15 state; zero maintenance cost as a stub.
+
 ## Open questions (for /gsd:discuss-phase 16)
 
 1. **Canonical file_path for search results** — MIN lexicographic / shortest / closest to data_dir / newest mtime? (pillar of UX)
@@ -101,14 +143,16 @@ Already keyed on `blake3(raw_text + model_sig)` — dedup happens naturally. MEN
 6. **Transaction strategy** — one big transaction (safest, longest lock) vs per-strategy checkpoints with resume marker (like `migration_v15_state`)?
 7. **Test coverage** — at minimum: modify-one, delete-one, merge-into-existing. Additional: concurrent trickle + cleanup, empty knowledgebase migration.
 
-## Expected plan breakdown (~6 plans after /gsd:plan-phase)
+## Expected plan breakdown (~6 plans after /gsd:plan-phase) — updated post-panel
 
-- **P1**: Schema migration (new M2M table + collapse duplicates + UPDATE chunk_ids to blake3)
-- **P2**: Ingest flow rewrite (INSERT OR IGNORE + M2M association)
-- **P3**: `_purge_file` + trickle change-detection decrement-style rewrite
-- **P4**: Search API + result rendering (file_paths exposure, canonical selection)
-- **P5**: FalkorDB semantics (File-node reshape or edge strategy)
-- **P6**: Test suite (all edge cases above)
+- **P1**: Schema migration core — new `chunk_file_paths_*` M2M tables with PK `(chunk_id, file_path, chunk_index)`, blake3 id remap, collision collapse with canonical-keep + divergence assertion, per-strategy transaction + `migration_v16_state` resume marker, advisory lock sentinel. `ALTER TABLE DROP COLUMN` preferred over full rebuild. Also drops `char_offset` and replaces `migration_v15.py` with a no-op deprecation stub (Decisions #8, #9).
+- **P2**: Migration ops modes — `--dry-run`, `--verify-only`, `migrate status` CLI, structured progress logs (journald tag `dotmd-migrate`).
+- **P3**: Ingest flow rewrite — `INSERT OR IGNORE` on `chunks_*` + `INSERT OR IGNORE` on `chunk_file_paths_*`; trickle startup advisory-lock check.
+- **P4**: `_purge_file` + trickle change-detection — decrement-style rewrite: remove M2M rows for file, cascade-delete chunks_*/vec_meta_*/vec0/FTS only when holder count reaches 0.
+- **P5**: Search API clean break — `SearchResult.file_paths: list[str]` (sorted lex) replaces `file_path: str`; rendering JOIN through M2M; update CLI + MCP + API consumers.
+- **P6**: Test suite — all data-correctness + operational + invariant + quality cases from Decision #7. FalkorDB graph changes deferred (see Decision #5).
+
+**Deferred to backlog:** `HOLDS(File → chunk_id)` edges in FalkorDB (file as 16.1 if ever demanded).
 
 ## Blockers this phase unblocks
 
