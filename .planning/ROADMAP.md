@@ -105,7 +105,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 | 11. Embedding Model Evaluation | v1.4 | Complete | 2026-04-01 |
 | 12. Indexing Integrity Rework | v1.4 | Complete | 2026-04-02 |
 | 13. Content-Aware Chunking & Search | v1.4 | Complete | 2026-04-02 |
-| 14. Frontmatter-Driven Indexing | v1.4 | In Progress | — |
+| 14. Frontmatter-Driven Indexing | v1.4 | Complete | 2026-04-02 |
 | 15. Content-addressed caching | v1.4 | Not started | — |
 
 ## Backlog
