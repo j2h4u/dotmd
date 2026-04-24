@@ -28,10 +28,8 @@ class TestSearchEngines:
             assert "keyword" in result["matched_engines"]
 
     def test_graph_returns_results(self, client: httpx.Client):
-        """TEST-03: Graph search returns results."""
+        """TEST-03: Graph search mode returns results (blends semantic, keyword, graph_direct)."""
         r = client.get("/search", params={"q": "test", "top_k": 5, "mode": "graph"})
         assert r.status_code == 200
         data = r.json()
         assert data["count"] > 0, "Graph search returned no results"
-        for result in data["results"]:
-            assert "graph" in result["matched_engines"]
