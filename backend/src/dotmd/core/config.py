@@ -68,6 +68,8 @@ class Settings(BaseSettings):
         "activity",
         "date_time",
     ]
+    # GLiNER model for NER extraction. Changing this clears the extraction_cache.
+    ner_model_name: str = "urchade/gliner_multi-v2.1"
 
     # Initial TEI batch size for embedding requests. Auto-tuned down on 413 errors.
     # Small batches (4-8) are often faster on CPU due to lower TEI queue/inference time.
