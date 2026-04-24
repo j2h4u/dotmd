@@ -30,5 +30,11 @@
   },
   "mode": "yolo",
   "granularity": "coarse",
-  "resolve_model_ids": "omit"
+  "resolve_model_ids": "omit",
+  "review": {
+    "models": {
+      "codex": "ssh hetz sudo codex exec",
+      "opencode": "opencode run"
+    }
+  }
 }
