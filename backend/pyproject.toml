@@ -9,6 +9,7 @@ description = "Markdown knowledgebase search tool with semantic, keyword, and gr
 license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
+    "blake3>=1.0",
     "click>=8.0",
     "sentence-transformers>=3.0",
     "transformers>=4.45,<5",
