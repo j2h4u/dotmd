@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 from pathlib import Path
@@ -24,7 +23,7 @@ _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
 def _make_chunk_id(body_checksum: str, chunk_index: int, chunk_strategy: str) -> str:
     """Content-addressed chunk identifier — path-independent.
 
-    body_checksum is blake2b(kind + body) from chunk_fingerprints_{strategy}.
+    body_checksum is blake3(kind + "\n" + body) from chunk_fingerprints_{strategy}.
     Equivalent to chunk_checksum() in reader.py.
 
     chunk_strategy prevents collisions between heading_512_50 and
@@ -176,7 +175,7 @@ def chunk_file(
 
     # Compute body_checksum for content-addressed chunk IDs.
     # Formula: blake2b(kind + "\n" + body) — matches chunk_fingerprints_{strategy}.checksum.
-    body_checksum = hashlib.blake2b(f"{kind}\n{body}".encode()).hexdigest()
+    body_checksum = _blake3.blake3(f"{kind}\n{body}".encode()).hexdigest()
 
     handler = get_handler(kind)
     sections = _parse_sections(body)

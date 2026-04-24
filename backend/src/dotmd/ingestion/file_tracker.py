@@ -8,7 +8,7 @@ The two-stage detection strategy avoids unnecessary I/O:
 
 1. If ``mtime`` **and** ``size`` match the stored fingerprint the file is
    classified as **unchanged** without reading any bytes.
-2. Only when ``mtime`` or ``size`` differ is the blake2b checksum computed.
+2. Only when ``mtime`` or ``size`` differ is the blake3 checksum computed.
    If the checksum still matches (e.g. a ``touch`` without content change)
    the file is classified as **unchanged** and the stored mtime/size are
    silently updated.

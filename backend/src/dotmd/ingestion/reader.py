@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
+import blake3
 import logging
 import os
 import re
@@ -60,7 +60,7 @@ def chunk_checksum(path: Path) -> str:
     frontmatter, body = parse_frontmatter(content)
     kind = frontmatter.get("kind", DocKind.DOCUMENT)
     payload = f"{kind}\n{body}"
-    return hashlib.blake2b(payload.encode()).hexdigest()
+    return blake3.blake3(payload.encode()).hexdigest()
 
 
 def embed_checksum(path: Path) -> str:
@@ -85,7 +85,7 @@ def embed_checksum(path: Path) -> str:
     tags = frontmatter.get("tags", [])
     tags_str = ",".join(sorted(str(t) for t in tags)) if tags else ""
     payload = f"{kind}\n{title}\n{tags_str}\n{body}"
-    return hashlib.blake2b(payload.encode()).hexdigest()
+    return blake3.blake3(payload.encode()).hexdigest()
 
 
 def _extract_title(content: str, path: Path, frontmatter: dict | None = None) -> str:

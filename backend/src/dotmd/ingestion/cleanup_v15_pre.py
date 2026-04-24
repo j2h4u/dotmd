@@ -216,13 +216,24 @@ def plan_cleanup(conn: sqlite3.Connection) -> dict:
     return plan
 
 
+def _connect_with_vec0(index_db_path: Path) -> sqlite3.Connection:
+    """Open the index database with sqlite-vec loaded (required to touch vec0 tables)."""
+    import sqlite_vec
+
+    conn = sqlite3.connect(str(index_db_path))
+    conn.enable_load_extension(True)
+    sqlite_vec.load(conn)
+    conn.enable_load_extension(False)
+    return conn
+
+
 def run_cleanup(index_db_path: Path, apply: bool) -> int:
     """Main entrypoint. Returns exit code."""
     if not index_db_path.exists():
         print(f"ERROR: {index_db_path} not found", file=sys.stderr)
         return 2
 
-    conn = sqlite3.connect(str(index_db_path))
+    conn = _connect_with_vec0(index_db_path)
     try:
         plan = plan_cleanup(conn)
 

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # Schema constants
 _SCHEMA_INIT = [
     # Node tables
-    "CREATE NODE TABLE IF NOT EXISTS File(id STRING, title STRING, checksum STRING, PRIMARY KEY (id))",
+    "CREATE NODE TABLE IF NOT EXISTS File(id STRING, title STRING, PRIMARY KEY (id))",
     "CREATE NODE TABLE IF NOT EXISTS Section(id STRING, heading STRING, level INT64, file_path STRING, text_preview STRING, PRIMARY KEY (id))",
     "CREATE NODE TABLE IF NOT EXISTS Entity(id STRING, type STRING, source STRING, PRIMARY KEY (id))",
     "CREATE NODE TABLE IF NOT EXISTS Tag(id STRING, PRIMARY KEY (id))",
@@ -100,12 +100,11 @@ class LadybugDBGraphStore:
         self,
         file_path: str,
         title: str,
-        checksum: str,
     ) -> None:
         with self._connection() as conn:
             conn.execute(
-                "MERGE (f:File {id: $id}) SET f.title = $title, f.checksum = $checksum",
-                parameters={"id": file_path, "title": title, "checksum": checksum},
+                "MERGE (f:File {id: $id}) SET f.title = $title",
+                parameters={"id": file_path, "title": title},
             )
 
     def add_section_node(
@@ -291,7 +290,7 @@ class LadybugDBGraphStore:
 
             # Nodes
             for label, cols in [
-                ("File", "n.id, n.title, n.checksum"),
+                ("File", "n.id, n.title"),
                 ("Section", "n.id, n.heading, n.level, n.file_path, n.text_preview"),
                 ("Entity", "n.id, n.type, n.source"),
                 ("Tag", "n.id"),

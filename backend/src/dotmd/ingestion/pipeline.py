@@ -17,7 +17,7 @@ multi-strategy experimentation without data collision.
 
 from __future__ import annotations
 
-import hashlib
+import blake3
 import logging
 import sqlite3
 import time
@@ -461,7 +461,7 @@ class IndexingPipeline:
 
         # text_hash on enriched text (prefix changes embedding → different hash)
         text_hashes: dict[str, str] = {
-            cid: hashlib.blake2b(text.encode()).hexdigest()
+            cid: blake3.blake3(text.encode()).hexdigest()
             for cid, text in enriched_texts.items()
         }
 
@@ -570,7 +570,7 @@ class IndexingPipeline:
             except OSError:
                 pass
             self._graph_store.add_file_node(
-                file_path=fp, title=str(title), checksum="",
+                file_path=fp, title=str(title),
             )
 
         # Section nodes + CONTAINS edges
@@ -1255,7 +1255,6 @@ class IndexingPipeline:
             self._graph_store.add_file_node(
                 file_path=str(file_info.path),
                 title=file_info.title,
-                checksum=file_info.checksum,
             )
         for chunk in chunks:
             self._graph_store.add_section_node(

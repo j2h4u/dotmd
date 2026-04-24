@@ -66,7 +66,6 @@ class FalkorDBGraphStore:
         self,
         file_path: str,
         title: str,
-        checksum: str,
     ) -> None:
         """Create or update a node representing a source file.
 
@@ -76,13 +75,10 @@ class FalkorDBGraphStore:
             Absolute or workspace-relative path to the file.
         title:
             Human-readable title for the file.
-        checksum:
-            Content hash used for change detection.
         """
         self._graph.query(
-            "MERGE (f:File {id: $id}) "
-            "SET f.title = $title, f.checksum = $checksum",
-            params={"id": file_path, "title": title, "checksum": checksum},
+            "MERGE (f:File {id: $id}) SET f.title = $title",
+            params={"id": file_path, "title": title},
         )
 
     def add_section_node(

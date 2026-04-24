@@ -135,7 +135,6 @@ class GraphStoreProtocol(Protocol):
         self,
         file_path: str,
         title: str,
-        checksum: str,
     ) -> None:
         """Create or update a node representing a source file.
 
@@ -145,8 +144,6 @@ class GraphStoreProtocol(Protocol):
             Absolute or workspace-relative path to the file.
         title:
             Human-readable title for the file.
-        checksum:
-            Content hash used for change detection.
         """
         ...
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -70,17 +69,6 @@ class FileInfo(BaseModel):
     size_bytes: int
     kind: str = DocKind.DOCUMENT
     frontmatter: dict = Field(default_factory=dict)
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def checksum(self) -> str:
-        """blake2b hash of raw file bytes including frontmatter. Reads from disk on every access.
-
-        Used only for graph File nodes (informational). For change detection,
-        use ``reader.chunk_checksum()`` (body+kind) or ``reader.embed_checksum()``
-        (body+kind+title+tags). Raises ``FileNotFoundError`` if the file no longer exists.
-        """
-        return hashlib.blake2b(self.path.read_bytes()).hexdigest()
 
 
 class Chunk(BaseModel):

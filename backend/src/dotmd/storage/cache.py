@@ -14,9 +14,10 @@ caller must call :meth:`clear` before the first lookup.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
+
+import blake3
 import sqlite3
 import struct
 from typing import TYPE_CHECKING
@@ -193,7 +194,7 @@ class ExtractionCache:
     They are rebuilt at read time using the current chunk.chunk_id.
 
     Invalidation: full table clear when model_sig changes.
-    model_sig = blake2b(model_name + entity_types_hash + str(threshold)).hexdigest()
+    model_sig = blake3(model_name + entity_types_hash + str(threshold)).hexdigest()
     """
 
     _BATCH = 500  # max placeholders per IN-clause
@@ -208,10 +209,10 @@ class ExtractionCache:
         self._conn = conn
         self._model_name = model_name
         self._threshold = threshold
-        self._entity_types_hash = hashlib.blake2b(
+        self._entity_types_hash = blake3.blake3(
             ",".join(sorted(entity_types)).encode()
         ).hexdigest()
-        self._model_sig = hashlib.blake2b(
+        self._model_sig = blake3.blake3(
             (model_name + self._entity_types_hash + str(threshold)).encode()
         ).hexdigest()
         self.ensure_table()
@@ -294,8 +295,8 @@ class ExtractionCache:
         Uses raw chunk.text — NOT the pipeline's text_hash (which is for
         enriched text). This is correct because GLiNER runs on raw text.
         """
-        chunk_text_hash = hashlib.blake2b(chunk_text.encode()).hexdigest()
-        return hashlib.blake2b(
+        chunk_text_hash = blake3.blake3(chunk_text.encode()).hexdigest()
+        return blake3.blake3(
             (chunk_text_hash + self._model_sig).encode()
         ).hexdigest()
 
