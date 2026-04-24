@@ -1074,33 +1074,47 @@ class IndexingPipeline:
     ) -> tuple[int, int, int]:
         """Remove indexed data for files not in *discovered_paths*.
 
-        Compares ``SELECT DISTINCT file_path`` from the chunks table against
-        the set of paths currently on disk.  Any file_path present in the
-        database but absent from *discovered_paths* is purged from all stores
-        (chunks, FTS5, vectors, graph, fingerprints).
+        Scans EVERY ``chunks_*`` table (across all chunk strategies, not just
+        the currently active one) and removes any file_path that is absent
+        from *discovered_paths* from every associated store:
+        chunks, chunks_fts, vec_meta/vec0 (all embedding models),
+        chunk_fingerprints, embed_fingerprints, graph subgraph.
 
-        Processes orphans in batches of 100 to keep transactions bounded.
+        Processes orphans in batches to keep the single transaction bounded.
 
         Returns ``(files_removed, chunks_removed, vectors_removed)``.
         """
-        # Discover stored file paths from the chunks table
-        try:
-            rows = self._conn.execute(
-                f"SELECT DISTINCT file_path FROM {self._chunks_table}",
+        # Discover every chunks_<strategy> table and its companion tables.
+        strategies = [
+            r[0].removeprefix("chunks_")
+            for r in self._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name LIKE 'chunks_%' AND name NOT LIKE 'chunks_fts_%'"
             ).fetchall()
-        except sqlite3.OperationalError:
-            # Table doesn't exist yet (fresh install)
+        ]
+        if not strategies:
             return 0, 0, 0
 
-        stored_paths = {row[0] for row in rows}
-        orphan_paths = stored_paths - discovered_paths
+        # Union of file paths stored across all strategies.
+        stored_paths: set[str] = set()
+        for strat in strategies:
+            try:
+                rows = self._conn.execute(
+                    f"SELECT DISTINCT file_path FROM chunks_{strat}"
+                ).fetchall()
+            except sqlite3.OperationalError:
+                continue
+            stored_paths.update(r[0] for r in rows)
 
+        orphan_paths = stored_paths - discovered_paths
         if not orphan_paths:
             return 0, 0, 0
 
         logger.info(
-            "Orphan cleanup: %d stored files, %d discovered, %d orphans to remove",
+            "Orphan cleanup: %d stored files, %d discovered, %d orphans to remove "
+            "(across %d chunk strategies: %s)",
             len(stored_paths), len(discovered_paths), len(orphan_paths),
+            len(strategies), ", ".join(strategies),
         )
 
         files_removed = 0
@@ -1114,23 +1128,17 @@ class IndexingPipeline:
             batch = orphan_list[i : i + batch_size]
 
             for file_path in batch:
-                chunk_ids = self._metadata_store.get_chunk_ids_by_file(file_path)
-                n_chunks = len(chunk_ids)
-
-                if chunk_ids:
-                    # Delete vectors from ALL vec_meta tables for current model
-                    n_vecs = self._vector_store.delete_vectors_by_chunk_ids(
-                        chunk_ids,
-                    )
-                    vectors_removed += n_vecs if isinstance(n_vecs, int) else n_chunks
-                    self._keyword_engine.remove_chunks(chunk_ids)
-
-                self._metadata_store.delete_chunks_by_file(file_path)
-                self._graph_store.delete_file_subgraph(file_path)
-                self._chunk_tracker.remove_fingerprint(file_path)
-                self._embed_tracker.remove_fingerprint(file_path)
+                n_chunks, n_vecs = self._purge_file_all_strategies(
+                    file_path, strategies,
+                )
+                try:
+                    self._graph_store.delete_file_subgraph(file_path)
+                except Exception:  # noqa: BLE001
+                    logger.debug("graph delete_file_subgraph failed for %s",
+                                 file_path, exc_info=True)
 
                 chunks_removed += n_chunks
+                vectors_removed += n_vecs
                 files_removed += 1
 
             if i + batch_size < len(orphan_list):
@@ -1144,6 +1152,100 @@ class IndexingPipeline:
             files_removed, chunks_removed, vectors_removed,
         )
         return files_removed, chunks_removed, vectors_removed
+
+    def _purge_file_all_strategies(
+        self, file_path: str, strategies: list[str],
+    ) -> tuple[int, int]:
+        """Cascade-delete a single file_path from every chunk strategy.
+
+        Returns ``(chunks_removed, vectors_removed)``.
+        """
+        chunks_removed = 0
+        vectors_removed = 0
+
+        for strat in strategies:
+            chunks_table = f"chunks_{strat}"
+            fts_table = f"chunks_fts_{strat}"
+            fp_table = f"chunk_fingerprints_{strat}"
+
+            try:
+                chunk_ids = [
+                    r[0] for r in self._conn.execute(
+                        f"SELECT chunk_id FROM {chunks_table} WHERE file_path = ?",
+                        (file_path,),
+                    ).fetchall()
+                ]
+            except sqlite3.OperationalError:
+                continue
+
+            if chunk_ids:
+                ph = ",".join("?" * len(chunk_ids))
+
+                # vec_meta / vec0 for every embedding model present in this strategy
+                vec_meta_tables = [
+                    r[0] for r in self._conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' "
+                        "AND name LIKE ?",
+                        (f"vec_meta_{strat}_%",),
+                    ).fetchall()
+                ]
+                for vm in vec_meta_tables:
+                    vec0_table = "vec_chunks_" + vm.removeprefix("vec_meta_")
+                    rowids = [
+                        r[0] for r in self._conn.execute(
+                            f"SELECT rowid FROM {vm} WHERE chunk_id IN ({ph})",
+                            chunk_ids,
+                        ).fetchall()
+                    ]
+                    if rowids:
+                        rph = ",".join("?" * len(rowids))
+                        try:
+                            self._conn.execute(
+                                f"DELETE FROM {vec0_table} WHERE rowid IN ({rph})",
+                                rowids,
+                            )
+                            vectors_removed += len(rowids)
+                        except sqlite3.OperationalError:
+                            logger.debug("vec0 delete failed for %s", vec0_table,
+                                         exc_info=True)
+                    self._conn.execute(
+                        f"DELETE FROM {vm} WHERE chunk_id IN ({ph})", chunk_ids,
+                    )
+
+                # FTS5 rows
+                try:
+                    self._conn.execute(
+                        f"DELETE FROM {fts_table} WHERE chunk_id IN ({ph})",
+                        chunk_ids,
+                    )
+                except sqlite3.OperationalError:
+                    pass
+
+                chunks_removed += len(chunk_ids)
+                self._conn.execute(
+                    f"DELETE FROM {chunks_table} WHERE chunk_id IN ({ph})",
+                    chunk_ids,
+                )
+
+            # fingerprints (keyed on file_path, not chunk_id)
+            try:
+                self._conn.execute(
+                    f"DELETE FROM {fp_table} WHERE file_path = ?", (file_path,),
+                )
+            except sqlite3.OperationalError:
+                pass
+            for embed_fp in [
+                r[0] for r in self._conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE ?",
+                    (f"embed_fingerprints_{strat}_%",),
+                ).fetchall()
+            ]:
+                self._conn.execute(
+                    f"DELETE FROM {embed_fp} WHERE file_path = ?", (file_path,),
+                )
+
+        self._conn.commit()
+        return chunks_removed, vectors_removed
 
     # ------------------------------------------------------------------
     # Extraction helpers

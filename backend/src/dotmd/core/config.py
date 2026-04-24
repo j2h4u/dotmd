@@ -86,7 +86,21 @@ class Settings(BaseSettings):
     # Directories (full recursive .md scan) or glob patterns (e.g., "/home/**/README.md")
     indexing_paths: list[str] = []
     # Exclude patterns -- glob patterns to filter out (e.g., "**/node_modules")
-    indexing_exclude: list[str] = ["**/node_modules", "**/.git", "**/__pycache__"]
+    indexing_exclude: list[str] = [
+        "**/node_modules",
+        "**/.git",
+        "**/__pycache__",
+        "**/.pytest_cache",
+        "**/.ruff_cache",
+        "**/.mypy_cache",
+        "**/.tox",
+        "**/.nox",
+        "**/.venv",
+        "**/venv",
+        "**/dist",
+        "**/build",
+        "**/.cache",
+    ]
 
     # Trickle indexer settings
     poll_interval_seconds: float = 3600.0  # 1 hour fallback poll
