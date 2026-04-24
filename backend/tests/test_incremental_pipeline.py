@@ -70,8 +70,7 @@ def mock_settings(index_dir: Path):
     """Return a Settings-like mock with paths pointing to temp dirs."""
     settings = MagicMock()
     settings.index_dir = index_dir
-    settings.sqlite_path = index_dir / "metadata.db"
-    settings.sqlite_vec_path = index_dir / "vec.db"
+    settings.index_db_path = index_dir / "index.db"
     settings.graph_db_path = index_dir / "graphdb"
 
     settings.acronyms_path = index_dir / "acronyms.json"
@@ -79,11 +78,15 @@ def mock_settings(index_dir: Path):
     settings.embedding_url = "http://test:8088"
     settings.extract_depth = "structural"  # skip NER for speed
     settings.ner_entity_types = []
+    settings.ner_model_name = "urchade/gliner_multi-v2.1"
+    settings.chunk_strategy = "heading_512_50"
     settings.max_chunk_tokens = 512
     settings.chunk_overlap_tokens = 50
     settings.read_only = False
     settings.vector_backend = "sqlite-vec"
     settings.lancedb_path = index_dir / "lancedb"
+    settings.tei_batch_size = 32
+    settings.needs_embedding_prefix = False
     return settings
 
 
@@ -120,7 +123,8 @@ class TestFirstIndex:
         assert stats.total_files == 2
         assert stats.total_chunks == 2
         # Verify chunks were saved
-        assert mock_read_file.call_count == 2
+        # Two-fingerprint arch reads each new file twice (chunk + embed tracker paths)
+        assert mock_read_file.call_count == 4
         assert mock_chunk_file.call_count == 2
 
 
@@ -209,7 +213,8 @@ class TestModifiedFile:
         stats = pipeline.index(md_dir)
 
         # Only file A should be re-read (modified), not file B (unchanged)
-        assert mock_read_file.call_count == 1
+        # Two-fingerprint arch reads each changed file twice (chunk + embed tracker paths)
+        assert mock_read_file.call_count == 2
         assert mock_chunk_file.call_count == 1
         assert stats.total_chunks >= 1
 
@@ -256,9 +261,9 @@ class TestDeletedFile:
 
         # No new files to read (b is unchanged)
         assert mock_read_file.call_count == 0
-        # File a's fingerprint should be gone
+        # File a's fingerprint should be gone from chunk tracker table
         cursor = pipeline._metadata_store._conn.execute(
-            "SELECT COUNT(*) FROM file_fingerprints WHERE file_path = ?",
+            "SELECT COUNT(*) FROM chunk_fingerprints_heading_512_50 WHERE file_path = ?",
             (str(md_dir / "a.md"),),
         )
         assert cursor.fetchone()[0] == 0
@@ -305,7 +310,8 @@ class TestNewFileAdded:
         stats = pipeline.index(md_dir)
 
         # Only file c should be read (new), not file a (unchanged)
-        assert mock_read_file.call_count == 1
+        # Two-fingerprint arch reads each new file twice (chunk + embed tracker paths)
+        assert mock_read_file.call_count == 2
         assert stats.total_files == 2  # both files counted
 
 
@@ -386,8 +392,8 @@ class TestFingerprintTiming:
             return original_save_fp(*args)
 
         pipeline._semantic_engine.encode_batch = tracking_encode
-        original_save_fp = pipeline._file_tracker.save_fingerprint
-        pipeline._file_tracker.save_fingerprint = tracking_save_fp
+        original_save_fp = pipeline._chunk_tracker.save_fingerprint
+        pipeline._chunk_tracker.save_fingerprint = tracking_save_fp
 
         pipeline.index(md_dir)
 
@@ -493,7 +499,8 @@ class TestForceReindex:
         # force=True should process all files even though nothing changed
         stats = pipeline.index(md_dir, force=True)
 
-        assert mock_read_file.call_count == 2
+        # Two-fingerprint arch reads each file twice (chunk + embed tracker paths)
+        assert mock_read_file.call_count == 4
         assert mock_chunk_file.call_count == 2
         assert stats.total_files == 2
 
@@ -517,21 +524,21 @@ class TestForceReindex:
         # First index
         pipeline.index(md_dir)
 
-        # Verify fingerprint exists
+        # Verify fingerprint exists in chunk tracker table
         cursor = pipeline._metadata_store._conn.execute(
-            "SELECT COUNT(*) FROM file_fingerprints"
+            "SELECT COUNT(*) FROM chunk_fingerprints_heading_512_50"
         )
         assert cursor.fetchone()[0] == 1
 
-        # Spy on file_tracker.clear
-        original_clear = pipeline._file_tracker.clear
+        # Spy on chunk_tracker.clear
+        original_clear = pipeline._chunk_tracker.clear
         clear_called = []
 
         def tracking_clear():
             clear_called.append(True)
             return original_clear()
 
-        pipeline._file_tracker.clear = tracking_clear
+        pipeline._chunk_tracker.clear = tracking_clear
 
         # Reset mocks for force=True run
         mock_read_file.reset_mock()

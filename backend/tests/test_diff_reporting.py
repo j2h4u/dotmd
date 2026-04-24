@@ -228,8 +228,7 @@ class TestPipelineIncrementalDiffCounts:
 
         settings = MagicMock()
         settings.index_dir = index_dir
-        settings.sqlite_path = index_dir / "metadata.db"
-        settings.sqlite_vec_path = index_dir / "vec.db"
+        settings.index_db_path = index_dir / "index.db"
         settings.graph_db_path = index_dir / "graphdb"
 
         settings.acronyms_path = index_dir / "acronyms.json"
@@ -237,11 +236,15 @@ class TestPipelineIncrementalDiffCounts:
         settings.embedding_url = "http://test:8088"
         settings.extract_depth = "structural"
         settings.ner_entity_types = []
+        settings.ner_model_name = "urchade/gliner_multi-v2.1"
+        settings.chunk_strategy = "heading_512_50"
         settings.max_chunk_tokens = 512
         settings.chunk_overlap_tokens = 50
         settings.read_only = False
         settings.vector_backend = "sqlite-vec"
         settings.lancedb_path = index_dir / "lancedb"
+        settings.tei_batch_size = 32
+        settings.needs_embedding_prefix = False
 
         file_a = _make_file_info(str(md_dir / "a.md"), "File A")
         file_b = _make_file_info(str(md_dir / "b.md"), "File B")
@@ -311,8 +314,7 @@ class TestPipelineFullIndexDiffCounts:
 
         settings = MagicMock()
         settings.index_dir = index_dir
-        settings.sqlite_path = index_dir / "metadata.db"
-        settings.sqlite_vec_path = index_dir / "vec.db"
+        settings.index_db_path = index_dir / "index.db"
         settings.graph_db_path = index_dir / "graphdb"
 
         settings.acronyms_path = index_dir / "acronyms.json"
@@ -320,11 +322,15 @@ class TestPipelineFullIndexDiffCounts:
         settings.embedding_url = "http://test:8088"
         settings.extract_depth = "structural"
         settings.ner_entity_types = []
+        settings.ner_model_name = "urchade/gliner_multi-v2.1"
+        settings.chunk_strategy = "heading_512_50"
         settings.max_chunk_tokens = 512
         settings.chunk_overlap_tokens = 50
         settings.read_only = False
         settings.vector_backend = "sqlite-vec"
         settings.lancedb_path = index_dir / "lancedb"
+        settings.tei_batch_size = 32
+        settings.needs_embedding_prefix = False
 
         file_a = _make_file_info(str(md_dir / "a.md"))
         file_b = _make_file_info(str(md_dir / "b.md"))
@@ -372,8 +378,7 @@ class TestPipelineNoChangesDiffCounts:
 
         settings = MagicMock()
         settings.index_dir = index_dir
-        settings.sqlite_path = index_dir / "metadata.db"
-        settings.sqlite_vec_path = index_dir / "vec.db"
+        settings.index_db_path = index_dir / "index.db"
         settings.graph_db_path = index_dir / "graphdb"
 
         settings.acronyms_path = index_dir / "acronyms.json"
@@ -381,11 +386,15 @@ class TestPipelineNoChangesDiffCounts:
         settings.embedding_url = "http://test:8088"
         settings.extract_depth = "structural"
         settings.ner_entity_types = []
+        settings.ner_model_name = "urchade/gliner_multi-v2.1"
+        settings.chunk_strategy = "heading_512_50"
         settings.max_chunk_tokens = 512
         settings.chunk_overlap_tokens = 50
         settings.read_only = False
         settings.vector_backend = "sqlite-vec"
         settings.lancedb_path = index_dir / "lancedb"
+        settings.tei_batch_size = 32
+        settings.needs_embedding_prefix = False
 
         file_a = _make_file_info(str(md_dir / "a.md"))
         file_b = _make_file_info(str(md_dir / "b.md"))

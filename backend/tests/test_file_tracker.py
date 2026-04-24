@@ -50,9 +50,9 @@ class TestFileTrackerDiff:
         fi = _make_file(tmp_path, "stable.md", "stable content")
         stat = fi.path.stat()
         # Pre-save a fingerprint that matches current file state
-        import hashlib
+        from dotmd.ingestion.reader import chunk_checksum
 
-        checksum = hashlib.md5(fi.path.read_bytes()).hexdigest()
+        checksum = chunk_checksum(fi.path)
         tracker.save_fingerprint(
             str(fi.path), stat.st_mtime, stat.st_size, checksum
         )
@@ -105,9 +105,9 @@ class TestFileTrackerDiff:
         """File with different mtime but same content -> unchanged, mtime updated."""
         tracker = FileTracker(sqlite_conn)
         fi = _make_file(tmp_path, "touched.md", "same content")
-        import hashlib
+        from dotmd.ingestion.reader import chunk_checksum
 
-        checksum = hashlib.md5(fi.path.read_bytes()).hexdigest()
+        checksum = chunk_checksum(fi.path)
         # Save fingerprint with an old mtime but same checksum
         old_mtime = fi.path.stat().st_mtime - 100.0
         tracker.save_fingerprint(
