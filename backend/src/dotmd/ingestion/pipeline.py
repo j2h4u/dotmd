@@ -41,6 +41,7 @@ from dotmd.ingestion.reader import chunk_checksum, discover_files, embed_checksu
 from dotmd.search.fts5 import FTS5SearchEngine
 from dotmd.search.semantic import SemanticSearchEngine
 from dotmd.storage.base import GraphStoreProtocol, VectorStoreProtocol
+from dotmd.storage.cache import EmbeddingCache
 from dotmd.storage.metadata import SQLiteMetadataStore
 
 logger = logging.getLogger(__name__)
@@ -197,6 +198,17 @@ class IndexingPipeline:
         self._ner_extractor: NERExtractor | None = None
         if settings.extract_depth == ExtractDepth.NER:
             self._ner_extractor = NERExtractor(settings.ner_entity_types)
+
+        # Global embedding cache — keyed on (text_hash, model_name).
+        # Survives file moves; invalidated automatically on embedding model change.
+        self._embedding_cache = EmbeddingCache(self._conn, settings.embedding_model)
+        if self._embedding_cache.should_invalidate():
+            logger.info(
+                "Embedding model changed — clearing embedding_cache"
+            )
+            self._embedding_cache.clear()
+        else:
+            self._embedding_cache.update_model_sentinel()
 
     # ------------------------------------------------------------------
     # Public API
@@ -439,6 +451,12 @@ class IndexingPipeline:
                 list(text_hashes.values()),
             )
 
+        # Global embedding cache lookup — fills misses from vec_meta only.
+        # setdefault() ensures vec_meta wins on overlap (never overwrites an existing hit).
+        global_hits = self._embedding_cache.lookup(list(text_hashes.values()))
+        for k, v in global_hits.items():
+            existing.setdefault(k, v)
+
         hits = 0
         to_encode_indices: list[int] = []
         embeddings: list[list[float] | None] = [None] * len(chunks)
@@ -458,6 +476,12 @@ class IndexingPipeline:
             new_embeddings = self._semantic_engine.encode_batch(texts_to_encode)
             for j, idx in enumerate(to_encode_indices):
                 embeddings[idx] = new_embeddings[j]
+
+            # Persist new embeddings to global cache. No commit here — deferred to caller
+            # (pipeline already commits after _vector_store.add_chunks()).
+            for j, idx in enumerate(to_encode_indices):
+                th = text_hashes[chunks[idx].chunk_id]
+                self._embedding_cache.store(th, new_embeddings[j])
 
         total = len(chunks)
         logger.info(

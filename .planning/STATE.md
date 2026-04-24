@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality Evaluations
 status: executing
-last_updated: "2026-04-24T12:04:59.733Z"
+last_updated: "2026-04-24T12:09:44.791Z"
 last_activity: 2026-04-24
 progress:
   total_phases: 2
@@ -20,7 +20,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 11 — embedding-model-swap
+**Current focus:** Phase 15 — content-addressed-caching
 
 ## Current Milestone
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 Phase: 11 of 12 (Embedding Model Swap)
 Plan: 3 plans (11-01 Wave 1, 11-02 Wave 1, 11-03 Wave 2)
-Status: Ready to execute
+Status: Executing Phase 15
 Last activity: 2026-04-24
 
 Progress: [░░░░░░░░░░] 0%
