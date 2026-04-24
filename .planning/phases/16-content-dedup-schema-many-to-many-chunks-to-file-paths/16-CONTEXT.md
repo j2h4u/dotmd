@@ -131,7 +131,7 @@ Already keyed on `blake3(raw_text + model_sig)` — dedup happens naturally. MEN
    Audit (2026-04-24): `char_offset` is written by `chunker.py` and stored in `metadata.py` but read by zero consumers outside the write path (no reference in search/fusion/CLI/MCP/service). Under M2M the value would be correct only for the canonical file, lying for every other holder. Panel verdict: remove from `Chunk` model, from chunker emission, and drop the column from every `chunks_*` strategy. If a future feature needs per-file offsets (e.g., UI "jump to chunk"), reintroduce on the junction table at that time — cheap migration, correct semantics. Aligns with clean-break + YAGNI + no-legacy-compat preferences.
 
 9. **`migration_v15.py` fate — LOCKED: keep as no-op stub this cycle, remove next cycle.**
-   Leave `migration_v15.py` in place with a clear deprecation banner ("superseded by migration_v16; this script is a no-op — run `dotmd migrate` instead"). Removal deferred to v1.5+1 and tracked via a beads ticket with `--defer` so it isn't forgotten. Rationale: minor safety net for anyone with a half-run v15 state; zero maintenance cost as a stub.
+   Leave `migration_v15.py` in place with a clear deprecation banner ("superseded by migration_v16; this script is a no-op — run `dotmd migrate` instead"). Removal deferred to the release cycle after Phase 16 ships; tracked as a GSD backlog item (not beads — dotMD uses GSD exclusively for project task tracking). Rationale: minor safety net for anyone with a half-run v15 state; zero maintenance cost as a stub.
 
 ## Open questions (for /gsd:discuss-phase 16)
 

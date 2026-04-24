@@ -201,6 +201,20 @@ anti-pattern for a production service — they let misconfiguration ship.
 **Plans:**
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
+### Phase 999.7: Remove migration_v15.py no-op stub (BACKLOG)
+
+**Goal:** Delete `backend/src/dotmd/storage/migration_v15.py` and its tests.
+
+**Context 2026-04-24:** Phase 16 supersedes v15 migration with `migration_v16` (schema change + blake3 remap + dedup collapse in one pass). v15 is left as a no-op stub with a deprecation banner for one release cycle as a safety net. Remove after Phase 16 has shipped and been stable for one cycle.
+
+**Scope:**
+- Delete `migration_v15.py`
+- Remove any remaining imports / CLI wiring
+- Delete v15-specific tests
+
+**Plans:**
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
 ### Future ideas:
 - Semantic chunking (split by topic similarity, not just structure)
 - Doc-level chunks (whole-document embeddings for broad queries)
@@ -223,13 +237,18 @@ Plans:
 **Goal:** Support content-addressed chunk_ids with multiple file_paths pointing to the same chunk. Unblocks Phase 15's migration_v15 (collision-blocked) and delivers real storage + search-quality wins.
 
 **Depends on:** Phase 15 (blake3 chunker + caches — deployed 2026-04-24)
-**Requirements**: TBD (fill in during /gsd:discuss-phase 16)
-**Plans:** 0 of ~6 — run /gsd:discuss-phase 16, then /gsd:plan-phase 16
+**Requirements**: DEDUP-01..DEDUP-11 (see 16-RESEARCH.md)
+**Plans:** 6 plans — generated 2026-04-24 via /gsd:plan-phase 16
 
-**Context & design notes:** see `.planning/phases/16-content-dedup-schema-many-to-many-chunks-to-file-paths/16-CONTEXT.md` — edge cases, schema sketch, open questions, expected plan breakdown (migrated from backlog 2026-04-24).
+**Context & design notes:** see `.planning/phases/16-content-dedup-schema-many-to-many-chunks-to-file-paths/16-CONTEXT.md` — edge cases, schema sketch, open questions, expected plan breakdown (migrated from backlog 2026-04-24). Researcher audit in `16-RESEARCH.md`.
 
 Plans:
-- [ ] TBD (run /gsd:plan-phase 16 to break down after discuss)
+- [ ] 16-P6-test-suite.md — Wave 0 RED fixtures + test skeletons (conftest, collision/empty/pre-v16 DBs, round-trip parity)
+- [ ] 16-P1-schema-migration-core.md — Wave 2 M2M schema, blake3 remap, collision collapse, char_offset drop, v15 stub
+- [ ] 16-P2-migration-ops-modes.md — Wave 3 `dotmd migrate {run,status}`, --dry-run, --verify-only, progress logs
+- [ ] 16-P3-ingest-flow-rewrite.md — Wave 3 INSERT OR IGNORE ingest + trickle advisory-lock startup check
+- [ ] 16-P4-purge-and-change-detection.md — Wave 3 decrement-cascade _purge_file + M2M orphan sweep
+- [ ] 16-P5-search-api-clean-break.md — Wave 3 SearchResult.file_paths: list[Path] across models/fusion/CLI/MCP
 
 ---
 *Roadmap created: 2026-03-26*
