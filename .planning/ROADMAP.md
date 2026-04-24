@@ -121,6 +121,23 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 **Plans:**
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
+### Phase 999.3: Automatic orphan cleanup — chunks/vec/FTS rows without live file_path (BACKLOG)
+
+**Goal:** Detect and purge orphan rows (chunks without fingerprints, chunks without vectors, chunks for deleted files) on a periodic or startup basis. Currently `_purge_file()` runs only when re-chunking, so orphans accumulate silently for months.
+
+**Context found 2026-04-24 during Phase 15 pre-migration cleanup:**
+- `chunks_heading_512_50`: 237 files orphan (no fingerprints — files deleted from disk)
+- `chunks_contextual_512_50`: 4937 rows without FTS and without vec_meta (pure ghosts from buggy `_purge_file()` after the 2026-04-03 MD5→blake2b migration)
+- Total: ~5k invisible rows consuming disk/RAM, surviving across re-chunking cycles
+
+**Rough scope:**
+- Startup-time scan mode (report only, opt-in log) + on-demand `dotmd cleanup` CLI
+- Criteria: (a) chunks without chunk_fingerprints row, (b) chunks without vec_meta row for any active model, (c) chunks with file_path not in discovered files
+- Atomic cascade: chunks → chunks_fts → vec_meta → vec0 virtual table rowid
+
+**Plans:**
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
 ### Future ideas:
 - Replace MD5 with a better hash (blake2b?) for chunk_id and content_checksum — MD5 collision resistance is broken, defense-in-depth
 - Semantic chunking (split by topic similarity, not just structure)
