@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality Evaluations
 status: executing
-last_updated: "2026-03-30T19:50:28.915Z"
-last_activity: 2026-03-30
+last_updated: "2026-04-24T11:31:47.501Z"
+last_activity: 2026-04-24
 progress:
   total_phases: 2
   completed_phases: 0
   total_plans: 3
-  completed_plans: 2
+  completed_plans: 0
   percent: 0
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 Phase: 11 of 12 (Embedding Model Swap)
 Plan: 3 plans (11-01 Wave 1, 11-02 Wave 1, 11-03 Wave 2)
 Status: Ready to execute
-Last activity: 2026-04-02 - Completed quick task 260402-vua: Phase 14 Frontmatter-Driven Indexing
+Last activity: 2026-04-24
 
 Progress: [░░░░░░░░░░] 0%
 
