@@ -106,7 +106,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 | 12. Indexing Integrity Rework | v1.4 | Complete | 2026-04-02 |
 | 13. Content-Aware Chunking & Search | v1.4 | Complete | 2026-04-02 |
 | 14. Frontmatter-Driven Indexing | v1.4 | Complete | 2026-04-02 |
-| 15. Content-addressed caching | 1/3 | In Progress|  |
+| 15. Content-addressed caching | 2/3 | In Progress|  |
 
 ## Backlog
 
@@ -132,7 +132,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 
 **Goal:** Prevent expensive reindexing (GLiNER + TEI) when files move or mount paths change. Three improvements in order: embedding cache (B) → extraction cache (C) → content-based chunk_id migration (A).
 **Requirements**: TBD
-**Plans:** 1/3 plans executed
+**Plans:** 2/3 plans executed
 
 Plans:
 - [ ] Plan 1: Global embedding cache by text_hash (skip TEI on file moves)
