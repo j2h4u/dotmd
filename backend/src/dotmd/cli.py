@@ -550,15 +550,19 @@ def migrate_run(
                 )
                 sys.exit(4)
 
-        # Check for invariant failures (run_invariants was called inside run_migration_v16)
-        # We don't have the InvariantReport directly on MigrationReport, so we
-        # re-run invariants as a read-only check to produce the exit code.
-        import sqlite3 as _sqlite3
-        _conn = _sqlite3.connect(str(index_db))
-        try:
-            inv = _m16.run_invariants(_conn)
-        finally:
-            _conn.close()
+        # Check for invariant failures.  run_migration_v16 now attaches the
+        # InvariantReport to MigrationReport.invariant_report (IN-01 fix) so we
+        # can reuse it without re-opening the DB.  Fall back to a fresh
+        # connection only if the field is absent (e.g. older callers).
+        if report.invariant_report is not None:
+            inv = report.invariant_report
+        else:
+            import sqlite3 as _sqlite3
+            _conn = _sqlite3.connect(str(index_db))
+            try:
+                inv = _m16.run_invariants(_conn)
+            finally:
+                _conn.close()
 
         if not inv.passed:
             click.echo("INVARIANT FAILURES:", err=True)

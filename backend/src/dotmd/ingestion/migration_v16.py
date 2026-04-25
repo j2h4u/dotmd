@@ -112,6 +112,9 @@ class MigrationReport:
     mode: str = "run"  # "run" | "dry-run" | "verify-only"
     per_strategy_progress: dict[str, dict[str, Any]] = field(default_factory=dict)
     disk_delta_estimate: int | None = None  # bytes, dry-run only
+    # verify-only: result of run_invariants() so CLI can reuse it without
+    # re-opening the DB.  None for dry-run and real-run paths.
+    invariant_report: "InvariantReport | None" = None
 
 
 @dataclass
@@ -1112,6 +1115,9 @@ def run_migration_v16(
                 "count": all_divergence_count,
                 "example_paths": example_paths[:5],
             }
+            # Persist the invariants result on the report so the CLI can
+            # use it directly without re-opening the DB (IN-01 fix).
+            report.invariant_report = inv
             report.completed = True
             # ROLLBACK the wrapping transaction — leaves DB byte-identical.
             conn.execute("ROLLBACK")
