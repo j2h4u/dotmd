@@ -137,10 +137,12 @@ class TestPayloadInvariantMismatch:
         self, tmp_index_db: Path
     ) -> None:
         """Two chunks with same blake3 but different heading_hierarchy emit payload_mismatch_warnings."""
+        import blake3 as _blake3
         _, run_migration_v16, *_ = _import()
         conn = _conn(tmp_index_db)
         strategy = "heading_512_50"
         table = f"chunks_{strategy}"
+        fp_table = f"chunk_fingerprints_{strategy}"
         shared_text = "identical body content for divergence test"
         conn.execute(
             f"INSERT INTO {table} (chunk_id, file_path, heading_hierarchy, level, text, chunk_index, char_offset) "
@@ -152,6 +154,15 @@ class TestPayloadInvariantMismatch:
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             ("old_id_bbb", "/path/fileB.md", json.dumps(["Heading B"]), 2, shared_text, 0, 0),
         )
+        # Both files have identical body text → same canonical checksum → collision group.
+        # Populate chunk_fingerprints so migration can look up the checksum.
+        shared_checksum = _blake3.blake3(f"document\n{shared_text}".encode()).hexdigest()
+        for fp in ("/path/fileA.md", "/path/fileB.md"):
+            conn.execute(
+                f"INSERT OR REPLACE INTO {fp_table} "
+                "(file_path, mtime, size_bytes, checksum, indexed_at) VALUES (?, ?, ?, ?, ?)",
+                (fp, 0.0, len(shared_text), shared_checksum, "2026-01-01T00:00:00"),
+            )
         conn.commit()
         conn.close()
 
@@ -367,6 +378,8 @@ class TestM2MRemapCoverage:
         table = f"chunks_{strategy}"
         m2m = f"chunk_file_paths_{strategy}"
 
+        import blake3 as _blake3
+        fp_table = f"chunk_fingerprints_{strategy}"
         shared_text = "shared content for three files in collision group"
         paths = ["/path/file_A.md", "/path/file_B.md", "/path/file_C.md"]
         old_ids = ["old_id_aaaa", "old_id_bbbb", "old_id_cccc"]
@@ -376,6 +389,14 @@ class TestM2MRemapCoverage:
                 f"INSERT INTO {table} (chunk_id, file_path, heading_hierarchy, level, text, chunk_index, char_offset) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (old_id, fp, json.dumps(["Same Heading"]), 1, shared_text, 0, 0),
+            )
+        # Populate fingerprints so migration can look up canonical body_checksum.
+        shared_checksum = _blake3.blake3(f"document\n{shared_text}".encode()).hexdigest()
+        for fp in paths:
+            conn.execute(
+                f"INSERT OR REPLACE INTO {fp_table} "
+                "(file_path, mtime, size_bytes, checksum, indexed_at) VALUES (?, ?, ?, ?, ?)",
+                (fp, 0.0, len(shared_text), shared_checksum, "2026-01-01T00:00:00"),
             )
         conn.commit()
         conn.close()
@@ -418,9 +439,11 @@ class TestPayloadDivergenceFailClosed:
     """Cycle-2 NEW-HIGH-2 + Decision #10: fail-closed divergence gate."""
 
     def _setup_divergent_db(self, tmp_index_db: Path) -> None:
+        import blake3 as _blake3
         conn = _conn(tmp_index_db)
         strategy = "heading_512_50"
         table = f"chunks_{strategy}"
+        fp_table = f"chunk_fingerprints_{strategy}"
         shared_text = "shared text for divergence policy test"
         conn.execute(
             f"INSERT INTO {table} (chunk_id, file_path, heading_hierarchy, level, text, chunk_index, char_offset) "
@@ -432,6 +455,14 @@ class TestPayloadDivergenceFailClosed:
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             ("div_old_bbb", "/file_Y.md", json.dumps(["Context B"]), 2, shared_text, 0, 0),
         )
+        # Populate fingerprints so migration can look up canonical body_checksum.
+        shared_checksum = _blake3.blake3(f"document\n{shared_text}".encode()).hexdigest()
+        for fp in ("/file_X.md", "/file_Y.md"):
+            conn.execute(
+                f"INSERT OR REPLACE INTO {fp_table} "
+                "(file_path, mtime, size_bytes, checksum, indexed_at) VALUES (?, ?, ?, ?, ?)",
+                (fp, 0.0, len(shared_text), shared_checksum, "2026-01-01T00:00:00"),
+            )
         conn.commit()
         conn.close()
 
@@ -502,3 +533,106 @@ class TestPayloadDivergenceFailClosed:
         assert report.payload_divergence_preview["count"] >= 1
         assert len(report.payload_divergence_preview.get("example_paths", [])) >= 1
         assert_db_bytes_unchanged(tmp_index_db, before)
+
+
+# ---------------------------------------------------------------------------
+# CR-01 regression guard: migrated chunk_id matches chunker.chunk_file() output
+# ---------------------------------------------------------------------------
+
+class TestMigratedChunkIdMatchesChunker:
+    """CR-01 regression: chunk_ids produced by migration == chunk_ids from chunker.
+
+    Pins the canonical body_checksum formula so that post-migration IDs
+    produced by run_migration_v16 match what a fresh dotmd index run would
+    produce on the same file content.  This ensures content-deduplication
+    works correctly after migration.
+    """
+
+    def test_migrated_chunk_id_matches_chunker_output(
+        self, tmp_index_db: Path, tmp_path: Path
+    ) -> None:
+        """Migrated chunk_id must equal chunker.chunk_file() chunk_id for same content.
+
+        Procedure:
+          1. Write a real markdown file to a temp path.
+          2. Run chunker.chunk_file() on it → collect expected chunk_ids.
+          3. Seed a pre-v16 DB with old-format chunk_ids for the same file,
+             and populate chunk_fingerprints_<strategy> with the canonical
+             checksum (blake3(kind + "\\n" + body)).
+          4. Run run_migration_v16 and verify the resulting chunk_ids in the DB
+             match those produced by chunk_file() in step 2.
+        """
+        import blake3 as _blake3
+        from dotmd.ingestion.chunker import chunk_file
+        from dotmd.ingestion.reader import parse_frontmatter
+
+        _, run_migration_v16, *_ = _import()
+
+        strategy = "heading_512_50"
+        table = f"chunks_{strategy}"
+        fp_table = f"chunk_fingerprints_{strategy}"
+
+        # --- Step 1: Write a real markdown file ---
+        md_content = (
+            "---\nkind: document\ntitle: CR-01 Test\n---\n\n"
+            "# Section One\n\nFirst section body content for CR-01 test.\n\n"
+            "# Section Two\n\nSecond section body content for CR-01 test.\n"
+        )
+        md_file = tmp_path / "cr01_test.md"
+        md_file.write_text(md_content, encoding="utf-8")
+
+        # --- Step 2: Run chunker.chunk_file() to get expected chunk_ids ---
+        chunks = chunk_file(
+            md_file,
+            md_content,
+            max_tokens=512,
+            overlap_tokens=50,
+            kind="document",
+            chunk_strategy=strategy,
+        )
+        assert len(chunks) >= 1, "chunk_file() produced no chunks — check test content"
+        expected_ids = {c.chunk_id for c in chunks}
+
+        # --- Step 3: Seed the pre-v16 DB ---
+        # Compute the canonical body_checksum (same formula as chunker + fingerprinter)
+        _, body = parse_frontmatter(md_content)
+        canonical_checksum = _blake3.blake3(f"document\n{body}".encode()).hexdigest()
+        file_path_str = str(md_file)
+
+        conn = _conn(tmp_index_db)
+        # Insert pre-v16 chunk rows with old-format (non-blake3) chunk_ids
+        for i, chunk in enumerate(chunks):
+            old_id = f"old_pre_v16_chunk_{i:04d}"
+            conn.execute(
+                f"INSERT INTO {table} "
+                "(chunk_id, file_path, heading_hierarchy, level, text, chunk_index, char_offset) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (old_id, file_path_str, json.dumps(chunk.heading_hierarchy),
+                 chunk.level, chunk.text, i, 0),
+            )
+        # Populate chunk_fingerprints with the canonical checksum
+        conn.execute(
+            f"INSERT INTO {fp_table} (file_path, mtime, size_bytes, checksum, indexed_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (file_path_str, 0.0, len(md_content), canonical_checksum, "2026-01-01T00:00:00"),
+        )
+        conn.commit()
+        conn.close()
+
+        # --- Step 4: Run migration and verify chunk_ids match chunker output ---
+        report = run_migration_v16(tmp_index_db)
+        assert report.completed is True
+
+        conn = _conn(tmp_index_db)
+        migrated_ids_rows = conn.execute(
+            f"SELECT chunk_id FROM {table}"
+        ).fetchall()
+        conn.close()
+        migrated_ids = {r[0] for r in migrated_ids_rows}
+
+        assert migrated_ids == expected_ids, (
+            f"Migrated chunk_ids do not match chunker output.\n"
+            f"  Expected: {sorted(expected_ids)}\n"
+            f"  Got:      {sorted(migrated_ids)}\n"
+            "This means the migration body_checksum formula differs from chunker.chunk_file()."
+        )

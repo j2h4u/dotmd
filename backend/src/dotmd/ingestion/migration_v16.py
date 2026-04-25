@@ -143,18 +143,74 @@ class StatusReport:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _compute_body_checksum(text: str, kind: str = "text") -> str:
-    """Compute the per-chunk body checksum: blake3(kind + '\\n' + text)."""
-    return _blake3.blake3(f"{kind}\n{text}".encode()).hexdigest()
+def _compute_body_checksum_from_file(file_path: str, kind: str) -> str:
+    """Compute the canonical body_checksum by reading the source file from disk.
+
+    Formula: blake3(kind + "\\n" + body) where body is the file content after
+    frontmatter strip — identical to chunker.chunk_file and reader.chunk_checksum.
+
+    Used as a fallback when chunk_fingerprints_<strategy> has no row for a
+    file_path (e.g. partial fingerprint table from an interrupted prior run).
+    """
+    from dotmd.ingestion.reader import parse_frontmatter, read_file
+    content = read_file(Path(file_path))
+    _, body = parse_frontmatter(content)
+    return _blake3.blake3(f"{kind}\n{body}".encode()).hexdigest()
 
 
-def _compute_new_id_for_row(text: str, chunk_index: int, strategy: str) -> str:
+def _get_body_checksums_for_strategy(
+    conn: sqlite3.Connection,
+    strategy: str,
+    file_paths: list[str],
+) -> dict[str, str]:
+    """Look up canonical body_checksums from chunk_fingerprints_<strategy>.
+
+    Returns a mapping of file_path → checksum for all file_paths that have
+    a fingerprint row.  Missing entries must be resolved by the caller (either
+    via disk read or by aborting with a clear error).
+
+    The checksum stored in chunk_fingerprints_<strategy> is
+    blake3(kind + "\\n" + body) — the same formula used by chunker.chunk_file
+    to compute body_checksum before calling _make_chunk_id.
+    """
+    if not file_paths:
+        return {}
+    fp_table = f"chunk_fingerprints_{strategy}"
+    # Check the fingerprints table exists before querying.
+    exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        (fp_table,),
+    ).fetchone()
+    if not exists:
+        return {}
+    placeholders = ",".join("?" for _ in file_paths)
+    rows = conn.execute(
+        f"SELECT file_path, checksum FROM {fp_table} "
+        f"WHERE file_path IN ({placeholders})",
+        file_paths,
+    ).fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
+def _compute_new_id_for_row(
+    body_checksum: str, chunk_index: int, strategy: str
+) -> str:
     """Derive the new blake3 chunk_id for a row.
+
+    Parameters
+    ----------
+    body_checksum:
+        Canonical blake3(kind + "\\n" + body) from chunk_fingerprints_<strategy>
+        or computed fresh from the source file.  Must match the formula used by
+        chunker.chunk_file so migrated IDs match post-migration fresh-index IDs.
+    chunk_index:
+        Position of this chunk within the file.
+    strategy:
+        Strategy name (prevents cross-strategy ID collisions).
 
     Reuses chunker._make_chunk_id via the module reference so monkeypatching
     in tests is respected (Review-HIGH-3 compliance).
     """
-    body_checksum = _compute_body_checksum(text)
     return _chunker_module._make_chunk_id(body_checksum, chunk_index, strategy)
 
 
@@ -580,19 +636,63 @@ def _migrate_strategy(
 
     # --- Step 4: Compute new_chunk_id for every row ---
     # chunk_index must exist (it's in M2M now, but still on chunks_* pre-drop)
+    #
+    # CR-01 fix: body_checksum MUST come from chunk_fingerprints_<strategy>
+    # (formula: blake3(kind + "\n" + body) over the FULL file body after
+    # frontmatter strip).  Using only chunk text would produce a different
+    # checksum than chunker.chunk_file, so migrated IDs would never match
+    # fresh-index IDs, silently defeating content-deduplication post-migration.
+    #
+    # Lookup strategy:
+    #   1. Query chunk_fingerprints_<strategy> for all distinct file_paths.
+    #   2. For rows with no fingerprint entry, read the source file from disk.
+    #   3. If the file is also missing from disk, abort with a clear error
+    #      directing the user to run `dotmd index --force` first.
     if has_chunk_index:
         rows = conn.execute(
-            f"SELECT chunk_id, text, chunk_index FROM {table}"
+            f"SELECT chunk_id, file_path, chunk_index FROM {table}"
         ).fetchall()
     else:
-        # Already dropped chunk_index — should not happen in normal flow,
-        # but guard against re-runs after partial migration
+        # chunk_index already dropped — guard against re-runs after partial migration
         rows = conn.execute(
-            f"SELECT chunk_id, text, 0 FROM {table}"
+            f"SELECT chunk_id, file_path, 0 FROM {table}"
         ).fetchall()
 
-    for old_id, text, chunk_index in rows:
-        new_id = _compute_new_id_for_row(text, chunk_index, strategy)
+    # Collect all distinct file_paths present in this strategy's table and
+    # batch-fetch their canonical checksums from chunk_fingerprints_<strategy>.
+    all_file_paths: list[str] = list({r[1] for r in rows if r[1]})
+    fp_checksums = _get_body_checksums_for_strategy(conn, strategy, all_file_paths)
+
+    # For any file_path missing from chunk_fingerprints, try a disk read.
+    # Log a single WARNING per missing file_path (not per chunk row).
+    missing_fps = [fp for fp in all_file_paths if fp not in fp_checksums]
+    if missing_fps:
+        logger.warning(
+            "chunk_fingerprints_%s has no entry for %d file(s); "
+            "falling back to disk read for canonical body_checksum: %s",
+            strategy, len(missing_fps), missing_fps[:5],
+        )
+    for fp in missing_fps:
+        try:
+            # kind is not stored in pre-v16 chunks_* — default to "document"
+            # which matches the chunker default for files without a kind frontmatter.
+            fp_checksums[fp] = _compute_body_checksum_from_file(fp, "document")
+        except OSError as exc:
+            raise RuntimeError(
+                f"Cannot compute canonical body_checksum for {fp!r}: "
+                f"not in chunk_fingerprints_{strategy} and file not found on disk ({exc}). "
+                "Run `dotmd index --force` to rebuild fingerprints before re-running migration."
+            ) from exc
+
+    for old_id, file_path, chunk_index in rows:
+        body_checksum = fp_checksums.get(file_path or "")
+        if body_checksum is None:
+            raise RuntimeError(
+                f"No body_checksum available for file_path={file_path!r} "
+                f"(chunk_id={old_id!r}, strategy={strategy!r}). "
+                "Run `dotmd index --force` to rebuild fingerprints before re-running migration."
+            )
+        new_id = _compute_new_id_for_row(body_checksum, chunk_index, strategy)
         conn.execute(
             f"UPDATE {table} SET new_chunk_id = ? WHERE chunk_id = ?",
             (new_id, old_id),
@@ -945,13 +1045,25 @@ def run_migration_v16(
                 has_ci = "chunk_index" in col_names
                 if not has_ci:
                     continue
-                # Compute preview by scanning for potential collision groups
+                # Compute preview by scanning for potential collision groups.
+                # Use canonical body_checksum from chunk_fingerprints_<strategy>
+                # (same formula as chunker.chunk_file) so collision prediction
+                # matches what the actual migration will compute.
                 rows = conn.execute(
-                    f"SELECT chunk_id, text, chunk_index FROM {table}"
+                    f"SELECT chunk_id, file_path, chunk_index FROM {table}"
                 ).fetchall()
+                all_fps: list[str] = list({r[1] for r in rows if r[1]})
+                preview_checksums = _get_body_checksums_for_strategy(conn, s, all_fps)
+                # For missing fingerprints in verify_only, skip the row — we
+                # cannot read files here without side effects; the preview count
+                # may be slightly under-reported but the migration itself will
+                # error on missing fingerprints with a clear message.
                 id_to_new: dict[str, str] = {}
-                for cid, text, ci in rows:
-                    new_id = _compute_new_id_for_row(text, ci, s)
+                for cid, file_path, ci in rows:
+                    bcs = preview_checksums.get(file_path or "")
+                    if bcs is None:
+                        continue  # fingerprint missing — skip from preview
+                    new_id = _compute_new_id_for_row(bcs, ci, s)
                     id_to_new[cid] = new_id
 
                 # Group by new_id

@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Generator
 from unittest.mock import MagicMock, patch
 
+import blake3 as _blake3
+
 import pytest
 
 # ---------------------------------------------------------------------------
@@ -153,16 +155,48 @@ def _make_old_chunk_id(file_path: str, chunk_index: int) -> str:
     return hashlib.blake2b(payload.encode()).hexdigest()  # 128 chars
 
 
-def _make_blake3_chunk_id(text: str, chunk_index: int, strategy: str) -> str:
-    """Compute the post-v15/v16 64-char blake3 chunk_id.
+def _canonical_body_checksum(body: str, kind: str = "document") -> str:
+    """Compute the canonical body_checksum for a file body.
 
-    Mirrors chunker._make_chunk_id logic without importing migration_v16.
-    Only used by post_v15_pre_v16_db fixture.
+    Formula: blake3(kind + "\\n" + body) — matches chunker.chunk_file and
+    reader.chunk_checksum.  Used to populate chunk_fingerprints_<strategy>
+    in fixtures so migration_v16 can look up the correct value.
     """
-    import blake3 as _blake3
-    body_checksum = _blake3.blake3(f"text\n{text}".encode()).hexdigest()
+    return _blake3.blake3(f"{kind}\n{body}".encode()).hexdigest()
+
+
+def _make_blake3_chunk_id(body: str, chunk_index: int, strategy: str, kind: str = "document") -> str:
+    """Compute the post-v16 64-char blake3 chunk_id using the canonical formula.
+
+    Uses _canonical_body_checksum (blake3(kind + "\\n" + body)) so that IDs
+    produced here match what migration_v16 and chunker.chunk_file produce.
+    Updated from the old formula (f"text\\n{text}") which was incorrect.
+    """
+    body_checksum = _canonical_body_checksum(body, kind)
     payload = f"{body_checksum}:{chunk_index}:{strategy}"
     return _blake3.blake3(payload.encode()).hexdigest()
+
+
+def _insert_fingerprint_row(
+    conn: sqlite3.Connection,
+    strategy: str,
+    file_path: str,
+    body: str,
+    kind: str = "document",
+) -> None:
+    """Insert a chunk_fingerprints_<strategy> row with canonical checksum.
+
+    Populates the fingerprint table so migration_v16 can look up the
+    canonical body_checksum (blake3(kind + "\\n" + body)) per file_path
+    rather than falling back to disk reads that fail in tests.
+    """
+    fp_table = f"chunk_fingerprints_{strategy}"
+    checksum = _canonical_body_checksum(body, kind)
+    conn.execute(
+        f"INSERT OR REPLACE INTO {fp_table} (file_path, mtime, size_bytes, checksum, indexed_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (file_path, 0.0, len(body.encode()), checksum, "2026-01-01T00:00:00"),
+    )
 
 
 def _seeded_vector(seed: int, dim: int = 8) -> bytes:
@@ -359,6 +393,17 @@ def collision_rich_db(tmp_index_db: Path) -> Path:
         cid_u = _make_old_chunk_id(path_u, 0)
         _insert_chunk_row(conn, strategy, cid_u, path_u,
                           ["Unique Content"], 1, UNIQUE_BODY, 0, vec_seed=404)
+
+        # --- Populate chunk_fingerprints_<strategy> with canonical checksums ---
+        # CR-01 fix: migration_v16 reads body_checksum from chunk_fingerprints_*
+        # (blake3(kind + "\n" + body)) rather than recomputing from chunk text.
+        # The test bodies have no frontmatter so the full body IS the body text.
+        _insert_fingerprint_row(conn, strategy, path_a1, PYTEST_README_BODY)
+        _insert_fingerprint_row(conn, strategy, path_a2, PYTEST_README_BODY)
+        _insert_fingerprint_row(conn, strategy, path_b1, SKILL_BODY)
+        _insert_fingerprint_row(conn, strategy, path_b2, SKILL_BODY)
+        _insert_fingerprint_row(conn, strategy, path_c, REPEATED_HEADING_BODY)
+        _insert_fingerprint_row(conn, strategy, path_u, UNIQUE_BODY)
 
     conn.commit()
     conn.close()
