@@ -48,6 +48,7 @@ class TrickleState:
     chunks_per_hour: float = 0.0
     total_chunks_done: int = 0
     eta_minutes: float | None = None
+    last_indexed_at: datetime | None = None
     _start_time: float = field(default_factory=time.monotonic, repr=False)
 
 
@@ -374,8 +375,16 @@ class TrickleIndexer:
                 queued_str,
             )
         else:
-            # zero-changes path — handled in fix 6 (compact idle form)
-            pass  # placeholder, will be filled in fix 6
+            last_act = (
+                self._state.last_indexed_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+                if self._state.last_indexed_at
+                else "never"
+            )
+            logger.info(
+                "Backlog: idle (%d indexed, last activity %s)",
+                len(diff.unchanged),
+                last_act,
+            )
 
         if not unindexed:
             return
@@ -403,6 +412,7 @@ class TrickleIndexer:
             succeeded += 1
             self._state.indexed_count = succeeded
             self._state.total_chunks_done += n_chunks or 0
+            self._state.last_indexed_at = datetime.now(timezone.utc)
             self._update_eta(i + 1, len(unindexed))
 
             # Progress log every file
@@ -485,6 +495,7 @@ class TrickleIndexer:
                     try:
                         await asyncio.to_thread(self._process_one_file, fi)
                         self._state.indexed_count += 1
+                        self._state.last_indexed_at = datetime.now(timezone.utc)
                         logger.info("Watch: indexed %s", file_path.name)
                     finally:
                         self._state.current_file = None
