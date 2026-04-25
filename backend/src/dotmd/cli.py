@@ -408,8 +408,8 @@ def migrate() -> None:
       1 -- invariant violation detected (--verify-only)
       2 -- lock contention or mutually-exclusive flag combination
       3 -- unexpected exception
-      4 -- payload divergence without --allow-payload-divergence (Decision #10)
-      5 -- hard integrity error (text mismatch across collision group)
+      4 -- payload divergence detected (Decision #10 fail-closed; see divergence_report.txt)
+           or hard integrity error (text mismatch across collision group)
     """
 
 
@@ -442,22 +442,8 @@ def _resolve_index_db(ctx: click.Context) -> Path:
     help=(
         "Run invariant checks against the live DB without any mutation. "
         "Exits 1 if any invariant fails. "
-        "Exits 4 if payload divergence groups are detected and "
-        "--allow-payload-divergence was not passed. "
+        "Exits 4 if payload divergence groups are detected. "
         "Exits 0 otherwise."
-    ),
-)
-@click.option(
-    "--allow-payload-divergence",
-    is_flag=True,
-    default=False,
-    help=(
-        "Proceed with canonical-keep when a collision group has diverging "
-        "heading_hierarchy or level across holders. WITHOUT this flag, the "
-        "migration aborts with exit 4 and writes `divergence_report.txt` to "
-        "the run directory. WITH this flag, canonical (MIN old chunk_id) "
-        "metadata is kept and the divergence is recorded in "
-        "migration_v16_state for audit. See Decision #10 in CONTEXT.md."
     ),
 )
 @click.pass_context
@@ -465,7 +451,6 @@ def migrate_run(
     ctx: click.Context,
     dry_run: bool,
     verify_only: bool,
-    allow_payload_divergence: bool,
 ) -> None:
     """Execute the Phase 16 schema migration.
 
@@ -474,8 +459,7 @@ def migrate_run(
       1 -- invariant violation (--verify-only)
       2 -- lock contention or --dry-run + --verify-only combined
       3 -- unexpected exception
-      4 -- payload divergence without --allow-payload-divergence
-      5 -- hard integrity error (text mismatch across collision group)
+      4 -- payload divergence (Decision #10 fail-closed) or hard integrity error
     """
     from dotmd.ingestion import migration_v16 as _m16
 
@@ -496,23 +480,17 @@ def migrate_run(
             index_db,
             dry_run=dry_run,
             verify_only=verify_only,
-            allow_payload_divergence=allow_payload_divergence,
         )
     except _m16.PayloadDivergenceBlocked as exc:
         click.echo(f"ABORT: {exc}", err=True)
         run_dir = index_db.parent
         click.echo(f"See {run_dir}/divergence_report.txt", err=True)
-        click.echo(
-            "Hint: re-run with --allow-payload-divergence to proceed with "
-            "canonical-keep (Decision #10).",
-            err=True,
-        )
         sys.exit(4)
     except RuntimeError as exc:
         msg = str(exc)
         if "text mismatch" in msg or "HARD ERROR" in msg:
             click.echo(f"FATAL: {msg}", err=True)
-            sys.exit(5)
+            sys.exit(4)
         if "migration_v16_lock is held" in msg:
             click.echo(f"ERROR: {msg}", err=True)
             click.echo(
@@ -540,15 +518,11 @@ def migrate_run(
                 click.echo("  example paths:")
                 for p in example_paths:
                     click.echo(f"    {p}")
-            if not allow_payload_divergence:
-                click.echo(
-                    f"\n{div_count} divergence group(s) detected. Migration will "
-                    "ABORT without --allow-payload-divergence.\n"
-                    "Re-run `dotmd migrate run --verify-only --allow-payload-divergence` "
-                    "to suppress this warning, or re-run "
-                    "`dotmd migrate run --allow-payload-divergence` to commit."
-                )
-                sys.exit(4)
+            click.echo(
+                f"\n{div_count} divergence group(s) detected. Migration will ABORT "
+                "(Decision #10 fail-closed). See divergence_report.txt for details."
+            )
+            sys.exit(4)
 
         # Check for invariant failures.  run_migration_v16 now attaches the
         # InvariantReport to MigrationReport.invariant_report (IN-01 fix) so we
@@ -582,17 +556,13 @@ def migrate_run(
         preview = report.payload_divergence_preview or {}
         div_count = preview.get("count", 0)
         example_paths = preview.get("example_paths", [])
-        would_abort = div_count > 0 and not allow_payload_divergence
 
         click.echo(
             f"dry-run summary: collisions_collapsed={report.collisions_collapsed} "
             f"divergence_warnings={report.divergence_warnings} "
             f"payload_mismatch_warnings={report.payload_mismatch_warnings}"
         )
-        click.echo(
-            f"  payload_divergence_groups={div_count} "
-            f"would_abort_without_flag={str(would_abort).lower()}"
-        )
+        click.echo(f"  payload_divergence_groups={div_count}")
         if div_count > 0 and example_paths:
             click.echo(f"  example_paths={','.join(example_paths[:5])}")
         if report.disk_delta_estimate is not None:
@@ -605,8 +575,7 @@ def migrate_run(
         f"strategies={len(report.completed_strategies)} "
         f"collisions_collapsed={report.collisions_collapsed} "
         f"divergence_warnings={report.divergence_warnings} "
-        f"payload_mismatch_warnings={report.payload_mismatch_warnings} "
-        f"allow_payload_divergence={report.allow_payload_divergence}"
+        f"payload_mismatch_warnings={report.payload_mismatch_warnings}"
     )
     if report.skipped_strategies:
         click.echo(f"  skipped (already migrated): {report.skipped_strategies}")
@@ -646,13 +615,11 @@ def migrate_status(ctx: click.Context) -> None:
             completed_at = state.get("completed_at", "")
             collisions = state.get("collisions_collapsed", 0)
             pm_warns = state.get("payload_mismatch_warnings", 0)
-            allow_div = state.get("allow_payload_divergence", False)
             click.echo(
                 f"  {strategy}: status={status_val} "
                 f"completed_at={completed_at} "
                 f"collisions_collapsed={collisions} "
-                f"payload_mismatch_warnings={pm_warns} "
-                f"allow_payload_divergence={allow_div}"
+                f"payload_mismatch_warnings={pm_warns}"
             )
     else:
         click.echo("No migration_v16_state rows found.")

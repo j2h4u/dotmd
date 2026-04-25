@@ -18,6 +18,8 @@ Flow overview (per strategy, inside a transaction):
     5d. Vector divergence WARN (Decision #4).
     5e. Collapse: DELETE non-canonical rows from chunks_*/vec_meta_*/chunks_fts_*.
   Step 5f — Fail-closed divergence gate (Decision #10 / cycle-2 NEW-HIGH-2 fix).
+            Any divergence → write divergence_report.txt, ROLLBACK, raise PayloadDivergenceBlocked.
+            No override flag — fail-closed is the only path (YAGNI cleanup 2026-04-25).
   Step 6  — Sanity: zero duplicates in new_chunk_id.
   Step 7  — Remap M2M / vec_meta / chunks_fts chunk_id → new_chunk_id.
   Step 8  — UPDATE chunks_*.chunk_id = new_chunk_id (safe — uniqueness guaranteed).
@@ -28,7 +30,7 @@ Flow overview (per strategy, inside a transaction):
 Post-flight: release advisory lock.
 
 Run offline (container must be stopped):
-    python -m dotmd.ingestion.migration_v16 /path/to/index.db [--dry-run] [--allow-payload-divergence]
+    python -m dotmd.ingestion.migration_v16 /path/to/index.db [--dry-run] [--verify-only]
 """
 
 from __future__ import annotations
@@ -80,9 +82,10 @@ def _validate_strategy(strategy: str) -> str:
 # ---------------------------------------------------------------------------
 
 class PayloadDivergenceBlocked(RuntimeError):
-    """Raised when collision groups have diverging heading_hierarchy or level
-    and ``allow_payload_divergence`` is False (Decision #10 fail-closed default).
+    """Raised when collision groups have diverging heading_hierarchy or level.
 
+    Decision #10 fail-closed: no override flag exists (YAGNI cleanup 2026-04-25).
+    Migration writes divergence_report.txt, rolls back, and raises this exception.
     CLI translates this to exit code 4.
     """
 
@@ -101,7 +104,6 @@ class MigrationReport:
     collisions_collapsed: int = 0
     divergence_warnings: int = 0
     payload_mismatch_warnings: int = 0
-    allow_payload_divergence: bool = False
     dry_run: bool = False
     verify_only: bool = False
     lock_mode: str = "run"
@@ -321,7 +323,6 @@ def _ensure_state_table(conn: sqlite3.Connection) -> None:
     """)
     # Add columns idempotently for DBs created by an older version of this table
     for col, typedef in [
-        ("allow_payload_divergence", "INTEGER NOT NULL DEFAULT 0"),
         ("payload_divergences", "TEXT"),
         ("status", "TEXT NOT NULL DEFAULT 'complete'"),
     ]:
@@ -581,7 +582,6 @@ def _migrate_strategy(
     *,
     dry_run: bool,
     verify_only: bool,
-    allow_payload_divergence: bool,
     run_dir: Path,
     reporter: "ProgressReporter | None" = None,
 ) -> tuple[int, int, int, list[dict], bool]:
@@ -592,7 +592,7 @@ def _migrate_strategy(
          all_divergences, aborted_by_divergence)
 
     On PayloadDivergenceBlocked (fail-closed), raises the exception after
-    writing the state marker and divergence_report.txt.
+    writing divergence_report.txt.
     """
     table = f"chunks_{strategy}"
     fts_table = f"chunks_fts_{strategy}"
@@ -839,43 +839,15 @@ def _migrate_strategy(
             reporter.set_collisions(collisions_collapsed)
 
     # --- Step 5f: Fail-closed divergence gate (Decision #10) ---
+    # No override flag exists — any divergence aborts the migration.
     if all_divergences:
-        if not allow_payload_divergence:
-            # Default: fail closed
-            report_path = run_dir / "divergence_report.txt"
-            _write_divergence_report(report_path, all_divergences)
-
-            # Write state marker (outside the main per-strategy transaction
-            # since we are about to ROLLBACK — use a separate connection write
-            # or write before ROLLBACK via savepoint).
-            # We write the state marker inside the current transaction so it
-            # rolls back with the data — but we need it to persist.
-            # Solution: write to state BEFORE rollback by using a direct
-            # execute on the connection (will be rolled back with the tx).
-            # The plan says "update_state_marker, ROLLBACK" — the state marker
-            # is written but then rolled back. We store the fact that we
-            # detected divergence by writing AFTER rollback using a fresh tx.
-            # (The plan's pseudocode shows this as part of the rollback path;
-            # the caller in run_migration_v16 handles this.)
-            raise PayloadDivergenceBlocked(
-                f"{len(all_divergences)} collision group(s) with diverging "
-                f"heading_hierarchy/level in strategy={strategy}. "
-                f"Re-run with --allow-payload-divergence to proceed with "
-                f"canonical-keep; see divergence_report.txt."
-            )
-        else:
-            # Override path: log each WARN, continue
-            for record in all_divergences:
-                logger.warning(
-                    "payload_mismatch_override strategy=%s new_id=%s old_ids=%s "
-                    "diverged_fields=%s canonical=%s",
-                    record["strategy"],
-                    record["new_chunk_id"],
-                    record["old_ids"],
-                    record["diverged_fields"],
-                    record["chosen_canonical_old_id"],
-                )
-                payload_mismatch_warnings += 1
+        report_path = run_dir / "divergence_report.txt"
+        _write_divergence_report(report_path, all_divergences)
+        raise PayloadDivergenceBlocked(
+            f"{len(all_divergences)} collision group(s) with diverging "
+            f"heading_hierarchy/level in strategy={strategy}. "
+            f"See divergence_report.txt for details."
+        )
 
     # --- Step 6: Sanity — zero duplicates in new_chunk_id ---
     dup_count = conn.execute(f"""
@@ -971,7 +943,6 @@ def run_migration_v16(
     *,
     dry_run: bool = False,
     verify_only: bool = False,
-    allow_payload_divergence: bool = False,
 ) -> MigrationReport:
     """Orchestrate the v16 migration across all strategies.
 
@@ -985,16 +956,11 @@ def run_migration_v16(
     verify_only:
         Run invariant checks only. Acquires lock with mode='verify-only'.
         No schema mutation.
-    allow_payload_divergence:
-        If True, proceed even when collision groups have diverging
-        heading_hierarchy/level. Override + details persisted to state.
-        If False (default), abort with PayloadDivergenceBlocked (exit 4).
     """
     _mode = "dry-run" if dry_run else ("verify-only" if verify_only else "run")
     report = MigrationReport(
         dry_run=dry_run,
         verify_only=verify_only,
-        allow_payload_divergence=allow_payload_divergence,
         lock_mode=_mode,
         mode=_mode,
     )
@@ -1186,7 +1152,6 @@ def run_migration_v16(
                     strategy,
                     dry_run=dry_run,
                     verify_only=False,
-                    allow_payload_divergence=allow_payload_divergence,
                     run_dir=run_dir,
                     reporter=reporter,
                 )
@@ -1216,14 +1181,13 @@ def run_migration_v16(
 
                     all_divs = prog.get("_all_divergences", [])
                     div_count = len([d for d in all_divs]) if all_divs else 0
-                    would_abort = div_count > 0 and not allow_payload_divergence
                     logger.info(
                         "mode=dry-run strategy=%s collisions=%d "
                         "divergence_warnings=%d payload_mismatch_warnings=%d "
-                        "payload_divergence_groups=%d would_abort_without_flag=%s "
+                        "payload_divergence_groups=%d "
                         "disk_delta_estimate=%d",
                         strategy, collisions, div_warns, pm_warns,
-                        div_count, str(would_abort).lower(),
+                        div_count,
                         report.disk_delta_estimate or 0,
                     )
                 else:
@@ -1232,15 +1196,14 @@ def run_migration_v16(
                         INSERT OR REPLACE INTO migration_v16_state (
                             strategy, status, completed_at, collisions_collapsed,
                             divergence_warnings, payload_mismatch_warnings,
-                            allow_payload_divergence, payload_divergences
-                        ) VALUES (?, 'complete', ?, ?, ?, ?, ?, ?)
+                            payload_divergences
+                        ) VALUES (?, 'complete', ?, ?, ?, ?, ?)
                     """, (
                         strategy,
                         datetime.now(timezone.utc).isoformat(),
                         collisions,
                         div_warns,
                         pm_warns,
-                        1 if allow_payload_divergence else 0,
                         json.dumps(all_divergences) if all_divergences else None,
                     ))
                     conn.execute("COMMIT")
@@ -1259,8 +1222,8 @@ def run_migration_v16(
                         INSERT OR REPLACE INTO migration_v16_state (
                             strategy, status, completed_at, collisions_collapsed,
                             divergence_warnings, payload_mismatch_warnings,
-                            allow_payload_divergence, payload_divergences
-                        ) VALUES (?, 'payload_divergence_blocked', ?, 0, 0, 0, 0, ?)
+                            payload_divergences
+                        ) VALUES (?, 'payload_divergence_blocked', ?, 0, 0, 0, ?)
                     """, (
                         strategy,
                         datetime.now(timezone.utc).isoformat(),
@@ -1431,7 +1394,7 @@ def status(index_db: Path) -> StatusReport:
         if state_exists:
             rows = conn.execute(
                 "SELECT strategy, status, completed_at, collisions_collapsed, "
-                "divergence_warnings, payload_mismatch_warnings, allow_payload_divergence "
+                "divergence_warnings, payload_mismatch_warnings "
                 "FROM migration_v16_state"
             ).fetchall()
             for row in rows:
@@ -1441,7 +1404,6 @@ def status(index_db: Path) -> StatusReport:
                     "collisions_collapsed": row[3],
                     "divergence_warnings": row[4],
                     "payload_mismatch_warnings": row[5],
-                    "allow_payload_divergence": bool(row[6]),
                 }
                 report.strategies[row[0]] = entry
                 report.per_strategy_state[row[0]] = entry
@@ -1487,13 +1449,12 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     dry_run = "--dry-run" in args
     verify_only = "--verify-only" in args
-    allow_payload_divergence = "--allow-payload-divergence" in args
     db_args = [a for a in args if not a.startswith("--")]
 
     if not db_args:
         print(
             "Usage: python -m dotmd.ingestion.migration_v16 <index.db> "
-            "[--dry-run] [--verify-only] [--allow-payload-divergence]",
+            "[--dry-run] [--verify-only]",
             file=sys.stderr,
         )
         sys.exit(2)
@@ -1508,7 +1469,6 @@ if __name__ == "__main__":
             db_path,
             dry_run=dry_run,
             verify_only=verify_only,
-            allow_payload_divergence=allow_payload_divergence,
         )
         print(
             f"Migration complete: completed={result.completed} "
