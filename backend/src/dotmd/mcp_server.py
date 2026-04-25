@@ -4,15 +4,27 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Annotated, Literal
 
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 
 from dotmd.api.service import DotMDService
 from dotmd.core.config import Settings
 
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("dotmd", instructions="Search a markdown knowledgebase.")
+mcp = FastMCP(
+    "dotmd",
+    instructions=(
+        "Search a personal markdown knowledgebase containing notes, meeting transcripts, "
+        "voice notes, documentation, and project files. "
+        "Use `search` to find relevant chunks by meaning or keyword. "
+        "Use `status` to check how many files are indexed and whether indexing is in progress."
+    ),
+    host="0.0.0.0",
+    port=8080,
+)
 
 _service: DotMDService | None = None
 
@@ -25,37 +37,54 @@ def _get_service() -> DotMDService:
     return _service
 
 
-@mcp.tool()
+@mcp.tool(
+    annotations={
+        "title": "Search Knowledgebase",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+)
 def search(
-    query: str,
-    top_k: int = 10,
-    mode: str = "hybrid",
-    rerank: bool = True,
+    query: Annotated[str, Field(description="Natural-language search query.")],
+    top_k: Annotated[int, Field(description="Maximum results to return.", ge=1, le=100)] = 10,
+    mode: Annotated[
+        Literal["hybrid", "semantic", "keyword", "graph"],
+        Field(description=(
+            "Search strategy. "
+            "hybrid: semantic + keyword + graph fused via RRF (default, best for most queries). "
+            "semantic: vector similarity only. "
+            "keyword: FTS5 full-text search only. "
+            "graph: entity-based graph traversal only."
+        )),
+    ] = "hybrid",
+    rerank: Annotated[bool, Field(description="Rerank results with a cross-encoder for higher precision.")] = True,
 ) -> list[dict]:
-    """Search the indexed markdown knowledgebase.
+    """Search the indexed markdown knowledgebase and return ranked chunks.
 
-    Args:
-        query: Natural-language search query.
-        top_k: Maximum number of results to return.
-        mode: Search strategy — "semantic", "keyword", "graph", or "hybrid".
-        rerank: Whether to rerank results with a cross-encoder.
-
-    Returns:
-        List of search results. Each result has `file_paths: list[str]` —
-        all files whose content hashes to this chunk (Phase 16 Decision #1).
-        Also includes heading, snippet, score, and matched_engines.
+    Each result includes the source file paths, heading context, a cleaned text
+    snippet, a relevance score, and which search engines matched it.
     """
     service = _get_service()
     results = service.search(query, top_k=top_k, mode=mode, rerank=rerank)
     return [_format_result(r) for r in results]
 
 
-@mcp.tool()
+@mcp.tool(
+    annotations={
+        "title": "Index Status",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+)
 def status() -> dict:
-    """Get current index statistics.
+    """Return current index statistics and trickle indexer progress.
 
-    Returns:
-        Index statistics including trickle indexer progress.
+    Useful for checking how many files and chunks are indexed, whether
+    background indexing is active, and when the last file was indexed.
     """
     service = _get_service()
     stats = service.status().model_dump(mode="json")
@@ -93,7 +122,6 @@ _TIMESTAMP_RE = re.compile(r"\[\d{2}:\d{2}:\d{2}\]\s*")
 
 
 def _format_result(r) -> dict:
-    """Format a SearchResult for MCP response."""
     snippet = r.snippet
 
     # Extract title from frontmatter (for heading fallback)
@@ -107,18 +135,14 @@ def _format_result(r) -> dict:
                     title = stripped[6:].strip().strip("'\"")
                     break
 
-    # Clean snippet: strip frontmatter, extract first timestamp
     clean = _FRONTMATTER_RE.sub("", snippet).strip()
     first_ts = _TIMESTAMP_RE.search(clean)
     start_time = first_ts.group().strip(" []") if first_ts else None
     clean = _TIMESTAMP_RE.sub("", clean).strip()
 
-    # heading: use heading_path if available, fallback to frontmatter title
-    heading = r.heading_path or title
-
     return {
         "file_paths": [str(p) for p in r.file_paths],
-        "heading": heading,
+        "heading": r.heading_path or title,
         "snippet": clean,
         "score": round(r.fused_score, 3),
         "matched_engines": r.matched_engines,

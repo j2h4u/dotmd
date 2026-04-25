@@ -363,12 +363,18 @@ def serve(host: str, port: int) -> None:
 
 
 @main.command()
-def mcp() -> None:
+@click.option("--transport", default="stdio", type=click.Choice(["stdio", "streamable-http"]), help="MCP transport.")
+@click.option("--host", default="0.0.0.0", help="Bind host (streamable-http only).")
+@click.option("--port", "-p", default=8080, help="Bind port (streamable-http only).")
+def mcp(transport: str, host: str, port: int) -> None:
     """Start the MCP (Model Context Protocol) server."""
     from dotmd.mcp_server import mcp as mcp_app
 
-    click.echo("Starting dotMD MCP server...", err=True)
-    mcp_app.run()
+    click.echo(f"Starting dotMD MCP server ({transport})...", err=True)
+    if transport == "streamable-http":
+        mcp_app.settings.host = host
+        mcp_app.settings.port = port
+    mcp_app.run(transport=transport)
 
 
 @main.command("mcp-config")

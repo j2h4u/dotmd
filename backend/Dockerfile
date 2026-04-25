@@ -25,6 +25,8 @@ WORKDIR /app
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /app /app
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
 
 ENV DOTMD_INDEX_DIR=/dotmd-index
 ENV DOTMD_DATA_DIR=/data
@@ -36,4 +38,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-ENTRYPOINT ["dotmd"]
+ENTRYPOINT ["/app/start.sh"]

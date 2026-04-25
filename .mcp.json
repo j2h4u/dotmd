@@ -2,7 +2,7 @@
   "mcpServers": {
     "dotmd": {
       "command": "docker",
-      "args": ["exec", "-i", "dotmd-api-1", "dotmd", "mcp"]
+      "args": ["exec", "-i", "dotmd", "dotmd", "mcp"]
     }
   }
 }

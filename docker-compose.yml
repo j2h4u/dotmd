@@ -1,7 +1,9 @@
 services:
-  api:
+  dotmd:
     build:
       context: ./backend
+    image: dotmd
+    container_name: dotmd
     ports:
       - "${DOTMD_PORT:-8000}:8000"
     volumes:
@@ -11,7 +13,6 @@ services:
     env_file:
       - path: .env
         required: false
-    command: ["serve", "--host", "0.0.0.0"]
 
   tei:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9

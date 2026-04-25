@@ -76,7 +76,8 @@ async def _log_requests(request: Request, call_next):  # noqa: ANN001
     t0 = time.perf_counter()
     response = await call_next(request)
     elapsed_ms = (time.perf_counter() - t0) * 1000
-    log = logger.error if response.status_code >= 500 else logger.info
+    is_health = request.url.path == "/health"
+    log = logger.error if response.status_code >= 500 else (logger.debug if is_health else logger.info)
     log(
         "%s %s %d (%.0fms)",
         request.method,
@@ -173,4 +174,4 @@ def main(host: str = "127.0.0.1", port: int = 8000) -> None:
     """Run the API server via uvicorn."""
     import uvicorn
 
-    uvicorn.run(app, host=host, port=port)
+    uvicorn.run(app, host=host, port=port, access_log=False)

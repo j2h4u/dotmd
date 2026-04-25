@@ -21,18 +21,55 @@ The fork has been substantially reworked:
 - **Two-dimensional storage**: tables keyed by `(chunk_strategy, embedding_model)` — supports multiple chunking strategies and embedding models simultaneously
 - **Content-aware chunking**: speaker-turn splitting for meeting transcripts, paragraph splitting for voicenotes, heading-based for docs
 - **Context prefix injection**: document title prepended to embeddings at encode time
-- **Graph-first entity retrieval**: entity-direct graph search as RRF peer alongside semantic and BM25
+- **Graph-first entity retrieval**: entity-direct graph search as RRF peer alongside semantic and FTS5
 - **Embedding reuse**: text_hash column enables cross-strategy embedding cache
 - **Split fingerprints**: chunk tracking and embed tracking separated (change model → skip re-chunking)
 - **Exclusive lock**: `fcntl.flock` prevents parallel indexing
 - **Orphan cleanup**: automatic at trickle startup
+- **M2M content-addressed schema**: chunks → file_paths many-to-many (Phase 16)
 - **sqlite-vec**: replaced LanceDB with sqlite-vec (no AVX2 requirement)
-- **FalkorDB**: replaced LadybugDB with FalkorDB for knowledge graph
+- **FTS5**: replaced rank_bm25 with SQLite FTS5 (incremental, no pickle, column weights)
+- **FalkorDB**: production graph backend; LadybugDB kept as embedded local-dev default
 - **TEI**: external embedding server (Text Embeddings Inference), CPU-only
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|------------|
+| Language | Python 3.12+ |
+| Vector store | sqlite-vec |
+| Graph DB | FalkorDB (production) / LadybugDB (local dev, no container needed) |
+| Metadata + FTS | SQLite + FTS5 |
+| Embeddings | TEI (Text Embeddings Inference) — external container |
+| Reranker | cross-encoder/ms-marco-MiniLM-L-6-v2 |
+| NER | GLiNER (urchade/gliner_multi-v2.1) — zero-shot |
+| CLI | Click |
+| Models | Pydantic v2 |
+
+## Monorepo Structure
+
+```
+dotMD/
+├── backend/              # Python package (src layout)
+│   ├── pyproject.toml
+│   ├── start.sh          # container entrypoint — starts MCP HTTP (bg) + serve (fg)
+│   └── src/dotmd/        # importable package
+│       ├── core/         # models, config, exceptions
+│       ├── ingestion/    # reader, chunker, pipeline, trickle, migration
+│       ├── extraction/   # structural, GLiNER NER
+│       ├── storage/      # sqlite-vec (vectors), FalkorDB/LadybugDB (graph), SQLite (metadata + FTS5)
+│       ├── search/       # semantic, FTS5, graph_direct, fusion, reranker, query
+│       ├── api/          # DotMDService facade + FastAPI server
+│       ├── mcp_server.py # FastMCP server (search + status tools)
+│       └── cli.py        # Click CLI (thin wrapper over api/service.py)
+├── .mcp.json             # Claude Code MCP config (stdio via docker exec)
+├── data/                 # Sample markdown files for testing
+└── README.md
+```
 
 ## Architecture Overview
 
-See `CLAUDE.md` for full details. Key paths:
+Key paths:
 
 ```
 backend/src/dotmd/
@@ -47,8 +84,72 @@ backend/src/dotmd/
   cli.py                  — Click CLI
 ```
 
+Search pipeline: query → expand → 3 engines parallel (semantic + FTS5 + graph) → RRF fuse → cross-encoder rerank → top-K.
+
+## Storage
+
+Production index lives on docker volume `dotmd_dotmd-index` (mapped to `/dotmd-index/` in container):
+- `index.db` — unified database: chunk metadata, FTS5 tables, sqlite-vec embeddings, fingerprints, M2M file_paths
+
+Graph stored externally in FalkorDB (shared `graphiti_default` Docker network).
+
+## Configuration
+
+Production env vars (source: `/opt/docker/dotmd/.env`):
+
+| Variable | Purpose |
+|----------|---------|
+| `DOTMD_PORT` | Listen address (e.g. `127.0.0.1:8321`) |
+| `DOTMD_DATA_DIR` | Markdown source root — **locked to `/mnt`**, never narrow |
+| `DOTMD_INDEX_DIR` | Index directory (docker volume mount) |
+| `DOTMD_EMBEDDING_URL` | TEI server URL |
+| `DOTMD_EMBEDDING_MODEL` | Model name passed to TEI |
+| `DOTMD_TEI_BATCH_SIZE` | TEI call batch size |
+| `DOTMD_EXTRACT_DEPTH` | `structural` or `ner` |
+| `DOTMD_GRAPH_BACKEND` | `falkordb` (prod) or `ladybugdb` (local dev) |
+| `DOTMD_FALKORDB_URL` | FalkorDB Redis URL |
+| `DOTMD_FALKORDB_GRAPH_NAME` | Graph name in FalkorDB |
+| `DOTMD_PROFILE_INDEXING` | Enable pipeline timing logs |
+
 ## Deployment
 
-Docker container on senbonzakura server. See `/opt/docker/dotmd/` for compose config.
-TEI runs as separate container (`embeddings` service on port 8088).
-FalkorDB runs as separate container (`graphiti-falkordb-1`).
+Single container `dotmd` (container_name: dotmd) on senbonzakura. See `/opt/docker/dotmd/` for compose config.
+
+`backend/start.sh` is the ENTRYPOINT — starts two processes:
+```sh
+dotmd mcp --transport streamable-http --host 0.0.0.0 --port 8080 &
+exec dotmd serve --host 0.0.0.0
+```
+
+- **REST API**: port 8000 internally, mapped to `127.0.0.1:8321` externally
+- **MCP HTTP**: port 8080, internal Docker network only (no external mapping)
+
+External dependencies (separate containers):
+- TEI (`embeddings` service, port 8088) — embedding server
+- FalkorDB (`graphiti-falkordb-1`) — knowledge graph
+
+Source code is bind-mounted into the container — code changes take effect on container restart, no image rebuild needed. Rebuild only when `pyproject.toml` or `start.sh` changes.
+
+## MCP Interface
+
+Two transports available:
+
+**stdio** — for Claude Code in this project. Configured in `.mcp.json`:
+```json
+{"command": "docker", "args": ["exec", "-i", "dotmd", "dotmd", "mcp"]}
+```
+Each session spawns a fresh `dotmd mcp` subprocess inside the running container.
+
+**HTTP (streamable-http)** — for other containers on the Docker network. Endpoint: `http://dotmd:8080/mcp`. Connect by joining the `dotmd_default` network.
+
+Tools exposed: `search(query, top_k, mode, rerank)` and `status()`.
+
+## When Modifying Code
+
+- New storage backends: implement the Protocol from `storage/base.py`
+- New extractors: implement `ExtractorProtocol` from `extraction/base.py`
+- New search engines: implement `SearchEngineProtocol` from `search/base.py`
+- All public APIs go through `api/service.py` — never expose internals directly
+- **Never reload indexes per-request.** Indexes must be loaded once at startup and reused. Calling `load_index()` inside search methods causes disk I/O on every request.
+- **Never run `dotmd index --force` while serve is running** — trickle holds the fcntl lock. Stop the container first.
+- **Never restart production on small changes** — batch changes, deploy once.
