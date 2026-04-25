@@ -1,0 +1,109 @@
+CREATE TABLE chunk_fingerprints_contextual_512_50 (
+    file_path   TEXT PRIMARY KEY,
+    mtime       REAL    NOT NULL,
+    size_bytes  INTEGER NOT NULL,
+    checksum    TEXT    NOT NULL,
+    indexed_at  TEXT    NOT NULL
+);
+CREATE TABLE chunk_fingerprints_heading_512_50 (
+    file_path   TEXT PRIMARY KEY,
+    mtime       REAL    NOT NULL,
+    size_bytes  INTEGER NOT NULL,
+    checksum    TEXT    NOT NULL,
+    indexed_at  TEXT    NOT NULL
+);
+CREATE TABLE chunks_contextual_512_50 (
+    chunk_id        TEXT PRIMARY KEY,
+    file_path       TEXT    NOT NULL,
+    heading_hierarchy TEXT  NOT NULL DEFAULT '[]',
+    level           INTEGER NOT NULL DEFAULT 0,
+    text            TEXT    NOT NULL DEFAULT '',
+    chunk_index     INTEGER NOT NULL DEFAULT 0,
+    char_offset     INTEGER NOT NULL DEFAULT 0
+);
+CREATE VIRTUAL TABLE chunks_fts_contextual_512_50 USING fts5(
+    chunk_id UNINDEXED,
+    text,
+    title,
+    tags,
+    tokenize = 'unicode61'
+);
+CREATE TABLE 'chunks_fts_contextual_512_50_config'(k PRIMARY KEY, v) WITHOUT ROWID;
+CREATE TABLE 'chunks_fts_contextual_512_50_content'(id INTEGER PRIMARY KEY, c0, c1, c2, c3);
+CREATE TABLE 'chunks_fts_contextual_512_50_data'(id INTEGER PRIMARY KEY, block BLOB);
+CREATE TABLE 'chunks_fts_contextual_512_50_docsize'(id INTEGER PRIMARY KEY, sz BLOB);
+CREATE TABLE 'chunks_fts_contextual_512_50_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID;
+CREATE VIRTUAL TABLE chunks_fts_heading_512_50 USING fts5(
+    chunk_id UNINDEXED,
+    text,
+    tokenize = 'unicode61'
+);
+CREATE TABLE 'chunks_fts_heading_512_50_config'(k PRIMARY KEY, v) WITHOUT ROWID;
+CREATE TABLE 'chunks_fts_heading_512_50_content'(id INTEGER PRIMARY KEY, c0, c1);
+CREATE TABLE 'chunks_fts_heading_512_50_data'(id INTEGER PRIMARY KEY, block BLOB);
+CREATE TABLE 'chunks_fts_heading_512_50_docsize'(id INTEGER PRIMARY KEY, sz BLOB);
+CREATE TABLE 'chunks_fts_heading_512_50_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID;
+CREATE TABLE chunks_heading_512_50 (
+    chunk_id        TEXT PRIMARY KEY,
+    file_path       TEXT    NOT NULL,
+    heading_hierarchy TEXT  NOT NULL DEFAULT '[]',
+    level           INTEGER NOT NULL DEFAULT 0,
+    text            TEXT    NOT NULL DEFAULT '',
+    chunk_index     INTEGER NOT NULL DEFAULT 0,
+    char_offset     INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE embed_fingerprints_contextual_512_50_multilingual_e5_large (
+    file_path   TEXT PRIMARY KEY,
+    mtime       REAL    NOT NULL,
+    size_bytes  INTEGER NOT NULL,
+    checksum    TEXT    NOT NULL,
+    indexed_at  TEXT    NOT NULL
+);
+CREATE TABLE embed_fingerprints_heading_512_50_multilingual_e5_large (
+    file_path   TEXT PRIMARY KEY,
+    mtime       REAL    NOT NULL,
+    size_bytes  INTEGER NOT NULL,
+    checksum    TEXT    NOT NULL,
+    indexed_at  TEXT    NOT NULL
+);
+CREATE TABLE embedding_cache (
+                text_hash  TEXT NOT NULL,
+                model_name TEXT NOT NULL,
+                embedding  BLOB NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (text_hash, model_name)
+            );
+CREATE TABLE embedding_cache_meta (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+CREATE TABLE extraction_cache (
+                cache_key    TEXT PRIMARY KEY,
+                entities_json  TEXT NOT NULL,
+                co_occurs_json TEXT NOT NULL,
+                created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+CREATE TABLE extraction_cache_meta (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+CREATE INDEX idx_chunks_contextual_512_50_file_path ON chunks_contextual_512_50(file_path);
+CREATE INDEX idx_chunks_heading_512_50_file_path ON chunks_heading_512_50(file_path);
+CREATE TABLE stats (
+    id              INTEGER PRIMARY KEY DEFAULT 1,
+    total_files     INTEGER NOT NULL DEFAULT 0,
+    total_chunks    INTEGER NOT NULL DEFAULT 0,
+    total_entities  INTEGER NOT NULL DEFAULT 0,
+    total_edges     INTEGER NOT NULL DEFAULT 0,
+    last_indexed    TEXT
+, new_files INTEGER NOT NULL DEFAULT 0, modified_files INTEGER NOT NULL DEFAULT 0, deleted_files INTEGER NOT NULL DEFAULT 0, unchanged_files INTEGER NOT NULL DEFAULT 0, data_dir TEXT);
+CREATE TABLE vec_meta_contextual_512_50_multilingual_e5_large (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                chunk_id TEXT NOT NULL UNIQUE,
+                text_hash TEXT
+            );
+CREATE TABLE vec_meta_heading_512_50_multilingual_e5_large (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                chunk_id TEXT NOT NULL UNIQUE,
+                text_hash TEXT
+            );

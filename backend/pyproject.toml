@@ -44,6 +44,8 @@ eval = [
 dotmd = "dotmd.cli:main"
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-x --tb=short"
 markers = [
     "smoke: smoke tests requiring a running dotMD stack",
 ]
