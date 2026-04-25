@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class SearchMode(StrEnum):
@@ -72,15 +72,22 @@ class FileInfo(BaseModel):
 
 
 class Chunk(BaseModel):
-    """A section of a markdown file after chunking."""
+    """A section of a markdown file after chunking.
+
+    Phase 16 (Decision #8): char_offset dropped; file_path replaced by
+    file_paths: list[Path] (single-element list when emitted by the chunker).
+    chunk_index stays on the Chunk at creation time but is stored only in the
+    chunk_file_paths_* M2M table, not in chunks_* columns.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     chunk_id: str
-    file_path: Path
+    file_paths: list[Path] = Field(default_factory=list)
     heading_hierarchy: list[str] = Field(default_factory=list)
     level: int = 0
     text: str
     chunk_index: int
-    char_offset: int
     kind: str = DocKind.DOCUMENT
 
     @computed_field  # type: ignore[prop-decorator]
@@ -124,10 +131,14 @@ class ExpandedQuery(BaseModel):
 
 
 class SearchResult(BaseModel):
-    """A single search result after fusion and optional reranking."""
+    """A single search result after fusion and optional reranking.
+
+    Phase 16 (Decision #1, #2): file_path replaced by file_paths: list[Path]
+    sorted lexicographically (clean break — no backward-compat alias).
+    """
 
     chunk_id: str
-    file_path: Path
+    file_paths: list[Path] = Field(default_factory=list)
     heading_path: str
     snippet: str
     fused_score: float

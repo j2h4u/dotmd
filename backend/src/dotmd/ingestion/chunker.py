@@ -130,7 +130,7 @@ def _parse_sections(content: str) -> list[tuple[int, str, str, int]]:
 
 def chunk_file(
     file_path: Path,
-    content: str,
+    content: str | None = None,
     max_tokens: int = 512,
     overlap_tokens: int = 50,
     kind: str = DocKind.DOCUMENT,
@@ -167,6 +167,10 @@ def chunk_file(
     list[Chunk]
         Ordered list of chunks covering the entire document.
     """
+    # If content is not supplied, read it from disk.
+    if content is None:
+        content = file_path.read_text(encoding="utf-8")
+
     # ADR: Strip YAML frontmatter before chunking so raw YAML never leaks
     # into chunk text. Frontmatter metadata reaches search engines through
     # structured channels (graph entities, FTS5 columns, embedding prefix)
@@ -186,7 +190,7 @@ def chunk_file(
     # Index 0 is unused (level 0 = no heading); indices 1-6 correspond to
     # ``#`` through ``######``.
     hierarchy: list[str] = [""] * 7
-    for level, heading, section_body, char_offset in sections:
+    for level, heading, section_body, _char_offset in sections:
         if level > 0:
             hierarchy[level] = heading
             # Clear deeper headings when a higher-level heading appears.
@@ -216,12 +220,11 @@ def chunk_file(
             chunks.append(
                 Chunk(
                     chunk_id=_make_chunk_id(body_checksum, chunk_index, chunk_strategy),
-                    file_path=file_path,
+                    file_paths=[file_path],
                     heading_hierarchy=list(current_hierarchy),
                     level=level,
                     text=section_text,
                     chunk_index=chunk_index,
-                    char_offset=char_offset,
                     kind=kind,
                 )
             )
@@ -236,12 +239,11 @@ def chunk_file(
                 chunks.append(
                     Chunk(
                         chunk_id=_make_chunk_id(body_checksum, chunk_index, chunk_strategy),
-                        file_path=file_path,
+                        file_paths=[file_path],
                         heading_hierarchy=list(current_hierarchy),
                         level=level,
                         text=sub_text,
                         chunk_index=chunk_index,
-                        char_offset=char_offset,
                         kind=kind,
                     )
                 )
