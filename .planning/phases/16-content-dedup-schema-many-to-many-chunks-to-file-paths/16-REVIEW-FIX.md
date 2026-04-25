@@ -7,6 +7,7 @@ findings_in_scope: 6
 fixed: 6
 skipped: 0
 status: all_fixed
+post_script_addressed: [IN-01, IN-02, DEDUP-10b]
 ---
 
 # Phase 16: Code Review Fix Report
@@ -113,3 +114,27 @@ None — all 6 in-scope findings were fixed.
 _Fixed: 2026-04-25T14:30:00Z_
 _Fixer: Claude (gsd-code-fixer)_
 _Iteration: 1_
+
+---
+
+## Post-script: INFO items + DEDUP-10b xfail (same-day cleanup)
+
+Three follow-ups that were originally deferred — closed inline in the
+same session per user request ("зачем переносить на 2 недели вперед,
+если можно прямо сейчас пофиксить").
+
+| ID         | Commit    | What                                                                                                                                  |
+|------------|-----------|---------------------------------------------------------------------------------------------------------------------------------------|
+| IN-02      | `749d1d4` | Lifted `from collections import defaultdict` from inside `verify_only` branch to module-level imports.                                |
+| IN-01      | `f72729a` | Added `MigrationReport.invariant_report` field; verify-only populates it; CLI reuses it instead of opening a fresh DB connection.     |
+| DEDUP-10b  | `48354d6` | Refactored `test_search_parity.py` to patch `SemanticSearchEngine.encode` (the real seam) at class level with `autospec=True`. xfail decorator removed; test now PASSES (was the only xfail in the suite). Vector dim aligned with fixture's `_seeded_vector` dim (8). |
+
+**Final regression:** 156 passed, 0 xfailed, 0 failures across the full
+backend test suite. End-to-end search-layer parity (DEDUP-10b) is now
+automated; migration-layer parity remains covered by
+`test_migration_v16_invariants`.
+
+The `_index_file` residual noted by the verifier in `16-VERIFICATION.md`
+(WARNING 2) is still tracked in `16-HUMAN-UAT.md` Notes — that is a
+behavior refinement, not a bug, and the code already documents it as a
+future cleanup. No code change needed.

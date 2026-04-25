@@ -68,6 +68,6 @@ beyond the migration_v16 backup it takes itself.
   comment marks this as known: "The M2M-aware cascade (P4) will refine this further."
   Track as future cleanup if it surfaces under real workloads.
 
-- DEDUP-10b xfail: `test_search_parity.py` patches a non-existent service seam.
-  Migration-layer parity (DEDUP-10a) IS covered by `test_migration_v16_invariants`.
-  Refactor the xfailed test to patch `SemanticSearch.encode` when convenient.
+- ~~DEDUP-10b xfail~~ — closed 2026-04-25 in commit `48354d6`. Refactored
+  the parity test to patch `SemanticSearchEngine.encode` (the real seam)
+  at class level. Test now PASSES; full suite has 0 xfails.
