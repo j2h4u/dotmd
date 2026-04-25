@@ -880,6 +880,11 @@ def run_migration_v16(
     if not is_no_persist:
         conn.execute("PRAGMA journal_mode=WAL")
 
+    # Guard: tracks whether _release_lock has already been called so the
+    # finally block does not attempt a second release on a closed connection
+    # (PayloadDivergenceBlocked handler releases + closes before re-raising).
+    _lock_released = False
+
     try:
         if is_no_persist:
             # Begin a wrapping transaction that will ROLLBACK at the end.
@@ -1121,6 +1126,7 @@ def run_migration_v16(
                     ))
                     conn.execute("COMMIT")
                     _release_lock(conn)
+                    _lock_released = True
                     conn.close()
                 raise exc from None
 
@@ -1143,7 +1149,9 @@ def run_migration_v16(
                 conn.execute("ROLLBACK")
             except Exception:  # noqa: BLE001
                 pass
-        else:
+        elif not _lock_released:
+            # Only release if not already released by the PayloadDivergenceBlocked
+            # handler — avoids a spurious WARNING on an already-closed connection.
             _release_lock(conn)
         conn.close()
 
