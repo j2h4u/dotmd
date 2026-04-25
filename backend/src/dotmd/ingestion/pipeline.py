@@ -1157,6 +1157,66 @@ class IndexingPipeline:
         ).fetchall()
         return [r[0].removeprefix("chunk_file_paths_") for r in rows]
 
+    def _holder_aware_chunk_cleanup(
+        self,
+        file_path: str,
+        *,
+        conn: sqlite3.Connection,
+    ) -> dict[str, list[str]]:
+        """Decrement M2M for *file_path* across all strategies, cascade-delete
+        only chunk_ids whose holder count reached 0.
+
+        This is the single shared primitive for both ``_purge_file`` and
+        ``_index_file``.  It covers the four in-transaction DB-level deletes:
+        M2M rows → orphan chunks_* rows → vec_meta_* rows → FTS5 rows.
+
+        **Transaction boundary:** MUST be called inside a caller-managed
+        BEGIN/COMMIT block.  This method issues no COMMIT of its own.
+
+        **Strategies covered:** all strategies that have a
+        ``chunk_file_paths_*`` M2M table in the DB at call time (discovered
+        via ``_present_strategies``).  For ``_index_file`` this is typically
+        one strategy; for ``_purge_file`` it covers all strategies atomically.
+
+        Parameters
+        ----------
+        file_path:
+            The file whose M2M associations should be decremented.
+        conn:
+            The open SQLite connection carrying the active transaction.
+
+        Returns
+        -------
+        dict[str, list[str]]
+            Mapping of ``strategy → [orphan_chunk_ids]``.  Orphans are
+            chunk_ids whose holder count dropped to 0 and were cascade-deleted
+            from the DB tables.  The caller uses this for post-commit external
+            cleanup (graph nodes, fingerprints).
+        """
+        all_orphans_by_strategy: dict[str, list[str]] = {}
+        for strategy in self._present_strategies(conn):
+            orphans = self._metadata_store.delete_m2m_for_file(
+                strategy, file_path, conn=conn
+            )
+            if orphans:
+                self._metadata_store.delete_orphan_chunks(
+                    strategy, orphans, conn=conn
+                )
+                self._vector_store.delete_by_chunk_ids(
+                    strategy, orphans, conn=conn
+                )
+                # FTS5 cascade — runs inside the same transaction.
+                fts_table = f"chunks_fts_{strategy}"
+                try:
+                    conn.executemany(
+                        f"DELETE FROM {fts_table} WHERE chunk_id = ?",
+                        [(cid,) for cid in orphans],
+                    )
+                except sqlite3.OperationalError:
+                    logger.debug("FTS5 delete skipped — %s absent", fts_table)
+                all_orphans_by_strategy[strategy] = orphans
+        return all_orphans_by_strategy
+
     def _purge_file(self, file_path: str) -> None:
         """Remove all indexed data for a single file, using holder-aware cascade.
 
@@ -1166,8 +1226,9 @@ class IndexingPipeline:
 
         Transaction boundary:
             ONE sqlite3 BEGIN/COMMIT covers all strategies × {M2M delete,
-            orphan cascade, vec cascade, FTS cascade}.  On any exception inside
-            the BEGIN block, ROLLBACK restores exact pre-purge state.
+            orphan cascade, vec cascade, FTS cascade} via
+            ``_holder_aware_chunk_cleanup``.  On any exception inside the
+            BEGIN block, ROLLBACK restores exact pre-purge state.
 
         Post-commit external state (graph + fingerprints):
             Runs AFTER the DB commit.  Failures are WARN-logged; they do not
@@ -1187,27 +1248,9 @@ class IndexingPipeline:
         all_orphans_by_strategy: dict[str, list[str]] = {}
         try:
             conn.execute("BEGIN")
-            for strategy in self._present_strategies(conn):
-                orphans = self._metadata_store.delete_m2m_for_file(
-                    strategy, file_path, conn=conn
-                )
-                if orphans:
-                    self._metadata_store.delete_orphan_chunks(
-                        strategy, orphans, conn=conn
-                    )
-                    self._vector_store.delete_by_chunk_ids(
-                        strategy, orphans, conn=conn
-                    )
-                    # FTS5 cascade — runs inside the same transaction.
-                    fts_table = f"chunks_fts_{strategy}"
-                    try:
-                        conn.executemany(
-                            f"DELETE FROM {fts_table} WHERE chunk_id = ?",
-                            [(cid,) for cid in orphans],
-                        )
-                    except sqlite3.OperationalError:
-                        logger.debug("FTS5 delete skipped — %s absent", fts_table)
-                    all_orphans_by_strategy[strategy] = orphans
+            all_orphans_by_strategy = self._holder_aware_chunk_cleanup(
+                file_path, conn=conn
+            )
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")
