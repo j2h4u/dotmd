@@ -201,19 +201,28 @@ anti-pattern for a production service — they let misconfiguration ship.
 **Plans:**
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
-### Phase 999.7: Remove migration_v15.py no-op stub (BACKLOG)
+### Phase 999.7: Remove all migration dead code (BACKLOG)
 
-**Goal:** Delete `backend/src/dotmd/storage/migration_v15.py` and its tests.
+**Goal:** Delete every migration-related artifact now that Phase 16 has shipped and the production index is fully on the v16 M2M schema. One commit, one mental purge.
 
-**Context 2026-04-24:** Phase 16 supersedes v15 migration with `migration_v16` (schema change + blake3 remap + dedup collapse in one pass). v15 is left as a no-op stub with a deprecation banner for one release cycle as a safety net. Remove after Phase 16 has shipped and been stable for one cycle.
+**Context (updated 2026-04-25):** Phase 16 shipped to production on 2026-04-25 — `dotmd migrate run` succeeded (486 collisions collapsed, 0 divergence, no override), `migrate status` reports `needs migration: NO`, full backend regression green (155 passed, 0 failed). The migration code is one-shot: it only ever runs once per DB. After a soak window with no production issues, all of it is dead code.
 
-**Scope:**
-- Delete `migration_v15.py`
-- Remove any remaining imports / CLI wiring
-- Delete v15-specific tests
+**Trigger condition:** Phase 16 stable in production for **2–4 weeks** without any need to roll back, AND `index.db.v16-backup` is also being removed in the same sweep (i.e. we are committing to "no rollback path" simultaneously with deleting the rollback script).
+
+**Scope (everything goes together in one phase):**
+- `backend/src/dotmd/ingestion/migration_v15.py` — already a no-op stub (deprecation banner only); delete it and any imports.
+- `backend/src/dotmd/ingestion/migration_v16.py` — full migration logic (~1500 lines); delete.
+- `backend/src/dotmd/cli.py` — remove the `dotmd migrate` Click group entirely (run + status subcommands). `migrate status` is the only useful runtime piece, but its only purpose is to report "you need to run the migration"; once the migration is gone, the status command has no meaning.
+- All migration tests under `backend/tests/ingestion/test_migration_v*` and `backend/tests/cli/test_migrate_cli.py`.
+- `index.db.v16-backup` on the dotmd-index volume (~254 MB).
+- Any `chunk_fingerprints_*`-table consumers that exist *only* to feed migration_v16's body_checksum lookup (verify with grep before deletion — fingerprints are also used by `FileTracker`, leave that path intact).
+
+**Out of scope:**
+- The M2M schema itself, `_holder_aware_chunk_cleanup`, `chunk_file_paths_*` tables — these are now the live schema, not migration code.
+- `PayloadDivergenceBlocked` exception — only thrown by migration_v16; delete it alongside the file.
 
 **Plans:**
-- [ ] TBD (promote with /gsd-review-backlog when ready)
+- [ ] TBD (promote with `/gsd:review-backlog` when soak is done)
 
 ### Phase 999.8: Per-holder heading hierarchy — promote `heading_hierarchy` + `level` to M2M (BACKLOG)
 
