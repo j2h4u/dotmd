@@ -317,7 +317,6 @@ def _ensure_state_table(conn: sqlite3.Connection) -> None:
             collisions_collapsed    INTEGER NOT NULL DEFAULT 0,
             divergence_warnings     INTEGER NOT NULL DEFAULT 0,
             payload_mismatch_warnings INTEGER NOT NULL DEFAULT 0,
-            allow_payload_divergence  INTEGER NOT NULL DEFAULT 0,
             payload_divergences     TEXT
         )
     """)

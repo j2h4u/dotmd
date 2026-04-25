@@ -27,7 +27,7 @@ class TestProgressLineEmission:
     ) -> None:
         """MigrationReport carries rows_per_sec > 0 for each completed strategy."""
         run_migration_v16 = _import()
-        report = run_migration_v16(collision_rich_db, allow_payload_divergence=True)
+        report = run_migration_v16(collision_rich_db)
         # Report must expose per-strategy progress fields
         assert hasattr(report, "per_strategy_progress"), (
             "MigrationReport missing per_strategy_progress field"

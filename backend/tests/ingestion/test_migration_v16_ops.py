@@ -67,7 +67,7 @@ class TestStatusReporting:
     ) -> None:
         """status() after a completed migration reports per-strategy rows."""
         run_migration_v16, status = _import()
-        run_migration_v16(collision_rich_db, allow_payload_divergence=True)
+        run_migration_v16(collision_rich_db)
 
         report = status(collision_rich_db)
         assert report is not None

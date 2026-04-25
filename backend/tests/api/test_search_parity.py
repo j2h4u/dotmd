@@ -68,7 +68,7 @@ class TestTopKParityForNonCollisionChunks:
                 ]
 
         # Run migration
-        run_migration_v16(collision_rich_db, allow_payload_divergence=True)
+        run_migration_v16(collision_rich_db)
 
         # Post-migration search (recreate service to pick up new schema)
         with patch(encode_target, autospec=True, side_effect=_stub_encode):

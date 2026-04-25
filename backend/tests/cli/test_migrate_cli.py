@@ -117,7 +117,7 @@ class TestMigrateStatusCLI:
     def test_cli_status_post_migration(self, collision_rich_db: Path) -> None:
         """dotmd migrate status after migration shows per-strategy state."""
         from dotmd.ingestion.migration_v16 import run_migration_v16
-        run_migration_v16(collision_rich_db, allow_payload_divergence=True)
+        run_migration_v16(collision_rich_db)
 
         CliRunner, main = _get_cli()
         runner = CliRunner()

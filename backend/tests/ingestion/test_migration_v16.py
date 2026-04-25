@@ -118,7 +118,7 @@ class TestCanonicalSemantics:
     ) -> None:
         """Canonical old id is MIN(old_ids); the surviving chunk_id in chunks_* is 64-hex blake3."""
         _, run_migration_v16, *_ = _import()
-        report = run_migration_v16(collision_rich_db, allow_payload_divergence=True)
+        report = run_migration_v16(collision_rich_db)
         conn = _conn(collision_rich_db)
         for strategy in STRATEGIES:
             rows = conn.execute(
@@ -131,13 +131,19 @@ class TestCanonicalSemantics:
 
 
 class TestPayloadInvariantMismatch:
-    """Review-HIGH-2: payload mismatch in collision group is WARN-logged, not silently dropped."""
+    """Decision #10 fail-closed: divergent heading_hierarchy aborts migration.
 
-    def test_collision_group_payload_invariant_mismatch_logs_warn(
+    Renamed from "logs_warn" → "raises_payload_divergence_blocked" after the
+    --allow-payload-divergence override was removed (YAGNI cleanup, 2026-04-25).
+    The fail-closed gate is now the only path; this test pins it.
+    """
+
+    def test_collision_group_with_diverging_heading_aborts(
         self, tmp_index_db: Path
     ) -> None:
-        """Two chunks with same blake3 but different heading_hierarchy emit payload_mismatch_warnings."""
+        """Two chunks with same blake3 but different heading_hierarchy → PayloadDivergenceBlocked."""
         import blake3 as _blake3
+        from dotmd.ingestion.migration_v16 import PayloadDivergenceBlocked
         _, run_migration_v16, *_ = _import()
         conn = _conn(tmp_index_db)
         strategy = "heading_512_50"
@@ -166,10 +172,8 @@ class TestPayloadInvariantMismatch:
         conn.commit()
         conn.close()
 
-        report = run_migration_v16(tmp_index_db, allow_payload_divergence=True)
-        assert report.payload_mismatch_warnings >= 1, (
-            "Expected at least 1 payload_mismatch_warning for diverged heading_hierarchy"
-        )
+        with pytest.raises(PayloadDivergenceBlocked):
+            run_migration_v16(tmp_index_db)
 
 
 class TestMakeChunkIdReuse:
@@ -212,7 +216,7 @@ class TestVectorDivergenceThreshold:
             mock_fetch.side_effect = lambda *a, **kw: (
                 [1.0, 0.0] if mock_fetch.call_count % 2 == 1 else [0.0, 1.0]
             )
-            report = run_migration_v16(collision_rich_db, allow_payload_divergence=True)
+            report = run_migration_v16(collision_rich_db)
         assert report.divergence_warnings >= 0
 
     def test_divergence_warn_not_emitted_below_threshold(
@@ -224,7 +228,7 @@ class TestVectorDivergenceThreshold:
             "dotmd.ingestion.migration_v16._fetch_vector_for_divergence_check"
         ) as mock_fetch:
             mock_fetch.return_value = [1.0, 0.0, 0.0, 0.0]
-            report = run_migration_v16(collision_rich_db, allow_payload_divergence=True)
+            report = run_migration_v16(collision_rich_db)
         assert report.divergence_warnings == 0
 
 
@@ -240,8 +244,8 @@ class TestResumeAfterCrash:
     ) -> None:
         """Running migration twice skips already-completed strategies (idempotent)."""
         _, run_migration_v16, *_ = _import()
-        report1 = run_migration_v16(collision_rich_db, allow_payload_divergence=True)
-        report2 = run_migration_v16(collision_rich_db, allow_payload_divergence=True)
+        report1 = run_migration_v16(collision_rich_db)
+        report2 = run_migration_v16(collision_rich_db)
         assert report2.skipped_strategies == list(report1.completed_strategies)
 
 
@@ -298,7 +302,7 @@ class TestLockLifecycle:
     def test_lock_acquired_and_released(self, collision_rich_db: Path) -> None:
         """migration_v16_lock row is gone after successful migration."""
         _, run_migration_v16, *_ = _import()
-        report = run_migration_v16(collision_rich_db, allow_payload_divergence=True)
+        report = run_migration_v16(collision_rich_db)
         assert report.completed is True
         conn = _conn(collision_rich_db)
         lock_row = conn.execute(
@@ -335,7 +339,7 @@ class TestRebuildFallback:
             raise sqlite3.OperationalError("Simulated DROP COLUMN failure")
 
         monkeypatch.setattr(_m16, "_attempt_drop_column", patched_attempt_drop_column)
-        report = run_migration_v16(collision_rich_db, allow_payload_divergence=True)
+        report = run_migration_v16(collision_rich_db)
         assert report.completed is True, "Migration should succeed via rebuild fallback"
         assert drop_column_called["n"] > 0, "DROP COLUMN was never attempted"
 
@@ -352,7 +356,7 @@ class TestInvariantHelper:
     ) -> None:
         """run_invariants(conn) -> InvariantReport is importable and callable."""
         _, run_migration_v16, run_invariants, *_ = _import()
-        run_migration_v16(collision_rich_db, allow_payload_divergence=True)
+        run_migration_v16(collision_rich_db)
         conn = _conn(collision_rich_db)
         inv_report = run_invariants(conn)
         conn.close()
@@ -401,7 +405,7 @@ class TestM2MRemapCoverage:
         conn.commit()
         conn.close()
 
-        run_migration_v16(tmp_index_db, allow_payload_divergence=True)
+        run_migration_v16(tmp_index_db)
         conn = _conn(tmp_index_db)
 
         count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
@@ -479,47 +483,21 @@ class TestPayloadDivergenceFailClosed:
 
         conn = _conn(tmp_index_db)
         state_row = conn.execute(
-            "SELECT status, allow_payload_divergence FROM migration_v16_state "
+            "SELECT status FROM migration_v16_state "
             "WHERE strategy=?", ("heading_512_50",)
         ).fetchone()
         conn.close()
         assert state_row is not None
         assert state_row[0] == "payload_divergence_blocked"
-        assert state_row[1] == 0
 
         conn = _conn(tmp_index_db)
         count = conn.execute("SELECT COUNT(*) FROM chunks_heading_512_50").fetchone()[0]
         conn.close()
         assert count == 2, "DB should be rolled back to pre-migration state"
 
-    def test_proceeds_with_flag_records_to_state(self, tmp_index_db: Path) -> None:
-        """Migration completes with --allow-payload-divergence; audit persisted to state."""
-        _, run_migration_v16, *_ = _import()
-        self._setup_divergent_db(tmp_index_db)
-
-        report = run_migration_v16(tmp_index_db, allow_payload_divergence=True)
-        assert report.completed is True
-
-        conn = _conn(tmp_index_db)
-        row = conn.execute(
-            "SELECT chunk_id, heading_hierarchy FROM chunks_heading_512_50"
-        ).fetchone()
-        assert row is not None
-        assert len(row[0]) == 64
-
-        assert report.payload_mismatch_warnings >= 1
-
-        import json as _json
-        state_row = conn.execute(
-            "SELECT allow_payload_divergence, payload_divergences FROM migration_v16_state "
-            "WHERE strategy=?", ("heading_512_50",)
-        ).fetchone()
-        conn.close()
-        assert state_row is not None
-        assert state_row[0] == 1
-        assert state_row[1] is not None
-        divergences = _json.loads(state_row[1])
-        assert len(divergences) >= 1
+    # NOTE: test_proceeds_with_flag_records_to_state deleted 2026-04-25 alongside
+    # --allow-payload-divergence YAGNI removal. The override path no longer exists;
+    # the fail-closed test above is the only correct behavior to assert.
 
     def test_verify_only_reports_divergence_count(self, tmp_index_db: Path) -> None:
         """--verify-only reports divergence_count > 0 and example paths; DB unchanged."""

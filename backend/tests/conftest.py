@@ -275,7 +275,6 @@ def tmp_index_db(tmp_path: Path) -> Generator[Path, None, None]:
             collisions_collapsed    INTEGER NOT NULL DEFAULT 0,
             divergence_warnings     INTEGER NOT NULL DEFAULT 0,
             payload_mismatch_warnings INTEGER NOT NULL DEFAULT 0,
-            allow_payload_divergence  INTEGER NOT NULL DEFAULT 0,
             payload_divergences     TEXT
         );
         CREATE TABLE IF NOT EXISTS migration_v16_lock (

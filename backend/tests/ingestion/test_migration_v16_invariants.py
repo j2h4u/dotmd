@@ -46,7 +46,7 @@ class TestAllChunkIdsAre64HexBlake3:
 
     def test_all_chunk_ids_are_64_hex_blake3(self, collision_rich_db: Path) -> None:
         run_invariants, run_migration_v16 = _import()
-        run_migration_v16(collision_rich_db, allow_payload_divergence=True)
+        run_migration_v16(collision_rich_db)
         conn = _conn(collision_rich_db)
         inv = run_invariants(conn)
         conn.close()
@@ -61,7 +61,7 @@ class TestNoOrphanVecMetaRows:
 
     def test_no_orphan_vec_meta_rows(self, collision_rich_db: Path) -> None:
         run_invariants, run_migration_v16 = _import()
-        run_migration_v16(collision_rich_db, allow_payload_divergence=True)
+        run_migration_v16(collision_rich_db)
         conn = _conn(collision_rich_db)
         inv = run_invariants(conn)
         conn.close()
@@ -76,7 +76,7 @@ class TestNoOrphanFtsRows:
 
     def test_no_orphan_fts_rows(self, collision_rich_db: Path) -> None:
         run_invariants, run_migration_v16 = _import()
-        run_migration_v16(collision_rich_db, allow_payload_divergence=True)
+        run_migration_v16(collision_rich_db)
         conn = _conn(collision_rich_db)
         inv = run_invariants(conn)
         conn.close()
@@ -93,7 +93,7 @@ class TestUniqueFilePathChunkIndexPerStrategy:
         self, collision_rich_db: Path
     ) -> None:
         run_invariants, run_migration_v16 = _import()
-        run_migration_v16(collision_rich_db, allow_payload_divergence=True)
+        run_migration_v16(collision_rich_db)
         conn = _conn(collision_rich_db)
         inv = run_invariants(conn)
         conn.close()
@@ -122,7 +122,7 @@ class TestRowCountDeltaMatchesExpectedCollapse:
             ).fetchone()[0]
         conn_pre.close()
 
-        report = run_migration_v16(collision_rich_db, allow_payload_divergence=True)
+        report = run_migration_v16(collision_rich_db)
         conn = _conn(collision_rich_db)
         inv = run_invariants(conn)
         conn.close()
@@ -140,7 +140,7 @@ class TestBackupFileExists:
     def test_backup_file_exists(self, collision_rich_db: Path) -> None:
         """After run_migration_v16, a backup file exists at index.db.v16-backup."""
         _, run_migration_v16 = _import()
-        run_migration_v16(collision_rich_db, allow_payload_divergence=True)
+        run_migration_v16(collision_rich_db)
         backup_path = collision_rich_db.with_suffix(".db.v16-backup")
         alt_backup = Path(str(collision_rich_db) + ".v16-backup")
         assert backup_path.exists() or alt_backup.exists(), (
