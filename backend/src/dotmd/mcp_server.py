@@ -10,6 +10,7 @@ from typing import Annotated, AsyncIterator, Literal
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
+from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -19,35 +20,6 @@ from dotmd.core.config import Settings
 logger = logging.getLogger(__name__)
 
 _service: DotMDService | None = None
-
-
-@asynccontextmanager
-async def _lifespan(app: FastMCP) -> AsyncIterator[None]:  # noqa: ARG001
-    global _service  # noqa: PLW0603
-    _service = DotMDService(Settings())
-    _service.warmup()
-
-    shutdown_event = asyncio.Event()
-    indexer_task = asyncio.create_task(
-        _service.trickle_indexer.run(shutdown_event)
-    )
-
-    yield
-
-    shutdown_event.set()
-    try:
-        await asyncio.wait_for(indexer_task, timeout=120)
-    except asyncio.TimeoutError:
-        logger.warning("Trickle indexer did not stop within 120s -- cancelling")
-        indexer_task.cancel()
-        try:
-            await indexer_task
-        except asyncio.CancelledError:
-            pass
-    except Exception:
-        logger.exception("Trickle indexer task failed during shutdown")
-    _service = None
-
 
 mcp = FastMCP(
     "dotmd",
@@ -59,7 +31,8 @@ mcp = FastMCP(
     ),
     host="0.0.0.0",
     port=8080,
-    lifespan=_lifespan,
+    # No lifespan= here — FastMCP's lifespan fires per MCP session, not per server.
+    # Server-wide init lives in create_app() below.
 )
 
 
@@ -69,8 +42,62 @@ async def health(request: Request) -> JSONResponse:  # noqa: ARG001
 
 
 def _get_service() -> DotMDService:
-    assert _service is not None, "Service not initialized — lifespan not running"
+    assert _service is not None, "Service not initialized — server not started via create_app()"
     return _service
+
+
+def create_app() -> Starlette:
+    """Build the Starlette ASGI app with a server-wide lifespan.
+
+    FastMCP's ``lifespan=`` parameter fires per MCP session (once per client
+    connection), not once for the server process.  This function composes a
+    proper server-wide lifespan that:
+      1. Initialises DotMDService and warms up ML models once at startup.
+      2. Starts the trickle background indexer as a long-running asyncio task.
+      3. Wraps the FastMCP session manager so its task group is live for the
+         full server lifetime.
+    """
+    # streamable_http_app() lazy-creates mcp._session_manager and returns a
+    # Starlette app whose lifespan is session_manager.run().  We copy its
+    # routes but replace the lifespan with our own composed version.
+    mcp_starlette = mcp.streamable_http_app()
+
+    @asynccontextmanager
+    async def _server_lifespan(app: Starlette) -> AsyncIterator[None]:  # noqa: ARG001
+        global _service  # noqa: PLW0603
+
+        svc = DotMDService(Settings())
+        # warmup() is CPU/disk-bound; run in thread to keep event loop free
+        await asyncio.to_thread(svc.warmup)
+        _service = svc
+
+        shutdown_event = asyncio.Event()
+        indexer_task = asyncio.create_task(svc.trickle_indexer.run(shutdown_event))
+
+        # session_manager.run() initialises the task group that handles all
+        # MCP HTTP sessions — must stay alive for the full server lifetime.
+        async with mcp.session_manager.run():
+            yield
+
+        shutdown_event.set()
+        try:
+            await asyncio.wait_for(indexer_task, timeout=120)
+        except asyncio.TimeoutError:
+            logger.warning("Trickle indexer did not stop within 120s -- cancelling")
+            indexer_task.cancel()
+            try:
+                await indexer_task
+            except asyncio.CancelledError:
+                pass
+        except Exception:
+            logger.exception("Trickle indexer task failed during shutdown")
+        _service = None
+
+    return Starlette(
+        debug=mcp.settings.debug,
+        routes=mcp_starlette.routes,
+        lifespan=_server_lifespan,
+    )
 
 
 @mcp.tool(

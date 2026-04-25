@@ -368,13 +368,28 @@ def serve(host: str, port: int) -> None:
 @click.option("--port", "-p", default=8080, help="Bind port (streamable-http only).")
 def mcp(transport: str, host: str, port: int) -> None:
     """Start the MCP (Model Context Protocol) server."""
-    from dotmd.mcp_server import mcp as mcp_app
+    import asyncio
 
     click.echo(f"Starting dotMD MCP server ({transport})...", err=True)
+
     if transport == "streamable-http":
+        import uvicorn
+        from dotmd.mcp_server import create_app, mcp as mcp_app
+
         mcp_app.settings.host = host
         mcp_app.settings.port = port
-    mcp_app.run(transport=transport)
+        app = create_app()
+        config = uvicorn.Config(
+            app,
+            host=host,
+            port=port,
+            log_level=mcp_app.settings.log_level.lower(),
+            access_log=False,
+        )
+        asyncio.run(uvicorn.Server(config).serve())
+    else:
+        from dotmd.mcp_server import mcp as mcp_app
+        mcp_app.run(transport=transport)
 
 
 @main.command("mcp-config")
