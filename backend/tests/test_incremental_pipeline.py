@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from dotmd.core.models import Chunk, ExtractionResult, FileInfo, IndexStats
-from dotmd.ingestion.file_tracker import FileDiff
+from dotmd.core.models import Chunk, FileInfo
 
 
 # ---------------------------------------------------------------------------
@@ -30,12 +29,11 @@ def _make_file_info(path: str, title: str = "Test") -> FileInfo:
 def _make_chunk(chunk_id: str, file_path: str) -> Chunk:
     return Chunk(
         chunk_id=chunk_id,
-        file_path=Path(file_path),
+        file_paths=[Path(file_path)],
         heading_hierarchy=["Test"],
         level=1,
         text=f"Content of {chunk_id}",
         chunk_index=0,
-        char_offset=0,
     )
 
 
@@ -100,7 +98,7 @@ class TestFirstIndex:
 
     @patch("dotmd.ingestion.pipeline.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
-    @patch("dotmd.ingestion.pipeline.chunk_file")
+    @patch("dotmd.ingestion.chunker.chunk_file")
     def test_first_index_ingests_all_files(
         self, mock_chunk_file, mock_read_file, mock_discover, md_dir, mock_settings
     ):
@@ -133,7 +131,7 @@ class TestUnchangedFiles:
 
     @patch("dotmd.ingestion.pipeline.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
-    @patch("dotmd.ingestion.pipeline.chunk_file")
+    @patch("dotmd.ingestion.chunker.chunk_file")
     def test_unchanged_files_skip_embedding(
         self, mock_chunk_file, mock_read_file, mock_discover, md_dir, mock_settings
     ):
@@ -174,7 +172,7 @@ class TestModifiedFile:
 
     @patch("dotmd.ingestion.pipeline.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
-    @patch("dotmd.ingestion.pipeline.chunk_file")
+    @patch("dotmd.ingestion.chunker.chunk_file")
     def test_modified_file_purges_then_reingests(
         self, mock_chunk_file, mock_read_file, mock_discover, md_dir, mock_settings
     ):
@@ -224,7 +222,7 @@ class TestDeletedFile:
 
     @patch("dotmd.ingestion.pipeline.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
-    @patch("dotmd.ingestion.pipeline.chunk_file")
+    @patch("dotmd.ingestion.chunker.chunk_file")
     def test_deleted_file_purges_and_removes_fingerprint(
         self, mock_chunk_file, mock_read_file, mock_discover, md_dir, mock_settings
     ):
@@ -274,7 +272,7 @@ class TestNewFileAdded:
 
     @patch("dotmd.ingestion.pipeline.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
-    @patch("dotmd.ingestion.pipeline.chunk_file")
+    @patch("dotmd.ingestion.chunker.chunk_file")
     def test_new_file_ingested_existing_untouched(
         self, mock_chunk_file, mock_read_file, mock_discover, md_dir, mock_settings
     ):
@@ -316,48 +314,13 @@ class TestNewFileAdded:
 
 
 class TestFTS5UpdateAfterChanges:
-    """FTS5 index is updated incrementally on deletions."""
+    """FTS5 index is updated incrementally on deletions.
 
-    @patch("dotmd.ingestion.pipeline.discover_files")
-    @patch("dotmd.ingestion.pipeline.read_file")
-    @patch("dotmd.ingestion.pipeline.chunk_file")
-    def test_fts5_chunks_removed_on_delete(
-        self, mock_chunk_file, mock_read_file, mock_discover, md_dir, mock_settings
-    ):
-        from dotmd.ingestion.pipeline import IndexingPipeline
-
-        file_a = _make_file_info(str(md_dir / "a.md"), "File A")
-        file_b = _make_file_info(str(md_dir / "b.md"), "File B")
-        mock_discover.return_value = [file_a, file_b]
-        mock_read_file.return_value = "# Test\nSome content."
-        chunk_a = _make_chunk("a-0", str(md_dir / "a.md"))
-        chunk_b = _make_chunk("b-0", str(md_dir / "b.md"))
-        mock_chunk_file.side_effect = [[chunk_a], [chunk_b]]
-
-        pipeline = IndexingPipeline(mock_settings)
-        pipeline._semantic_engine.encode_batch = MagicMock(return_value=_dummy_embeddings(2))
-
-        # First index
-        pipeline.index(md_dir)
-
-        # Spy on FTS5 remove_chunks
-        pipeline._keyword_engine.remove_chunks = MagicMock()
-
-        # Delete file a
-        (md_dir / "a.md").unlink()
-        mock_read_file.reset_mock()
-        mock_chunk_file.reset_mock()
-        mock_chunk_file.side_effect = None
-
-        file_b_again = _make_file_info(str(md_dir / "b.md"), "File B")
-        mock_discover.return_value = [file_b_again]
-
-        pipeline.index(md_dir)
-
-        # Deleted file's chunks should be removed from FTS5
-        pipeline._keyword_engine.remove_chunks.assert_called_once()
-        removed_ids = pipeline._keyword_engine.remove_chunks.call_args[0][0]
-        assert "a-0" in removed_ids
+    Phase 16 note: _purge_file handles FTS5 deletion directly via SQL inside
+    its single-transaction cascade (not via keyword_engine.remove_chunks).
+    The delete-from-FTS5 path is covered by test_pipeline_purge.py.
+    This class is retained as a placeholder to document the design decision.
+    """
 
 
 class TestFingerprintTiming:
@@ -365,7 +328,7 @@ class TestFingerprintTiming:
 
     @patch("dotmd.ingestion.pipeline.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
-    @patch("dotmd.ingestion.pipeline.chunk_file")
+    @patch("dotmd.ingestion.chunker.chunk_file")
     def test_fingerprints_saved_after_ingestion(
         self, mock_chunk_file, mock_read_file, mock_discover, md_dir, mock_settings
     ):
@@ -403,63 +366,12 @@ class TestFingerprintTiming:
         assert call_order.index("encode") < call_order.index("save_fingerprint")
 
 
-class TestPurgeFileOrder:
-    """_purge_file calls stores in correct order."""
 
-    @patch("dotmd.ingestion.pipeline.discover_files")
-    @patch("dotmd.ingestion.pipeline.read_file")
-    @patch("dotmd.ingestion.pipeline.chunk_file")
-    def test_purge_file_gets_chunk_ids_before_delete(
-        self, mock_chunk_file, mock_read_file, mock_discover, md_dir, mock_settings
-    ):
-        from dotmd.ingestion.pipeline import IndexingPipeline
-
-        file_a = _make_file_info(str(md_dir / "a.md"), "File A")
-        mock_discover.return_value = [file_a]
-        mock_read_file.return_value = "# Test\nSome content."
-        chunk_a = _make_chunk("a-0", str(md_dir / "a.md"))
-        mock_chunk_file.return_value = [chunk_a]
-
-        pipeline = IndexingPipeline(mock_settings)
-        pipeline._semantic_engine.encode_batch = MagicMock(return_value=_dummy_embeddings(1))
-
-        # First index
-        pipeline.index(md_dir)
-
-        # Track call order during purge
-        call_order = []
-        original_get_ids = pipeline._metadata_store.get_chunk_ids_by_file
-        original_delete_vecs = pipeline._vector_store.delete_vectors_by_chunk_ids
-        original_delete_chunks = pipeline._metadata_store.delete_chunks_by_file
-        original_delete_graph = pipeline._graph_store.delete_file_subgraph
-
-        def track_get_ids(fp):
-            call_order.append("get_chunk_ids_by_file")
-            return original_get_ids(fp)
-
-        def track_delete_vecs(ids):
-            call_order.append("delete_vectors_by_chunk_ids")
-            return original_delete_vecs(ids)
-
-        def track_delete_chunks(fp):
-            call_order.append("delete_chunks_by_file")
-            return original_delete_chunks(fp)
-
-        def track_delete_graph(fp):
-            call_order.append("delete_file_subgraph")
-            return original_delete_graph(fp)
-
-        pipeline._metadata_store.get_chunk_ids_by_file = track_get_ids
-        pipeline._vector_store.delete_vectors_by_chunk_ids = track_delete_vecs
-        pipeline._metadata_store.delete_chunks_by_file = track_delete_chunks
-        pipeline._graph_store.delete_file_subgraph = track_delete_graph
-
-        pipeline._purge_file(str(md_dir / "a.md"))
-
-        # Verify order: get_chunk_ids BEFORE delete_chunks
-        assert call_order.index("get_chunk_ids_by_file") < call_order.index("delete_vectors_by_chunk_ids")
-        assert call_order.index("delete_vectors_by_chunk_ids") < call_order.index("delete_chunks_by_file")
-        assert call_order.index("delete_chunks_by_file") < call_order.index("delete_file_subgraph")
+# TestPurgeFileOrder removed: phase 16 _purge_file uses M2M cascade
+# (delete_m2m_for_file + delete_orphan_chunks + delete_by_chunk_ids) in a
+# single transaction.  The old get_chunk_ids_by_file → delete_vectors_by_chunk_ids
+# → delete_chunks_by_file → delete_file_subgraph sequence no longer exists.
+# Purge order is covered by test_pipeline_purge.py.
 
 
 class TestForceReindex:
@@ -467,7 +379,7 @@ class TestForceReindex:
 
     @patch("dotmd.ingestion.pipeline.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
-    @patch("dotmd.ingestion.pipeline.chunk_file")
+    @patch("dotmd.ingestion.chunker.chunk_file")
     def test_force_processes_all_files(
         self, mock_chunk_file, mock_read_file, mock_discover, md_dir, mock_settings
     ):
@@ -506,7 +418,7 @@ class TestForceReindex:
 
     @patch("dotmd.ingestion.pipeline.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
-    @patch("dotmd.ingestion.pipeline.chunk_file")
+    @patch("dotmd.ingestion.chunker.chunk_file")
     def test_force_clears_fingerprints(
         self, mock_chunk_file, mock_read_file, mock_discover, md_dir, mock_settings
     ):
