@@ -2,17 +2,52 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
-from typing import Annotated, Literal
+from contextlib import asynccontextmanager
+from typing import Annotated, AsyncIterator, Literal
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from dotmd.api.service import DotMDService
 from dotmd.core.config import Settings
 
 logger = logging.getLogger(__name__)
+
+_service: DotMDService | None = None
+
+
+@asynccontextmanager
+async def _lifespan(app: FastMCP) -> AsyncIterator[None]:  # noqa: ARG001
+    global _service  # noqa: PLW0603
+    _service = DotMDService(Settings())
+    _service.warmup()
+
+    shutdown_event = asyncio.Event()
+    indexer_task = asyncio.create_task(
+        _service.trickle_indexer.run(shutdown_event)
+    )
+
+    yield
+
+    shutdown_event.set()
+    try:
+        await asyncio.wait_for(indexer_task, timeout=120)
+    except asyncio.TimeoutError:
+        logger.warning("Trickle indexer did not stop within 120s -- cancelling")
+        indexer_task.cancel()
+        try:
+            await indexer_task
+        except asyncio.CancelledError:
+            pass
+    except Exception:
+        logger.exception("Trickle indexer task failed during shutdown")
+    _service = None
+
 
 mcp = FastMCP(
     "dotmd",
@@ -24,16 +59,17 @@ mcp = FastMCP(
     ),
     host="0.0.0.0",
     port=8080,
+    lifespan=_lifespan,
 )
 
-_service: DotMDService | None = None
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health(request: Request) -> JSONResponse:  # noqa: ARG001
+    return JSONResponse({"status": "ok"})
 
 
 def _get_service() -> DotMDService:
-    global _service
-    if _service is None:
-        _service = DotMDService(Settings())
-        _service.warmup()
+    assert _service is not None, "Service not initialized — lifespan not running"
     return _service
 
 
