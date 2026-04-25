@@ -127,7 +127,8 @@ class SemanticSearchEngine:
         """Call a TEI-compatible ``/embed`` endpoint.
 
         Probes the max batch size on first call, then uses it for all
-        subsequent batches.  Logs progress with ETA every 50 batches.
+        subsequent batches.  Emits a start line, then heartbeats at most
+        every 30 seconds of wall-clock time, then a final completion line.
         """
         import time
 
@@ -144,7 +145,9 @@ class SemanticSearchEngine:
         bs = self._tei_batch_size
         total_batches = (len(inputs) + bs - 1) // bs
         t_start = time.perf_counter()
-        log_interval = max(1, min(50, total_batches // 20))  # ~20 log lines total
+
+        logger.info("TEI start: %d chunks (%d batches, bs=%d)", len(inputs), total_batches, bs)
+        t_last_heartbeat = t_start
 
         for batch_idx, i in enumerate(range(0, len(inputs), bs)):
             batch = inputs[i : i + bs]
@@ -156,9 +159,11 @@ class SemanticSearchEngine:
             response.raise_for_status()
             results.extend(response.json())
 
-            if batch_idx % log_interval == 0 or batch_idx == total_batches - 1:
+            now = time.perf_counter()
+            is_last = (batch_idx == total_batches - 1)
+            if is_last or (now - t_last_heartbeat) >= 30.0:
                 done = batch_idx + 1
-                elapsed = time.perf_counter() - t_start
+                elapsed = now - t_start
                 rate = done / elapsed if elapsed > 0 else 0
                 remaining = (total_batches - done) / rate if rate > 0 else 0
                 if remaining < 60:
@@ -170,6 +175,7 @@ class SemanticSearchEngine:
                     done, total_batches, done / total_batches * 100,
                     rate, eta,
                 )
+                t_last_heartbeat = now
 
         elapsed = time.perf_counter() - t_start
         logger.info(
