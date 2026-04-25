@@ -1,0 +1,40 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-04-25T11:56:40.835Z",
+  "phase": "16",
+  "phase_name": "content-dedup-schema-many-to-many-chunks-to-file-paths",
+  "phase_dir": ".planning/phases/16-content-dedup-schema-many-to-many-chunks-to-file-paths",
+  "plan": null,
+  "task": null,
+  "total_tasks": 14,
+  "status": "shipped_with_pending_followups",
+  "completed_tasks": [
+    {"id": "wave-1", "name": "16-06 test-suite (RED targets)", "status": "done", "commit": "df0eb97"},
+    {"id": "wave-2", "name": "16-01 schema-migration-core", "status": "done", "commit": "b10c4eb"},
+    {"id": "wave-3", "name": "16-03 ingest-flow-rewrite", "status": "done", "commit": "5843137"},
+    {"id": "wave-4", "name": "16-04 purge-and-change-detection", "status": "done", "commit": "47dbd1a"},
+    {"id": "wave-5", "name": "16-05 search-api-clean-break", "status": "done", "commit": "69359a0"},
+    {"id": "wave-6", "name": "16-02 migration-ops-modes", "status": "done", "commit": "f077058"},
+    {"id": "review", "name": "code review (1 BLOCKER + 5 WARN + 2 INFO) — all fixed", "status": "done", "commit": "f72729a"},
+    {"id": "WR-2", "name": "_index_file holder-aware cleanup primitive", "status": "done", "commit": "1022f0a"},
+    {"id": "DEDUP-10b", "name": "search-parity test refactor — xfail removed", "status": "done", "commit": "48354d6"},
+    {"id": "log-clarity", "name": "Kaizen 6-point log cleanup (quick 260425-m79)", "status": "done", "commit": "8876670"},
+    {"id": "prod-purge", "name": "Surgical purge of 15 stale files (819 chunks)", "status": "done"},
+    {"id": "prod-migration", "name": "dotmd migrate run — 486 collisions collapsed, 0 divergence, no override", "status": "done"},
+    {"id": "yagni-cleanup", "name": "--allow-payload-divergence removed entirely", "status": "done", "commit": "58b5924"}
+  ],
+  "remaining_tasks": [
+    {"id": "trickle-reindex", "name": "Trickle reindexes 15 purged files on next hourly scan", "status": "pending_automatic", "blocking": false},
+    {"id": "orphan-vec-cleanup", "name": "Clean up vec_chunks_* orphan rows from purge (sqlite-vec extension required)", "status": "backlog", "blocking": false}
+  ],
+  "blockers": [],
+  "human_actions_pending": [],
+  "decisions": [
+    {"decision": "DOTMD_DATA_DIR=/mnt scope is locked", "rationale": "User explicitly forbade narrowing — see feedback_indexing_scope_locked memory", "phase": "16"},
+    {"decision": "Decision #10 fail-closed without override", "rationale": "--allow-payload-divergence removed as YAGNI — invariant by construction", "phase": "16"},
+    {"decision": "Surgical purge over --allow-payload-divergence for stale data", "rationale": "Override would mask the issue; surgical removes wrong rows so trickle re-indexes correctly", "phase": "16"}
+  ],
+  "uncommitted_files": [],
+  "next_action": "Phase 16 is shipped. Next session should: (1) verify trickle reindexed the 15 purged files (check `dotmd migrate status` + logs); (2) optionally schedule a quick task to clean orphan vec_chunks_* rows.",
+  "context_notes": "Production migration succeeded on 2026-04-25 after surgical purge of stale residue from old parallel-indexing incident. Phase 16 closed completely. Container running on new code via bind-mount, healthy."
+}
