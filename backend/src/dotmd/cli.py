@@ -375,6 +375,11 @@ def mcp(transport: str, host: str, port: int) -> None:
     if transport == "streamable-http":
         import uvicorn
         from dotmd.mcp_server import create_app, mcp as mcp_app
+        from dotmd.utils.logging import setup_logging
+
+        # FastMCP.__init__ installs a RichHandler on the root logger at import
+        # time. Reconfigure now so all loggers use a consistent format.
+        setup_logging()
 
         mcp_app.settings.host = host
         mcp_app.settings.port = port
@@ -385,10 +390,14 @@ def mcp(transport: str, host: str, port: int) -> None:
             port=port,
             log_level=mcp_app.settings.log_level.lower(),
             access_log=False,
+            log_config=None,  # don't let uvicorn override our logging setup
         )
         asyncio.run(uvicorn.Server(config).serve())
     else:
         from dotmd.mcp_server import mcp as mcp_app
+        from dotmd.utils.logging import setup_logging
+
+        setup_logging()
         mcp_app.run(transport=transport)
 
 
