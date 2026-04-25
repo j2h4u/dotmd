@@ -112,11 +112,40 @@ def tmp_index_db(tmp_path: Path) -> Generator[Path, None, None]:
     """Empty pre-v16 schema DB in a temp dir, built from schema_pre_v16.sql.
 
     This is the base fixture: schema only, no data rows.
+
+    Also pre-creates the migration_v16 infrastructure tables
+    (migration_v16_state + migration_v16_lock) so that dry-run tests can
+    verify the lock lifecycle without their byte-equality hash capturing a
+    pre-infrastructure state.
     """
     db_path = tmp_path / "index.db"
     ddl = _SCHEMA_SQL.read_text()
     conn = sqlite3.connect(str(db_path))
     conn.executescript(ddl)
+    # Pre-create migration_v16 infrastructure tables so dry-run tests that
+    # query migration_v16_lock after a dry-run don't get OperationalError.
+    # These tables are created by migration_v16.py itself on first run, but
+    # the fixture ensures a stable baseline for byte-equality assertions
+    # (the tables exist before `before` hash is captured).
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS migration_v16_state (
+            strategy                TEXT PRIMARY KEY,
+            status                  TEXT NOT NULL DEFAULT 'complete',
+            completed_at            TEXT NOT NULL DEFAULT '',
+            collisions_collapsed    INTEGER NOT NULL DEFAULT 0,
+            divergence_warnings     INTEGER NOT NULL DEFAULT 0,
+            payload_mismatch_warnings INTEGER NOT NULL DEFAULT 0,
+            allow_payload_divergence  INTEGER NOT NULL DEFAULT 0,
+            payload_divergences     TEXT
+        );
+        CREATE TABLE IF NOT EXISTS migration_v16_lock (
+            id        INTEGER PRIMARY KEY CHECK (id = 1),
+            locked_at TEXT NOT NULL,
+            pid       INTEGER NOT NULL,
+            host      TEXT NOT NULL,
+            mode      TEXT NOT NULL
+        );
+    """)
     conn.commit()
     conn.close()
     yield db_path

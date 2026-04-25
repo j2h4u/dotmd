@@ -307,18 +307,23 @@ class TestRebuildFallback:
     def test_rebuild_fallback_when_drop_column_fails(
         self, collision_rich_db: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """When ALTER TABLE DROP COLUMN raises OperationalError, rebuild path is taken."""
+        """When ALTER TABLE DROP COLUMN raises OperationalError, rebuild path is taken.
+
+        Patches migration_v16._attempt_drop_column (the module-level DROP COLUMN
+        hook) instead of sqlite3.Connection.execute (a C extension type that
+        Python cannot monkeypatch at class level).
+        """
+        import dotmd.ingestion.migration_v16 as _m16
         _, run_migration_v16, *_ = _import()
-        original_execute = sqlite3.Connection.execute
         drop_column_called = {"n": 0}
 
-        def patched_execute(self, sql: str, *args, **kwargs):  # type: ignore[no-untyped-def]
-            if "DROP COLUMN" in str(sql).upper():
-                drop_column_called["n"] += 1
-                raise sqlite3.OperationalError("Simulated DROP COLUMN failure")
-            return original_execute(self, sql, *args, **kwargs)
+        def patched_attempt_drop_column(
+            conn: sqlite3.Connection, table: str, col: str
+        ) -> None:
+            drop_column_called["n"] += 1
+            raise sqlite3.OperationalError("Simulated DROP COLUMN failure")
 
-        monkeypatch.setattr(sqlite3.Connection, "execute", patched_execute)
+        monkeypatch.setattr(_m16, "_attempt_drop_column", patched_attempt_drop_column)
         report = run_migration_v16(collision_rich_db, allow_payload_divergence=True)
         assert report.completed is True, "Migration should succeed via rebuild fallback"
         assert drop_column_called["n"] > 0, "DROP COLUMN was never attempted"
