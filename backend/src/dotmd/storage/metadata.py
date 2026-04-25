@@ -223,6 +223,8 @@ class SQLiteMetadataStore:
         heading_hierarchy: list[str],
         level: int,
         text: str,
+        *,
+        _commit: bool = True,
     ) -> None:
         """Insert a chunk row using INSERT OR IGNORE (D-07).
 
@@ -235,13 +237,19 @@ class SQLiteMetadataStore:
             Strategy name (used to derive the table name).
         chunk_id, heading_hierarchy, level, text:
             Chunk payload fields.
+        _commit:
+            If False, skip the auto-commit so the caller can batch multiple
+            inserts inside its own BEGIN/COMMIT transaction (e.g. the
+            index_file write loop in pipeline.py).  Defaults to True for
+            backward compatibility with single-call sites.
         """
         table = f"chunks_{strategy}"
         self._conn.execute(
             _INSERT_CHUNK_TPL.format(table=table),
             (chunk_id, json.dumps(heading_hierarchy), level, text),
         )
-        self._conn.commit()
+        if _commit:
+            self._conn.commit()
 
     def add_file_path(
         self,
@@ -249,6 +257,8 @@ class SQLiteMetadataStore:
         chunk_id: str,
         file_path: str,
         chunk_index: int,
+        *,
+        _commit: bool = True,
     ) -> None:
         """Record (chunk_id, file_path, chunk_index) in the M2M table.
 
@@ -256,13 +266,20 @@ class SQLiteMetadataStore:
         tuples are silently skipped (idempotent).
 
         Callers must have previously called :meth:`ensure_m2m_table`.
+
+        Parameters
+        ----------
+        _commit:
+            If False, skip the auto-commit so the caller can batch multiple
+            inserts inside its own BEGIN/COMMIT transaction.
         """
         m2m_table = f"chunk_file_paths_{strategy}"
         self._conn.execute(
             _INSERT_M2M_TPL.format(m2m_table=m2m_table),
             (chunk_id, file_path, chunk_index),
         )
-        self._conn.commit()
+        if _commit:
+            self._conn.commit()
 
     def get_file_paths_by_chunk_id(
         self, strategy: str, chunk_id: str

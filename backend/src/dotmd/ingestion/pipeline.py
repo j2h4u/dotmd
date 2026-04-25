@@ -1003,43 +1003,54 @@ class IndexingPipeline:
             _beacon("save+fts5")
             # Phase 16 M2M write path: INSERT OR IGNORE on chunks_* + M2M.
             # For each chunk, check payload consistency on conflict (Review-HIGH-P3).
+            # Wrap the full per-file write loop in a single transaction so that
+            # insert_chunk and add_file_path are atomic: a crash between the two
+            # cannot leave a chunks_* row without a chunk_file_paths_* entry.
             self._metadata_store.ensure_m2m_table(self._strategy)
-            for c in chunks:
-                existing = self._metadata_store.get_stored_payload(
-                    self._strategy, c.chunk_id
-                )
-                if existing is not None:
-                    # Content-addressed id: same id => same content.
-                    # If the stored payload disagrees this is a chunker bug or
-                    # a real hash collision — WARN and keep first-writer's row.
-                    diverged: list[str] = []
-                    if existing["text"] != c.text:
-                        diverged.append("text")
-                    if existing["heading_hierarchy"] != c.heading_hierarchy:
-                        diverged.append("heading_hierarchy")
-                    if existing["level"] != c.level:
-                        diverged.append("level")
-                    if diverged:
-                        logger.warning(
-                            "ingest_payload_mismatch chunk_id=%s file=%s diverged_fields=%s",
-                            c.chunk_id,
-                            path_str,
-                            diverged,
-                        )
-                    # Fall through to INSERT OR IGNORE — first-writer's row wins.
-                self._metadata_store.insert_chunk(
-                    self._strategy,
-                    c.chunk_id,
-                    c.heading_hierarchy,
-                    c.level,
-                    c.text,
-                )
-                self._metadata_store.add_file_path(
-                    self._strategy,
-                    c.chunk_id,
-                    path_str,
-                    c.chunk_index,
-                )
+            self._conn.execute("BEGIN")
+            try:
+                for c in chunks:
+                    existing = self._metadata_store.get_stored_payload(
+                        self._strategy, c.chunk_id
+                    )
+                    if existing is not None:
+                        # Content-addressed id: same id => same content.
+                        # If the stored payload disagrees this is a chunker bug or
+                        # a real hash collision — WARN and keep first-writer's row.
+                        diverged: list[str] = []
+                        if existing["text"] != c.text:
+                            diverged.append("text")
+                        if existing["heading_hierarchy"] != c.heading_hierarchy:
+                            diverged.append("heading_hierarchy")
+                        if existing["level"] != c.level:
+                            diverged.append("level")
+                        if diverged:
+                            logger.warning(
+                                "ingest_payload_mismatch chunk_id=%s file=%s diverged_fields=%s",
+                                c.chunk_id,
+                                path_str,
+                                diverged,
+                            )
+                        # Fall through to INSERT OR IGNORE — first-writer's row wins.
+                    self._metadata_store.insert_chunk(
+                        self._strategy,
+                        c.chunk_id,
+                        c.heading_hierarchy,
+                        c.level,
+                        c.text,
+                        _commit=False,
+                    )
+                    self._metadata_store.add_file_path(
+                        self._strategy,
+                        c.chunk_id,
+                        path_str,
+                        c.chunk_index,
+                        _commit=False,
+                    )
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
 
             # FTS5: INSERT OR REPLACE is idempotent on chunk_id (Research §Component).
             _trickle_tags = file_info.frontmatter.get("tags", [])
