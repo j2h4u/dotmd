@@ -75,7 +75,7 @@ class DotMDService:
         )
 
         # Background trickle indexer
-        self._trickle_indexer = TrickleIndexer(self._pipeline, self._settings)
+        self._trickle_indexer = TrickleIndexer(self._settings, self._pipeline)
 
     # ------------------------------------------------------------------
     # Public API
@@ -220,6 +220,38 @@ class DotMDService:
         # -- Determine pool size for reranking --------------------------------
         pool_size = self._settings.rerank_pool_size if rerank else top_k
 
+        return self._execute_search(
+            search_query=search_query,
+            original_query=query,
+            top_k=top_k,
+            mode=mode,
+            rerank=rerank,
+            pool_size=pool_size,
+        )
+
+    def _execute_search(
+        self,
+        search_query: str,
+        original_query: str,
+        top_k: int,
+        mode: SearchMode | str,
+        rerank: bool,
+        pool_size: int,
+    ) -> list[SearchResult]:
+        """Core retrieval + fusion + reranking pipeline.
+
+        Separated from :meth:`search` so tests can patch this method to inject
+        stub results without running the full engine stack.
+
+        Parameters
+        ----------
+        search_query:
+            Possibly-expanded query string for engine calls.
+        original_query:
+            The original (unexpanded) query used for snippet extraction.
+        top_k, mode, rerank, pool_size:
+            Same as :meth:`search`.
+        """
         # -- Stage 1: Primary retrieval ----------------------------------------
         semantic_hits: list[tuple[str, float]] = []
         keyword_hits: list[tuple[str, float]] = []
@@ -234,7 +266,7 @@ class DotMDService:
         # Graph-direct: entity matching (pre-fusion peer, not seed-based)
         if mode in (SearchMode.GRAPH, SearchMode.HYBRID):
             graph_direct_hits = self._graph_direct_engine.search(
-                query, top_k=pool_size,
+                original_query, top_k=pool_size,
             )
 
         if not semantic_hits and not keyword_hits and not graph_direct_hits:
@@ -333,7 +365,7 @@ class DotMDService:
             fused[:top_k],
             per_engine=engine_results,
             metadata_store=self._pipeline.metadata_store,
-            query=query,
+            query=original_query,
             top_k=top_k,
             snippet_length=self._settings.snippet_length,
         )

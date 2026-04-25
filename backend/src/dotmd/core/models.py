@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 
 class SearchMode(StrEnum):
@@ -147,6 +147,14 @@ class SearchResult(BaseModel):
     graph_score: float | None = None
     graph_direct_score: float | None = None
     matched_engines: list[str] = Field(default_factory=list)
+
+    @field_validator("file_paths", mode="before")
+    @classmethod
+    def _sort_file_paths(cls, v: object) -> list[Path]:
+        """Enforce lexicographic sort on file_paths (Decision #1)."""
+        if not isinstance(v, list):
+            return v  # type: ignore[return-value]
+        return sorted(Path(p) for p in v)
 
 
 class IndexStats(BaseModel):

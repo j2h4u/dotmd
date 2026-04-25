@@ -10,13 +10,17 @@ This module provides two functions:
 
 from __future__ import annotations
 
+import logging
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from dotmd.core.models import SearchResult
 
 if TYPE_CHECKING:
     from dotmd.storage.base import MetadataStoreProtocol
+
+logger = logging.getLogger(__name__)
 
 
 def _extract_best_snippet(text: str, query: str, length: int = 300) -> str:
@@ -179,6 +183,17 @@ def build_search_results(
     top_ids = [cid for cid, _ in fused[:top_k]]
     chunks_by_id = {c.chunk_id: c for c in metadata_store.get_chunks(top_ids)}
 
+    # Batch-hydrate file_paths for all top_ids in a single SELECT per strategy
+    # (Review-LOW-12: avoids O(K) round-trips).
+    strategy = getattr(metadata_store, "_table", "").removeprefix("chunks_")
+    file_paths_map: dict[str, list[Path]] = {}
+    if strategy and hasattr(metadata_store, "get_file_paths_for_chunk_ids"):
+        raw_map = metadata_store.get_file_paths_for_chunk_ids(strategy, top_ids)
+        file_paths_map = {
+            cid: [Path(fp) for fp in fps]
+            for cid, fps in raw_map.items()
+        }
+
     results: list[SearchResult] = []
     for chunk_id, fused_score in fused[:top_k]:
         chunk = chunks_by_id.get(chunk_id)
@@ -188,6 +203,16 @@ def build_search_results(
         heading_path = " > ".join(chunk.heading_hierarchy) if chunk.heading_hierarchy else ""
 
         snippet = _extract_best_snippet(chunk.text, query, snippet_length)
+
+        # Resolve file_paths: batch map first, fall back to chunk.file_paths.
+        resolved_paths = file_paths_map.get(chunk_id) or chunk.file_paths
+
+        # DEBUG: assert sort invariant (regression guard per plan spec).
+        if logger.isEnabledFor(logging.DEBUG) and resolved_paths:
+            assert resolved_paths == sorted(resolved_paths), (
+                f"file_paths sort invariant violated for chunk {chunk_id!r}: "
+                f"{resolved_paths!r}"
+            )
 
         # Determine which engines matched and their individual scores.
         matched_engines: list[str] = []
@@ -201,7 +226,7 @@ def build_search_results(
         results.append(
             SearchResult(
                 chunk_id=chunk_id,
-                file_path=chunk.file_path,
+                file_paths=resolved_paths,
                 heading_path=heading_path,
                 snippet=snippet,
                 fused_score=fused_score,

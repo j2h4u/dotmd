@@ -131,7 +131,12 @@ class TestBatchHydrationSingleQueryPerStrategy:
         # Build a minimal post-v16 store
         conn_raw = __import__("sqlite3").connect(str(db_path))
         conn_raw.executescript(f"""
-            CREATE TABLE chunks_{strategy} (chunk_id TEXT PRIMARY KEY, text TEXT);
+            CREATE TABLE chunks_{strategy} (
+                chunk_id TEXT PRIMARY KEY,
+                heading_hierarchy TEXT NOT NULL DEFAULT '[]',
+                level INTEGER NOT NULL DEFAULT 0,
+                text TEXT NOT NULL DEFAULT ''
+            );
             CREATE TABLE chunk_file_paths_{strategy} (
                 chunk_id TEXT NOT NULL, file_path TEXT NOT NULL,
                 chunk_index INTEGER NOT NULL,
@@ -148,8 +153,8 @@ class TestBatchHydrationSingleQueryPerStrategy:
             store.insert_chunk(strategy, cid, ["H"], 1, f"text {i}")
             store.add_file_path(strategy, cid, f"/path/file_{i}.md", chunk_index=0)
 
-        # Count SELECT calls
-        original_execute = conn_raw.execute
+        # Count SELECT calls via _ConnProxy (store wraps conn_raw with _ConnProxy)
+        original_execute = store._conn.execute
         select_count = {"n": 0}
 
         def counting_execute(sql: str, *args, **kwargs):  # type: ignore[no-untyped-def]
@@ -157,7 +162,7 @@ class TestBatchHydrationSingleQueryPerStrategy:
                 select_count["n"] += 1
             return original_execute(sql, *args, **kwargs)
 
-        conn_raw.execute = counting_execute  # type: ignore[method-assign]
+        store._conn.execute = counting_execute  # type: ignore[method-assign]
         select_count["n"] = 0
 
         result = store.get_file_paths_for_chunk_ids(strategy, chunk_ids)
