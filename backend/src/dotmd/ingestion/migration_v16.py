@@ -86,6 +86,10 @@ class MigrationReport:
     # dry-run / verify-only specific fields
     divergence_report_lines: list[str] = field(default_factory=list)
     payload_divergence_preview: dict[str, Any] | None = None
+    # Progress reporter fields (Task 1 — P2)
+    mode: str = "run"  # "run" | "dry-run" | "verify-only"
+    per_strategy_progress: dict[str, dict[str, Any]] = field(default_factory=dict)
+    disk_delta_estimate: int | None = None  # bytes, dry-run only
 
 
 @dataclass
@@ -109,6 +113,9 @@ class StatusReport:
     strategies: dict[str, dict[str, Any]] = field(default_factory=dict)
     lock_held: bool = False
     lock_info: dict[str, Any] | None = None
+    # Convenience aliases expected by test_migration_v16_ops.py
+    needs_migration: bool = True
+    per_strategy_state: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +410,81 @@ def _write_divergence_report(report_path: Path, divergences: list[dict]) -> None
 
 
 # ---------------------------------------------------------------------------
+# Progress reporter
+# ---------------------------------------------------------------------------
+
+_PROGRESS_INTERVAL = 1000  # emit a log line every N rows
+
+
+class ProgressReporter:
+    """Lightweight progress tracker for per-strategy migration steps.
+
+    Emits throttled structured log lines to the ``dotmd-migrate`` logger so
+    journald can filter by SyslogIdentifier. Uses only stdlib (no tqdm — tqdm
+    outputs escape codes to journald).
+
+    Log format (single-line key=value for journald parsing)::
+
+        dotmd-migrate mode=run strategy=heading_512_50 rows_done=1000 rows_total=12345 rows_per_sec=850.3 eta=9.8s collisions=12
+    """
+
+    def __init__(self, strategy: str, total_rows: int, mode: str) -> None:
+        import time
+        self.strategy = strategy
+        self.total_rows = total_rows
+        self.mode = mode
+        self._start = time.monotonic()
+        self._rows_done = 0
+        self._last_emit = 0
+        self._collisions = 0
+
+    def tick(self, n: int = 1) -> None:
+        """Advance rows_done counter; emit a log line every _PROGRESS_INTERVAL rows."""
+        import time
+        self._rows_done += n
+        if self._rows_done - self._last_emit >= _PROGRESS_INTERVAL:
+            self._emit(time.monotonic())
+            self._last_emit = self._rows_done
+
+    def set_collisions(self, count: int) -> None:
+        self._collisions = count
+
+    def _emit(self, now: float) -> None:
+        elapsed = now - self._start
+        rows_per_sec = self._rows_done / elapsed if elapsed > 0 else 0.0
+        remaining = max(0, self.total_rows - self._rows_done)
+        eta_seconds = remaining / rows_per_sec if rows_per_sec > 0 else 0.0
+        logger.info(
+            "mode=%s strategy=%s rows_done=%d rows_total=%d rows_per_sec=%.1f eta=%.1fs collisions=%d",
+            self.mode, self.strategy, self._rows_done, self.total_rows,
+            rows_per_sec, eta_seconds, self._collisions,
+        )
+
+    def finish(self) -> dict[str, Any]:
+        """Emit final summary line and return a progress dict for MigrationReport."""
+        import time
+        now = time.monotonic()
+        elapsed = now - self._start
+        rows_per_sec = self._rows_done / elapsed if elapsed > 0 else 0.0
+        remaining = max(0, self.total_rows - self._rows_done)
+        eta_seconds = remaining / rows_per_sec if rows_per_sec > 0 else 0.0
+        logger.info(
+            "mode=%s strategy=%s DONE rows_done=%d rows_total=%d rows_per_sec=%.1f "
+            "eta=%.1fs collisions=%d",
+            self.mode, self.strategy, self._rows_done, self.total_rows,
+            rows_per_sec, eta_seconds, self._collisions,
+        )
+        return {
+            "rows_done": self._rows_done,
+            "rows_total": self.total_rows,
+            "rows_per_sec": rows_per_sec,
+            "eta_seconds": eta_seconds,
+            "collisions": self._collisions,
+            "mode": self.mode,
+        }
+
+
+# ---------------------------------------------------------------------------
 # Per-strategy migration
 # ---------------------------------------------------------------------------
 
@@ -414,6 +496,7 @@ def _migrate_strategy(
     verify_only: bool,
     allow_payload_divergence: bool,
     run_dir: Path,
+    reporter: "ProgressReporter | None" = None,
 ) -> tuple[int, int, int, list[dict], bool]:
     """Migrate a single strategy inside an open connection.
 
@@ -487,6 +570,8 @@ def _migrate_strategy(
             f"UPDATE {table} SET new_chunk_id = ? WHERE chunk_id = ?",
             (new_id, old_id),
         )
+        if reporter is not None:
+            reporter.tick()
 
     # --- Step 5: Detect collision groups ---
     collision_rows = conn.execute(f"""
@@ -628,6 +713,8 @@ def _migrate_strategy(
             )
 
         collisions_collapsed += len(non_canonical)
+        if reporter is not None:
+            reporter.set_collisions(collisions_collapsed)
 
     # --- Step 5f: Fail-closed divergence gate (Decision #10) ---
     if all_divergences:
@@ -781,11 +868,13 @@ def run_migration_v16(
         heading_hierarchy/level. Override + details persisted to state.
         If False (default), abort with PayloadDivergenceBlocked (exit 4).
     """
+    _mode = "dry-run" if dry_run else ("verify-only" if verify_only else "run")
     report = MigrationReport(
         dry_run=dry_run,
         verify_only=verify_only,
         allow_payload_divergence=allow_payload_divergence,
-        lock_mode="dry-run" if dry_run else ("verify-only" if verify_only else "run"),
+        lock_mode=_mode,
+        mode=_mode,
     )
 
     conn = sqlite3.connect(str(index_db))
@@ -902,6 +991,14 @@ def run_migration_v16(
         strategies = _discover_strategies(conn)
         logger.info("Strategies found: %s", strategies)
 
+        # --- Disk delta estimate setup (dry-run only) ---
+        # Compute avg_row_size = db_size / total_rows for the delta estimate.
+        _db_size_bytes: int = index_db.stat().st_size if index_db.exists() else 0
+        _total_rows_all: int = sum(
+            conn.execute(f"SELECT COUNT(*) FROM chunks_{s}").fetchone()[0]
+            for s in strategies
+        ) if strategies else 0
+
         total_collisions = 0
         total_divergence_warnings = 0
         total_payload_mismatch = 0
@@ -925,6 +1022,12 @@ def run_migration_v16(
 
             logger.info("Migrating strategy: %s", strategy)
 
+            # --- Create progress reporter ---
+            total_rows_for_strategy = conn.execute(
+                f"SELECT COUNT(*) FROM chunks_{strategy}"
+            ).fetchone()[0]
+            reporter = ProgressReporter(strategy, total_rows_for_strategy, _mode)
+
             if not dry_run:
                 # Real run: per-strategy transaction
                 conn.execute("BEGIN")
@@ -944,19 +1047,43 @@ def run_migration_v16(
                     verify_only=False,
                     allow_payload_divergence=allow_payload_divergence,
                     run_dir=run_dir,
+                    reporter=reporter,
                 )
 
                 total_collisions += collisions
                 total_divergence_warnings += div_warns
                 total_payload_mismatch += pm_warns
 
+                # Collect per-strategy progress
+                prog = reporter.finish()
+                prog["collisions_collapsed"] = collisions
+                prog["divergence_warnings"] = div_warns
+                prog["payload_mismatch_warnings"] = pm_warns
+                report.per_strategy_progress[strategy] = prog
+
                 if dry_run:
                     # All work is inside the outer wrapping BEGIN — do not
                     # commit per-strategy; the outer finally ROLLBACKs everything.
+                    # Compute disk delta estimate: rows_collapsed * avg_row_size
+                    if _total_rows_all > 0 and _db_size_bytes > 0:
+                        avg_row_size = _db_size_bytes // _total_rows_all
+                    else:
+                        avg_row_size = 0
+                    if report.disk_delta_estimate is None:
+                        report.disk_delta_estimate = 0
+                    report.disk_delta_estimate += collisions * avg_row_size
+
+                    all_divs = prog.get("_all_divergences", [])
+                    div_count = len([d for d in all_divs]) if all_divs else 0
+                    would_abort = div_count > 0 and not allow_payload_divergence
                     logger.info(
                         "mode=dry-run strategy=%s collisions=%d "
-                        "divergence_warnings=%d payload_mismatch_warnings=%d",
+                        "divergence_warnings=%d payload_mismatch_warnings=%d "
+                        "payload_divergence_groups=%d would_abort_without_flag=%s "
+                        "disk_delta_estimate=%d",
                         strategy, collisions, div_warns, pm_warns,
+                        div_count, str(would_abort).lower(),
+                        report.disk_delta_estimate or 0,
                     )
                 else:
                     # --- Step 10: State marker ---
@@ -1164,7 +1291,7 @@ def status(index_db: Path) -> StatusReport:
                 "FROM migration_v16_state"
             ).fetchall()
             for row in rows:
-                report.strategies[row[0]] = {
+                entry = {
                     "status": row[1],
                     "completed_at": row[2],
                     "collisions_collapsed": row[3],
@@ -1172,6 +1299,17 @@ def status(index_db: Path) -> StatusReport:
                     "payload_mismatch_warnings": row[5],
                     "allow_payload_divergence": bool(row[6]),
                 }
+                report.strategies[row[0]] = entry
+                report.per_strategy_state[row[0]] = entry
+
+        # needs_migration: True if any strategy still needs migration
+        strategies = _discover_strategies(conn)
+        if strategies:
+            report.needs_migration = any(
+                _strategy_needs_migration(conn, s) for s in strategies
+            )
+        else:
+            report.needs_migration = False
 
         lock_exists = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='migration_v16_lock'"
