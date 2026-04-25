@@ -52,7 +52,7 @@ The fork has been substantially reworked:
 dotMD/
 ├── backend/              # Python package (src layout)
 │   ├── pyproject.toml
-│   ├── start.sh          # container entrypoint — starts MCP HTTP (bg) + serve (fg)
+│   ├── start.sh          # container entrypoint — single process: MCP HTTP (streamable-http, port 8080)
 │   └── src/dotmd/        # importable package
 │       ├── core/         # models, config, exceptions
 │       ├── ingestion/    # reader, chunker, pipeline, trickle, migration
@@ -99,7 +99,6 @@ Production env vars (source: `/opt/docker/dotmd/.env`):
 
 | Variable | Purpose |
 |----------|---------|
-| `DOTMD_PORT` | Listen address (e.g. `127.0.0.1:8321`) |
 | `DOTMD_DATA_DIR` | Markdown source root — **locked to `/mnt`**, never narrow |
 | `DOTMD_INDEX_DIR` | Index directory (docker volume mount) |
 | `DOTMD_EMBEDDING_URL` | TEI server URL |
@@ -115,14 +114,13 @@ Production env vars (source: `/opt/docker/dotmd/.env`):
 
 Single container `dotmd` (container_name: dotmd) on senbonzakura. See `/opt/docker/dotmd/` for compose config.
 
-`backend/start.sh` is the ENTRYPOINT — starts two processes:
+`backend/start.sh` is the ENTRYPOINT — single process:
 ```sh
-dotmd mcp --transport streamable-http --host 0.0.0.0 --port 8080 &
-exec dotmd serve --host 0.0.0.0
+exec dotmd mcp --transport streamable-http --host 0.0.0.0 --port 8080
 ```
 
-- **REST API**: port 8000 internally, mapped to `127.0.0.1:8321` externally
 - **MCP HTTP**: port 8080, internal Docker network only (no external mapping)
+- **Health**: `GET /health` on port 8080 → `{"status":"ok"}` (used by Docker healthcheck)
 
 External dependencies (separate containers):
 - TEI (`embeddings` service, port 8088) — embedding server
@@ -151,5 +149,5 @@ Tools exposed: `search(query, top_k, mode, rerank)` and `status()`.
 - New search engines: implement `SearchEngineProtocol` from `search/base.py`
 - All public APIs go through `api/service.py` — never expose internals directly
 - **Never reload indexes per-request.** Indexes must be loaded once at startup and reused. Calling `load_index()` inside search methods causes disk I/O on every request.
-- **Never run `dotmd index --force` while serve is running** — trickle holds the fcntl lock. Stop the container first.
+- **Never run `dotmd index --force` while the container is running** — trickle holds the fcntl lock. Stop the container first.
 - **Never restart production on small changes** — batch changes, deploy once.

@@ -4,8 +4,6 @@ services:
       context: ./backend
     image: dotmd
     container_name: dotmd
-    ports:
-      - "${DOTMD_PORT:-8000}:8000"
     volumes:
       - ${DOTMD_DATA_VOLUME:-.}/data:/data
       - dotmd-index:/dotmd-index
