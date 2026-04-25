@@ -519,6 +519,11 @@ class TrickleIndexer:
         chunk, embed, store, extract, graph, and fingerprint.
 
         Runs synchronously in a thread pool to avoid blocking the event loop.
+
+        Two-line-per-file steady state (Fix 2):
+          1. ``pipeline: {basename} DONE N chunks X.Xs (...)``  — emitted by pipeline._index_file
+          2. ``{basename} — N chunks, X.Xs``                    — emitted here (only when n_chunks > 0)
+        No other INFO lines are emitted per file from this method.
         """
         t0 = time.perf_counter()
         n_chunks = self._pipeline.index_file(file_info)
