@@ -278,6 +278,74 @@ class SQLiteVecVectorStore:
 
         return len(rowids)
 
+    def delete_by_chunk_ids(
+        self,
+        strategy: str,
+        chunk_ids: list[str],
+        *,
+        conn: sqlite3.Connection,
+    ) -> int:
+        """Delete vec_meta_* and vec0_* rows for chunk_ids using a caller-supplied conn.
+
+        This variant accepts an explicit connection so the delete runs inside
+        the pipeline's transaction (P4 single-transaction purge). Does NOT call
+        commit() — the caller owns the transaction boundary.
+
+        Parameters
+        ----------
+        strategy:
+            Strategy name (used to discover all vec_meta_<strategy>_* tables).
+        chunk_ids:
+            Chunk identifiers to delete.
+        conn:
+            Open SQLite connection; must be the same one wrapping the caller's
+            BEGIN/COMMIT transaction.
+
+        Returns
+        -------
+        int
+            Number of vec rows deleted (across all embedding models for this strategy).
+        """
+        if not chunk_ids:
+            return 0
+
+        placeholders = ",".join("?" for _ in chunk_ids)
+
+        # Discover all vec_meta tables for this strategy (any embedding model).
+        vec_meta_tables = [
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE ?",
+                (f"vec_meta_{strategy}_%",),
+            ).fetchall()
+        ]
+
+        total_deleted = 0
+        for vm_table in vec_meta_tables:
+            vec0_table = "vec_chunks_" + vm_table.removeprefix("vec_meta_")
+            rowids = [
+                r[0]
+                for r in conn.execute(
+                    f"SELECT rowid FROM {vm_table} WHERE chunk_id IN ({placeholders})",
+                    chunk_ids,
+                ).fetchall()
+            ]
+            if rowids:
+                rph = ",".join("?" for _ in rowids)
+                try:
+                    conn.execute(
+                        f"DELETE FROM {vec0_table} WHERE rowid IN ({rph})",
+                        rowids,
+                    )
+                    total_deleted += len(rowids)
+                except sqlite3.OperationalError:
+                    logger.debug("vec0 delete failed for %s", vec0_table, exc_info=True)
+            conn.execute(
+                f"DELETE FROM {vm_table} WHERE chunk_id IN ({placeholders})",
+                chunk_ids,
+            )
+
+        return total_deleted
 
     def delete_all(self) -> None:
         try:

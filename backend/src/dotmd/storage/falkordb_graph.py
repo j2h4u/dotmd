@@ -226,6 +226,54 @@ class FalkorDBGraphStore:
 
     # -- housekeeping -------------------------------------------------------
 
+    def delete_chunks_from_graph(self, chunk_ids: list[str]) -> None:
+        """Delete Section nodes for the given chunk_ids (holder-aware purge).
+
+        Called by the pipeline only for chunk_ids that are confirmed orphans
+        (holder count dropped to 0 across ALL strategies).  Shared chunks
+        whose holder count is still > 0 are NOT passed here, so their
+        MENTIONS / CO_OCCURS edges are preserved.
+
+        ``DETACH DELETE`` removes the Section node and all its connected edges
+        (MENTIONS, CO_OCCURS, REL) for the chunk_ids in the list.
+
+        Parameters
+        ----------
+        chunk_ids:
+            Chunk identifiers whose Section nodes should be removed.
+        """
+        if not chunk_ids:
+            return
+        for chunk_id in chunk_ids:
+            try:
+                self._graph.query(
+                    "MATCH (s:Section {id: $id}) DETACH DELETE s",
+                    params={"id": chunk_id},
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "delete_chunks_from_graph failed for chunk_id=%s", chunk_id,
+                    exc_info=True,
+                )
+
+    def delete_file_node(self, file_path: str) -> None:
+        """Delete the File node for *file_path* (holder-aware purge).
+
+        Called after ``delete_chunks_from_graph`` when the file itself is
+        being purged.  Only removes the File node and its direct edges — does
+        not touch Section or Entity nodes (those are handled per-chunk by
+        ``delete_chunks_from_graph``).
+
+        Parameters
+        ----------
+        file_path:
+            The path of the file whose File node should be removed.
+        """
+        self._graph.query(
+            "MATCH (f:File {id: $fp}) DETACH DELETE f",
+            params={"fp": file_path},
+        )
+
     def delete_file_subgraph(self, file_path: str) -> None:
         """Delete File and Section nodes for a file path.
 

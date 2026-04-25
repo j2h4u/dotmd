@@ -1133,56 +1133,133 @@ class IndexingPipeline:
     # Per-file purge
     # ------------------------------------------------------------------
 
-    def _purge_file(self, file_path: str) -> None:
-        """Remove all indexed data for a single file from all stores.
+    def _present_strategies(self, conn: sqlite3.Connection) -> list[str]:
+        """Return strategy names that have a chunk_file_paths_* M2M table in the DB.
 
-        ORDERING MATTERS: chunk_ids must be fetched from metadata BEFORE
-        metadata rows are deleted, because vector deletion needs them.
-
-        Only cleans the CURRENT (strategy, model) pair's vec + fingerprints.
-        Other models' data for this file becomes stale but self-heals when
-        that model's pipeline runs next (embed_diff detects "modified").
+        Uses the M2M table presence (not chunks_*) so strategy switches don't
+        leak: a strategy whose chunks_* was dropped but whose M2M table still
+        has rows is still discovered and cleaned up.
         """
-        chunk_ids = self._metadata_store.get_chunk_ids_by_file(
-            self._strategy, file_path
-        )
-        if chunk_ids:
-            self._vector_store.delete_vectors_by_chunk_ids(chunk_ids)
-            self._keyword_engine.remove_chunks(chunk_ids)
-        self._metadata_store.delete_chunks_by_file(file_path)
-        self._graph_store.delete_file_subgraph(file_path)
-        self._chunk_tracker.remove_fingerprint(file_path)
-        self._embed_tracker.remove_fingerprint(file_path)
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name LIKE 'chunk_file_paths_%'"
+        ).fetchall()
+        return [r[0].removeprefix("chunk_file_paths_") for r in rows]
+
+    def _purge_file(self, file_path: str) -> None:
+        """Remove all indexed data for a single file, using holder-aware cascade.
+
+        Phase 16 rewrite (P4): decrement M2M, then cascade-delete only chunks
+        whose holder count dropped to 0.  Shared chunks (still referenced by
+        another file) survive.
+
+        Transaction boundary:
+            ONE sqlite3 BEGIN/COMMIT covers all strategies × {M2M delete,
+            orphan cascade, vec cascade, FTS cascade}.  On any exception inside
+            the BEGIN block, ROLLBACK restores exact pre-purge state.
+
+        Post-commit external state (graph + fingerprints):
+            Runs AFTER the DB commit.  Failures are WARN-logged; they do not
+            undo the DB purge.  A subsequent purge_orphaned_files sweep will
+            reconcile any drift.
+
+        Graph audit branch (b):
+            delete_file_subgraph is NOT safe under M2M because Section nodes
+            are MERGE'd on chunk_id, so DETACH DELETE on a Section shared by
+            another file would strip MENTIONS/REL edges the other file still
+            needs.  This method uses the holder-aware path: delete_chunks_from_graph
+            (orphan chunk_ids only) + delete_file_node (File node only).
+        """
+        conn = self._conn
+
+        # -- Single-transaction DB cascade (M2M + orphan + vec + FTS) ---------
+        all_orphans_by_strategy: dict[str, list[str]] = {}
+        try:
+            conn.execute("BEGIN")
+            for strategy in self._present_strategies(conn):
+                orphans = self._metadata_store.delete_m2m_for_file(
+                    strategy, file_path, conn=conn
+                )
+                if orphans:
+                    self._metadata_store.delete_orphan_chunks(
+                        strategy, orphans, conn=conn
+                    )
+                    self._vector_store.delete_by_chunk_ids(
+                        strategy, orphans, conn=conn
+                    )
+                    # FTS5 cascade — runs inside the same transaction.
+                    fts_table = f"chunks_fts_{strategy}"
+                    try:
+                        conn.executemany(
+                            f"DELETE FROM {fts_table} WHERE chunk_id = ?",
+                            [(cid,) for cid in orphans],
+                        )
+                    except sqlite3.OperationalError:
+                        logger.debug("FTS5 delete skipped — %s absent", fts_table)
+                    all_orphans_by_strategy[strategy] = orphans
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+        # -- Post-commit, best-effort external state ---------------------------
+        # Graph: holder-aware path (branch b — see docstring above).
+        try:
+            all_orphan_ids: list[str] = [
+                cid
+                for orphans in all_orphans_by_strategy.values()
+                for cid in orphans
+            ]
+            self._graph_store.delete_chunks_from_graph(all_orphan_ids)
+            self._graph_store.delete_file_node(file_path)
+        except AttributeError:
+            # Graph store does not implement narrow helpers (e.g. LadybugDB).
+            # Fall back to the broad delete_file_subgraph (pre-M2M behaviour).
+            try:
+                self._graph_store.delete_file_subgraph(file_path)
+            except Exception as _e:  # noqa: BLE001
+                logger.warning(
+                    "graph cleanup (fallback) failed after DB commit: %s (file=%s)",
+                    _e, file_path,
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "graph cleanup failed after DB commit: %s (file=%s)", e, file_path,
+            )
+
+        # Fingerprints: keyed on file_path, safe to remove unconditionally.
+        try:
+            self._chunk_tracker.remove_fingerprint(file_path)
+            self._embed_tracker.remove_fingerprint(file_path)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "fingerprint cleanup failed after DB commit: %s (file=%s)", e, file_path,
+            )
 
     def purge_orphaned_files(
-        self, discovered_paths: set[str],
+        self,
+        discovered_paths: set[str] | None = None,
     ) -> tuple[int, int, int]:
-        """Remove indexed data for files not in *discovered_paths*.
+        """Remove indexed data for file_paths no longer present on disk.
 
-        Scans EVERY ``chunks_*`` table (across all chunk strategies, not just
-        the currently active one) and removes any file_path that is absent
-        from *discovered_paths* from every associated store:
-        chunks, chunks_fts, vec_meta/vec0 (all embedding models),
-        chunk_fingerprints, embed_fingerprints, graph subgraph.
+        Phase 16 rewrite (P4): scans chunk_file_paths_* M2M tables (not
+        chunks_* directly) so the sweep covers all strategies correctly.
 
-        Processes orphans in batches to keep the single transaction bounded.
+        When *discovered_paths* is supplied (trickle call site), any file_path
+        absent from that set is treated as an orphan.  When omitted (startup
+        / test call), each stored file_path is checked via Path.exists().
 
-        Returns ``(files_removed, chunks_removed, vectors_removed)``.
+        Per-file purge delegates to ``_purge_file`` which runs the full
+        decrement-cascade inside a single sqlite3 transaction per file.
+
+        Returns ``(files_discovered, files_missing, paths_purged)``.
+        The return shape is kept backward-compatible:
+        ``files_removed, chunks_removed, vectors_removed`` for trickle callers
+        (chunks/vectors counters are 0 — _purge_file is the authoritative
+        accounting point; callers care about files_removed only).
         """
-        # Discover every chunks_<strategy> table and its companion tables.
-        strategies = [
-            r[0].removeprefix("chunks_")
-            for r in self._conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' "
-                "AND name LIKE 'chunks_%' AND name NOT LIKE 'chunks_fts_%'"
-            ).fetchall()
-        ]
-        if not strategies:
-            return 0, 0, 0
-
-        # Union of file paths stored across all strategies.
-        # Phase 16: file paths live in chunk_file_paths_<strategy> M2M tables.
-        # Fall back to legacy chunks_*.file_path for pre-migration DBs.
+        # Collect all file_paths from M2M tables across all strategies.
+        strategies = self._present_strategies(self._conn)
         stored_paths: set[str] = set()
         for strat in strategies:
             m2m_table = f"chunk_file_paths_{strat}"
@@ -1191,169 +1268,45 @@ class IndexingPipeline:
                     f"SELECT DISTINCT file_path FROM {m2m_table}"
                 ).fetchall()
                 stored_paths.update(r[0] for r in rows)
-                continue
-            except sqlite3.OperationalError:
-                pass  # M2M table absent — try legacy column
-            try:
-                rows = self._conn.execute(
-                    f"SELECT DISTINCT file_path FROM chunks_{strat}"
-                ).fetchall()
-                stored_paths.update(r[0] for r in rows)
             except sqlite3.OperationalError:
                 continue
 
-        orphan_paths = stored_paths - discovered_paths
+        files_discovered = len(stored_paths)
+
+        # Determine orphan paths.
+        if discovered_paths is not None:
+            orphan_paths = stored_paths - discovered_paths
+        else:
+            # Disk-existence check — used when called without arguments.
+            orphan_paths = {fp for fp in stored_paths if not Path(fp).exists()}
+
+        files_missing = len(orphan_paths)
+
+        logger.info(
+            "purge_orphaned_files: files_discovered=%d files_missing=%d paths_purging=%d "
+            "(strategies=%s)",
+            files_discovered, files_missing, files_missing,
+            ", ".join(strategies) if strategies else "none",
+        )
+
         if not orphan_paths:
             return 0, 0, 0
 
-        logger.info(
-            "Orphan cleanup: %d stored files, %d discovered, %d orphans to remove "
-            "(across %d chunk strategies: %s)",
-            len(stored_paths), len(discovered_paths), len(orphan_paths),
-            len(strategies), ", ".join(strategies),
-        )
-
         files_removed = 0
-        chunks_removed = 0
-        vectors_removed = 0
-
-        orphan_list = sorted(orphan_paths)
-        batch_size = 100
-
-        for i in range(0, len(orphan_list), batch_size):
-            batch = orphan_list[i : i + batch_size]
-
-            for file_path in batch:
-                n_chunks, n_vecs = self._purge_file_all_strategies(
-                    file_path, strategies,
-                )
-                try:
-                    self._graph_store.delete_file_subgraph(file_path)
-                except Exception:  # noqa: BLE001
-                    logger.debug("graph delete_file_subgraph failed for %s",
-                                 file_path, exc_info=True)
-
-                chunks_removed += n_chunks
-                vectors_removed += n_vecs
+        for file_path in sorted(orphan_paths):
+            try:
+                self._purge_file(file_path)
                 files_removed += 1
-
-            if i + batch_size < len(orphan_list):
-                logger.info(
-                    "Orphan cleanup progress: %d/%d files (%d chunks)",
-                    files_removed, len(orphan_list), chunks_removed,
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "purge_orphaned_files: failed to purge %s — skipping", file_path,
                 )
 
         logger.info(
-            "Orphan cleanup: purged %d files (%d chunks, %d vectors)",
-            files_removed, chunks_removed, vectors_removed,
+            "purge_orphaned_files: purged %d/%d orphan files",
+            files_removed, files_missing,
         )
-        return files_removed, chunks_removed, vectors_removed
-
-    def _purge_file_all_strategies(
-        self, file_path: str, strategies: list[str],
-    ) -> tuple[int, int]:
-        """Cascade-delete a single file_path from every chunk strategy.
-
-        Returns ``(chunks_removed, vectors_removed)``.
-        """
-        chunks_removed = 0
-        vectors_removed = 0
-
-        for strat in strategies:
-            chunks_table = f"chunks_{strat}"
-            fts_table = f"chunks_fts_{strat}"
-            fp_table = f"chunk_fingerprints_{strat}"
-
-            # Phase 16: query chunk_ids via M2M table; fall back to legacy
-            # chunks_*.file_path column for pre-migration DBs.
-            m2m_table = f"chunk_file_paths_{strat}"
-            try:
-                chunk_ids = [
-                    r[0] for r in self._conn.execute(
-                        f"SELECT DISTINCT chunk_id FROM {m2m_table} WHERE file_path = ?",
-                        (file_path,),
-                    ).fetchall()
-                ]
-            except sqlite3.OperationalError:
-                # M2M table absent — try legacy column
-                try:
-                    chunk_ids = [
-                        r[0] for r in self._conn.execute(
-                            f"SELECT chunk_id FROM {chunks_table} WHERE file_path = ?",
-                            (file_path,),
-                        ).fetchall()
-                    ]
-                except sqlite3.OperationalError:
-                    continue
-
-            if chunk_ids:
-                ph = ",".join("?" * len(chunk_ids))
-
-                # vec_meta / vec0 for every embedding model present in this strategy
-                vec_meta_tables = [
-                    r[0] for r in self._conn.execute(
-                        "SELECT name FROM sqlite_master WHERE type='table' "
-                        "AND name LIKE ?",
-                        (f"vec_meta_{strat}_%",),
-                    ).fetchall()
-                ]
-                for vm in vec_meta_tables:
-                    vec0_table = "vec_chunks_" + vm.removeprefix("vec_meta_")
-                    rowids = [
-                        r[0] for r in self._conn.execute(
-                            f"SELECT rowid FROM {vm} WHERE chunk_id IN ({ph})",
-                            chunk_ids,
-                        ).fetchall()
-                    ]
-                    if rowids:
-                        rph = ",".join("?" * len(rowids))
-                        try:
-                            self._conn.execute(
-                                f"DELETE FROM {vec0_table} WHERE rowid IN ({rph})",
-                                rowids,
-                            )
-                            vectors_removed += len(rowids)
-                        except sqlite3.OperationalError:
-                            logger.debug("vec0 delete failed for %s", vec0_table,
-                                         exc_info=True)
-                    self._conn.execute(
-                        f"DELETE FROM {vm} WHERE chunk_id IN ({ph})", chunk_ids,
-                    )
-
-                # FTS5 rows
-                try:
-                    self._conn.execute(
-                        f"DELETE FROM {fts_table} WHERE chunk_id IN ({ph})",
-                        chunk_ids,
-                    )
-                except sqlite3.OperationalError:
-                    pass
-
-                chunks_removed += len(chunk_ids)
-                self._conn.execute(
-                    f"DELETE FROM {chunks_table} WHERE chunk_id IN ({ph})",
-                    chunk_ids,
-                )
-
-            # fingerprints (keyed on file_path, not chunk_id)
-            try:
-                self._conn.execute(
-                    f"DELETE FROM {fp_table} WHERE file_path = ?", (file_path,),
-                )
-            except sqlite3.OperationalError:
-                pass
-            for embed_fp in [
-                r[0] for r in self._conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE ?",
-                    (f"embed_fingerprints_{strat}_%",),
-                ).fetchall()
-            ]:
-                self._conn.execute(
-                    f"DELETE FROM {embed_fp} WHERE file_path = ?", (file_path,),
-                )
-
-        self._conn.commit()
-        return chunks_removed, vectors_removed
+        return files_removed, 0, 0
 
     # ------------------------------------------------------------------
     # Extraction helpers

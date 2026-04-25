@@ -159,21 +159,33 @@ class FTS5SearchEngine:
         self._conn.commit()
         logger.debug("FTS5: added %d chunks", len(chunks))
 
-    def remove_chunks(self, chunk_ids: list[str]) -> None:
+    def remove_chunks(
+        self,
+        chunk_ids: list[str],
+        *,
+        conn: sqlite3.Connection | None = None,
+    ) -> None:
         """Remove chunks from the FTS5 index by their identifiers.
 
         Parameters
         ----------
         chunk_ids:
             List of chunk identifiers to delete.
+        conn:
+            Optional caller-supplied connection.  When provided the delete
+            runs inside the caller's transaction and commit() is NOT called
+            (P4 single-transaction purge pattern).  When None the engine's
+            own connection is used and commit() is called as before.
         """
         if not chunk_ids:
             return
-        self._conn.executemany(
+        _conn = conn if conn is not None else self._conn
+        _conn.executemany(
             f"DELETE FROM {self._table} WHERE chunk_id = ?",
             [(cid,) for cid in chunk_ids],
         )
-        self._conn.commit()
+        if conn is None:
+            self._conn.commit()
         logger.debug("FTS5: removed %d chunks", len(chunk_ids))
 
     # ------------------------------------------------------------------
