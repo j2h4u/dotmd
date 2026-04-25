@@ -121,7 +121,7 @@ None identified — all phase items are present in this phase's plans.
 
 | File | Location | Pattern | Severity | Impact |
 |------|----------|---------|----------|--------|
-| `pipeline.py` | lines 971-978 | `_index_file` modified-file path uses `delete_file_subgraph` (not holder-aware) for the old-chunk graph/vec/FTS pre-purge on a reindexed file | WARNING | This path clears the old chunk's FTS+vec+graph entries for the FILE being reindexed, even if another file still holds the same chunk_id. The `chunks_*` row itself is NOT deleted (INSERT OR IGNORE at ingest ensures it stays). The vec/FTS deletion for a still-shared chunk is incorrect under full M2M semantics but is protected by a code comment: "The M2M-aware cascade (P4) will refine this further." This is a known residual, not a silent data-loss path — the chunks_* row survives, and the chunk is re-inserted to FTS/vec on next index of the other file. |
+| `pipeline.py` | lines 971-978 | `_index_file` modified-file path uses `delete_file_subgraph` (not holder-aware) for the old-chunk graph/vec/FTS pre-purge on a reindexed file | ~~WARNING~~ **RESOLVED** (commit `71a5f80`) | Fixed by extracting `_holder_aware_chunk_cleanup` primitive (commit `3b19129`) and wiring it into `_index_file` (commit `71a5f80`). Reindexing a file now decrements M2M and cascade-deletes only zero-holder orphans — shared chunks survive in all tables. Full suite: 161 passed. |
 | `tests/api/test_search_parity.py` | xfail marker | Patches `DotMDService._get_embedding` which does not exist — wrong mock seam | WARNING | DEDUP-10b search-layer E2E parity is unverified automatically. Migration-layer parity (DEDUP-10a via `test_migration_v16_invariants.py`) is covered. |
 
 ### Human Verification Required

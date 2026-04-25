@@ -61,12 +61,14 @@ beyond the migration_v16 backup it takes itself.
 
 ## Notes
 
-- Code-level WARNING from verifier (not a UAT item, just a follow-up):
+- ~~Code-level WARNING from verifier (not a UAT item, just a follow-up):
   `_index_file` residual — when a file is reindexed (content changed), old chunk's
   FTS/vec/graph entries are cleared via `delete_file_subgraph` even if another file
   still holds that chunk_id. The `chunks_*` row survives (INSERT OR IGNORE). A code
   comment marks this as known: "The M2M-aware cascade (P4) will refine this further."
-  Track as future cleanup if it surfaces under real workloads.
+  Track as future cleanup if it surfaces under real workloads.~~ — closed 2026-04-25
+  in commits `3b19129` (extract primitive) + `71a5f80` (wire into `_index_file`).
+  `_index_file` now uses `_holder_aware_chunk_cleanup` — shared chunks survive reindex.
 
 - ~~DEDUP-10b xfail~~ — closed 2026-04-25 in commit `48354d6`. Refactored
   the parity test to patch `SemanticSearchEngine.encode` (the real seam)

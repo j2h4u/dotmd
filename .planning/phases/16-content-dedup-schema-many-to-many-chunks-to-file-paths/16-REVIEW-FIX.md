@@ -138,3 +138,35 @@ The `_index_file` residual noted by the verifier in `16-VERIFICATION.md`
 (WARNING 2) is still tracked in `16-HUMAN-UAT.md` Notes — that is a
 behavior refinement, not a bug, and the code already documents it as a
 future cleanup. No code change needed.
+
+---
+
+## Post-script: WR-2 closed (panel-driven)
+
+Closed 2026-04-25 via four atomic commits after a cross-AI review panel
+identified the `_index_file` pre-purge as an M2M-unaware gap (WARNING 2
+in `16-VERIFICATION.md`).
+
+**Panel rationale:** extract a single holder-aware cascade primitive used
+by both `_purge_file` (existing) and `_index_file` (new) — one source of
+truth, two call sites, extensible to a third (future orphan-sweep path).
+
+| Step | Commit    | What                                                                                                                                 |
+|------|-----------|--------------------------------------------------------------------------------------------------------------------------------------|
+| 1    | `4f57380` | RED tests (5) — pin correct holder-aware reindex behavior; all fail on pre-fix code.                                                 |
+| 2    | `3b19129` | Extract `_holder_aware_chunk_cleanup` primitive; refactor `_purge_file` to use it. Pure refactor — all existing tests stay GREEN.    |
+| 3    | `71a5f80` | Wire `_index_file` to use `_holder_aware_chunk_cleanup`. All 5 RED tests turn GREEN. Full suite: 161 passed, 0 failed, 0 xfailed.   |
+| 4    | see docs commit | Doc close-out: VERIFICATION.md WARNING 2 marked RESOLVED; HUMAN-UAT.md residual struck out; REVIEW-FIX.md this section added. |
+
+**What changed in `_index_file`:**
+- Removed: `get_chunk_ids_by_file` + `remove_chunks` + `delete_vectors_by_chunk_ids` + `delete_file_subgraph` (M2M-unaware).
+- Added: separate cleanup transaction (`BEGIN` → `_holder_aware_chunk_cleanup` → `COMMIT`/`ROLLBACK`) before the chunking phase.
+- Post-commit graph step: `delete_chunks_from_graph(orphan_ids)` with `delete_file_subgraph` fallback for LadybugDB.
+- File node is NOT deleted during reindex (the graph phase below re-populates it).
+- Stale comment "The M2M-aware cascade (P4) will refine this further" replaced with accurate description.
+
+**Transaction ordering in `_index_file`:**
+  cleanup-tx (commit) → chunking (no DB) → insert-tx (commit)
+
+Two separate transactions (not one mega-transaction) to avoid holding a
+write lock through the potentially slow chunking phase.
