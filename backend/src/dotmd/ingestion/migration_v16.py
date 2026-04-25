@@ -37,6 +37,7 @@ import json
 import logging
 import math
 import os
+import re
 import shutil
 import socket
 import sqlite3
@@ -51,6 +52,26 @@ import dotmd.ingestion.chunker as _chunker_module
 from dotmd.storage.lock_constants import LOCK_TABLE
 
 logger = logging.getLogger("dotmd-migrate")
+
+# Whitelist for strategy names interpolated into SQL.  Only alphanumeric chars
+# and underscores are permitted — this prevents SQL injection via crafted table
+# names in a user-supplied index.db (e.g. "chunks_foo; DROP TABLE bar").
+_SAFE_STRATEGY_RE = re.compile(r"^[a-zA-Z0-9_]+$")
+
+
+def _validate_strategy(strategy: str) -> str:
+    """Raise ValueError if *strategy* contains SQL-unsafe characters.
+
+    Called at the discovery boundary so every downstream f-string
+    interpolation of strategy names is safe.
+    """
+    if not _SAFE_STRATEGY_RE.fullmatch(strategy):
+        raise ValueError(
+            f"Unsafe strategy name {strategy!r} — only alphanumeric chars and "
+            "underscores are allowed.  If this DB was produced by dotmd, this "
+            "is a bug; otherwise the DB may have been tampered with."
+        )
+    return strategy
 
 
 # ---------------------------------------------------------------------------
@@ -181,14 +202,20 @@ def _fetch_vector_for_divergence_check(
 
 
 def _discover_strategies(conn: sqlite3.Connection) -> list[str]:
-    """Return all strategy names from chunks_* tables (excluding FTS and M2M)."""
+    """Return all strategy names from chunks_* tables (excluding FTS and M2M).
+
+    Each returned name is validated against ``_SAFE_STRATEGY_RE`` before being
+    returned.  A tampered index.db with a crafted table name (e.g.
+    ``chunks_foo; DROP TABLE bar``) will raise ``ValueError`` here rather than
+    propagating unsafe SQL through every downstream f-string interpolation.
+    """
     rows = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' "
         "AND name LIKE 'chunks_%' "
         "AND name NOT LIKE 'chunks_fts_%' "
         "AND name NOT LIKE 'chunk_file_paths_%'"
     ).fetchall()
-    return [r[0].removeprefix("chunks_") for r in rows]
+    return [_validate_strategy(r[0].removeprefix("chunks_")) for r in rows]
 
 
 def _strategy_needs_migration(conn: sqlite3.Connection, strategy: str) -> bool:
