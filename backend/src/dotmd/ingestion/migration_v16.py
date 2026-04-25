@@ -41,6 +41,7 @@ import re
 import shutil
 import socket
 import sqlite3
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1067,7 +1068,6 @@ def run_migration_v16(
                     id_to_new[cid] = new_id
 
                 # Group by new_id
-                from collections import defaultdict
                 groups: dict[str, list[str]] = defaultdict(list)
                 for cid, new_id in id_to_new.items():
                     groups[new_id].append(cid)
