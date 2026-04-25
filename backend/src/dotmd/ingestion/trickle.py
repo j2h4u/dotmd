@@ -356,21 +356,29 @@ class TrickleIndexer:
             logger.info("Purge complete: %d files removed from all stores", len(diff.deleted))
 
         self._state.total_files = len(unindexed)
-        logger.info(
-            "Backlog: %d new, %d modified, %d deleted, %d unchanged, %d total",
-            len(diff.new),
-            len(diff.modified),
-            len(diff.deleted),
-            len(diff.unchanged),
-            len(all_files),
-        )
+        n_queued = len(diff.new) + len(diff.modified)
+        if n_queued > 0:
+            basenames = [fi.path.name for fi in unindexed]
+            if n_queued < 8:
+                queued_str = ", ".join(basenames)
+            else:
+                queued_str = ", ".join(basenames[:5]) + f", ... and {n_queued - 5} more"
+            logger.info(
+                "Backlog: %d new, %d modified, %d deleted, %d unchanged, %d total"
+                " — queued: %s",
+                len(diff.new),
+                len(diff.modified),
+                len(diff.deleted),
+                len(diff.unchanged),
+                len(all_files),
+                queued_str,
+            )
+        else:
+            # zero-changes path — handled in fix 6 (compact idle form)
+            pass  # placeholder, will be filled in fix 6
 
         if not unindexed:
             return
-
-        if len(unindexed) <= 5:
-            for fi in unindexed:
-                logger.info("  queued: %s (mtime %s)", fi.path, fi.last_modified.isoformat())
 
         succeeded = 0
         failed = 0
