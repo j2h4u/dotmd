@@ -557,11 +557,6 @@ ALL_TEST_NAMES: list[str] = [
     "test_row_count_delta_matches_expected_collapse",
     "test_backup_file_exists",
 
-    # test_migration_v15_superseded.py
-    "test_needs_migration_v15_returns_false",
-    "test_run_migration_v15_is_noop",
-    "test_v15_module_has_deprecation_banner",
-
     # test_trickle_lock.py
     "test_refuses_while_locked",
     "test_starts_when_lock_cleared",
