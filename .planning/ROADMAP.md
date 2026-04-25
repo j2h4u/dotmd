@@ -232,6 +232,51 @@ anti-pattern for a production service — they let misconfiguration ship.
 **Plans:**
 - [ ] TBD (promote when a consumer emerges)
 
+### Phase 999.9: MCP tool — graph entity inspection (BACKLOG)
+
+**Goal:** Expose graph traversal through MCP so agents can explore entity context, not just retrieve flat snippets.
+
+**Context 2026-04-25:** Hermes (Tiger's Claw) searched for "Даннинг-Крюгер" and found a relevant voicenote (score 0.904). When asked to explore further — linked entities, related conversations, speaker context — it couldn't. dotmd has 42k entities and 256k graph edges in FalkorDB, but they're used only internally for RRF ranking. Nothing surfaces through MCP. Hermes noted: "граф используется под капотом для reranking, но наружу выдаётся всё равно плоский список сниппетов."
+
+**Proposed tools:**
+- `get_entity(name)` → entity properties + type
+- `related_entities(name, depth=1)` → neighbours with relation types and weights
+- Possibly: `entity_mentions(name)` → chunks where entity appears
+
+**Plans:**
+- [ ] TBD
+
+---
+
+### Phase 999.10: MCP tool — document metadata / frontmatter (BACKLOG)
+
+**Goal:** Let agents retrieve structured metadata (frontmatter, speaker, tags, date) for a specific file by path, as a follow-up to a search result.
+
+**Context 2026-04-25:** Same Hermes session. After finding the Даннинг-Крюгер voicenote, it tried to get its frontmatter (speaker, tags, full YAML) — no way to do it. `list_resources` returns empty, `search` only returns text snippets. The file lives inside the dotmd container at `/mnt/knowledgebase/…` which Hermes cannot access directly. Hermes concluded: "dotmd не отдаёт structured metadata через MCP-интерфейс."
+
+**Proposed tool:**
+- `get_metadata(file_path)` → frontmatter dict (title, date, tags, speaker, etc.) from the stored chunk metadata
+
+This doesn't require re-reading files — frontmatter is already parsed and stored at index time.
+
+**Plans:**
+- [ ] TBD
+
+---
+
+### Phase 999.11: MCP list_resources — indexed file registry (BACKLOG)
+
+**Goal:** Implement MCP `list_resources` so clients can enumerate indexed files by URI and read their metadata or content snippets.
+
+**Context 2026-04-25:** Hermes called `list_resources` and got an empty list. MCP supports resources as a first-class primitive (URI-addressable data alongside tools and prompts). dotmd ignores this. Low immediate value at 730 files (can't paginate usefully), but the hook is needed for agents that do resource-oriented workflows. Prerequisite for proper `read_resource` support.
+
+**Note:** Lower priority than 999.9 and 999.10. Useful only if an agent workflow specifically iterates over the file list rather than searching. A `get_metadata(file_path)` tool (999.10) is more immediately useful.
+
+**Plans:**
+- [ ] TBD
+
+---
+
 ### Future ideas:
 - Semantic chunking (split by topic similarity, not just structure)
 - Doc-level chunks (whole-document embeddings for broad queries)
