@@ -33,12 +33,11 @@ def _make_file_info(path: str, title: str = "Test") -> FileInfo:
 def _make_chunk(chunk_id: str, file_path: str) -> Chunk:
     return Chunk(
         chunk_id=chunk_id,
-        file_path=Path(file_path),
+        file_paths=[Path(file_path)],
         heading_hierarchy=["Test"],
         level=1,
         text=f"Content of {chunk_id}",
         chunk_index=0,
-        char_offset=0,
     )
 
 
@@ -212,7 +211,7 @@ class TestPipelineIncrementalDiffCounts:
 
     @patch("dotmd.ingestion.pipeline.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
-    @patch("dotmd.ingestion.pipeline.chunk_file")
+    @patch("dotmd.ingestion.chunker.chunk_file")
     def test_incremental_index_has_diff_counts(
         self, mock_chunk_file, mock_read_file, mock_discover, tmp_path
     ):
@@ -298,7 +297,7 @@ class TestPipelineFullIndexDiffCounts:
 
     @patch("dotmd.ingestion.pipeline.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
-    @patch("dotmd.ingestion.pipeline.chunk_file")
+    @patch("dotmd.ingestion.chunker.chunk_file")
     def test_force_index_all_new(
         self, mock_chunk_file, mock_read_file, mock_discover, tmp_path
     ):
@@ -363,7 +362,7 @@ class TestPipelineNoChangesDiffCounts:
 
     @patch("dotmd.ingestion.pipeline.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
-    @patch("dotmd.ingestion.pipeline.chunk_file")
+    @patch("dotmd.ingestion.chunker.chunk_file")
     def test_no_changes_fresh_counts(
         self, mock_chunk_file, mock_read_file, mock_discover, tmp_path
     ):
