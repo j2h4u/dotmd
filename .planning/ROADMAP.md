@@ -107,7 +107,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 | 13. Content-Aware Chunking & Search | v1.4 | Complete | 2026-04-02 |
 | 14. Frontmatter-Driven Indexing | v1.4 | Complete | 2026-04-02 |
 | 15. Content-addressed caching | 2/3 | In Progress|  |
-| 16. Content-dedup schema | v1.4 | Planned |  |
+| 16. Content-dedup schema | 1/6 | In Progress|  |
 
 ## Backlog
 
@@ -247,7 +247,7 @@ Plans:
 
 **Depends on:** Phase 15 (blake3 chunker + caches — deployed 2026-04-24)
 **Requirements**: DEDUP-01..DEDUP-11 (see 16-RESEARCH.md)
-**Plans:** 6 plans — generated 2026-04-24 via /gsd:plan-phase 16
+**Plans:** 1/6 plans executed
 
 **Context & design notes:** see `.planning/phases/16-content-dedup-schema-many-to-many-chunks-to-file-paths/16-CONTEXT.md` — edge cases, schema sketch, open questions, expected plan breakdown (migrated from backlog 2026-04-24). Researcher audit in `16-RESEARCH.md`.
 
