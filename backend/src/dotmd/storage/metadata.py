@@ -530,15 +530,21 @@ class SQLiteMetadataStore:
     def delete_chunks_by_file(self, file_path: str) -> int:
         """Delete all chunks belonging to a file. Returns count deleted.
 
-        Phase 16: delegates to M2M-aware helpers. For backward compatibility
-        this method still works but callers should prefer delete_m2m_for_file
-        + delete_orphan_chunks for transactional safety.
+        Phase 16: delegates to M2M-aware helpers inside a single BEGIN/COMMIT
+        so the M2M delete and orphan cascade are atomic.  A crash between the
+        two operations in the old code could leave M2M rows gone but chunk
+        content rows present (inverse orphan).
         """
         strategy = self._table.removeprefix("chunks_")
-        conn = self._conn
-        orphans = self.delete_m2m_for_file(strategy, file_path, conn=conn)
-        self.delete_orphan_chunks(strategy, orphans, conn=conn)
-        self._conn.commit()
+        raw = object.__getattribute__(self._conn, "_real_conn")
+        raw.execute("BEGIN")
+        try:
+            orphans = self.delete_m2m_for_file(strategy, file_path, conn=self._conn)
+            self.delete_orphan_chunks(strategy, orphans, conn=self._conn)
+            raw.execute("COMMIT")
+        except Exception:
+            raw.execute("ROLLBACK")
+            raise
         return len(orphans)
 
     # -- stats --------------------------------------------------------------
