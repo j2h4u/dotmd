@@ -15,8 +15,15 @@ from dotmd.utils.logging import setup_logging
 
 @click.group()
 @click.option("--verbose", "-v", is_flag=True, help="Enable verbose logging.")
+@click.option(
+    "--index-dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Override index storage directory (default: ~/.dotmd).",
+    envvar="DOTMD_INDEX_DIR",
+)
 @click.pass_context
-def main(ctx: click.Context, verbose: bool) -> None:
+def main(ctx: click.Context, verbose: bool, index_dir: Path | None) -> None:
     """dotMD — Search your markdown knowledgebase.
 
     In normal operation, the background trickle indexer (started with
@@ -26,11 +33,20 @@ def main(ctx: click.Context, verbose: bool) -> None:
     setup_logging(verbose=verbose)
     ctx.ensure_object(dict)
     ctx.obj["verbose"] = verbose
+    ctx.obj["index_dir"] = index_dir
 
 
 def _get_service(**overrides: object) -> DotMDService:
     settings = Settings(**overrides)  # type: ignore[arg-type]
     return DotMDService(settings=settings)
+
+
+def _get_service_from_ctx(ctx: click.Context, **overrides: object) -> DotMDService:
+    """Build DotMDService, applying --index-dir from context if set."""
+    index_dir = (ctx.obj or {}).get("index_dir")
+    if index_dir is not None:
+        overrides.setdefault("index_dir", index_dir)
+    return _get_service(**overrides)
 
 
 @main.command()
@@ -92,9 +108,10 @@ def index(ctx: click.Context, directory: Path, extract_depth: str, entity_types:
 )
 @click.option("--no-rerank", is_flag=True, help="Skip cross-encoder reranking.")
 @click.option("--no-expand", is_flag=True, help="Skip query expansion.")
-def search(query: str, top: int, mode: str, no_rerank: bool, no_expand: bool) -> None:
+@click.pass_context
+def search(ctx: click.Context, query: str, top: int, mode: str, no_rerank: bool, no_expand: bool) -> None:
     """Search the indexed knowledgebase."""
-    service = _get_service(read_only=True)
+    service = _get_service_from_ctx(ctx, read_only=True)
     results = service.search(
         query=query,
         top_k=top,
@@ -109,7 +126,18 @@ def search(query: str, top: int, mode: str, no_rerank: bool, no_expand: bool) ->
 
     for i, r in enumerate(results, 1):
         click.echo(f"\n{'─' * 60}")
-        click.echo(f"  [{i}] {r.file_path}")
+        # Phase 16 P5: render file_paths list (locked format — Review-LOW-11)
+        # Single holder: [i] path
+        # Multi holder:  [i] path_0  (+N-1 more: path_1, path_2, …)
+        paths = sorted(r.file_paths)  # validator already sorts, defensive re-sort
+        if len(paths) == 0:
+            path_line = f"  [{i}] (no path)"
+        elif len(paths) == 1:
+            path_line = f"  [{i}] {paths[0]}"
+        else:
+            rest = ", ".join(str(p) for p in paths[1:])
+            path_line = f"  [{i}] {paths[0]}  (+{len(paths) - 1} more: {rest})"
+        click.echo(path_line)
         if r.heading_path:
             click.echo(f"      {r.heading_path}")
         click.echo(f"      Score: {r.fused_score:.4f}  Engines: {', '.join(r.matched_engines)}")
@@ -118,9 +146,10 @@ def search(query: str, top: int, mode: str, no_rerank: bool, no_expand: bool) ->
 
 @main.command()
 @click.option("--verbose", "-V", is_flag=True, help="Show per-strategy/model table details.")
-def status(verbose: bool) -> None:
+@click.pass_context
+def status(ctx: click.Context, verbose: bool) -> None:
     """Show index statistics."""
-    service = _get_service(read_only=True)
+    service = _get_service_from_ctx(ctx, read_only=True)
     stats = service.status()
 
     click.echo(f"Files:    {stats.total_files}")
@@ -152,14 +181,19 @@ def status(verbose: bool) -> None:
         ).fetchall()
 
         # Collect strategies from chunks_* tables
+        # Phase 16 P5: file count from chunk_file_paths_* M2M table (not chunks_* file_path column)
         strategies: dict[str, tuple[int, int]] = {}  # strategy -> (chunks, files)
         for (name,) in rows:
             if name.startswith("chunks_") and not name.startswith("chunks_fts_"):
                 strategy = name[len("chunks_"):]
                 count = conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
-                files = conn.execute(
-                    f"SELECT COUNT(DISTINCT file_path) FROM {name}"
-                ).fetchone()[0]
+                m2m_table = f"chunk_file_paths_{strategy}"
+                try:
+                    files = conn.execute(
+                        f"SELECT COUNT(DISTINCT file_path) FROM {m2m_table}"
+                    ).fetchone()[0]
+                except Exception:
+                    files = 0
                 strategies[strategy] = (count, files)
 
         if strategies:

@@ -140,6 +140,8 @@ Already keyed on `blake3(raw_text + model_sig)` — dedup happens naturally. MEN
     - **`--verify-only` reports divergence count** up-front so the operator knows before committing. Expected count on current KB = 0 (observed duplicates are symlinks/mirrored copies with identical headings).
     - **Schema unchanged** — `heading_hierarchy`/`level` stay on `chunks_*`. If a future feature surfaces per-holder heading (e.g., breadcrumb per hit, heading-filtered search), promote the fields to the M2M table in a later phase. See backlog 999.8.
 
+**CLI rendering — LOCKED (Phase 16 P5):** Multi-holder lines print as `[i] path_0  (+N-1 more: path_1, …)` in sorted-lex order from file_paths. Single holder prints as `[i] path`.
+
 ## Open questions (for /gsd:discuss-phase 16)
 
 1. **Canonical file_path for search results** — MIN lexicographic / shortest / closest to data_dir / newest mtime? (pillar of UX)

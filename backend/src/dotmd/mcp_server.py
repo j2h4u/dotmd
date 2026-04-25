@@ -41,7 +41,9 @@ def search(
         rerank: Whether to rerank results with a cross-encoder.
 
     Returns:
-        List of search results with file_path, heading, snippet, and score.
+        List of search results. Each result has `file_paths: list[str]` —
+        all files whose content hashes to this chunk (Phase 16 Decision #1).
+        Also includes heading, snippet, score, and matched_engines.
     """
     service = _get_service()
     results = service.search(query, top_k=top_k, mode=mode, rerank=rerank)
@@ -115,7 +117,7 @@ def _format_result(r) -> dict:
     heading = r.heading_path or title
 
     return {
-        "file_path": str(r.file_path),
+        "file_paths": [str(p) for p in r.file_paths],
         "heading": heading,
         "snippet": clean,
         "score": round(r.fused_score, 3),

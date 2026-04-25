@@ -397,8 +397,11 @@ class DotMDService:
             stats.total_chunks = conn.execute(
                 f"SELECT COUNT(*) FROM {chunks_table}"
             ).fetchone()[0]
+            # Phase 16 P5: file count from M2M table (chunks_* has no file_path column)
+            strategy = chunks_table.removeprefix("chunks_")
+            m2m_table = f"chunk_file_paths_{strategy}"
             stats.total_files = conn.execute(
-                f"SELECT COUNT(DISTINCT file_path) FROM {chunks_table}"
+                f"SELECT COUNT(DISTINCT file_path) FROM {m2m_table}"
             ).fetchone()[0]
         except Exception:
             pass
