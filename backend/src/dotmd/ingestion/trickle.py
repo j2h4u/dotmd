@@ -398,12 +398,14 @@ class TrickleIndexer:
             self._update_eta(i + 1, len(unindexed))
 
             # Progress log every file
-            eta_str = ""
             if self._state.eta_minutes is not None:
                 if self._state.eta_minutes < 60:
                     eta_str = f", ETA ~{self._state.eta_minutes:.0f}min"
                 else:
                     eta_str = f", ETA ~{self._state.eta_minutes / 60:.1f}hr"
+            else:
+                # Still collecting sample — don't lie
+                eta_str = ", ETA: estimating..."
             rate_str = ""
             if self._state.chunks_per_hour > 0:
                 rate_str = f" @ {self._state.chunks_per_hour:.0f} chunks/hr ({self._state.files_per_hour:.0f} files/hr)"
@@ -564,12 +566,20 @@ class TrickleIndexer:
             self._observer = None
 
     def _update_eta(self, files_done: int, files_total: int) -> None:
-        """Update throughput rates and ETA."""
+        """Update throughput rates and ETA.
+
+        ETA is suppressed until at least 3 files have been processed AND
+        at least 120 seconds have elapsed, to avoid wildly inflated early estimates.
+        """
         elapsed = time.monotonic() - self._state._start_time
         if elapsed > 0 and files_done > 0:
             self._state.files_per_hour = files_done / (elapsed / 3600)
             if self._state.total_chunks_done > 0:
                 self._state.chunks_per_hour = self._state.total_chunks_done / (elapsed / 3600)
-            remaining = files_total - files_done
-            if self._state.files_per_hour > 0:
-                self._state.eta_minutes = remaining / (self._state.files_per_hour / 60)
+            # Suppress ETA until sample is large enough to be meaningful
+            if files_done >= 3 and elapsed >= 120:
+                remaining = files_total - files_done
+                if self._state.files_per_hour > 0:
+                    self._state.eta_minutes = remaining / (self._state.files_per_hour / 60)
+            else:
+                self._state.eta_minutes = None  # "estimating..."
