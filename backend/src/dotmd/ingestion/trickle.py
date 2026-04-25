@@ -48,6 +48,7 @@ class TrickleState:
     chunks_per_hour: float = 0.0
     total_chunks_done: int = 0
     eta_minutes: float | None = None
+    last_indexed_at: datetime | None = None
     _start_time: float = field(default_factory=time.monotonic, repr=False)
 
 
@@ -356,21 +357,37 @@ class TrickleIndexer:
             logger.info("Purge complete: %d files removed from all stores", len(diff.deleted))
 
         self._state.total_files = len(unindexed)
-        logger.info(
-            "Backlog: %d new, %d modified, %d deleted, %d unchanged, %d total",
-            len(diff.new),
-            len(diff.modified),
-            len(diff.deleted),
-            len(diff.unchanged),
-            len(all_files),
-        )
+        n_queued = len(diff.new) + len(diff.modified)
+        if n_queued > 0:
+            basenames = [fi.path.name for fi in unindexed]
+            if n_queued < 8:
+                queued_str = ", ".join(basenames)
+            else:
+                queued_str = ", ".join(basenames[:5]) + f", ... and {n_queued - 5} more"
+            logger.info(
+                "Backlog: %d new, %d modified, %d deleted, %d unchanged, %d total"
+                " — queued: %s",
+                len(diff.new),
+                len(diff.modified),
+                len(diff.deleted),
+                len(diff.unchanged),
+                len(all_files),
+                queued_str,
+            )
+        else:
+            last_act = (
+                self._state.last_indexed_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+                if self._state.last_indexed_at
+                else "never"
+            )
+            logger.info(
+                "Backlog: idle (%d indexed, last activity %s)",
+                len(diff.unchanged),
+                last_act,
+            )
 
         if not unindexed:
             return
-
-        if len(unindexed) <= 5:
-            for fi in unindexed:
-                logger.info("  queued: %s (mtime %s)", fi.path, fi.last_modified.isoformat())
 
         succeeded = 0
         failed = 0
@@ -395,15 +412,18 @@ class TrickleIndexer:
             succeeded += 1
             self._state.indexed_count = succeeded
             self._state.total_chunks_done += n_chunks or 0
+            self._state.last_indexed_at = datetime.now(timezone.utc)
             self._update_eta(i + 1, len(unindexed))
 
             # Progress log every file
-            eta_str = ""
             if self._state.eta_minutes is not None:
                 if self._state.eta_minutes < 60:
                     eta_str = f", ETA ~{self._state.eta_minutes:.0f}min"
                 else:
                     eta_str = f", ETA ~{self._state.eta_minutes / 60:.1f}hr"
+            else:
+                # Still collecting sample — don't lie
+                eta_str = ", ETA: estimating..."
             rate_str = ""
             if self._state.chunks_per_hour > 0:
                 rate_str = f" @ {self._state.chunks_per_hour:.0f} chunks/hr ({self._state.files_per_hour:.0f} files/hr)"
@@ -475,6 +495,7 @@ class TrickleIndexer:
                     try:
                         await asyncio.to_thread(self._process_one_file, fi)
                         self._state.indexed_count += 1
+                        self._state.last_indexed_at = datetime.now(timezone.utc)
                         logger.info("Watch: indexed %s", file_path.name)
                     finally:
                         self._state.current_file = None
@@ -519,6 +540,11 @@ class TrickleIndexer:
         chunk, embed, store, extract, graph, and fingerprint.
 
         Runs synchronously in a thread pool to avoid blocking the event loop.
+
+        Two-line-per-file steady state (Fix 2):
+          1. ``pipeline: {basename} DONE N chunks X.Xs (...)``  — emitted by pipeline._index_file
+          2. ``{basename} — N chunks, X.Xs``                    — emitted here (only when n_chunks > 0)
+        No other INFO lines are emitted per file from this method.
         """
         t0 = time.perf_counter()
         n_chunks = self._pipeline.index_file(file_info)
@@ -559,12 +585,20 @@ class TrickleIndexer:
             self._observer = None
 
     def _update_eta(self, files_done: int, files_total: int) -> None:
-        """Update throughput rates and ETA."""
+        """Update throughput rates and ETA.
+
+        ETA is suppressed until at least 3 files have been processed AND
+        at least 120 seconds have elapsed, to avoid wildly inflated early estimates.
+        """
         elapsed = time.monotonic() - self._state._start_time
         if elapsed > 0 and files_done > 0:
             self._state.files_per_hour = files_done / (elapsed / 3600)
             if self._state.total_chunks_done > 0:
                 self._state.chunks_per_hour = self._state.total_chunks_done / (elapsed / 3600)
-            remaining = files_total - files_done
-            if self._state.files_per_hour > 0:
-                self._state.eta_minutes = remaining / (self._state.files_per_hour / 60)
+            # Suppress ETA until sample is large enough to be meaningful
+            if files_done >= 3 and elapsed >= 120:
+                remaining = files_total - files_done
+                if self._state.files_per_hour > 0:
+                    self._state.eta_minutes = remaining / (self._state.files_per_hour / 60)
+            else:
+                self._state.eta_minutes = None  # "estimating..."
