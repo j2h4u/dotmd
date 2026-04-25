@@ -185,7 +185,7 @@ class TestMigrateVerifyOnlyInvariantViolation:
             "INSERT INTO chunks_heading_512_50 "
             "(chunk_id, file_path, heading_hierarchy, level, text, chunk_index, char_offset) "
             "VALUES (?, ?, '[]', 0, 'text', 0, 0)",
-            ("short_invalid_id",),  # not 64 chars
+            ("short_invalid_id", "/tmp/test.md"),  # chunk_id not 64 chars — triggers invariant
         )
         conn.commit()
         conn.close()
