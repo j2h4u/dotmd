@@ -677,22 +677,13 @@ def _migrate_strategy(
             )
         """, (canonical_old_id, canonical_old_id))
 
-        # --- Step 5d: Vector divergence check (Decision #4) ---
-        for nc_id in non_canonical:
-            v_canon = _fetch_vector_for_divergence_check(conn, strategy, canonical_old_id)
-            v_other = _fetch_vector_for_divergence_check(conn, strategy, nc_id)
-            if v_canon is not None and v_other is not None:
-                try:
-                    distance = 1.0 - _cosine_similarity(v_canon, v_other)
-                    if distance > 0.01:
-                        logger.warning(
-                            "vector_divergence strategy=%s canonical=%s discarded=%s "
-                            "cosine_distance=%.4f (> 0.01 threshold)",
-                            strategy, canonical_old_id, nc_id, distance,
-                        )
-                        divergence_warnings += 1
-                except ValueError:
-                    pass
+        # --- Step 5d removed: vector divergence check was dead code ---
+        # _fetch_vector_for_divergence_check always returned None because the
+        # migration connection does not load the sqlite_vec extension.  The
+        # guard `if v_canon is not None and v_other is not None` never fired.
+        # Payload divergence (step 5f) covers the common case; vector
+        # divergence is not checked during migration.  The canonical chunk's
+        # vector is kept by default in step 5e's DELETE.
 
         # --- Step 5e: Collapse DELETE non-canonical rows ---
         nc_placeholders = ",".join("?" * len(non_canonical))
