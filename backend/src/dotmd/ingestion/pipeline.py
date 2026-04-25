@@ -960,22 +960,51 @@ class IndexingPipeline:
 
         chunk_diff = self._chunk_tracker.diff([file_info])
         if path_str in chunk_diff.new or path_str in chunk_diff.modified:
-            # Purge derived data (FTS5, graph, vec) for the old associations
-            # of this file. chunks_* rows that are still referenced by OTHER
-            # files are left untouched (M2M holder check). For now we purge
-            # only the per-file derived data (FTS5 keys, vec for this file's
-            # chunk_ids, graph subgraph). The M2M-aware cascade (P4) will
-            # refine this further.
+            # Holder-aware pre-purge: decrement M2M for this file, then
+            # cascade-delete only chunks whose holder count dropped to 0.
+            # Shared chunks (still referenced by another file) are left intact
+            # in chunks_*, FTS5, and vec_meta.
             if prof:
                 t0 = time.perf_counter()
             _beacon("purge")
-            old_chunk_ids = self._metadata_store.get_chunk_ids_by_file(
-                self._strategy, path_str
-            )
-            if old_chunk_ids:
-                self._keyword_engine.remove_chunks(old_chunk_ids)
-                self._vector_store.delete_vectors_by_chunk_ids(old_chunk_ids)
-                self._graph_store.delete_file_subgraph(path_str)
+            cleanup_orphans_by_strategy: dict[str, list[str]] = {}
+            try:
+                self._conn.execute("BEGIN")
+                cleanup_orphans_by_strategy = self._holder_aware_chunk_cleanup(
+                    path_str, conn=self._conn
+                )
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+            # Post-commit graph cleanup: holder-aware path (branch b).
+            # Only orphan chunk_ids are removed from the graph; the File node
+            # is NOT deleted here because the file is being re-indexed (it will
+            # be re-populated in the graph phase below).
+            _cleanup_orphan_ids: list[str] = [
+                cid
+                for orphans in cleanup_orphans_by_strategy.values()
+                for cid in orphans
+            ]
+            if _cleanup_orphan_ids:
+                try:
+                    self._graph_store.delete_chunks_from_graph(_cleanup_orphan_ids)
+                except AttributeError:
+                    # Graph store lacks narrow helper (e.g. LadybugDB) — fall
+                    # back to broad subgraph delete.  The graph will be
+                    # re-populated in the graph phase below.
+                    try:
+                        self._graph_store.delete_file_subgraph(path_str)
+                    except Exception as _ge:  # noqa: BLE001
+                        logger.warning(
+                            "graph cleanup (fallback) failed during reindex: %s (file=%s)",
+                            _ge, path_str,
+                        )
+                except Exception as _ge:  # noqa: BLE001
+                    logger.warning(
+                        "graph chunk cleanup failed during reindex: %s (file=%s)",
+                        _ge, path_str,
+                    )
             if prof:
                 logger.info("[prof] %s purge: %.2fs", file_info.path, time.perf_counter() - t0)
 
