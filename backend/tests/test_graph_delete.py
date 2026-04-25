@@ -40,7 +40,7 @@ def _populate_graph(gs: LadybugDBGraphStore) -> None:
            SECTION_SECTION x1, FILE_ENTITY x1, FILE_TAG x1
     Total: 5 nodes, 8 edges
     """
-    gs.add_file_node(file_path="doc/test.md", title="Test Doc", checksum="abc123")
+    gs.add_file_node(file_path="doc/test.md", title="Test Doc")
     gs.add_section_node(
         chunk_id="chunk-1", heading="Intro", level=1,
         file_path="doc/test.md", text_preview="Introduction text",
@@ -68,7 +68,7 @@ def _populate_graph(gs: LadybugDBGraphStore) -> None:
 
 def _populate_second_file(gs: LadybugDBGraphStore) -> None:
     """Add a second file that shares Entity 'Python' and Tag 'programming'."""
-    gs.add_file_node(file_path="doc/other.md", title="Other Doc", checksum="def456")
+    gs.add_file_node(file_path="doc/other.md", title="Other Doc")
     gs.add_section_node(
         chunk_id="chunk-3", heading="Appendix", level=1,
         file_path="doc/other.md", text_preview="Appendix text",
