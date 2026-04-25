@@ -85,6 +85,9 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 
 ### Backlog items completed:
 - [x] 999.1 Multi-model vector store — absorbed into Phase 12
+- [x] 999.3 Automatic orphan cleanup — impossible by construction after Phase 16 M2M (2026-04-25)
+- [x] 999.5 Ignore patterns for data discovery — extended default excludes in config.py (2026-04-24)
+- [x] 999.10 MCP document metadata — implemented as `drill(file_path)` with frontmatter + entities (2026-04-26)
 
 </details>
 
@@ -122,7 +125,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 **Plans:**
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
-### Phase 999.3: Automatic orphan cleanup — chunks/vec/FTS rows without live file_path (BACKLOG, partially done)
+### Phase 999.3: Automatic orphan cleanup — chunks/vec/FTS rows without live file_path (DONE 2026-04-25)
 
 **Goal:** Detect and purge orphan rows (chunks without fingerprints, chunks without vectors, chunks for deleted files) on a periodic or startup basis. Historically `_purge_file()` only ran when re-chunking, so orphans accumulated for months across hash-algorithm migrations.
 
@@ -131,20 +134,12 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 - `chunks_contextual_512_50`: 4937 rows without FTS and without vec_meta (pure ghosts from buggy `_purge_file()` after the 2026-04-03 MD5→blake2b migration)
 - Total: ~5k invisible rows consuming disk/RAM, surviving across re-chunking cycles
 
-**Done 2026-04-24 (as a side fix while deploying Phase 15):**
-- ✅ Criterion (c) — chunks with file_path not in discovered files — is now cleaned on every trickle startup
-- ✅ `purge_orphaned_files` rewritten to scan ALL `chunks_<strategy>` tables, not just the active strategy (previously heading orphans were invisible to cleanup because pipeline saw only contextual)
-- ✅ Cascade covers chunks, chunks_fts, vec_meta, vec0 virtual table by rowid, chunk_fingerprints, embed_fingerprints_* across every embedding model
-
-**Still open:**
-- Criterion (a) — chunks without a chunk_fingerprints row for the same file_path (should be impossible, but worth a periodic audit)
-- Criterion (b) — chunks without a vec_meta row for any active embedding model (this was the 4937-row class from 2026-04-03 fallout)
-- On-demand `dotmd cleanup` CLI — currently only runs on trickle startup; no way to trigger it without a restart
-- Reporting mode — log a dry-run summary before destructive changes for operator confidence
-- Periodic scheduling — beyond startup (e.g., weekly as systemd timer / cron), for long-lived deployments
-
-**Plans:**
-- [ ] TBD (promote with /gsd-review-backlog when ready)
+**Done:**
+- ✅ Criterion (c) — chunks with file_path not in discovered files — cleaned on every trickle startup (2026-04-24)
+- ✅ `purge_orphaned_files` rewritten to scan ALL `chunks_<strategy>` tables, not just the active strategy (2026-04-24)
+- ✅ Cascade covers chunks, chunks_fts, vec_meta, vec0 virtual table by rowid, chunk_fingerprints, embed_fingerprints_* across every embedding model (2026-04-24)
+- ✅ Phase 16 M2M rewrite (2026-04-25): `purge_orphaned_files` now scans `chunk_file_paths_*` M2M tables; `_purge_file` cascade is authoritative — criteria (a) and (b) impossible by construction after Phase 16
+- ✅ 4937-row ghost class from MD5→blake2b migration: eliminated by Phase 16 migration (486 collisions collapsed, schema rebuilt clean)
 
 ### Phase 999.5: Ignore patterns for data discovery (DONE 2026-04-24)
 
@@ -248,19 +243,13 @@ anti-pattern for a production service — they let misconfiguration ship.
 
 ---
 
-### Phase 999.10: MCP tool — document metadata / frontmatter (BACKLOG)
+### Phase 999.10: MCP tool — document metadata / frontmatter (DONE 2026-04-26)
 
 **Goal:** Let agents retrieve structured metadata (frontmatter, speaker, tags, date) for a specific file by path, as a follow-up to a search result.
 
 **Context 2026-04-25:** Same Hermes session. After finding the Даннинг-Крюгер voicenote, it tried to get its frontmatter (speaker, tags, full YAML) — no way to do it. `list_resources` returns empty, `search` only returns text snippets. The file lives inside the dotmd container at `/mnt/knowledgebase/…` which Hermes cannot access directly. Hermes concluded: "dotmd не отдаёт structured metadata через MCP-интерфейс."
 
-**Proposed tool:**
-- `get_metadata(file_path)` → frontmatter dict (title, date, tags, speaker, etc.) from the stored chunk metadata
-
-This doesn't require re-reading files — frontmatter is already parsed and stored at index time.
-
-**Plans:**
-- [ ] TBD
+**Done 2026-04-26:** Implemented as `drill(file_path)` — name chosen over `get_metadata` to convey the "dig deeper after search" intent. Returns frontmatter (read from disk), chunk_count (from M2M table), and entities (from FalkorDB graph). Also covers part of 999.9 — agents get entity names from `drill` and can use them for follow-up searches.
 
 ---
 
@@ -274,6 +263,39 @@ This doesn't require re-reading files — frontmatter is already parsed and stor
 
 **Plans:**
 - [ ] TBD
+
+---
+
+### Phase 999.12: Dual-encoder unified embedding — decoupled metadata vectors (BACKLOG)
+
+**Goal:** Decouple metadata (title, tags) from chunk embeddings so that metadata-only changes (tag updates, title renames) require 1 TEI call per document instead of N TEI calls per chunk.
+
+**Context 2026-04-26:** Sync agent updated tags on 50 voicenote transcripts → trickle triggered full re-embed of all chunks in each file (~107 chunks × 393s TEI = hours of work). Root cause: `enrich_with_title_and_tags` bakes title+tags into the embedding text, so any tag change changes `text_hash` for every chunk → 0 cache hits.
+
+**Technique:** Dual-encoder unified embedding (arxiv 2601.11863, ECIR 2026).
+
+Instead of `embed(title + tags + chunk_text)` → store two vectors separately:
+```
+e_text  = embed(chunk_text)           # computed once per chunk, frozen
+e_meta  = embed(title + tags)         # one vector per document (not per chunk)
+e_fused = norm(α·norm(e_text) + (1-α)·norm(e_meta))   # local math, no TEI
+```
+
+On tag/title update: 1 TEI call to recompute `e_meta` + N local vector additions (no TEI).
+On body change: recompute `e_text` per chunk (same as today).
+
+Paper reports unified embeddings match or beat prefix approach in retrieval quality. `α` is a tunable weight (needs per-corpus calibration).
+
+**Schema impact:**
+- `e_text` — store alongside existing vec in `vec_meta_*`
+- `e_meta` — new per-file table (one vector per file_path per model)
+- `e_fused` — replaces current vec0 content; recomputed locally on metadata change
+- `text_hash` — computed on `chunk_text` only (no prefix), enabling true cross-strategy reuse
+
+**Reference:** [Utilizing Metadata for Better RAG (ECIR 2026)](https://arxiv.org/abs/2601.11863)
+
+**Plans:**
+- [ ] TBD (promote with /gsd-review-backlog when ready)
 
 ---
 

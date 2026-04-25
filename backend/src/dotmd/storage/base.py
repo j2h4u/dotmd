@@ -252,6 +252,10 @@ class GraphStoreProtocol(Protocol):
         """Return chunk_ids for sections connected to an entity."""
         return []
 
+    def get_entities_by_file(self, file_path: str) -> list[str]:
+        """Return sorted entity names mentioned in sections belonging to file_path."""
+        return []
+
     def delete_all(self) -> None:
         """Remove **all** nodes and edges from the graph."""
         ...

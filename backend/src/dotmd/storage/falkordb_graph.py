@@ -310,6 +310,14 @@ class FalkorDBGraphStore:
         )
         return [str(row[0]) for row in result.result_set]
 
+    def get_entities_by_file(self, file_path: str) -> list[str]:
+        """Return sorted entity names mentioned in sections belonging to file_path."""
+        result = self._graph.ro_query(
+            "MATCH (s:Section {file_path: $fp})--(e:Entity) RETURN DISTINCT e.id",
+            params={"fp": file_path},
+        )
+        return sorted(str(row[0]) for row in result.result_set)
+
     def delete_all(self) -> None:
         """Remove all nodes and edges from the graph."""
         self._graph.query("MATCH (n) DETACH DELETE n")

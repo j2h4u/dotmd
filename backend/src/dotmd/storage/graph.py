@@ -382,3 +382,18 @@ class LadybugDBGraphStore:
             except Exception:
                 logger.debug("Failed to get chunks for entity %s", entity_name, exc_info=True)
                 return []
+
+    def get_entities_by_file(self, file_path: str) -> list[str]:
+        """Return sorted entity names mentioned in sections belonging to file_path."""
+        with self._connection() as conn:
+            try:
+                result = conn.execute(
+                    "MATCH (s:Section {file_path: $fp})-[:SECTION_ENTITY]->(e:Entity) "
+                    "RETURN DISTINCT e.id",
+                    parameters={"fp": file_path},
+                )
+                df = result.get_as_df()
+                return sorted(str(row["e.id"]) for _, row in df.iterrows())
+            except Exception:
+                logger.debug("Failed to get entities for file %s", file_path, exc_info=True)
+                return []

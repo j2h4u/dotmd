@@ -372,6 +372,32 @@ class DotMDService:
 
         return results
 
+    def drill(self, file_path: str) -> dict:
+        """Return metadata for a file path from search results.
+
+        Reads frontmatter from disk, chunk count from the active strategy's
+        M2M table, and entity names from the graph.
+        """
+        from dotmd.ingestion.reader import parse_frontmatter, read_file
+
+        path = Path(file_path)
+        try:
+            frontmatter, _ = parse_frontmatter(read_file(path))
+        except Exception:
+            frontmatter = {}
+
+        chunk_ids = self._pipeline.metadata_store.get_chunk_ids_by_file(
+            self._settings.chunk_strategy, file_path
+        )
+        entities = self._pipeline.graph_store.get_entities_by_file(file_path)
+
+        return {
+            "file_path": file_path,
+            "frontmatter": frontmatter,
+            "chunk_count": len(chunk_ids),
+            "entities": entities,
+        }
+
     def status(self) -> IndexStats:
         """Return the current index statistics.
 

@@ -6,7 +6,7 @@ import asyncio
 import logging
 import re
 from contextlib import asynccontextmanager
-from typing import Annotated, AsyncIterator, Literal
+from typing import Annotated, AsyncIterator
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -112,17 +112,6 @@ def create_app() -> Starlette:
 def search(
     query: Annotated[str, Field(description="Natural-language search query.")],
     top_k: Annotated[int, Field(description="Maximum results to return.", ge=1, le=100)] = 10,
-    mode: Annotated[
-        Literal["hybrid", "semantic", "keyword", "graph"],
-        Field(description=(
-            "Search strategy. "
-            "hybrid: semantic + keyword + graph fused via RRF (default, best for most queries). "
-            "semantic: vector similarity only. "
-            "keyword: FTS5 full-text search only. "
-            "graph: entity-based graph traversal only."
-        )),
-    ] = "hybrid",
-    rerank: Annotated[bool, Field(description="Rerank results with a cross-encoder for higher precision.")] = True,
 ) -> list[dict]:
     """Search the indexed markdown knowledgebase and return ranked chunks.
 
@@ -130,8 +119,31 @@ def search(
     snippet, a relevance score, and which search engines matched it.
     """
     service = _get_service()
-    results = service.search(query, top_k=top_k, mode=mode, rerank=rerank)
+    results = service.search(query, top_k=top_k)
     return [_format_result(r) for r in results]
+
+
+@mcp.tool(
+    annotations={
+        "title": "Drill Into Document",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+)
+def drill(
+    file_path: Annotated[str, Field(description="Absolute file path from a search result.")],
+) -> dict:
+    """Retrieve metadata for a file returned by search.
+
+    Returns frontmatter fields (title, date, tags, speaker, etc.), the number
+    of indexed chunks, and entity names extracted from the file's graph nodes.
+    Use this after search to understand the document's context before drawing
+    conclusions from a snippet.
+    """
+    service = _get_service()
+    return service.drill(file_path)
 
 
 @mcp.tool(
@@ -199,8 +211,6 @@ def _format_result(r) -> dict:
                     break
 
     clean = _FRONTMATTER_RE.sub("", snippet).strip()
-    first_ts = _TIMESTAMP_RE.search(clean)
-    start_time = first_ts.group().strip(" []") if first_ts else None
     clean = _TIMESTAMP_RE.sub("", clean).strip()
 
     return {
@@ -208,8 +218,6 @@ def _format_result(r) -> dict:
         "heading": r.heading_path or title,
         "snippet": clean,
         "score": round(r.fused_score, 3),
-        "matched_engines": r.matched_engines,
-        "start_time": start_time,
     }
 
 
