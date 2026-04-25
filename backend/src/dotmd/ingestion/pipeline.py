@@ -954,18 +954,19 @@ class IndexingPipeline:
             if prof:
                 _beacon_path.write_text(f"{file_info.path}:{phase}")
 
-        # --- Phase 1: Chunk ---
-        if prof:
-            t_file = time.perf_counter()
+        # Timing accumulators — always defined so the DONE summary can reference
+        # them unconditionally regardless of which code paths were taken.
+        t_file = time.perf_counter()
+        t_purge = t_chunk = t_save = t_extract = t_graph = t_embed = t_vec = 0.0
 
+        # --- Phase 1: Chunk ---
         chunk_diff = self._chunk_tracker.diff([file_info])
         if path_str in chunk_diff.new or path_str in chunk_diff.modified:
             # Holder-aware pre-purge: decrement M2M for this file, then
             # cascade-delete only chunks whose holder count dropped to 0.
             # Shared chunks (still referenced by another file) are left intact
             # in chunks_*, FTS5, and vec_meta.
-            if prof:
-                t0 = time.perf_counter()
+            t0 = time.perf_counter()
             _beacon("purge")
             cleanup_orphans_by_strategy: dict[str, list[str]] = {}
             try:
@@ -1005,12 +1006,10 @@ class IndexingPipeline:
                         "graph chunk cleanup failed during reindex: %s (file=%s)",
                         _ge, path_str,
                     )
-            if prof:
-                logger.info("[prof] %s purge: %.2fs", file_info.path, time.perf_counter() - t0)
+            t_purge = time.perf_counter() - t0
 
             _beacon("chunk")
-            if prof:
-                t0 = time.perf_counter()
+            t0 = time.perf_counter()
             content = read_file(file_info.path)
             chunks = _chunker_module.chunk_file(
                 file_info.path,
@@ -1020,15 +1019,13 @@ class IndexingPipeline:
                 kind=file_info.kind,
                 chunk_strategy=self._strategy,
             )
-            if prof:
-                logger.info("[prof] %s chunk: %d chunks, %.2fs", file_info.path, len(chunks), time.perf_counter() - t0)
+            t_chunk = time.perf_counter() - t0
 
             if not chunks:
                 self._save_chunk_fingerprint(file_info)
                 return 0
 
-            if prof:
-                t0 = time.perf_counter()
+            t0 = time.perf_counter()
             _beacon("save+fts5")
             # Phase 16 M2M write path: INSERT OR IGNORE on chunks_* + M2M.
             # For each chunk, check payload consistency on conflict (Review-HIGH-P3).
@@ -1086,23 +1083,18 @@ class IndexingPipeline:
             _trickle_tags_csv = ", ".join(str(t) for t in _trickle_tags) if _trickle_tags else ""
             _trickle_meta = {str(file_info.path): (file_info.title, _trickle_tags_csv)}
             self._keyword_engine.add_chunks(chunks, file_meta=_trickle_meta)
-            if prof:
-                logger.info("[prof] %s save+fts5: %.2fs", file_info.path, time.perf_counter() - t0)
+            t_save = time.perf_counter() - t0
 
             _beacon("extraction")
-            if prof:
-                t0 = time.perf_counter()
+            t0 = time.perf_counter()
             extraction = self._run_extraction(chunks)
-            if prof:
-                logger.info("[prof] %s extraction: %d entities, %.2fs", file_info.path, extraction.total_entities, time.perf_counter() - t0)
+            t_extract = time.perf_counter() - t0
 
             _beacon("graph")
-            if prof:
-                t0 = time.perf_counter()
+            t0 = time.perf_counter()
             self._populate_graph([file_info], chunks, extraction)
             self._frontmatter_to_graph([file_info])
-            if prof:
-                logger.info("[prof] %s graph: %.2fs", file_info.path, time.perf_counter() - t0)
+            t_graph = time.perf_counter() - t0
 
             self._save_chunk_fingerprint(file_info)
             needs_embed = True
@@ -1131,21 +1123,17 @@ class IndexingPipeline:
 
             if chunks:
                 _beacon("embed")
-                if prof:
-                    t0 = time.perf_counter()
+                t0 = time.perf_counter()
                 embeddings, text_hashes = self._embed_chunks(chunks)
-                if prof:
-                    logger.info("[prof] %s embed: %d chunks, %.2fs", file_info.path, len(chunks), time.perf_counter() - t0)
+                t_embed = time.perf_counter() - t0
 
                 _beacon("vec_store")
-                if prof:
-                    t0 = time.perf_counter()
+                t0 = time.perf_counter()
                 self._vector_store.add_chunks(
                     chunks, embeddings, overwrite=False,
                     text_hashes=text_hashes,
                 )
-                if prof:
-                    logger.info("[prof] %s vec_store: %.2fs", file_info.path, time.perf_counter() - t0)
+                t_vec = time.perf_counter() - t0
 
                 if metadata_only:
                     file_meta = self._build_file_meta_from_fileinfo([file_info])
@@ -1160,12 +1148,15 @@ class IndexingPipeline:
             self._save_embed_fingerprint(file_info)
 
         _beacon("idle")
-        if prof:
-            logger.info(
-                "[prof] %s TOTAL: %d chunks, %.2fs",
-                file_info.path, len(chunks) if chunks else 0,
-                time.perf_counter() - t_file,
-            )
+        t_total = time.perf_counter() - t_file
+        logger.info(
+            "pipeline: %s DONE %d chunks %.1fs"
+            " (chunk %.2f / save %.2f / extract %.2f / graph %.2f / embed %.2f / vec %.2f)",
+            file_info.path.name,
+            len(chunks) if chunks else 0,
+            t_total,
+            t_chunk, t_save, t_extract, t_graph, t_embed, t_vec,
+        )
 
         return len(chunks) if chunks else 0
 
