@@ -48,6 +48,7 @@ from typing import Any
 import blake3 as _blake3
 
 import dotmd.ingestion.chunker as _chunker_module
+from dotmd.storage.lock_constants import LOCK_TABLE
 
 logger = logging.getLogger("dotmd-migrate")
 

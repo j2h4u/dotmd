@@ -229,14 +229,19 @@ class SQLiteVecVectorStore:
 
         for chunk, embedding in zip(chunks, embeddings):
             th = text_hashes.get(chunk.chunk_id) if text_hashes else None
+            # Phase 16: use INSERT OR IGNORE so that re-indexing a chunk_id
+            # that already has a vector (e.g. identical content from another
+            # file) is a no-op. The existing vector row is kept as-is.
             cur = conn.execute(
-                f"INSERT INTO {self._META_TABLE} (chunk_id, text_hash) VALUES (?, ?)",
+                f"INSERT OR IGNORE INTO {self._META_TABLE} (chunk_id, text_hash) VALUES (?, ?)",
                 (chunk.chunk_id, th),
             )
-            conn.execute(
-                f"INSERT INTO {self._VEC_TABLE} (rowid, embedding) VALUES (?, ?)",
-                (cur.lastrowid, _serialize_f32(embedding)),
-            )
+            # cur.lastrowid is 0 when INSERT OR IGNORE is a no-op (row exists).
+            if cur.lastrowid:
+                conn.execute(
+                    f"INSERT INTO {self._VEC_TABLE} (rowid, embedding) VALUES (?, ?)",
+                    (cur.lastrowid, _serialize_f32(embedding)),
+                )
 
         conn.commit()
         logger.info("Indexed %d chunks (%d-dim vectors)", len(chunks), dim)

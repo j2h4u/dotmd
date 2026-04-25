@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
+import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -20,6 +22,7 @@ from watchdog.observers import Observer
 
 from dotmd.core.models import FileInfo, TrickleStatus
 from dotmd.ingestion.lock import indexing_lock
+from dotmd.storage.lock_constants import LOCK_TABLE
 
 if TYPE_CHECKING:
     from dotmd.core.config import Settings
@@ -97,24 +100,97 @@ class _MarkdownEventHandler(PatternMatchingEventHandler):
 # ---------------------------------------------------------------------------
 
 
+def _check_migration_lock(db_path: Path) -> None:
+    """Startup guardrail ONLY; not full mutex.
+
+    Check whether ``migration_v16_lock`` is held at trickle startup.
+    Operator must stop trickle before running migration. See 16-03-SUMMARY.md
+    for the operational runbook.
+
+    This is a GUARDRAIL against operator forgetting to stop trickle before
+    ``migrate run``.  It is NOT full mutual exclusion — if trickle is already
+    running when migration begins, migration's lock INSERT will see no prior
+    row and a race is possible.  The operational runbook instructs operators
+    to stop the trickle service before running migration.
+
+    Parameters
+    ----------
+    db_path:
+        Path to ``index.db``.  Opened read-only so this check never modifies
+        the database.
+
+    Raises
+    ------
+    RuntimeError
+        If ``migration_v16_lock`` row with ``id=1`` exists (lock held).
+    """
+    if not db_path.exists():
+        return  # fresh install — no lock possible
+    try:
+        conn = sqlite3.connect(
+            f"file:{db_path}?mode=ro", uri=True, timeout=1
+        )
+    except sqlite3.OperationalError:
+        # DB file absent or not readable — treat as clear.
+        return
+    try:
+        # Guard: check that the lock table exists at all.
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (LOCK_TABLE,),
+        ).fetchone()
+        if row is None:
+            return  # pre-migration DB without lock table — proceed
+
+        lock_row = conn.execute(
+            f"SELECT locked_at, pid, host, mode FROM {LOCK_TABLE} WHERE id = 1"
+        ).fetchone()
+        if lock_row is None:
+            return  # lock table exists but is empty — proceed
+
+        locked_at, pid, host, mode = lock_row
+        msg = (
+            f"trickle refused to start: {LOCK_TABLE} held since {locked_at} "
+            f"by pid {pid}@{host} mode={mode}. "
+            "Stop the trickle service before running `dotmd migrate run`. "
+            "If the migration was interrupted, clear the lock manually: "
+            f"DELETE FROM {LOCK_TABLE} WHERE id = 1;"
+        )
+        logger.error(msg)
+        raise RuntimeError(msg)
+    finally:
+        conn.close()
+
+
 class TrickleIndexer:
     """Background indexer that processes files one at a time.
 
     Parameters
     ----------
-    pipeline:
-        The IndexingPipeline instance (shared with DotMDService).
     settings:
         Application settings with indexing paths, exclude, pause config.
+    pipeline:
+        The IndexingPipeline instance (shared with DotMDService).
+        Optional at construction time; must be set before calling ``run()``.
     """
 
-    def __init__(self, pipeline: IndexingPipeline, settings: Settings) -> None:
-        self._pipeline = pipeline
+    def __init__(
+        self,
+        settings: Settings,
+        pipeline: IndexingPipeline | None = None,
+    ) -> None:
         self._settings = settings
+        self._pipeline = pipeline
         self._state = TrickleState()
         self._file_queue: asyncio.Queue[str] = asyncio.Queue()
         self._observer: Observer | None = None
         self._needs_vacuum: bool = False
+
+        # Startup advisory-lock check (Phase 16).
+        # Must run BEFORE claiming the fcntl file lock to avoid deadlock
+        # risk if the operator runs `migrate run` while trickle is in a
+        # retry loop waiting for the file lock.
+        _check_migration_lock(self._settings.index_db_path)
 
     @property
     def state(self) -> TrickleState:
@@ -158,18 +234,7 @@ class TrickleIndexer:
         self._state.total_chunks_done = 0
 
         try:
-            # Startup health checks
-            await self._startup_checks()
-            if shutdown.is_set():
-                return
-
-            # Phase 1: Process existing backlog
-            await self._process_backlog(shutdown)
-            if shutdown.is_set():
-                return
-
-            # Phase 2: Watch mode
-            await self._watch_mode(shutdown)
+            await self._run_index_loop(shutdown)
         except Exception:
             logger.exception("Trickle indexer crashed")
         finally:
@@ -179,6 +244,25 @@ class TrickleIndexer:
                 "Trickle indexer stopped (indexed %d files)",
                 self._state.indexed_count,
             )
+
+    async def _run_index_loop(self, shutdown: asyncio.Event) -> None:
+        """Core index loop: startup checks, backlog, watch mode.
+
+        Extracted as a separate method so tests can patch it to verify
+        that the startup lock check runs before any indexing work begins.
+        """
+        # Startup health checks
+        await self._startup_checks()
+        if shutdown.is_set():
+            return
+
+        # Phase 1: Process existing backlog
+        await self._process_backlog(shutdown)
+        if shutdown.is_set():
+            return
+
+        # Phase 2: Watch mode
+        await self._watch_mode(shutdown)
 
     # ------------------------------------------------------------------
     # Startup checks (integrity + orphan cleanup)

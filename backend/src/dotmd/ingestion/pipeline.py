@@ -18,6 +18,7 @@ multi-strategy experimentation without data collision.
 from __future__ import annotations
 
 import blake3
+import json
 import logging
 import sqlite3
 import time
@@ -34,7 +35,7 @@ from dotmd.extraction.acronyms import extract_acronyms_from_chunks
 from dotmd.extraction.keyterms import KeyTermExtractor
 from dotmd.extraction.ner import NERExtractor
 from dotmd.extraction.structural import StructuralExtractor
-from dotmd.ingestion.chunker import chunk_file
+import dotmd.ingestion.chunker as _chunker_module
 from dotmd.ingestion.content_handlers import get_handler
 from dotmd.ingestion.file_tracker import FileDiff, FileTracker
 from dotmd.ingestion.reader import chunk_checksum, discover_files, embed_checksum, parse_frontmatter, read_file
@@ -153,6 +154,8 @@ class IndexingPipeline:
             table_name=self._chunks_table,
             fts_table_name=self._fts_table,
         )
+        # Ensure M2M table exists for this strategy (Phase 16).
+        self._metadata_store.ensure_m2m_table(strategy)
 
         if settings.vector_backend == "sqlite-vec":
             from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
@@ -427,7 +430,8 @@ class IndexingPipeline:
         Reads frontmatter from the source file (cached per-file) and
         delegates to the handler's ``enrich`` function.
         """
-        file_path = chunk.file_path
+        # Phase 16: Chunk.file_path → file_paths[0] (primary path).
+        file_path = chunk.file_paths[0] if chunk.file_paths else Path("/dev/null")
         if file_path not in fm_cache:
             try:
                 content = read_file(file_path)
@@ -561,7 +565,8 @@ class IndexingPipeline:
         self._graph_store.delete_all()
 
         # File nodes — read frontmatter for proper title (not just filename)
-        for fp in sorted({str(c.file_path) for c in all_chunks}):
+        # Phase 16: Chunk has file_paths list; collect all unique paths across all chunks.
+        for fp in sorted({str(p) for c in all_chunks for p in c.file_paths}):
             title = Path(fp).stem
             try:
                 content = read_file(Path(fp))
@@ -574,16 +579,18 @@ class IndexingPipeline:
             )
 
         # Section nodes + CONTAINS edges
+        # Phase 16: chunk may have multiple file_paths; use first for graph node.
         for chunk in all_chunks:
+            _primary_fp = str(chunk.file_paths[0]) if chunk.file_paths else ""
             self._graph_store.add_section_node(
                 chunk_id=chunk.chunk_id,
                 heading=chunk.heading,
                 level=chunk.level,
-                file_path=str(chunk.file_path),
+                file_path=_primary_fp,
                 text_preview=chunk.text[:200],
             )
             self._graph_store.add_edge(
-                source_id=str(chunk.file_path),
+                source_id=_primary_fp,
                 target_id=chunk.chunk_id,
                 relation_type=RelationType.CONTAINS,
             )
@@ -754,7 +761,7 @@ class IndexingPipeline:
         chunks: list[Chunk] = []
         for fi in files:
             content = read_file(fi.path)
-            chunks.extend(chunk_file(
+            chunks.extend(_chunker_module.chunk_file(
                 fi.path, content,
                 max_tokens=self._settings.max_chunk_tokens,
                 overlap_tokens=self._settings.chunk_overlap_tokens,
@@ -896,17 +903,45 @@ class IndexingPipeline:
     # Single-file indexing (used by trickle indexer)
     # ------------------------------------------------------------------
 
-    def index_file(self, file_info: FileInfo) -> int:
+    def index_file(self, file_info: FileInfo | Path) -> int:
         """Index a single file through the two-phase pipeline.
 
-        Phase 1 (chunk): check chunk_tracker, re-chunk if needed, save
-        chunk fingerprint.  Phase 2 (embed): check embed_tracker,
-        text_hash lookup, encode misses, save embed fingerprint.
+        Phase 1 (chunk): check chunk_tracker, re-chunk if needed, write
+        chunks via M2M INSERT OR IGNORE path, save chunk fingerprint.
+        Phase 2 (embed): check embed_tracker, text_hash lookup, encode
+        misses, save embed fingerprint.
 
         Used by the trickle indexer for one-at-a-time background processing.
 
+        Accepts either a ``FileInfo`` or a plain ``Path`` — when a ``Path`` is
+        given, a minimal ``FileInfo`` is constructed from the file's stat.
+
         Returns the number of chunks created/updated.
         """
+        # Normalise: accept bare Path for test convenience.
+        if isinstance(file_info, Path):
+            _p = file_info
+            try:
+                _stat = _p.stat()
+            except OSError:
+                logger.warning("index_file: cannot stat %s — skipping", _p)
+                return 0
+            try:
+                _raw = read_file(_p)
+                _fm, _ = parse_frontmatter(_raw)
+            except OSError:
+                _fm = {}
+            from dotmd.core.models import DocKind
+            _kind = _fm.get("kind", DocKind.DOCUMENT)
+            file_info = FileInfo(
+                path=_p,
+                title=str(_fm.get("title", _p.stem)),
+                last_modified=datetime.fromtimestamp(_stat.st_mtime, tz=timezone.utc),
+                size_bytes=_stat.st_size,
+                frontmatter=_fm,
+                kind=_kind,
+            )
+
         path_str = str(file_info.path)
         needs_embed = False
         prof = self._settings.profile_indexing  # gate: DOTMD_PROFILE_INDEXING=true
@@ -925,12 +960,18 @@ class IndexingPipeline:
 
         chunk_diff = self._chunk_tracker.diff([file_info])
         if path_str in chunk_diff.new or path_str in chunk_diff.modified:
-            # Purge old derived data (FTS5, graph, current vec) but NOT
-            # chunks (overwritten by UPSERT with deterministic IDs).
+            # Purge derived data (FTS5, graph, vec) for the old associations
+            # of this file. chunks_* rows that are still referenced by OTHER
+            # files are left untouched (M2M holder check). For now we purge
+            # only the per-file derived data (FTS5 keys, vec for this file's
+            # chunk_ids, graph subgraph). The M2M-aware cascade (P4) will
+            # refine this further.
             if prof:
                 t0 = time.perf_counter()
             _beacon("purge")
-            old_chunk_ids = self._metadata_store.get_chunk_ids_by_file(path_str)
+            old_chunk_ids = self._metadata_store.get_chunk_ids_by_file(
+                self._strategy, path_str
+            )
             if old_chunk_ids:
                 self._keyword_engine.remove_chunks(old_chunk_ids)
                 self._vector_store.delete_vectors_by_chunk_ids(old_chunk_ids)
@@ -942,7 +983,7 @@ class IndexingPipeline:
             if prof:
                 t0 = time.perf_counter()
             content = read_file(file_info.path)
-            chunks = chunk_file(
+            chunks = _chunker_module.chunk_file(
                 file_info.path,
                 content,
                 max_tokens=self._settings.max_chunk_tokens,
@@ -960,7 +1001,47 @@ class IndexingPipeline:
             if prof:
                 t0 = time.perf_counter()
             _beacon("save+fts5")
-            self._metadata_store.save_chunks(chunks)
+            # Phase 16 M2M write path: INSERT OR IGNORE on chunks_* + M2M.
+            # For each chunk, check payload consistency on conflict (Review-HIGH-P3).
+            self._metadata_store.ensure_m2m_table(self._strategy)
+            for c in chunks:
+                existing = self._metadata_store.get_stored_payload(
+                    self._strategy, c.chunk_id
+                )
+                if existing is not None:
+                    # Content-addressed id: same id => same content.
+                    # If the stored payload disagrees this is a chunker bug or
+                    # a real hash collision — WARN and keep first-writer's row.
+                    diverged: list[str] = []
+                    if existing["text"] != c.text:
+                        diverged.append("text")
+                    if existing["heading_hierarchy"] != c.heading_hierarchy:
+                        diverged.append("heading_hierarchy")
+                    if existing["level"] != c.level:
+                        diverged.append("level")
+                    if diverged:
+                        logger.warning(
+                            "ingest_payload_mismatch chunk_id=%s file=%s diverged_fields=%s",
+                            c.chunk_id,
+                            path_str,
+                            diverged,
+                        )
+                    # Fall through to INSERT OR IGNORE — first-writer's row wins.
+                self._metadata_store.insert_chunk(
+                    self._strategy,
+                    c.chunk_id,
+                    c.heading_hierarchy,
+                    c.level,
+                    c.text,
+                )
+                self._metadata_store.add_file_path(
+                    self._strategy,
+                    c.chunk_id,
+                    path_str,
+                    c.chunk_index,
+                )
+
+            # FTS5: INSERT OR REPLACE is idempotent on chunk_id (Research §Component).
             _trickle_tags = file_info.frontmatter.get("tags", [])
             _trickle_tags_csv = ", ".join(str(t) for t in _trickle_tags) if _trickle_tags else ""
             _trickle_meta = {str(file_info.path): (file_info.title, _trickle_tags_csv)}
@@ -1003,7 +1084,9 @@ class IndexingPipeline:
 
         if needs_embed:
             if not chunks:
-                chunk_ids = self._metadata_store.get_chunk_ids_by_file(path_str)
+                chunk_ids = self._metadata_store.get_chunk_ids_by_file(
+                    self._strategy, path_str
+                )
                 chunks = self._metadata_store.get_chunks(chunk_ids) if chunk_ids else []
 
             if chunks:
@@ -1060,7 +1143,9 @@ class IndexingPipeline:
         Other models' data for this file becomes stale but self-heals when
         that model's pipeline runs next (embed_diff detects "modified").
         """
-        chunk_ids = self._metadata_store.get_chunk_ids_by_file(file_path)
+        chunk_ids = self._metadata_store.get_chunk_ids_by_file(
+            self._strategy, file_path
+        )
         if chunk_ids:
             self._vector_store.delete_vectors_by_chunk_ids(chunk_ids)
             self._keyword_engine.remove_chunks(chunk_ids)
@@ -1096,15 +1181,26 @@ class IndexingPipeline:
             return 0, 0, 0
 
         # Union of file paths stored across all strategies.
+        # Phase 16: file paths live in chunk_file_paths_<strategy> M2M tables.
+        # Fall back to legacy chunks_*.file_path for pre-migration DBs.
         stored_paths: set[str] = set()
         for strat in strategies:
+            m2m_table = f"chunk_file_paths_{strat}"
+            try:
+                rows = self._conn.execute(
+                    f"SELECT DISTINCT file_path FROM {m2m_table}"
+                ).fetchall()
+                stored_paths.update(r[0] for r in rows)
+                continue
+            except sqlite3.OperationalError:
+                pass  # M2M table absent — try legacy column
             try:
                 rows = self._conn.execute(
                     f"SELECT DISTINCT file_path FROM chunks_{strat}"
                 ).fetchall()
+                stored_paths.update(r[0] for r in rows)
             except sqlite3.OperationalError:
                 continue
-            stored_paths.update(r[0] for r in rows)
 
         orphan_paths = stored_paths - discovered_paths
         if not orphan_paths:
@@ -1168,15 +1264,27 @@ class IndexingPipeline:
             fts_table = f"chunks_fts_{strat}"
             fp_table = f"chunk_fingerprints_{strat}"
 
+            # Phase 16: query chunk_ids via M2M table; fall back to legacy
+            # chunks_*.file_path column for pre-migration DBs.
+            m2m_table = f"chunk_file_paths_{strat}"
             try:
                 chunk_ids = [
                     r[0] for r in self._conn.execute(
-                        f"SELECT chunk_id FROM {chunks_table} WHERE file_path = ?",
+                        f"SELECT DISTINCT chunk_id FROM {m2m_table} WHERE file_path = ?",
                         (file_path,),
                     ).fetchall()
                 ]
             except sqlite3.OperationalError:
-                continue
+                # M2M table absent — try legacy column
+                try:
+                    chunk_ids = [
+                        r[0] for r in self._conn.execute(
+                            f"SELECT chunk_id FROM {chunks_table} WHERE file_path = ?",
+                            (file_path,),
+                        ).fetchall()
+                    ]
+                except sqlite3.OperationalError:
+                    continue
 
             if chunk_ids:
                 ph = ",".join("?" * len(chunk_ids))
@@ -1358,12 +1466,14 @@ class IndexingPipeline:
                 file_path=str(file_info.path),
                 title=file_info.title,
             )
+        # Phase 16: use first file_path for graph node (primary path).
         for chunk in chunks:
+            _primary_fp = str(chunk.file_paths[0]) if chunk.file_paths else ""
             self._graph_store.add_section_node(
                 chunk_id=chunk.chunk_id,
                 heading=chunk.heading,
                 level=chunk.level,
-                file_path=str(chunk.file_path),
+                file_path=_primary_fp,
                 text_preview=chunk.text[:200],
             )
         for relation in extraction.relations:
@@ -1374,8 +1484,9 @@ class IndexingPipeline:
                 weight=relation.weight,
             )
         for chunk in chunks:
+            _primary_fp = str(chunk.file_paths[0]) if chunk.file_paths else ""
             self._graph_store.add_edge(
-                source_id=str(chunk.file_path),
+                source_id=_primary_fp,
                 target_id=chunk.chunk_id,
                 relation_type=RelationType.CONTAINS,
             )
@@ -1387,7 +1498,8 @@ class IndexingPipeline:
     def _build_file_meta(self, chunks: list[Chunk]) -> dict[str, tuple[str, str]]:
         """Build file_meta mapping for FTS5 title/tags columns from source files."""
         file_meta: dict[str, tuple[str, str]] = {}
-        for fp in {str(c.file_path) for c in chunks}:
+        # Phase 16: Chunk.file_path → file_paths list; collect all unique paths.
+        for fp in {str(p) for c in chunks for p in c.file_paths}:
             if fp in file_meta:
                 continue
             try:
@@ -1449,7 +1561,9 @@ class IndexingPipeline:
         """
         for fi in files:
             path_str = str(fi.path)
-            chunk_ids = self._metadata_store.get_chunk_ids_by_file(path_str)
+            chunk_ids = self._metadata_store.get_chunk_ids_by_file(
+                self._strategy, path_str
+            )
             if not chunk_ids:
                 continue
             chunks = self._metadata_store.get_chunks(chunk_ids)
