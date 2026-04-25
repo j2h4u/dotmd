@@ -146,7 +146,10 @@ class FTS5SearchEngine:
         file_meta = file_meta or {}
         rows = []
         for c in chunks:
-            title, tags_csv = file_meta.get(str(c.file_path), ("", ""))
+            # Phase 16: Chunk.file_path → Chunk.file_paths (list). Use first
+            # path for file_meta lookup; falls back to empty string for orphaned chunks.
+            _fp_key = str(c.file_paths[0]) if c.file_paths else ""
+            title, tags_csv = file_meta.get(_fp_key, ("", ""))
             rows.append((c.chunk_id, _expand_compounds(c.text), title, tags_csv))
         self._conn.executemany(
             f"INSERT OR REPLACE INTO {self._table}(chunk_id, text, title, tags) "

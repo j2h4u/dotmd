@@ -20,6 +20,7 @@ import sqlite3
 import struct
 from pathlib import Path
 from typing import Generator
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -32,6 +33,50 @@ _SCHEMA_SQL = _FIXTURES_DIR / "schema_pre_v16.sql"
 
 # Strategies present in the pre-v16 DB
 STRATEGIES = ["heading_512_50", "contextual_512_50"]
+
+
+# ---------------------------------------------------------------------------
+# Global env fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _dotmd_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Set minimal env vars so Settings() and IndexingPipeline can be constructed.
+
+    - DOTMD_EMBEDDING_URL: required field with no default (prevents misconfiguration
+      in production). A non-routable stub is fine — tests that need real embeddings
+      mock the HTTP call at a higher level.
+    - DOTMD_EXTRACT_DEPTH: override to 'structural' so tests that construct a full
+      IndexingPipeline do not accidentally load NER models or call TEI during ingest.
+      Tests that specifically exercise NER must override this fixture or set the env
+      var directly.
+    """
+    monkeypatch.setenv("DOTMD_EMBEDDING_URL", "http://test-tei:8088")
+    monkeypatch.setenv("DOTMD_EXTRACT_DEPTH", "structural")
+
+
+@pytest.fixture(autouse=True)
+def _mock_semantic_engine() -> Generator[None, None, None]:
+    """Patch SemanticSearchEngine to avoid real HTTP/model calls in tests.
+
+    Tests that exercise the actual embedding pipeline should override this
+    fixture or un-patch locally. The stub returns zero-vectors (dimension 8)
+    which is enough for schema/idempotency tests that only check row counts.
+    """
+    def _stub_encode_batch(texts: list[str]) -> list[list[float]]:
+        return [[0.0] * 8 for _ in texts]
+
+    def _stub_get_tei_model_id(self) -> str | None:  # type: ignore[no-untyped-def]
+        return "stub-model"
+
+    with patch(
+        "dotmd.search.semantic.SemanticSearchEngine.encode_batch",
+        side_effect=_stub_encode_batch,
+    ), patch(
+        "dotmd.search.semantic.SemanticSearchEngine.get_tei_model_id",
+        _stub_get_tei_model_id,
+    ):
+        yield
 # Default model suffix for vec_meta tables
 MODEL_SUFFIX = "multilingual_e5_large"
 
