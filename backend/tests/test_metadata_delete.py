@@ -1,4 +1,11 @@
-"""Tests for metadata store delete methods — per-file chunk deletion."""
+"""Tests for metadata store delete methods — per-file chunk deletion.
+
+Updated for Phase 16 M2M schema:
+  - Chunk.file_paths replaces Chunk.file_path (no char_offset)
+  - get_chunk_ids_by_file(strategy, file_path) takes strategy as first arg
+  - idx_chunks_file_path removed (file_path column gone from chunks_*);
+    M2M index idx_chunk_file_paths_<strategy>_file_path replaces it
+"""
 
 from __future__ import annotations
 
@@ -10,16 +17,18 @@ from dotmd.core.models import Chunk
 from dotmd.storage.metadata import SQLiteMetadataStore
 
 
+STRATEGY = "heading_512_50"
+
+
 def _make_chunk(chunk_id: str, file_path: str, text: str = "sample") -> Chunk:
     """Create a minimal Chunk for testing."""
     return Chunk(
         chunk_id=chunk_id,
-        file_path=Path(file_path),
+        file_paths=[Path(file_path)],
         heading_hierarchy=["Test"],
         level=1,
         text=text,
         chunk_index=0,
-        char_offset=0,
     )
 
 
@@ -35,7 +44,7 @@ class TestGetChunkIdsByFile:
         ]
         metadata_store.save_chunks(chunks)
 
-        ids = metadata_store.get_chunk_ids_by_file("/docs/a.md")
+        ids = metadata_store.get_chunk_ids_by_file(STRATEGY, "/docs/a.md")
 
         assert sorted(ids) == ["c1", "c2"]
 
@@ -43,7 +52,7 @@ class TestGetChunkIdsByFile:
         self, metadata_store: SQLiteMetadataStore
     ) -> None:
         """Should return empty list for a file_path not in the store."""
-        ids = metadata_store.get_chunk_ids_by_file("/nonexistent.md")
+        ids = metadata_store.get_chunk_ids_by_file(STRATEGY, "/nonexistent.md")
         assert ids == []
 
 
@@ -84,13 +93,15 @@ class TestDeleteChunksByFile:
         assert metadata_store.get_chunk("c2") is not None
 
 
-class TestFilePathIndex:
-    """Test that the chunks table has an index on file_path."""
+class TestM2MFilePathIndex:
+    """Test that the M2M table has an index on file_path (replaces old idx_chunks_file_path)."""
 
-    def test_index_exists(self, metadata_store: SQLiteMetadataStore) -> None:
-        """The idx_chunks_file_path index should exist on the chunks table."""
+    def test_m2m_index_exists(self, metadata_store: SQLiteMetadataStore) -> None:
+        """The idx_chunk_file_paths_<strategy>_file_path index should exist."""
+        expected_name = f"idx_chunk_file_paths_{STRATEGY}_file_path"
         cur = metadata_store._conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_chunks_file_path'"
+            "SELECT name FROM sqlite_master WHERE type='index' AND name=?",
+            (expected_name,),
         )
         row = cur.fetchone()
-        assert row is not None, "Expected idx_chunks_file_path index to exist"
+        assert row is not None, f"Expected {expected_name} index to exist"
