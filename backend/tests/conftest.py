@@ -77,6 +77,67 @@ def _mock_semantic_engine() -> Generator[None, None, None]:
         _stub_get_tei_model_id,
     ):
         yield
+
+
+# ---------------------------------------------------------------------------
+# Shared convenience fixtures (used by pre-phase-16 test files)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def tmp_dir(tmp_path: Path) -> Path:
+    """Alias for tmp_path — used by test files that predate pytest's tmp_path name."""
+    return tmp_path
+
+
+@pytest.fixture
+def sqlite_conn(tmp_path: Path) -> Generator[sqlite3.Connection, None, None]:
+    """In-memory SQLite connection for FileTracker tests."""
+    conn = sqlite3.connect(":memory:")
+    yield conn
+    conn.close()
+
+
+@pytest.fixture
+def metadata_store(tmp_path: Path):
+    """SQLiteMetadataStore with M2M table for the default strategy."""
+    from dotmd.storage.metadata import SQLiteMetadataStore
+
+    strategy = "heading_512_50"
+    db_path = tmp_path / "metadata.db"
+    store = SQLiteMetadataStore(db_path=db_path, table_name=f"chunks_{strategy}")
+    store.ensure_m2m_table(strategy)
+    return store
+
+
+@pytest.fixture
+def vector_store(tmp_path: Path):
+    """SQLiteVecVectorStore backed by a temp file DB."""
+    import sqlite3 as _sqlite3
+
+    import sqlite_vec  # type: ignore[import-untyped]
+
+    from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
+
+    db_path = tmp_path / "vec.db"
+    conn = _sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.enable_load_extension(True)
+    sqlite_vec.load(conn)
+    conn.enable_load_extension(False)
+    store = SQLiteVecVectorStore(table_name="vec_chunks", conn=conn)
+    return store
+
+
+@pytest.fixture
+def graph_store(tmp_path: Path):
+    """LadybugDBGraphStore backed by a temp directory."""
+    from dotmd.storage.graph import LadybugDBGraphStore
+
+    db_path = tmp_path / "graphdb"
+    store = LadybugDBGraphStore(db_path=db_path)
+    return store
+
+
 # Default model suffix for vec_meta tables
 MODEL_SUFFIX = "multilingual_e5_large"
 

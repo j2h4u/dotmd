@@ -11,12 +11,11 @@ from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
 def _make_chunk(chunk_id: str, file_path: str = "test.md") -> Chunk:
     return Chunk(
         chunk_id=chunk_id,
-        file_path=Path(file_path),
+        file_paths=[Path(file_path)],
         heading_hierarchy=["Test"],
         level=1,
         text=f"Content of {chunk_id}",
         chunk_index=0,
-        char_offset=0,
     )
 
 
