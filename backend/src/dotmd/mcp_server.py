@@ -31,6 +31,12 @@ mcp = FastMCP(
     ),
     host="0.0.0.0",
     port=8080,
+    # json_response=True: tool call responses returned as JSON in the POST body
+    # instead of SSE. More reliable — avoids a mcp 1.27.0 SSE delivery bug where
+    # message_router drops responses when the zero-buffer stream isn't consumed
+    # in time. MCP spec allows both; clients send Accept: application/json, text/event-stream.
+    json_response=True,
+    stateless_http=True,
     # No lifespan= here — FastMCP's lifespan fires per MCP session, not per server.
     # Server-wide init lives in create_app() below.
 )
@@ -109,7 +115,7 @@ def create_app() -> Starlette:
         "openWorldHint": False,
     }
 )
-def search(
+async def search(
     query: Annotated[str, Field(description="Natural-language search query.")],
     top_k: Annotated[int, Field(description="Maximum results to return.", ge=1, le=100)] = 10,
 ) -> list[dict]:
@@ -119,7 +125,7 @@ def search(
     snippet, a relevance score, and which search engines matched it.
     """
     service = _get_service()
-    results = service.search(query, top_k=top_k)
+    results = await asyncio.to_thread(service.search, query, top_k=top_k)
     return [_format_result(r) for r in results]
 
 
@@ -132,7 +138,7 @@ def search(
         "openWorldHint": False,
     }
 )
-def drill(
+async def drill(
     file_path: Annotated[str, Field(description="Absolute file path from a search result.")],
 ) -> dict:
     """Retrieve metadata for a file returned by search.
@@ -143,7 +149,7 @@ def drill(
     conclusions from a snippet.
     """
     service = _get_service()
-    return service.drill(file_path)
+    return await asyncio.to_thread(service.drill, file_path)
 
 
 @mcp.tool(
@@ -155,37 +161,33 @@ def drill(
         "openWorldHint": False,
     }
 )
-def status() -> dict:
+async def status() -> dict:
     """Return current index statistics and trickle indexer progress.
 
     Useful for checking how many files and chunks are indexed, whether
     background indexing is active, and when the last file was indexed.
     """
-    service = _get_service()
-    stats = service.status().model_dump(mode="json")
-
-    # Enrich with graph counts from FalkorDB
-    try:
-        graph_store = service._pipeline.graph_store
-        stats["total_entities"] = graph_store.node_count()
-        stats["total_edges"] = graph_store.edge_count()
-    except Exception:
-        pass
-
-    # last_indexed from fingerprints if stats table is empty
-    if not stats.get("last_indexed"):
+    def _collect_stats() -> dict:
+        service = _get_service()
+        stats = service.status(live_diff=False).model_dump(mode="json")
         try:
-            conn = service._pipeline.conn
-            fp_table = f"chunk_fingerprints_{service._settings.chunk_strategy}"
-            row = conn.execute(
-                f"SELECT max(indexed_at) FROM {fp_table}"
-            ).fetchone()
-            if row and row[0]:
-                stats["last_indexed"] = row[0]
+            graph_store = service._pipeline.graph_store
+            stats["total_entities"] = graph_store.node_count()
+            stats["total_edges"] = graph_store.edge_count()
         except Exception:
             pass
+        if not stats.get("last_indexed"):
+            try:
+                conn = service._pipeline.conn
+                fp_table = f"chunk_fingerprints_{service._settings.chunk_strategy}"
+                row = conn.execute(f"SELECT max(indexed_at) FROM {fp_table}").fetchone()
+                if row and row[0]:
+                    stats["last_indexed"] = row[0]
+            except Exception:
+                pass
+        return stats
 
-    return stats
+    return await asyncio.to_thread(_collect_stats)
 
 
 # ---------------------------------------------------------------------------

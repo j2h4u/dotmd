@@ -398,7 +398,7 @@ class DotMDService:
             "entities": entities,
         }
 
-    def status(self) -> IndexStats:
+    def status(self, live_diff: bool = True) -> IndexStats:
         """Return the current index statistics.
 
         Always returns an ``IndexStats`` instance (never ``None``) so that
@@ -407,6 +407,7 @@ class DotMDService:
 
         When a previous data_dir is known and the directory still exists,
         runs a live file diff to populate pending change counts.
+        Pass ``live_diff=False`` to skip the scan (e.g. from MCP tools).
 
         Returns
         -------
@@ -431,34 +432,35 @@ class DotMDService:
             ).fetchone()[0]
         except Exception:
             pass
-        # Change detection: run live diff against all known paths
-        try:
-            if self._settings.indexing_paths:
-                from dotmd.ingestion.reader import discover_files_multi
+        # Change detection: run live diff against all known paths (skip for MCP)
+        if live_diff:
+            try:
+                if self._settings.indexing_paths:
+                    from dotmd.ingestion.reader import discover_files_multi
 
-                files = discover_files_multi(
-                    self._settings.indexing_paths,
-                    self._settings.indexing_exclude,
-                )
-            elif stats.data_dir:
-                data_path = Path(stats.data_dir)
-                if data_path.is_dir():
-                    from dotmd.ingestion.reader import discover_files
+                    files = discover_files_multi(
+                        self._settings.indexing_paths,
+                        self._settings.indexing_exclude,
+                    )
+                elif stats.data_dir:
+                    data_path = Path(stats.data_dir)
+                    if data_path.is_dir():
+                        from dotmd.ingestion.reader import discover_files
 
-                    files = discover_files(data_path)
+                        files = discover_files(data_path)
+                    else:
+                        files = []
                 else:
                     files = []
-            else:
-                files = []
 
-            if files:
-                diff = self._pipeline.chunk_tracker.diff(files)
-                stats.new_files = len(diff.new)
-                stats.modified_files = len(diff.modified)
-                stats.deleted_files = len(diff.deleted)
-                stats.unchanged_files = len(diff.unchanged)
-        except Exception as e:
-            logger.warning("Change detection failed: %s", e, exc_info=True)
+                if files:
+                    diff = self._pipeline.chunk_tracker.diff(files)
+                    stats.new_files = len(diff.new)
+                    stats.modified_files = len(diff.modified)
+                    stats.deleted_files = len(diff.deleted)
+                    stats.unchanged_files = len(diff.unchanged)
+            except Exception as e:
+                logger.warning("Change detection failed: %s", e, exc_info=True)
 
         # Trickle indexer progress
         trickle_state = self._trickle_indexer.state
