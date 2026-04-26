@@ -299,6 +299,31 @@ Paper reports unified embeddings match or beat prefix approach in retrieval qual
 
 ---
 
+### Phase 999.13: Вернуть stateful MCP режим + notifications/tools/list_changed (BACKLOG)
+
+**Goal:** Перейти обратно с `stateless_http=True` на stateful режим, чтобы сервер мог слать `notifications/tools/list_changed` агентам при изменении инструментов.
+
+**Context 2026-04-26:** Текущий workaround `stateless_http=True + json_response=True` был введён из-за бага в mcp 1.27.0 где SSE-доставка ответов на `tools/call` не работала. Root cause: в `streamable_http.py` `message_router` использует zero-buffer `anyio.create_memory_object_stream(0)` для доставки ответов в SSE writer — при определённых условиях response дропался без ошибки.
+
+**Почему notification важна:**
+- Hermes поддерживает `notifications/tools/list_changed` — реализовано в `tools/mcp_tool.py::_make_message_handler()` + `_refresh_tools()`
+- При получении уведомления Hermes немедленно перечитывает `tools/list` и обновляет реестр инструментов
+- В stateless режиме нет персистентного SSE-канала — уведомление некуда слать
+- Hermes не детектирует рестарт dotmd в stateless режиме: каждый POST независим, ошибок нет, инструменты остаются устаревшими
+
+**Как отправить notification:**
+FastMCP поддерживает `Context.session.send_tool_list_changed()`. В нашем случае — отправлять при старте lifespan (после warmup), чтобы уже подключённые клиенты обновили кэш.
+
+**Блокер:** mcp 1.27.0 SSE bug. Варианты разблокировки:
+- Дождаться фикса в mcp SDK (открыть issue upstream)
+- Зафиксировать версию SDK на 1.26.x где SSE работало
+- Самостоятельно патчить `message_router` (хрупко)
+
+**Plans:**
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+---
+
 ### Future ideas:
 - Semantic chunking (split by topic similarity, not just structure)
 - Doc-level chunks (whole-document embeddings for broad queries)
