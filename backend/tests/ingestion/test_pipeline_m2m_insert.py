@@ -16,25 +16,25 @@ import sqlite3
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 # P1 (wave 2) delivers these — will ImportError until then:
 from dotmd.storage.metadata import SQLiteMetadataStore  # noqa: F401
 
 
-STRATEGIES = ["heading_512_50"]
-MODEL = "multilingual_e5_large"
+def _build_post_v16_db(tmp_path: Path) -> tuple[Path, str, str]:
+    """Build a post-v16 schema DB using the strategy/model from Settings.
 
-
-def _build_post_v16_db(tmp_path: Path) -> Path:
-    """Build a post-v16 schema DB (no file_path/chunk_index/char_offset in chunks_*).
-
-    Returns the path to the DB. Used to test ingest into the M2M schema that
-    P1 creates and P3 writes into.
+    Returns ``(db_path, strategy, model_key)`` so tests use the same names
+    as the running pipeline regardless of env-var overrides.
     """
+    from dotmd.core.config import Settings
+    from dotmd.ingestion.pipeline import _model_to_table_suffix
+
+    settings = Settings(index_dir=tmp_path)
+    strategy = settings.chunk_strategy
+    model_key = _model_to_table_suffix(settings.embedding_model).lstrip("_")
+
     db_path = tmp_path / "index.db"
     conn = sqlite3.connect(str(db_path))
-    strategy = STRATEGIES[0]
     conn.executescript(f"""
         CREATE TABLE chunks_{strategy} (
             chunk_id TEXT PRIMARY KEY,
@@ -53,7 +53,7 @@ def _build_post_v16_db(tmp_path: Path) -> Path:
         CREATE VIRTUAL TABLE chunks_fts_{strategy} USING fts5(
             chunk_id UNINDEXED, text, tokenize='unicode61'
         );
-        CREATE TABLE vec_meta_{strategy}_{MODEL} (
+        CREATE TABLE vec_meta_{strategy}_{model_key} (
             rowid INTEGER PRIMARY KEY AUTOINCREMENT,
             chunk_id TEXT NOT NULL UNIQUE,
             text_hash TEXT
@@ -61,7 +61,7 @@ def _build_post_v16_db(tmp_path: Path) -> Path:
     """)
     conn.commit()
     conn.close()
-    return db_path
+    return db_path, strategy, model_key
 
 
 class TestInsertOrIgnoreOnRepeat:
@@ -72,7 +72,7 @@ class TestInsertOrIgnoreOnRepeat:
         from dotmd.ingestion.pipeline import IndexingPipeline
         from dotmd.core.config import Settings
 
-        db_path = _build_post_v16_db(tmp_path)
+        db_path, strategy, _model_key = _build_post_v16_db(tmp_path)
         settings = Settings(index_dir=tmp_path)
 
         # Build a stub file
@@ -85,10 +85,10 @@ class TestInsertOrIgnoreOnRepeat:
 
         conn = sqlite3.connect(str(db_path))
         count_after_1 = conn.execute(
-            f"SELECT COUNT(*) FROM chunks_{STRATEGIES[0]}"
+            f"SELECT COUNT(*) FROM chunks_{strategy}"
         ).fetchone()[0]
         text_after_1 = conn.execute(
-            f"SELECT text FROM chunks_{STRATEGIES[0]} LIMIT 1"
+            f"SELECT text FROM chunks_{strategy} LIMIT 1"
         ).fetchone()
         conn.close()
 
@@ -97,10 +97,10 @@ class TestInsertOrIgnoreOnRepeat:
 
         conn = sqlite3.connect(str(db_path))
         count_after_2 = conn.execute(
-            f"SELECT COUNT(*) FROM chunks_{STRATEGIES[0]}"
+            f"SELECT COUNT(*) FROM chunks_{strategy}"
         ).fetchone()[0]
         text_after_2 = conn.execute(
-            f"SELECT text FROM chunks_{STRATEGIES[0]} LIMIT 1"
+            f"SELECT text FROM chunks_{strategy} LIMIT 1"
         ).fetchone()
         conn.close()
 
@@ -120,7 +120,7 @@ class TestTwoFilesIdenticalContentShareChunk:
         from dotmd.ingestion.pipeline import IndexingPipeline
         from dotmd.core.config import Settings
 
-        db_path = _build_post_v16_db(tmp_path)
+        db_path, strategy, _model_key = _build_post_v16_db(tmp_path)
         settings = Settings(index_dir=tmp_path)
         pipeline = IndexingPipeline(settings)
 
@@ -134,7 +134,6 @@ class TestTwoFilesIdenticalContentShareChunk:
         pipeline.index_file(file_b)
 
         conn = sqlite3.connect(str(db_path))
-        strategy = STRATEGIES[0]
         chunk_count = conn.execute(
             f"SELECT COUNT(*) FROM chunks_{strategy}"
         ).fetchone()[0]
@@ -161,7 +160,7 @@ class TestRepeatedHeadingInSameFile:
         from dotmd.ingestion.pipeline import IndexingPipeline
         from dotmd.core.config import Settings
 
-        db_path = _build_post_v16_db(tmp_path)
+        db_path, strategy, _model_key = _build_post_v16_db(tmp_path)
         settings = Settings(index_dir=tmp_path)
         pipeline = IndexingPipeline(settings)
 
@@ -176,7 +175,6 @@ class TestRepeatedHeadingInSameFile:
         pipeline.index_file(md_file)
 
         conn = sqlite3.connect(str(db_path))
-        strategy = STRATEGIES[0]
         m2m_rows = conn.execute(
             f"SELECT chunk_id, file_path, chunk_index FROM chunk_file_paths_{strategy} "
             f"ORDER BY chunk_index"
@@ -199,7 +197,7 @@ class TestVecMetaNotRewrittenOnReindex:
         from dotmd.ingestion.pipeline import IndexingPipeline
         from dotmd.core.config import Settings
 
-        db_path = _build_post_v16_db(tmp_path)
+        db_path, strategy, model_key = _build_post_v16_db(tmp_path)
         settings = Settings(index_dir=tmp_path)
         pipeline = IndexingPipeline(settings)
 
@@ -208,9 +206,8 @@ class TestVecMetaNotRewrittenOnReindex:
         pipeline.index_file(md_file)
 
         conn = sqlite3.connect(str(db_path))
-        strategy = STRATEGIES[0]
         count1 = conn.execute(
-            f"SELECT COUNT(*) FROM vec_meta_{strategy}_{MODEL}"
+            f"SELECT COUNT(*) FROM vec_meta_{strategy}_{model_key}"
         ).fetchone()[0]
         conn.close()
 
@@ -219,7 +216,7 @@ class TestVecMetaNotRewrittenOnReindex:
 
         conn = sqlite3.connect(str(db_path))
         count2 = conn.execute(
-            f"SELECT COUNT(*) FROM vec_meta_{strategy}_{MODEL}"
+            f"SELECT COUNT(*) FROM vec_meta_{strategy}_{model_key}"
         ).fetchone()[0]
         conn.close()
 
@@ -232,19 +229,18 @@ class TestPayloadMismatchLogsWarn:
     """Review-HIGH-P3: payload mismatch on chunk_id conflict is WARN-logged, row not overwritten."""
 
     def test_payload_mismatch_logs_warn_without_overwriting(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+        self, tmp_path: Path
     ) -> None:
         """Monkeypatched chunker emitting same chunk_id with different text logs WARN; first-writer survives."""
         from dotmd.ingestion.pipeline import IndexingPipeline
         from dotmd.core.config import Settings
         from dotmd.core.models import Chunk
 
-        db_path = _build_post_v16_db(tmp_path)
+        db_path, strategy, _model_key = _build_post_v16_db(tmp_path)
         settings = Settings(index_dir=tmp_path)
         pipeline = IndexingPipeline(settings)
 
         # Insert the "first writer" row directly into chunks_*
-        strategy = STRATEGIES[0]
         first_text = "First writer text — must survive"
         conflict_text = "Second writer text — must NOT overwrite first"
         fixed_chunk_id = "a" * 64  # Valid 64-char id
@@ -277,9 +273,22 @@ class TestPayloadMismatchLogsWarn:
             ]
 
         import logging
-        with patch.object(_chunker, "chunk_file", patched_chunk_file):
-            with caplog.at_level(logging.WARNING):
+
+        warn_messages: list[str] = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                warn_messages.append(record.getMessage())
+
+        handler = _Capture(level=logging.WARNING)
+        pip_logger = logging.getLogger("dotmd.ingestion.pipeline")
+        pip_logger.addHandler(handler)
+        pip_logger.setLevel(logging.WARNING)
+        try:
+            with patch.object(_chunker, "chunk_file", patched_chunk_file):
                 pipeline.index_file(md_file)
+        finally:
+            pip_logger.removeHandler(handler)
 
         # Row must retain first-writer's text
         conn = sqlite3.connect(str(db_path))
@@ -292,11 +301,7 @@ class TestPayloadMismatchLogsWarn:
             f"First-writer text overwritten: stored={stored_text!r}"
         )
 
-        # WARN must have been logged (assert on record presence, not exact string)
-        warn_records = [
-            r for r in caplog.records
-            if r.levelno >= logging.WARNING and "mismatch" in r.getMessage().lower()
-        ]
-        assert len(warn_records) >= 1, (
+        # WARN must have been logged
+        assert any("mismatch" in m.lower() for m in warn_messages), (
             "Expected at least one WARNING log about payload mismatch"
         )

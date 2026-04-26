@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import threading
 from contextlib import AsyncExitStack
 from typing import Callable
 
@@ -75,33 +77,61 @@ def _http_call(method: str, params: dict | None = None) -> dict:
 class _StdioSession:
     """Long-lived dotmd mcp subprocess, shared across all stdio tests in a session.
 
-    Uses a dedicated event loop so sync pytest tests can call async MCP SDK methods.
+    Runs the entire async lifecycle (startup → serve → teardown) in one continuous
+    coroutine on a dedicated background thread.  This keeps anyio cancel scopes valid
+    during cleanup — closing them from the same task that created them.
+
+    Sync pytest tests submit calls via run_coroutine_threadsafe; stop() signals
+    shutdown via call_soon_threadsafe and joins the thread.
+
     One warmup per test run (~15s) instead of one per test call.
     """
 
     def __init__(self) -> None:
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._exit_stack: AsyncExitStack | None = None
+        self._thread: threading.Thread | None = None
         self._session = None  # mcp.ClientSession
+        self._ready: threading.Event = threading.Event()
+        self._shutdown: asyncio.Event | None = None
+        self._startup_error: BaseException | None = None
 
     def start(self) -> None:
         from mcp import ClientSession
         from mcp.client.stdio import StdioServerParameters, stdio_client
 
-        async def _startup() -> None:
-            self._exit_stack = AsyncExitStack()
-            server = StdioServerParameters(command="dotmd", args=["mcp"])
-            read, write = await self._exit_stack.enter_async_context(
-                stdio_client(server)
-            )
-            session = await self._exit_stack.enter_async_context(
-                ClientSession(read, write)
-            )
-            await session.initialize()
-            self._session = session
+        async def _run() -> None:
+            try:
+                async with AsyncExitStack() as stack:
+                    dotmd_env = {k: v for k, v in os.environ.items() if k.startswith("DOTMD_")}
+                    server = StdioServerParameters(command="dotmd", args=["mcp"], env=dotmd_env)
+                    read, write = await stack.enter_async_context(
+                        stdio_client(server)
+                    )
+                    session = await stack.enter_async_context(
+                        ClientSession(read, write)
+                    )
+                    await session.initialize()
+                    self._session = session
+                    self._shutdown = asyncio.Event()
+                    self._ready.set()
+                    await self._shutdown.wait()
+                    # AsyncExitStack unwinds here — same task that created the
+                    # anyio cancel scopes, so cleanup is valid.
+            except Exception as exc:
+                self._startup_error = exc
+                self._ready.set()
 
         self._loop = asyncio.new_event_loop()
-        self._loop.run_until_complete(_startup())
+        self._thread = threading.Thread(
+            target=lambda: self._loop.run_until_complete(_run()),
+            daemon=True,
+            name="stdio-mcp-session",
+        )
+        self._thread.start()
+        if not self._ready.wait(timeout=60):
+            raise TimeoutError("stdio session failed to start within 60s")
+        if self._startup_error is not None:
+            raise self._startup_error
 
     def call(self, method: str, params: dict | None = None) -> dict:
         assert self._session is not None, "stdio session not started"
@@ -133,16 +163,17 @@ class _StdioSession:
                 }
             raise ValueError(f"unsupported method for stdio caller: {method!r}")
 
-        return self._loop.run_until_complete(_call())
+        future = asyncio.run_coroutine_threadsafe(_call(), self._loop)
+        return future.result(timeout=60)
 
     def stop(self) -> None:
-        if self._exit_stack and self._loop:
-            self._loop.run_until_complete(self._exit_stack.aclose())
-        if self._loop:
-            self._loop.close()
+        if self._shutdown is not None and self._loop is not None:
+            self._loop.call_soon_threadsafe(self._shutdown.set)
+        if self._thread is not None:
+            self._thread.join(timeout=30)
         self._loop = None
         self._session = None
-        self._exit_stack = None
+        self._shutdown = None
 
 
 @pytest.fixture(scope="session")

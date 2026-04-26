@@ -10,8 +10,6 @@ import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 
 def _make_service(tmp_path: Path) -> "DotMDService":
     """Create a DotMDService with real internals for integration testing."""
@@ -46,6 +44,8 @@ class TestMergeBackBeyondPoolSize:
         service._keyword_engine.search.return_value = keyword_hits
         service._graph_engine = MagicMock()
         service._graph_engine.search.return_value = []
+        service._graph_direct_engine = MagicMock()
+        service._graph_direct_engine.search.return_value = []
         service._query_expander = MagicMock()
         service._query_expander.expand.return_value = MagicMock(expanded_text="test query")
 
@@ -111,6 +111,8 @@ class TestKeywordSurvivalThroughReranking:
         service._keyword_engine.search.return_value = keyword_hits
         service._graph_engine = MagicMock()
         service._graph_engine.search.return_value = []
+        service._graph_direct_engine = MagicMock()
+        service._graph_direct_engine.search.return_value = []
         service._query_expander = MagicMock()
         service._query_expander.expand.return_value = MagicMock(expanded_text="test query")
 
@@ -153,7 +155,7 @@ class TestKeywordSurvivalThroughReranking:
 class TestDiagnosticLogging:
     """Diagnostic logging reports keyword-only survival count."""
 
-    def test_keyword_survival_logged_at_debug(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    def test_keyword_survival_logged_at_debug(self, tmp_path: Path) -> None:
         """Log message matching 'keyword-only' present in captured logs at DEBUG level."""
         service = _make_service(tmp_path)
 
@@ -166,6 +168,8 @@ class TestDiagnosticLogging:
         service._keyword_engine.search.return_value = keyword_hits
         service._graph_engine = MagicMock()
         service._graph_engine.search.return_value = []
+        service._graph_direct_engine = MagicMock()
+        service._graph_direct_engine.search.return_value = []
         service._query_expander = MagicMock()
         service._query_expander.expand.return_value = MagicMock(expanded_text="test query")
 
@@ -183,10 +187,21 @@ class TestDiagnosticLogging:
             return_value=[mock_chunk]
         )
 
-        with caplog.at_level(logging.DEBUG, logger="dotmd.api.service"):
-            service.search("test query", top_k=10, mode="hybrid", rerank=True)
+        captured: list[str] = []
 
-        kw_log_messages = [r.message for r in caplog.records if "keyword-only" in r.message]
-        assert len(kw_log_messages) > 0, (
-            f"Expected log message containing 'keyword-only', got: {[r.message for r in caplog.records]}"
+        class _Capture(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                captured.append(record.getMessage())
+
+        handler = _Capture(level=logging.DEBUG)
+        svc_logger = logging.getLogger("dotmd.api.service")
+        svc_logger.addHandler(handler)
+        svc_logger.setLevel(logging.DEBUG)
+        try:
+            service.search("test query", top_k=10, mode="hybrid", rerank=True)
+        finally:
+            svc_logger.removeHandler(handler)
+
+        assert any("keyword-only" in m for m in captured), (
+            f"Expected log message containing 'keyword-only', got: {captured}"
         )

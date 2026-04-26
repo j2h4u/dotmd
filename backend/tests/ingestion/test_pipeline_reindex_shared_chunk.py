@@ -41,7 +41,11 @@ from unittest.mock import patch
 import pytest
 
 
-STRATEGY = "heading_512_50"
+def _get_strategy() -> str:
+    from dotmd.core.config import Settings
+    return Settings().chunk_strategy
+
+STRATEGY = _get_strategy()
 # The actual vec_meta table suffix is derived from the pipeline's embedding
 # model name.  Default model is BAAI/bge-small-en-v1.5 → suffix bge_small_en_v1.
 # We discover the table name at runtime via sqlite_master queries instead of

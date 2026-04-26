@@ -37,8 +37,10 @@ mcp = FastMCP(
     # in time. MCP spec allows both; clients send Accept: application/json, text/event-stream.
     json_response=True,
     stateless_http=True,
-    # No lifespan= here — FastMCP's lifespan fires per MCP session, not per server.
-    # Server-wide init lives in create_app() below.
+    # No lifespan= here — FastMCP's lifespan fires per MCP session (once per client
+    # connection for stateless HTTP), not once per server process.
+    # - HTTP: server-wide init (service + trickle) lives in create_app() below.
+    # - stdio: caller must invoke _init_for_stdio() before mcp_app.run().
 )
 
 
@@ -48,8 +50,21 @@ async def health(request: Request) -> JSONResponse:  # noqa: ARG001
 
 
 def _get_service() -> DotMDService:
-    assert _service is not None, "Service not initialized — server not started via create_app()"
+    assert _service is not None, "Service not initialized — server not started via create_app() or _init_for_stdio()"
     return _service
+
+
+def _init_for_stdio() -> None:
+    """Initialize service for the stdio transport path (no trickle).
+
+    The stdio entry point (``dotmd mcp``) calls ``mcp_app.run()`` directly,
+    bypassing ``create_app()``.  Call this before ``mcp_app.run()`` to set up
+    the service so tool handlers can reach it via ``_get_service()``.
+    """
+    global _service  # noqa: PLW0603
+    svc = DotMDService(Settings())
+    svc.warmup()
+    _service = svc
 
 
 def create_app() -> Starlette:
@@ -121,8 +136,8 @@ async def search(
 ) -> list[dict]:
     """Search the indexed markdown knowledgebase and return ranked chunks.
 
-    Each result includes the source file paths, heading context, a cleaned text
-    snippet, a relevance score, and which search engines matched it.
+    Each result dict contains: file_paths (list of source paths), heading context,
+    a cleaned text snippet, a relevance score, and which search engines matched it.
     """
     service = _get_service()
     results = await asyncio.to_thread(service.search, query, top_k=top_k)

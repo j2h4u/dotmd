@@ -394,10 +394,11 @@ def mcp(transport: str, host: str, port: int) -> None:
         )
         asyncio.run(uvicorn.Server(config).serve())
     else:
-        from dotmd.mcp_server import mcp as mcp_app
+        from dotmd.mcp_server import _init_for_stdio, mcp as mcp_app
         from dotmd.utils.logging import setup_logging
 
         setup_logging()
+        _init_for_stdio()
         mcp_app.run(transport=transport)
 
 
