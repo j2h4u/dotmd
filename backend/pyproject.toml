@@ -48,6 +48,7 @@ testpaths = ["tests"]
 addopts = "-x --tb=short"
 markers = [
     "smoke: smoke tests requiring a running dotMD stack",
+    "e2e: E2E tests against the live MCP HTTP server (run inside container)",
 ]
 
 [tool.hatch.build.targets.wheel]
