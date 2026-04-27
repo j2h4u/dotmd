@@ -48,31 +48,6 @@ def split_default(text: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def enrich_with_title_and_tags(text: str, frontmatter: dict) -> str:
-    """Prepend document title and tags to chunk text for embedding context.
-
-    ADR: Enriching embedding input with title + tags improves semantic search
-    recall. The embedding model sees "Meeting Notes\\nperson:Alice, budget\\n\\n..."
-    which places the chunk closer to queries about Alice or budgets in vector
-    space. This is the semantic equivalent of FTS5 column weighting -- each
-    search engine receives the same metadata through its native channel.
-
-    No longer called from the embedding path (Phase 999.12). Retained for
-    reference. title+tags are now encoded separately as the e_meta vector
-    component via _embed_meta_component() in the pipeline.
-    """
-    title = frontmatter.get("title", "")
-    tags = frontmatter.get("tags", [])
-    tags_str = ", ".join(str(t) for t in tags) if tags else ""
-    parts: list[str] = []
-    if title:
-        parts.append(title)
-    if tags_str:
-        parts.append(tags_str)
-    if parts:
-        return "\n".join(parts) + "\n\n" + text
-    return text
-
 
 def _enrich_noop(text: str, frontmatter: dict) -> str:
     """No-op enrichment — chunk text embedded as-is (Phase 999.12 dual-encoder).
