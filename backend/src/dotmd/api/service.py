@@ -451,7 +451,7 @@ class DotMDService:
                 f"SELECT COUNT(DISTINCT file_path) FROM {m2m_table}"
             ).fetchone()[0]
         except Exception:
-            pass
+            logger.debug("live chunk/file count failed", exc_info=True)
         # Change detection: run live diff against all known paths (skip for MCP)
         if live_diff:
             try:

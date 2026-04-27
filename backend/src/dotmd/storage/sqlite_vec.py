@@ -343,7 +343,7 @@ class SQLiteVecVectorStore:
                     )
                     total_deleted += len(rowids)
                 except sqlite3.OperationalError:
-                    logger.debug("vec0 delete failed for %s", vec0_table, exc_info=True)
+                    logger.warning("vec0 delete failed for %s — orphaned rows possible", vec0_table, exc_info=True)
             conn.execute(
                 f"DELETE FROM {vm_table} WHERE chunk_id IN ({placeholders})",
                 chunk_ids,

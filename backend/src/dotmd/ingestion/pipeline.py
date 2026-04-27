@@ -714,7 +714,10 @@ class IndexingPipeline:
         tags = tags or []
         tags_str = ", ".join(str(t) for t in tags) if tags else ""
         meta_text = f"{title} {tags_str}".strip() or str(title) or ""
-        result = self._semantic_engine.encode_batch([meta_text])
+        try:
+            result = self._semantic_engine.encode_batch([meta_text])
+        except Exception as exc:
+            raise RuntimeError(f"encode_batch failed for metadata of {file_info.path}") from exc
         e_meta = result[0]
         # Use _meta_entity_id() — the single canonical path normalizer for meta component
         self._vec_components.store(self._meta_entity_id(file_info.path), "meta", e_meta)
@@ -2249,6 +2252,7 @@ class IndexingPipeline:
         # ── WIPE PATH ────────────────────────────────────────────────────────────────
         # Step 0: Write in-progress sentinel FIRST so a crash before Step 7 is detected
         # on next startup and the wipe is resumed (not silently skipped as a fresh DB).
+        _wipe_step = 0
         try:
             self._conn.execute(
                 f"INSERT OR REPLACE INTO {config_table} (key, value)"
@@ -2257,28 +2261,30 @@ class IndexingPipeline:
             self._conn.commit()
 
             # 1. Wipe embedding cache (text_hash semantics changed)
-            self._embedding_cache.clear()
+            _wipe_step = 1; self._embedding_cache.clear()
             # 2. Wipe vec_components (stale e_text BLOBs)
-            self._vec_components.delete_all()
+            _wipe_step = 2; self._vec_components.delete_all()
             # 3. Wipe vec0 + vec_meta (SQLiteVecVectorStore.delete_all handles both)
-            self._vector_store.delete_all()
+            _wipe_step = 3; self._vector_store.delete_all()
             # 4. Clear chunk_tracker
-            self._chunk_tracker.clear()
+            _wipe_step = 4; self._chunk_tracker.clear()
             # 5. Clear meta_tracker
-            self._meta_tracker.clear()
+            _wipe_step = 5; self._meta_tracker.clear()
             # 6. Clear stored weights sentinel (re-written by _check_weights_changed)
+            _wipe_step = 6
             self._conn.execute(
                 f"DELETE FROM {config_table} WHERE key = 'weights_used'"
             )
             self._conn.commit()
             # 7. Write final sentinel (marks clean state — replaces WIPE_IN_PROGRESS)
+            _wipe_step = 7
             self._conn.execute(
                 f"INSERT OR REPLACE INTO {config_table} (key, value) VALUES ('schema_version', ?)",
                 (self.SCHEMA_VERSION,),
             )
             self._conn.commit()
         except Exception:
-            logger.error("_check_schema_version: wipe failed", exc_info=True)
+            logger.error("_check_schema_version: wipe failed at step %d", _wipe_step, exc_info=True)
             raise
 
         logger.info(
