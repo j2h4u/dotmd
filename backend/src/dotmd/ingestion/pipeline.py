@@ -1241,9 +1241,13 @@ class IndexingPipeline:
                 continue
             # Embed chunk bodies (pure, no storage)
             e_text_vectors, text_hashes = self._embed_chunks(file_chunks)
-            # Store e_text in VecComponentStore for future fast-path reads
+            # Store e_text in VecComponentStore for future fast-path reads.
+            # VecComponentStore.store() does not call commit() (caller owns boundary).
+            # With isolation_level=None each INSERT auto-commits, but we flush explicitly
+            # so all per-file BLOBs are durable before vec0 is written.
             for chunk, e_text in zip(file_chunks, e_text_vectors):
                 self._vec_components.store(chunk.chunk_id, "text", e_text)
+            self._conn.commit()  # flush VecComponentStore writes before vec0
             # Encode file metadata → e_meta (1 TEI call per unique file)
             e_meta = self._embed_meta_component(fi)
             # Fuse per chunk
