@@ -620,6 +620,167 @@ class IndexingPipeline:
         self._vec_components.store(self._meta_entity_id(file_info.path), "meta", e_meta)
         return e_meta
 
+    def _index_file_embed(
+        self,
+        file_info: FileInfo,
+        chunks: list[Chunk],
+        *,
+        body_changed: bool,
+        metadata_changed: bool,
+    ) -> None:
+        """Embed, fuse, and store vectors for a file. Owns the full transaction.
+
+        Call chain (trickle path):
+          index_file(path)
+            → _incremental_index(file_info)
+                → if chunk_tracker fired: _ingest_and_finalize(file_info)
+                                          then _index_file_embed(..., body_changed=True, metadata_changed=True)
+                → elif meta_tracker fired: _index_file_embed(..., body_changed=False, metadata_changed=True)
+
+        Call chain (bulk run() path):
+          run() → _save_and_embed_chunks(file_info, chunks)
+                → _index_file_embed(..., body_changed=True, metadata_changed=True)
+          run() → _embed_existing_chunks(file_info, chunks, *, model_switch=True/False)
+                → _index_file_embed(...) via internal routing (see _embed_existing_chunks)
+
+        _index_file_embed() is the SINGLE transaction owner for embed→fuse→store.
+        _ingest_and_finalize() owns chunking/FTS/graph — they are separate.
+        (Addresses OpenCode HIGH-3 Cycle 3: call site was undefined.)
+
+        Branching logic (three mutually exclusive paths):
+
+        Case 1 — body changed (body_changed=True):
+            Full path. Re-embed chunk bodies (e_text), embed metadata (e_meta),
+            fuse all chunks, overwrite vec0. chunk_tracker fires this case.
+
+        Case 2 — metadata only changed (body_changed=False, metadata_changed=True):
+            Fast path. Read stored e_text BLOBs from VecComponentStore (no TEI for
+            body). Embed metadata once (1 TEI call for e_meta). Fuse locally.
+            Update vec0. If any e_text BLOBs are missing, fall back to full embed
+            for the missing chunks.
+
+        Case 3 — neither changed:
+            Skip entirely. This method should not be called in this case (caller
+            checks), but guards defensively.
+
+        Transaction boundary: all writes (VecComponentStore, vec0, tracker) are
+        wrapped in a single BEGIN...COMMIT block. TEI calls happen BEFORE the
+        BEGIN so the transaction never holds a lock across network I/O.
+        If any step fails, the transaction is rolled back and the error is re-raised
+        so the caller can handle it (trickle marks the file as failed and retries).
+
+        entity_id for meta component: always via self._meta_entity_id(file_info.path).
+        """
+        if not body_changed and not metadata_changed:
+            logger.debug("_index_file_embed: no changes for %s — skipping", file_info.path)
+            return
+
+        # If caller passed no chunks, load from metadata store (metadata-only path)
+        if not chunks:
+            canonical = self._meta_entity_id(file_info.path)
+            chunk_ids = self._metadata_store.get_chunk_ids_by_file(
+                self._strategy, canonical
+            )
+            chunks = self._metadata_store.get_chunks(chunk_ids) if chunk_ids else []
+
+        if not chunks:
+            logger.debug("_index_file_embed: no chunks for %s", file_info.path)
+            self._save_meta_fingerprint(file_info)
+            return
+
+        weights = self._settings.parsed_embedding_weights
+
+        # ── COMPUTE VECTORS OUTSIDE TRANSACTION (TEI calls must not hold SQLite lock) ──
+        # Two-phase design (addresses Codex HIGH Cycle 3: transaction scope):
+        #   Phase 1 — compute all vectors (TEI calls, cache reads) outside any transaction
+        #   Phase 2 — atomically write all state inside BEGIN...COMMIT
+        # This prevents long-held write locks during network I/O.
+
+        missing_chunk_ids: set[str] = set()
+        e_text_map: dict[str, list[float]] = {}
+        text_hashes: dict[str, str] = {}
+
+        if body_changed:
+            # Full path: encode chunk bodies + metadata
+            e_text_vectors, text_hashes = self._embed_chunks(chunks)  # TEI outside tx
+            e_meta = self._embed_meta_component(file_info)             # TEI outside tx
+            e_fused_vectors = [
+                self._fuse_vectors(e_t, e_meta, weights) for e_t in e_text_vectors
+            ]
+        else:
+            # Metadata-only fast path: read cached e_text, encode only e_meta
+            e_text_map = self._vec_components.get_batch(
+                [c.chunk_id for c in chunks], "text"
+            )
+            missing_chunk_ids = {
+                c.chunk_id for c in chunks if c.chunk_id not in e_text_map
+            }
+            if missing_chunk_ids:
+                logger.warning(
+                    "Metadata-only fast path for %s: %d/%d e_text BLOBs missing — "
+                    "falling back to full embed for those chunks",
+                    file_info.path, len(missing_chunk_ids), len(chunks),
+                )
+                missing_chunks = [c for c in chunks if c.chunk_id in missing_chunk_ids]
+                missing_e_text, missing_hashes = self._embed_chunks(missing_chunks)  # TEI outside tx
+                for chunk, e_text in zip(missing_chunks, missing_e_text):
+                    e_text_map[chunk.chunk_id] = e_text
+                text_hashes = missing_hashes
+            e_meta = self._embed_meta_component(file_info)  # exactly 1 TEI call outside tx
+            e_fused_vectors = [
+                self._fuse_vectors(e_text_map[c.chunk_id], e_meta, weights) for c in chunks
+            ]
+
+        # ── ATOMIC WRITE PHASE ────────────────────────────────────────────────────────
+        self._conn.execute("BEGIN")
+        try:
+            if body_changed:
+                # Store e_text components for all chunks
+                for chunk, e_text in zip(chunks, e_text_vectors):
+                    self._vec_components.store(chunk.chunk_id, "text", e_text)
+            else:
+                # Store only newly-computed fallback e_text for missing chunks
+                if missing_chunk_ids:
+                    for chunk in chunks:
+                        if chunk.chunk_id in missing_chunk_ids:
+                            self._vec_components.store(
+                                chunk.chunk_id, "text", e_text_map[chunk.chunk_id]
+                            )
+
+            # Store e_meta component (canonical path via _meta_entity_id)
+            self._vec_components.store(
+                self._meta_entity_id(file_info.path), "meta", e_meta
+            )
+            # Write e_fused to vec0
+            self._vector_store.add_chunks(
+                chunks, e_fused_vectors, overwrite=True,
+                text_hashes=text_hashes if text_hashes else None,
+            )
+            # Save meta fingerprint
+            self._save_meta_fingerprint(file_info)
+
+            self._conn.execute("COMMIT")
+
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            logger.error(
+                "_index_file_embed: transaction rolled back for %s", file_info.path,
+                exc_info=True,
+            )
+            raise
+
+        if body_changed:
+            logger.info(
+                "Full embed for %s: %d chunks, e_text + e_meta encoded",
+                file_info.path, len(chunks),
+            )
+        else:
+            logger.info(
+                "Metadata-only fast path for %s: 1 TEI call (e_meta), "
+                "%d fused vectors recomputed locally (weights=%s)",
+                file_info.path, len(chunks), weights,
+            )
+
     # ------------------------------------------------------------------
     # Granular reindex (rebuild one store from metadata chunks)
     # ------------------------------------------------------------------
@@ -1204,8 +1365,8 @@ class IndexingPipeline:
         # --- Phase 2: Embed + metadata refresh ---
         # ADR: meta_tracker uses meta_checksum (title+tags only).
         # When only title/tags changed (chunk_diff=unchanged, meta_diff=modified),
-        # we skip re-chunking but still re-embed, update FTS5 columns, and
-        # refresh graph metadata. This is the "lightweight metadata update" path.
+        # we skip re-chunking but still re-embed (1 TEI call for e_meta), update
+        # FTS5 columns, and refresh graph metadata.
         metadata_only = False
         if not needs_embed:
             meta_diff = self._meta_tracker.diff([file_info])
@@ -1215,37 +1376,32 @@ class IndexingPipeline:
             metadata_only = needs_embed
 
         if needs_embed:
-            if not chunks:
-                chunk_ids = self._metadata_store.get_chunk_ids_by_file(
-                    self._strategy, path_str
+            _beacon("embed")
+            t0 = time.perf_counter()
+            # _index_file_embed owns the full embed→fuse→store transaction.
+            # body_changed=True when chunk_tracker fired (needs_embed set from chunking).
+            # body_changed=False when only meta_tracker fired (metadata_only path).
+            self._index_file_embed(
+                file_info,
+                chunks,
+                body_changed=not metadata_only,
+                metadata_changed=needs_embed,
+            )
+            t_embed = time.perf_counter() - t0
+
+            if metadata_only:
+                file_meta = self._build_file_meta_from_fileinfo([file_info])
+                self._keyword_engine.add_chunks(
+                    self._metadata_store.get_chunks(
+                        self._metadata_store.get_chunk_ids_by_file(
+                            self._strategy, path_str
+                        ) or []
+                    ) if not chunks else chunks,
+                    file_meta=file_meta,
                 )
-                chunks = self._metadata_store.get_chunks(chunk_ids) if chunk_ids else []
-
-            if chunks:
-                _beacon("embed")
-                t0 = time.perf_counter()
-                embeddings, text_hashes = self._embed_chunks(chunks)
-                t_embed = time.perf_counter() - t0
-
-                _beacon("vec_store")
-                t0 = time.perf_counter()
-                self._vector_store.add_chunks(
-                    chunks, embeddings, overwrite=False,
-                    text_hashes=text_hashes,
-                )
-                t_vec = time.perf_counter() - t0
-
-                if metadata_only:
-                    file_meta = self._build_file_meta_from_fileinfo([file_info])
-                    self._keyword_engine.add_chunks(chunks, file_meta=file_meta)
-                    self._frontmatter_to_graph([file_info])
-                    logger.info(
-                        "Metadata-only update for %s: FTS5 + graph + embeddings refreshed",
-                        file_info.path,
-                    )
+                self._frontmatter_to_graph([file_info])
 
             _beacon("fingerprint")
-            self._save_meta_fingerprint(file_info)
 
         _beacon("idle")
         t_total = time.perf_counter() - t_file
