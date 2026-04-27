@@ -381,8 +381,22 @@ class FalkorDBGraphStore:
         return result.nodes_deleted
 
     def delete_all(self) -> None:
-        """Remove all nodes and edges from the graph."""
-        self._graph.query("MATCH (n) DETACH DELETE n")
+        """Remove all nodes and edges from the graph.
+
+        Uses GRAPH.DELETE (O(1) at storage level) instead of MATCH+DELETE (O(n)).
+        Re-selects the graph and recreates label indexes after deletion.
+        """
+        try:
+            self._graph.delete()
+        except Exception:  # noqa: BLE001
+            # Graph may not exist yet on a fresh install.
+            logger.debug("delete_all: GRAPH.DELETE failed (graph may not exist)", exc_info=True)
+        self._graph = self._db.select_graph(self._graph_name)
+        for label in ("File", "Section", "Entity", "Tag"):
+            try:
+                self._graph.query(f"CREATE INDEX FOR (n:{label}) ON (n.id)")
+            except Exception:  # noqa: BLE001
+                logger.debug("Index for %s already exists or creation skipped", label)
 
     def node_count(self) -> int:
         """Return the total number of nodes in the graph."""
