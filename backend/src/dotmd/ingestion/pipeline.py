@@ -20,7 +20,9 @@ from __future__ import annotations
 import blake3
 import json
 import logging
+import re
 import sqlite3
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass as _dataclass
@@ -75,8 +77,6 @@ def _model_to_table_suffix(model_name: str) -> str:
     Version stripping kept for now (removal deferred to migration phase
     when tables are renamed).
     """
-    import re
-
     if not model_name:
         return "_default"
     # Take the part after the slash (org/model → model)
@@ -312,7 +312,6 @@ class IndexingPipeline:
         Concurrent write safety: shares self._conn with trickle indexer; both operate
         on index.db in WAL mode. The try/except handles any write failure gracefully.
         """
-        import json
         try:
             now = datetime.now(timezone.utc).isoformat()
             self._conn.execute(
@@ -1322,9 +1321,6 @@ class IndexingPipeline:
         all_chunks = self._metadata_store.get_all_chunks()
         acronym_dict = extract_acronyms_from_chunks(all_chunks)
         if acronym_dict:
-            import json
-            import tempfile
-
             self._settings.acronyms_path.parent.mkdir(parents=True, exist_ok=True)
             fd, tmp_path = tempfile.mkstemp(
                 dir=self._settings.acronyms_path.parent, suffix=".tmp",
@@ -2305,8 +2301,6 @@ class IndexingPipeline:
 
         Stored weights are in vec_config key 'weights_used' (JSON string).
         """
-        import json as _json
-
         # Guard: skip if store is empty (fresh install or post schema-version wipe)
         if self._vec_components.count() == 0:
             logger.debug("_check_weights_changed: VecComponentStore is empty — skipping")
@@ -2314,7 +2308,7 @@ class IndexingPipeline:
 
         config_table = self._vector_store._CONFIG_TABLE
         current_weights = self._settings.parsed_embedding_weights
-        current_weights_json = _json.dumps(current_weights, sort_keys=True)
+        current_weights_json = json.dumps(current_weights, sort_keys=True)
 
         row = self._conn.execute(
             f"SELECT value FROM {config_table} WHERE key = 'weights_used'"
