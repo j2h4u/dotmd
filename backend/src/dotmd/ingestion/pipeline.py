@@ -138,7 +138,7 @@ class IndexingPipeline:
         self._conn.enable_load_extension(False)
 
         # -- Strategy + model table name derivation ---------------------------
-        strategy = settings.chunk_strategy
+        strategy = re.sub(r"[^a-z0-9_]", "_", str(settings.chunk_strategy).lower())
         model_suffix = _model_to_table_suffix(settings.embedding_model)
 
         self._strategy = strategy
@@ -521,6 +521,9 @@ class IndexingPipeline:
                 or name.startswith(prefix_vec_components)
                 or name.startswith(prefix_embed_fp)
             ):
+                if not re.match(r"^[a-zA-Z0-9_]+$", name):
+                    logger.warning("Skipping table with unexpected name: %r", name)
+                    continue
                 self._conn.execute(f"DROP TABLE IF EXISTS {name}")
                 tables_dropped += 1
 
