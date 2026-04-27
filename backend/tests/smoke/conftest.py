@@ -5,7 +5,7 @@ import os
 import httpx
 import pytest
 
-DOTMD_URL = os.environ.get("DOTMD_SMOKE_URL", "http://localhost:8321")
+DOTMD_URL = os.environ.get("DOTMD_SMOKE_URL", "http://localhost:8080")
 
 
 def pytest_collection_modifyitems(config, items):
