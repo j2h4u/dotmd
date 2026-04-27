@@ -95,15 +95,12 @@ def test_embed_chunks_returns_etext_not_efused_from_cache(minimal_settings, tmp_
     pipeline._conn.commit()
 
     # Simulate a Chunk object
-    try:
-        chunk = Chunk(
-            chunk_id=fake_chunk_id,
-            text=fake_chunk_text,
-            chunk_index=0,
-        )
-    except Exception:
-        # Chunk constructor may differ — skip test if Chunk model is incompatible
-        pytest.skip("Chunk model constructor incompatible with test fixture")
+    chunk = Chunk(
+        chunk_id=fake_chunk_id,
+        text=fake_chunk_text,
+        file_paths=[pathlib.Path("test.md")],
+        chunk_index=0,
+    )
 
     # Call _embed_chunks with this chunk
     call_log.clear()

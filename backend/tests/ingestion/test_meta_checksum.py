@@ -105,11 +105,11 @@ def test_meta_and_chunk_orthogonal(tmp_path):
     assert meta_checksum(p) == mc_orig
 
     # Restore body, change title: meta_checksum changes, chunk_checksum stable
-    _write(p, "New Title", ["foo"], "new body")
+    _write(p, "New Title", ["foo"], "body")
     cc_after_title = chunk_checksum(p)
     mc_after_title = meta_checksum(p)
     assert mc_after_title != mc_orig
-    assert cc_after_title == chunk_checksum(p)
+    assert cc_after_title == cc_orig
 
 
 def test_embed_checksum_removed():

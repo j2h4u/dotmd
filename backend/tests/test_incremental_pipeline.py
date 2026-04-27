@@ -165,7 +165,7 @@ class TestUnchangedFiles:
         assert mock_read_file.call_count == 0
         assert mock_chunk_file.call_count == 0
         assert pipeline._semantic_engine.encode_batch.call_count == 0
-        assert stats.total_files >= 0  # just not an error
+        assert stats.total_files == 2
 
 
 class TestModifiedFile:
