@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, TomlConfigSettingsSource
 
 from dotmd.core.models import ExtractDepth
@@ -75,6 +76,61 @@ class Settings(BaseSettings):
     # Small batches (4-8) are often faster on CPU due to lower TEI queue/inference time.
     tei_batch_size: int = 4
 
+    # Fusion weights for N-vector unified embeddings (Phase 999.12).
+    # Format: "text=0.7,meta=0.3" — component names to float weights, comma-separated.
+    # Must sum to 1.0 (±0.001 tolerance). Validated at startup — fails fast.
+    # Must include both "text" and "meta" keys (dual-encoder architecture requires both).
+    # Recomputing e_fused after weight change is local math only (no TEI calls).
+    embedding_weights: str = "text=0.7,meta=0.3"
+
+    @field_validator("embedding_weights")
+    @classmethod
+    def validate_embedding_weights(cls, v: str) -> str:
+        """Parse and validate embedding_weights string.
+
+        Expected format: "text=0.7,meta=0.3"
+        Raises ValueError if:
+        - Any entry is not in key=value format
+        - Any value is not a valid float
+        - Values do not sum to 1.0 (±0.001 tolerance)
+        - Either "text" or "meta" key is missing (dual-encoder requires both)
+        """
+        pairs = [p.strip() for p in v.split(",") if p.strip()]
+        parsed: dict[str, float] = {}
+        total = 0.0
+        for pair in pairs:
+            if "=" not in pair:
+                raise ValueError(
+                    f"embedding_weights: invalid entry {pair!r} — expected key=value format"
+                )
+            key, val = pair.split("=", 1)
+            key = key.strip()
+            try:
+                w = float(val.strip())
+            except ValueError:
+                raise ValueError(
+                    f"embedding_weights: value for {key!r} is not a float: {val!r}"
+                )
+            parsed[key] = w
+            total += w
+        if abs(total - 1.0) > 0.001:
+            raise ValueError(
+                f"embedding_weights: weights must sum to 1.0 (got {total:.4f})"
+            )
+        # Require both "text" and "meta" keys — dual-encoder architecture requires both
+        # components. Accepting arbitrary keys would silently omit a component from fusion.
+        if "text" not in parsed:
+            raise ValueError(
+                "embedding_weights: missing required key 'text' "
+                "(dual-encoder requires both 'text' and 'meta')"
+            )
+        if "meta" not in parsed:
+            raise ValueError(
+                "embedding_weights: missing required key 'meta' "
+                "(dual-encoder requires both 'text' and 'meta')"
+            )
+        return v
+
     # Search
     default_top_k: int = 10
     fusion_k: int = 60  # RRF constant
@@ -132,6 +188,17 @@ class Settings(BaseSettings):
         if toml_path.exists():
             sources.append(TomlConfigSettingsSource(settings_cls))
         return tuple(sources)
+
+    @property
+    def parsed_embedding_weights(self) -> dict[str, float]:
+        """Return embedding_weights as {component_name: weight} dict."""
+        result: dict[str, float] = {}
+        for pair in self.embedding_weights.split(","):
+            pair = pair.strip()
+            if "=" in pair:
+                key, val = pair.split("=", 1)
+                result[key.strip()] = float(val.strip())
+        return result
 
     @property
     def config_path(self) -> Path:

@@ -88,6 +88,33 @@ def embed_checksum(path: Path) -> str:
     return blake3.blake3(payload.encode()).hexdigest()
 
 
+def meta_checksum(path: Path) -> str:
+    """Checksum for metadata-only change detection: hash(title + tags).
+
+    ADR: meta_tracker uses this checksum to detect frontmatter-only changes
+    (title renames, tag updates) without reading chunk body text.  When
+    meta_checksum changes but chunk_checksum does not, the pipeline triggers
+    the cheap metadata-only path: 1 TEI call (e_meta) + local fusion recompute.
+
+    Does NOT include body text — body changes are handled by chunk_checksum.
+    Does NOT include ``kind`` — intentional: kind changes are detected by
+    chunk_checksum (they affect pre-split strategy), so the full re-chunk
+    path runs anyway, recomputing e_meta as part of that path.
+
+    None-safe: title=None treated as "", tags=None treated as [].
+    Uses same defensive pattern as embed_checksum.
+
+    Data source: reads frontmatter via parse_frontmatter(read_file(path)),
+    same as embed_checksum.
+    """
+    content = read_file(path)
+    frontmatter, _ = parse_frontmatter(content)
+    title = str(frontmatter.get("title", "") or "")
+    tags = frontmatter.get("tags", []) or []
+    tags_str = ",".join(sorted(str(t) for t in tags)) if tags else ""
+    return blake3.blake3(f"{title}\n{tags_str}".encode()).hexdigest()
+
+
 def _extract_title(content: str, path: Path, frontmatter: dict | None = None) -> str:
     """Extract a human-readable title from file content or fall back to the filename.
 
