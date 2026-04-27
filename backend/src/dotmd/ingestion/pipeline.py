@@ -2087,20 +2087,17 @@ class IndexingPipeline:
                 e_fused_vectors = [
                     self._fuse_vectors(e_t, e_meta, weights) for e_t in e_text_vectors
                 ]
-                self._conn.execute("BEGIN")
-                try:
-                    for chunk, e_text in zip(chunks, e_text_vectors):
-                        self._vec_components.store(chunk.chunk_id, "text", e_text)
-                    self._vec_components.store(
-                        self._meta_entity_id(fi.path), "meta", e_meta
-                    )
-                    self._vector_store.add_chunks(
-                        chunks, e_fused_vectors, overwrite=True, text_hashes=text_hashes
-                    )
-                    self._conn.execute("COMMIT")
-                except Exception:
-                    self._conn.execute("ROLLBACK")
-                    raise
+                # Note: no explicit BEGIN here — add_chunks() commits internally.
+                # VecComponentStore.store() calls are auto-committed in WAL autocommit mode.
+                for chunk, e_text in zip(chunks, e_text_vectors):
+                    self._vec_components.store(chunk.chunk_id, "text", e_text)
+                self._vec_components.store(
+                    self._meta_entity_id(fi.path), "meta", e_meta
+                )
+                self._conn.commit()  # Flush VecComponentStore stores before add_chunks
+                self._vector_store.add_chunks(
+                    chunks, e_fused_vectors, overwrite=True, text_hashes=text_hashes
+                )
                 logger.info(
                     "_embed_existing_chunks (model_switch): %s — %d chunks, e_text + e_meta re-encoded",
                     fi.path, len(chunks),
@@ -2126,23 +2123,20 @@ class IndexingPipeline:
                     self._fuse_vectors(e_text_map[c.chunk_id], e_meta, weights)
                     for c in chunks
                 ]
-                self._conn.execute("BEGIN")
-                try:
-                    if missing:
-                        for chunk in missing:
-                            self._vec_components.store(
-                                chunk.chunk_id, "text", e_text_map[chunk.chunk_id]
-                            )
-                    self._vec_components.store(
-                        self._meta_entity_id(fi.path), "meta", e_meta
-                    )
-                    self._vector_store.add_chunks(
-                        chunks, e_fused_vectors, overwrite=True,
-                    )
-                    self._conn.execute("COMMIT")
-                except Exception:
-                    self._conn.execute("ROLLBACK")
-                    raise
+                # Note: no explicit BEGIN here — add_chunks() commits internally.
+                # VecComponentStore.store() calls are auto-committed in WAL autocommit mode.
+                if missing:
+                    for chunk in missing:
+                        self._vec_components.store(
+                            chunk.chunk_id, "text", e_text_map[chunk.chunk_id]
+                        )
+                self._vec_components.store(
+                    self._meta_entity_id(fi.path), "meta", e_meta
+                )
+                self._conn.commit()  # Flush VecComponentStore stores before add_chunks
+                self._vector_store.add_chunks(
+                    chunks, e_fused_vectors, overwrite=True,
+                )
                 logger.info(
                     "_embed_existing_chunks (cached e_text): %s — 1 TEI call (e_meta), "
                     "%d fused vectors recomputed locally",
@@ -2212,10 +2206,11 @@ class IndexingPipeline:
             stored_version, self.SCHEMA_VERSION,
         )
 
-        # Entire wipe runs in a single transaction for atomicity.
-        # Crash before COMMIT → sentinel not written → re-wipe on next startup (safe).
-        # Crash after COMMIT → fully wiped and consistent (safe).
-        self._conn.execute("BEGIN")
+        # Each sub-operation below commits internally (delete_all, clear all call
+        # conn.commit()). An outer BEGIN/COMMIT cannot wrap them atomically.
+        # Safety: each operation is idempotent. If a crash occurs mid-wipe, the
+        # schema_version sentinel is NOT written (it's last), so the next startup
+        # sees stored_version != SCHEMA_VERSION and repeats the wipe safely.
         try:
             # 1. Wipe embedding cache (text_hash semantics changed)
             self._embedding_cache.clear()
@@ -2236,10 +2231,9 @@ class IndexingPipeline:
                 f"INSERT OR REPLACE INTO {config_table} (key, value) VALUES ('schema_version', ?)",
                 (self.SCHEMA_VERSION,),
             )
-            self._conn.execute("COMMIT")
+            self._conn.commit()
         except Exception:
-            self._conn.execute("ROLLBACK")
-            logger.error("_check_schema_version: wipe failed — rolled back", exc_info=True)
+            logger.error("_check_schema_version: wipe failed", exc_info=True)
             raise
 
         logger.info(
