@@ -785,8 +785,10 @@ class IndexingPipeline:
             chunks = self._metadata_store.get_chunks(chunk_ids) if chunk_ids else []
 
         if not chunks:
-            logger.debug("_index_file_embed: no chunks for %s", file_info.path)
-            self._save_meta_fingerprint(file_info)
+            logger.debug(
+                "_index_file_embed: no chunks for %s — skipping (will retry after chunks arrive)",
+                file_info.path,
+            )
             return
 
         weights = self._settings.parsed_embedding_weights
