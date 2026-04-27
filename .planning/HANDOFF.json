@@ -1,0 +1,43 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-04-27T14:38:25Z",
+  "phase": "999.12",
+  "phase_name": "dual-encoder-unified-embedding-decoupled-metadata-vectors",
+  "phase_dir": ".planning/phases/999.12-dual-encoder-unified-embedding-decoupled-metadata-vectors-ba",
+  "plan": 3,
+  "task": null,
+  "total_tasks": null,
+  "status": "paused",
+  "completed_tasks": [
+    {"id": 1, "name": "Phase 999.12 execution (3 plans)", "status": "done", "commit": "2ff38eb"},
+    {"id": 2, "name": "Code review findings fix", "status": "done", "commit": "7ded65c"},
+    {"id": 3, "name": "Quality sweep waves 1-10 (34 fixes)", "status": "done", "commit": "19c1c11"}
+  ],
+  "remaining_tasks": [
+    {"id": 4, "name": "Production deployment", "status": "not_started", "notes": "backup first, then merge branch, then restart container"},
+    {"id": 5, "name": "Monitor reindex", "status": "not_started", "notes": "check trickle logs, ETA visible per-file after 3 files + 2 min"}
+  ],
+  "blockers": [],
+  "human_actions_pending": [
+    {
+      "action": "Create borg backup before deploy",
+      "context": "Wipe-on-deploy migration destroys all current vectors. Backup ensures rollback path.",
+      "blocking": true
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "Wipe-on-deploy migration (D-14)",
+      "rationale": "text_hash semantics changed: hash(title+tags+body) → hash(body only). Old vectors incompatible, cannot reuse.",
+      "phase": "999.12"
+    },
+    {
+      "decision": "~300 files, reindex expected several hours (not days)",
+      "rationale": "Initial CONTEXT.md said 'several days' — that was for a larger dataset. Actual file count is ~300.",
+      "phase": "999.12"
+    }
+  ],
+  "uncommitted_files": [],
+  "next_action": "Run borg backup, then merge feature/dual-encoder-unified-embeddings to dev, then docker compose up -d dotmd",
+  "context_notes": "Branch is fully ready. 189 tests pass. Quality sweep complete. Only remaining work is ops: backup + deploy + monitor reindex."
+}
