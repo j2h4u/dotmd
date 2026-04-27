@@ -370,6 +370,26 @@ class DotMDService:
             snippet_length=self._settings.snippet_length,
         )
 
+        # Log search for observability and future auto-calibration (Phase 999.12)
+        try:
+            _reranked = rerank and bool(self._reranker)
+            self._pipeline.log_search(
+                query=original_query,
+                weights_used=self._settings.parsed_embedding_weights,
+                top_results=[
+                    {
+                        "chunk_id": r.chunk_id,
+                        "score": float(r.fused_score),
+                        "engine": r.matched_engines[0] if r.matched_engines else "unknown",
+                    }
+                    for r in results[:top_k]
+                ],
+                mode=mode if isinstance(mode, str) else str(mode),
+                reranked=_reranked,
+            )
+        except Exception:
+            logger.warning("search log failed — non-fatal", exc_info=True)
+
         return results
 
     def drill(self, file_path: str) -> dict:

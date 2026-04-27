@@ -236,8 +236,12 @@ class SQLiteVecVectorStore:
                 f"INSERT OR IGNORE INTO {self._META_TABLE} (chunk_id, text_hash) VALUES (?, ?)",
                 (chunk.chunk_id, th),
             )
-            # cur.lastrowid is 0 when INSERT OR IGNORE is a no-op (row exists).
-            if cur.lastrowid:
+            # Use cur.rowcount (not cur.lastrowid) to detect no-op.
+            # In isolation_level=None (autocommit) mode, cur.lastrowid returns the
+            # last successful INSERT rowid on the connection — NOT 0 on no-op — which
+            # causes a false positive and an erroneous INSERT into vec0 (UNIQUE violation).
+            # cur.rowcount == 0 means INSERT OR IGNORE was a no-op (row already exists).
+            if cur.rowcount and cur.lastrowid:
                 conn.execute(
                     f"INSERT INTO {self._VEC_TABLE} (rowid, embedding) VALUES (?, ?)",
                     (cur.lastrowid, _serialize_f32(embedding)),

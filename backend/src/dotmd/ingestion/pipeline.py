@@ -194,6 +194,29 @@ class IndexingPipeline:
             conn=self._conn, table_name=vec_components_table,
         )
 
+        # -- search_log table --------------------------------------------------
+        # Shared log for all (strategy, model) combos — no suffix needed.
+        # mode/reranked columns included for Phase 999.15/999.16 calibration use.
+        # reranked is INTEGER (0/1) — SQLite has no native BOOLEAN type.
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS search_log (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                query        TEXT NOT NULL,
+                timestamp    TEXT NOT NULL,
+                weights_used TEXT NOT NULL,
+                top_results  TEXT NOT NULL,
+                mode         TEXT NOT NULL DEFAULT 'hybrid',
+                reranked     INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        # id INTEGER PRIMARY KEY AUTOINCREMENT already creates an efficient rowid
+        # index. The explicit index below enables efficient DELETE...ORDER BY id
+        # trimming and potential future covering indexes.
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS search_log_id_idx ON search_log(id)"
+        )
+        self._conn.commit()
+
         # -- search engines (used for encoding during indexing) ----------------
         self._semantic_engine = SemanticSearchEngine(
             self._vector_store,
@@ -248,6 +271,77 @@ class IndexingPipeline:
         # Startup integrity checks (order matters: schema wipe first, then weights)
         self._check_schema_version()   # Must run first (may wipe state)
         self._check_weights_changed()  # Runs after schema check (uses intact state)
+
+    # ------------------------------------------------------------------
+    # Search logging
+    # ------------------------------------------------------------------
+
+    _SEARCH_LOG_MAX_ROWS = 10_000
+
+    def log_search(
+        self,
+        query: str,
+        weights_used: dict[str, float],
+        top_results: list[dict],
+        *,
+        mode: str = "hybrid",
+        reranked: bool = False,
+    ) -> None:
+        """Log a search request to search_log for observability and future calibration.
+
+        Writes one row per search. Trims oldest rows when count exceeds
+        _SEARCH_LOG_MAX_ROWS (10,000) to bound table size (~3 MB max at ~300 bytes/row).
+
+        Non-fatal: all errors are caught; search() never fails due to logging.
+
+        Parameters
+        ----------
+        query:
+            Raw search query string.
+        weights_used:
+            Current fusion weights dict, e.g. {"text": 0.7, "meta": 0.3}.
+            Logs the PARSED effective weights (not the raw env var string).
+        top_results:
+            List of dicts with keys: chunk_id (str), score (float), engine (str).
+            Top-k results after reranking. Chunk text is NOT stored (privacy + size).
+        mode:
+            Search mode used: 'hybrid', 'semantic', 'keyword', 'graph'. Default: 'hybrid'.
+        reranked:
+            Whether cross-encoder reranking was applied. Default: False.
+
+        Concurrent write safety: shares self._conn with trickle indexer; both operate
+        on index.db in WAL mode. The try/except handles any write failure gracefully.
+        """
+        import json
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            self._conn.execute(
+                "INSERT INTO search_log (query, timestamp, weights_used, top_results, mode, reranked) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    query,
+                    now,
+                    json.dumps(weights_used, sort_keys=True),
+                    json.dumps(top_results),
+                    mode,
+                    int(reranked),
+                ),
+            )
+            # Trim oldest rows if over cap — uses indexed id column for efficiency
+            count = self._conn.execute(
+                "SELECT COUNT(*) FROM search_log"
+            ).fetchone()[0]
+            if count > self._SEARCH_LOG_MAX_ROWS:
+                excess = count - self._SEARCH_LOG_MAX_ROWS
+                self._conn.execute(
+                    "DELETE FROM search_log WHERE id IN ("
+                    "  SELECT id FROM search_log ORDER BY id ASC LIMIT ?"
+                    ")",
+                    (excess,),
+                )
+            self._conn.commit()
+        except Exception:
+            logger.warning("search_log write failed — non-fatal", exc_info=True)
 
     # ------------------------------------------------------------------
     # Public API
@@ -1987,26 +2081,31 @@ class IndexingPipeline:
 
             if model_switch:
                 # ── MODEL SWITCH: full re-encoding (both e_text and e_meta stale) ──
-                # Do NOT read VecComponentStore — stale e_text from old model
-                e_text_vectors, text_hashes = self._embed_chunks(chunks)  # TEI: all chunks
+                # Do NOT use _embed_chunks() — it reads VecComponentStore (Layer 1) which
+                # contains e_text from the OLD model and would silently return stale vectors.
+                # (Addresses OpenCode HIGH-2 Cycle 3: bypass VecComponentStore for model switch.)
+                # Call encode_batch directly so all chunks go through TEI regardless of cache.
+                texts = [c.text for c in chunks]
+                e_text_vectors = self._semantic_engine.encode_batch(texts)
+                text_hashes = {
+                    c.chunk_id: blake3.blake3(c.text.encode()).hexdigest()
+                    for c in chunks
+                }
                 e_meta = self._embed_meta_component(fi)                    # TEI: 1 call
                 e_fused_vectors = [
                     self._fuse_vectors(e_t, e_meta, weights) for e_t in e_text_vectors
                 ]
-                self._conn.execute("BEGIN")
-                try:
-                    for chunk, e_text in zip(chunks, e_text_vectors):
-                        self._vec_components.store(chunk.chunk_id, "text", e_text)
-                    self._vec_components.store(
-                        self._meta_entity_id(fi.path), "meta", e_meta
-                    )
-                    self._vector_store.add_chunks(
-                        chunks, e_fused_vectors, overwrite=True, text_hashes=text_hashes
-                    )
-                    self._conn.execute("COMMIT")
-                except Exception:
-                    self._conn.execute("ROLLBACK")
-                    raise
+                # Note: no explicit BEGIN here — add_chunks() commits internally.
+                # VecComponentStore.store() calls are auto-committed in WAL autocommit mode.
+                for chunk, e_text in zip(chunks, e_text_vectors):
+                    self._vec_components.store(chunk.chunk_id, "text", e_text)
+                self._vec_components.store(
+                    self._meta_entity_id(fi.path), "meta", e_meta
+                )
+                self._conn.commit()  # Flush VecComponentStore stores before add_chunks
+                self._vector_store.add_chunks(
+                    chunks, e_fused_vectors, overwrite=True, text_hashes=text_hashes
+                )
                 logger.info(
                     "_embed_existing_chunks (model_switch): %s — %d chunks, e_text + e_meta re-encoded",
                     fi.path, len(chunks),
@@ -2032,23 +2131,20 @@ class IndexingPipeline:
                     self._fuse_vectors(e_text_map[c.chunk_id], e_meta, weights)
                     for c in chunks
                 ]
-                self._conn.execute("BEGIN")
-                try:
-                    if missing:
-                        for chunk in missing:
-                            self._vec_components.store(
-                                chunk.chunk_id, "text", e_text_map[chunk.chunk_id]
-                            )
-                    self._vec_components.store(
-                        self._meta_entity_id(fi.path), "meta", e_meta
-                    )
-                    self._vector_store.add_chunks(
-                        chunks, e_fused_vectors, overwrite=True,
-                    )
-                    self._conn.execute("COMMIT")
-                except Exception:
-                    self._conn.execute("ROLLBACK")
-                    raise
+                # Note: no explicit BEGIN here — add_chunks() commits internally.
+                # VecComponentStore.store() calls are auto-committed in WAL autocommit mode.
+                if missing:
+                    for chunk in missing:
+                        self._vec_components.store(
+                            chunk.chunk_id, "text", e_text_map[chunk.chunk_id]
+                        )
+                self._vec_components.store(
+                    self._meta_entity_id(fi.path), "meta", e_meta
+                )
+                self._conn.commit()  # Flush VecComponentStore stores before add_chunks
+                self._vector_store.add_chunks(
+                    chunks, e_fused_vectors, overwrite=True,
+                )
                 logger.info(
                     "_embed_existing_chunks (cached e_text): %s — 1 TEI call (e_meta), "
                     "%d fused vectors recomputed locally",
@@ -2118,10 +2214,11 @@ class IndexingPipeline:
             stored_version, self.SCHEMA_VERSION,
         )
 
-        # Entire wipe runs in a single transaction for atomicity.
-        # Crash before COMMIT → sentinel not written → re-wipe on next startup (safe).
-        # Crash after COMMIT → fully wiped and consistent (safe).
-        self._conn.execute("BEGIN")
+        # Each sub-operation below commits internally (delete_all, clear all call
+        # conn.commit()). An outer BEGIN/COMMIT cannot wrap them atomically.
+        # Safety: each operation is idempotent. If a crash occurs mid-wipe, the
+        # schema_version sentinel is NOT written (it's last), so the next startup
+        # sees stored_version != SCHEMA_VERSION and repeats the wipe safely.
         try:
             # 1. Wipe embedding cache (text_hash semantics changed)
             self._embedding_cache.clear()
@@ -2142,10 +2239,9 @@ class IndexingPipeline:
                 f"INSERT OR REPLACE INTO {config_table} (key, value) VALUES ('schema_version', ?)",
                 (self.SCHEMA_VERSION,),
             )
-            self._conn.execute("COMMIT")
+            self._conn.commit()
         except Exception:
-            self._conn.execute("ROLLBACK")
-            logger.error("_check_schema_version: wipe failed — rolled back", exc_info=True)
+            logger.error("_check_schema_version: wipe failed", exc_info=True)
             raise
 
         logger.info(
