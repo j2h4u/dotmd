@@ -1380,7 +1380,7 @@ class IndexingPipeline:
 
         Phase 1 (chunk): check chunk_tracker, re-chunk if needed, write
         chunks via M2M INSERT OR IGNORE path, save chunk fingerprint.
-        Phase 2 (embed): check embed_tracker, text_hash lookup, encode
+        Phase 2 (embed): check meta_tracker, text_hash lookup, encode
         misses, save embed fingerprint.
 
         Used by the trickle indexer for one-at-a-time background processing.

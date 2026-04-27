@@ -77,10 +77,10 @@ def meta_checksum(path: Path) -> str:
     path runs anyway, recomputing e_meta as part of that path.
 
     None-safe: title=None treated as "", tags=None treated as [].
-    Uses same defensive pattern as embed_checksum.
+    Uses same defensive pattern as chunk_checksum.
 
     Data source: reads frontmatter via parse_frontmatter(read_file(path)),
-    same as embed_checksum.
+    same as chunk_checksum.
     """
     content = read_file(path)
     frontmatter, _ = parse_frontmatter(content)
