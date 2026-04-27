@@ -1,5 +1,6 @@
 """Application settings via pydantic-settings."""
 
+import warnings
 from pathlib import Path
 from typing import Literal
 
@@ -237,18 +238,26 @@ class Settings(BaseSettings):
         """Path to the unified SQLite index database (metadata + vec + FTS5)."""
         return self.index_dir / "index.db"
 
-    # Legacy alias — will be removed after pipeline migration
     @property
     def sqlite_vec_path(self) -> Path:
+        warnings.warn(
+            "sqlite_vec_path is deprecated — use index_db_path",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.index_db_path
 
     @property
     def graph_db_path(self) -> Path:
         return self.index_dir / f"graphdb_{self.chunk_strategy}"
 
-    # Legacy alias — will be removed after pipeline migration
     @property
     def sqlite_path(self) -> Path:
+        warnings.warn(
+            "sqlite_path is deprecated — use index_db_path",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.index_db_path
 
     @property
