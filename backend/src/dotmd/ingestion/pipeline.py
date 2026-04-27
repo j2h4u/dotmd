@@ -1280,7 +1280,8 @@ class IndexingPipeline:
         """Build FTS5 file_meta from FileInfo objects (no disk reads needed)."""
         file_meta: dict[str, tuple[str, str]] = {}
         for fi in files:
-            tags = fi.frontmatter.get("tags", [])
+            fm = fi.frontmatter or {}
+            tags = fm.get("tags", [])
             tags_str = ", ".join(str(t) for t in tags) if tags else ""
             file_meta[str(fi.path)] = (fi.title, tags_str)
         return file_meta
