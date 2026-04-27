@@ -41,11 +41,12 @@ from unittest.mock import patch
 import pytest
 
 
-def _get_strategy() -> str:
-    from dotmd.core.config import Settings
-    return Settings().chunk_strategy
-
-STRATEGY = _get_strategy()
+try:
+    from dotmd.core.config import Settings as _Settings
+    STRATEGY: str = _Settings().chunk_strategy
+except Exception:
+    # Fallback for environments where DOTMD_EMBEDDING_URL is not set at collection time.
+    STRATEGY = "heading_512_50"
 # The actual vec_meta table suffix is derived from the pipeline's embedding
 # model name.  Default model is BAAI/bge-small-en-v1.5 → suffix bge_small_en_v1.
 # We discover the table name at runtime via sqlite_master queries instead of

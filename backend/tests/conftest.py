@@ -55,6 +55,10 @@ def _dotmd_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setenv("DOTMD_EMBEDDING_URL", "http://test-tei:8088")
     monkeypatch.setenv("DOTMD_EXTRACT_DEPTH", "structural")
+    # Force local embedded graph — never touch production FalkorDB.
+    # Fallback guard: even if graph_backend slips to falkordb, the URL points nowhere.
+    monkeypatch.setenv("DOTMD_GRAPH_BACKEND", "ladybugdb")
+    monkeypatch.setenv("DOTMD_FALKORDB_URL", "redis://127.0.0.1:1")
 
 
 @pytest.fixture(autouse=True)

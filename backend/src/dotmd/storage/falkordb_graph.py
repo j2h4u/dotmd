@@ -191,6 +191,63 @@ class FalkorDBGraphStore:
             },
         )
 
+    # -- batch write --------------------------------------------------------
+
+    def batch_add_section_nodes(self, sections: list[dict]) -> None:
+        """Upsert Section nodes via UNWIND — one round-trip for the whole batch."""
+        if not sections:
+            return
+        self._graph.query(
+            "UNWIND $rows AS row "
+            "MERGE (s:Section {id: row.chunk_id}) "
+            "SET s.heading = row.heading, s.level = row.level, "
+            "s.file_path = row.file_path, s.text_preview = row.text_preview",
+            params={"rows": sections},
+        )
+
+    def batch_add_entity_nodes(self, entities: list[dict]) -> None:
+        """Upsert Entity nodes via UNWIND — one round-trip for the whole batch."""
+        if not entities:
+            return
+        self._graph.query(
+            "UNWIND $rows AS row "
+            "MERGE (e:Entity {id: row.name}) "
+            "SET e.type = row.entity_type, e.source = row.source",
+            params={"rows": entities},
+        )
+
+    def batch_add_tag_nodes(self, tags: list[str]) -> None:
+        """Upsert Tag nodes via UNWIND — one round-trip for the whole batch."""
+        if not tags:
+            return
+        self._graph.query(
+            "UNWIND $ids AS id MERGE (t:Tag {id: id})",
+            params={"ids": tags},
+        )
+
+    def batch_add_file_nodes(self, files: list[dict]) -> None:
+        """Upsert File nodes via UNWIND — one round-trip for the whole batch."""
+        if not files:
+            return
+        self._graph.query(
+            "UNWIND $rows AS row "
+            "MERGE (f:File {id: row.file_path}) "
+            "SET f.title = row.title",
+            params={"rows": files},
+        )
+
+    def batch_add_edges(self, edges: list[dict]) -> None:
+        """Upsert directed edges via UNWIND — one round-trip for the whole batch."""
+        if not edges:
+            return
+        self._graph.query(
+            "UNWIND $rows AS row "
+            "MATCH (a {id: row.source_id}), (b {id: row.target_id}) "
+            "MERGE (a)-[r:REL]->(b) "
+            "SET r.rel_type = row.relation_type, r.weight = row.weight",
+            params={"rows": edges},
+        )
+
     # -- queries ------------------------------------------------------------
 
     def get_neighbors(

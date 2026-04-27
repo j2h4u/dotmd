@@ -860,9 +860,11 @@ class IndexingPipeline:
         self._vec_components.store(
             self._meta_entity_id(file_info.path), "meta", e_meta
         )
-        # Write e_fused to vec0 (add_chunks commits internally)
+        # Write e_fused to vec0 (add_chunks commits internally).
+        # overwrite=False: _holder_aware_chunk_cleanup already removed orphan vec_meta rows.
+        # Full-table wipe would destroy shared chunks still held by other files.
         self._vector_store.add_chunks(
-            chunks, e_fused_vectors, overwrite=True,
+            chunks, e_fused_vectors, overwrite=False,
             text_hashes=text_hashes if text_hashes else None,
         )
         # Save meta fingerprint
@@ -992,6 +994,7 @@ class IndexingPipeline:
 
         # File nodes — read frontmatter for proper title (not just filename)
         # Phase 16: Chunk has file_paths list; collect all unique paths across all chunks.
+        file_rows = []
         for fp in sorted({str(p) for c in all_chunks for p in c.file_paths}):
             title = Path(fp).stem
             try:
@@ -1000,43 +1003,52 @@ class IndexingPipeline:
                 title = frontmatter.get("title", title)
             except OSError:
                 pass
-            self._graph_store.add_file_node(
-                file_path=fp, title=str(title),
-            )
+            file_rows.append({"file_path": fp, "title": str(title)})
+        self._graph_store.batch_add_file_nodes(file_rows)
 
         # Section nodes + CONTAINS edges
         # Phase 16: chunk may have multiple file_paths; use first for graph node.
-        for chunk in all_chunks:
-            _primary_fp = str(chunk.file_paths[0]) if chunk.file_paths else ""
-            self._graph_store.add_section_node(
-                chunk_id=chunk.chunk_id,
-                heading=chunk.heading,
-                level=chunk.level,
-                file_path=_primary_fp,
-                text_preview=chunk.text[:200],
-            )
-            self._graph_store.add_edge(
-                source_id=_primary_fp,
-                target_id=chunk.chunk_id,
-                relation_type=RelationType.CONTAINS,
-            )
+        section_rows = [
+            {
+                "chunk_id": c.chunk_id,
+                "heading": c.heading,
+                "level": c.level,
+                "file_path": str(c.file_paths[0]) if c.file_paths else "",
+                "text_preview": c.text[:200],
+            }
+            for c in all_chunks
+        ]
+        contains_edges = [
+            {
+                "source_id": str(c.file_paths[0]) if c.file_paths else "",
+                "target_id": c.chunk_id,
+                "relation_type": RelationType.CONTAINS,
+                "weight": 1.0,
+            }
+            for c in all_chunks
+        ]
+        self._graph_store.batch_add_section_nodes(section_rows)
+        self._graph_store.batch_add_edges(contains_edges)
 
         # Extraction + entity/relation nodes and edges
         extraction = self._run_extraction(all_chunks)
-        for entity in extraction.entities:
-            if entity.type == "tag":
-                self._graph_store.add_tag_node(entity.name)
-            else:
-                self._graph_store.add_entity_node(
-                    name=entity.name, entity_type=entity.type, source=entity.source,
-                )
-        for relation in extraction.relations:
-            self._graph_store.add_edge(
-                source_id=relation.source_id,
-                target_id=relation.target_id,
-                relation_type=relation.relation_type,
-                weight=relation.weight,
-            )
+        tag_names = [e.name for e in extraction.entities if e.type == "tag"]
+        entity_rows = [
+            {"name": e.name, "entity_type": e.type, "source": e.source}
+            for e in extraction.entities if e.type != "tag"
+        ]
+        relation_edges = [
+            {
+                "source_id": r.source_id,
+                "target_id": r.target_id,
+                "relation_type": r.relation_type,
+                "weight": r.weight,
+            }
+            for r in extraction.relations
+        ]
+        self._graph_store.batch_add_tag_nodes(tag_names)
+        self._graph_store.batch_add_entity_nodes(entity_rows)
+        self._graph_store.batch_add_edges(relation_edges)
 
         logger.info(
             "reindex_graph: %d chunks, %d entities, %d relations",
@@ -1908,6 +1920,9 @@ class IndexingPipeline:
         Kind-specific extraction (e.g. ``participants`` for meeting_transcript)
         follows the same principle: structured fields have known semantics.
         """
+        entity_rows: list[dict] = []
+        edge_rows: list[dict] = []
+
         for fi in files:
             if not fi.frontmatter:
                 continue
@@ -1924,14 +1939,13 @@ class IndexingPipeline:
                 else:
                     entity_type = EntityType.TAG
                     name = tag_str
-                self._graph_store.add_entity_node(
-                    name=name, entity_type=entity_type, source="frontmatter",
-                )
-                self._graph_store.add_edge(
-                    source_id=file_path_str,
-                    target_id=name,
-                    relation_type=RelationType.HAS_TAG,
-                )
+                entity_rows.append({"name": name, "entity_type": entity_type, "source": "frontmatter"})
+                edge_rows.append({
+                    "source_id": file_path_str,
+                    "target_id": name,
+                    "relation_type": RelationType.HAS_TAG,
+                    "weight": 1.0,
+                })
 
             # --- Kind-specific metadata ---------------------------------
             if fi.kind == DocKind.MEETING_TRANSCRIPT:
@@ -1940,14 +1954,18 @@ class IndexingPipeline:
                     p_name = str(p).strip()
                     if not p_name:
                         continue
-                    self._graph_store.add_entity_node(
-                        name=p_name, entity_type=EntityType.PERSON, source="frontmatter",
-                    )
-                    self._graph_store.add_edge(
-                        source_id=file_path_str,
-                        target_id=p_name,
-                        relation_type="HAS_PARTICIPANT",
-                    )
+                    entity_rows.append({"name": p_name, "entity_type": EntityType.PERSON, "source": "frontmatter"})
+                    edge_rows.append({
+                        "source_id": file_path_str,
+                        "target_id": p_name,
+                        "relation_type": "HAS_PARTICIPANT",
+                        "weight": 1.0,
+                    })
+
+        if entity_rows:
+            self._graph_store.batch_add_entity_nodes(entity_rows)
+        if edge_rows:
+            self._graph_store.batch_add_edges(edge_rows)
 
     def _populate_graph(
         self,
@@ -1956,44 +1974,49 @@ class IndexingPipeline:
         extraction: _ExtractionBundle,
     ) -> None:
         """Add entity/file/section nodes and edges to graph store."""
-        for entity in extraction.entities:
-            if entity.type == "tag":
-                self._graph_store.add_tag_node(entity.name)
-            else:
-                self._graph_store.add_entity_node(
-                    name=entity.name,
-                    entity_type=entity.type,
-                    source=entity.source,
-                )
-        for file_info in files:
-            self._graph_store.add_file_node(
-                file_path=str(file_info.path),
-                title=file_info.title,
-            )
+        tag_names = [e.name for e in extraction.entities if e.type == "tag"]
+        entity_rows = [
+            {"name": e.name, "entity_type": e.type, "source": e.source}
+            for e in extraction.entities if e.type != "tag"
+        ]
+        file_rows = [
+            {"file_path": str(fi.path), "title": fi.title}
+            for fi in files
+        ]
         # Phase 16: use first file_path for graph node (primary path).
-        for chunk in chunks:
-            _primary_fp = str(chunk.file_paths[0]) if chunk.file_paths else ""
-            self._graph_store.add_section_node(
-                chunk_id=chunk.chunk_id,
-                heading=chunk.heading,
-                level=chunk.level,
-                file_path=_primary_fp,
-                text_preview=chunk.text[:200],
-            )
-        for relation in extraction.relations:
-            self._graph_store.add_edge(
-                source_id=relation.source_id,
-                target_id=relation.target_id,
-                relation_type=relation.relation_type,
-                weight=relation.weight,
-            )
-        for chunk in chunks:
-            _primary_fp = str(chunk.file_paths[0]) if chunk.file_paths else ""
-            self._graph_store.add_edge(
-                source_id=_primary_fp,
-                target_id=chunk.chunk_id,
-                relation_type=RelationType.CONTAINS,
-            )
+        section_rows = [
+            {
+                "chunk_id": c.chunk_id,
+                "heading": c.heading,
+                "level": c.level,
+                "file_path": str(c.file_paths[0]) if c.file_paths else "",
+                "text_preview": c.text[:200],
+            }
+            for c in chunks
+        ]
+        edge_rows = [
+            {
+                "source_id": r.source_id,
+                "target_id": r.target_id,
+                "relation_type": r.relation_type,
+                "weight": r.weight,
+            }
+            for r in extraction.relations
+        ]
+        edge_rows += [
+            {
+                "source_id": str(c.file_paths[0]) if c.file_paths else "",
+                "target_id": c.chunk_id,
+                "relation_type": RelationType.CONTAINS,
+                "weight": 1.0,
+            }
+            for c in chunks
+        ]
+        self._graph_store.batch_add_tag_nodes(tag_names)
+        self._graph_store.batch_add_entity_nodes(entity_rows)
+        self._graph_store.batch_add_file_nodes(file_rows)
+        self._graph_store.batch_add_section_nodes(section_rows)
+        self._graph_store.batch_add_edges(edge_rows)
 
     # ------------------------------------------------------------------
     # Fingerprint management
@@ -2285,23 +2308,26 @@ class IndexingPipeline:
             # 2. Wipe vec_components (stale e_text BLOBs)
             _wipe_step = 2
             self._vec_components.delete_all()
-            # 3. Wipe vec0 + vec_meta (SQLiteVecVectorStore.delete_all handles both)
+            # 3. Wipe knowledge graph (stale nodes/edges from old schema)
             _wipe_step = 3
-            self._vector_store.delete_all()
-            # 4. Clear chunk_tracker
+            self._graph_store.delete_all()
+            # 4. Wipe vec0 + vec_meta (SQLiteVecVectorStore.delete_all handles both)
             _wipe_step = 4
-            self._chunk_tracker.clear()
-            # 5. Clear meta_tracker
+            self._vector_store.delete_all()
+            # 5. Clear chunk_tracker
             _wipe_step = 5
-            self._meta_tracker.clear()
-            # 6. Clear stored weights sentinel (re-written by _check_weights_changed)
+            self._chunk_tracker.clear()
+            # 6. Clear meta_tracker
             _wipe_step = 6
+            self._meta_tracker.clear()
+            # 7. Clear stored weights sentinel (re-written by _check_weights_changed)
+            _wipe_step = 7
             self._conn.execute(
                 f"DELETE FROM {config_table} WHERE key = 'weights_used'"
             )
             self._conn.commit()
-            # 7. Write final sentinel (marks clean state — replaces WIPE_IN_PROGRESS)
-            _wipe_step = 7
+            # 8. Write final sentinel (marks clean state — replaces WIPE_IN_PROGRESS)
+            _wipe_step = 8
             self._conn.execute(
                 f"INSERT OR REPLACE INTO {config_table} (key, value) VALUES ('schema_version', ?)",
                 (self.SCHEMA_VERSION,),

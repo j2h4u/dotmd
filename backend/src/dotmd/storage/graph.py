@@ -143,6 +143,43 @@ class LadybugDBGraphStore:
                 parameters={"id": name},
             )
 
+    # -- batch write (sequential fallback — LadybugDB has no UNWIND) --------
+
+    def batch_add_section_nodes(self, sections: list[dict]) -> None:
+        for s in sections:
+            self.add_section_node(
+                chunk_id=s["chunk_id"],
+                heading=s["heading"],
+                level=s["level"],
+                file_path=s["file_path"],
+                text_preview=s["text_preview"],
+            )
+
+    def batch_add_entity_nodes(self, entities: list[dict]) -> None:
+        for e in entities:
+            self.add_entity_node(
+                name=e["name"],
+                entity_type=e["entity_type"],
+                source=e["source"],
+            )
+
+    def batch_add_tag_nodes(self, tags: list[str]) -> None:
+        for tag in tags:
+            self.add_tag_node(tag)
+
+    def batch_add_file_nodes(self, files: list[dict]) -> None:
+        for f in files:
+            self.add_file_node(file_path=f["file_path"], title=f["title"])
+
+    def batch_add_edges(self, edges: list[dict]) -> None:
+        for e in edges:
+            self.add_edge(
+                source_id=e["source_id"],
+                target_id=e["target_id"],
+                relation_type=e["relation_type"],
+                weight=e.get("weight", 1.0),
+            )
+
     # -- edge creation ------------------------------------------------------
 
     def add_edge(

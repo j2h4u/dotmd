@@ -1,37 +1,52 @@
-"""Smoke test for API response structure (TEST-05)."""
+"""Smoke test for MCP search response structure (TEST-05)."""
 
-import httpx
 import pytest
 
-pytestmark = [pytest.mark.smoke, pytest.mark.usefixtures("ensure_indexed")]
+from tests.smoke.conftest import is_tool_error, tool_call, tool_result
+
+pytestmark = pytest.mark.smoke
 
 
 class TestAPI:
-    """API returns well-formed responses."""
+    """MCP search returns well-formed responses."""
 
-    def test_search_returns_valid_json(self, client: httpx.Client):
-        """TEST-05: Search endpoint returns HTTP 200 with valid JSON structure."""
-        r = client.get("/search", params={"q": "test", "top_k": 3})
-        assert r.status_code == 200
+    def test_search_returns_results(self):
+        """TEST-05: search tool returns a list with at least one result."""
+        data = tool_call("search", {"query": "test", "top_k": 3})
+        assert not is_tool_error(data), f"search returned error: {data}"
+        results = tool_result(data)
+        assert isinstance(results, list)
+        assert len(results) > 0, "search returned no results"
 
-        data = r.json()
+    def test_result_has_required_fields(self):
+        """Each search result has the expected fields."""
+        data = tool_call("search", {"query": "test", "top_k": 3})
+        results = tool_result(data)
+        if not results:
+            pytest.skip("no results to check fields")
+        result = results[0]
+        for field in ("file_paths", "heading", "snippet", "score"):
+            assert field in result, f"missing field: {field!r}"
 
-        # Top-level fields
-        assert "query" in data
-        assert "results" in data
-        assert "count" in data
-        assert isinstance(data["results"], list)
-        assert data["count"] == len(data["results"])
+    def test_score_is_float_in_range(self):
+        data = tool_call("search", {"query": "test", "top_k": 3})
+        results = tool_result(data)
+        if not results:
+            pytest.skip("no results to check")
+        score = results[0]["score"]
+        assert isinstance(score, float), f"score must be float, got {type(score)}"
+        assert 0.0 <= score <= 1.0, f"score out of range: {score}"
 
-        # Per-result structure (if results exist)
-        if data["results"]:
-            result = data["results"][0]
-            assert "chunk_id" in result
-            assert "file_path" in result
-            assert "snippet" in result
-            assert "fused_score" in result
-            assert isinstance(result["fused_score"], (int, float))
-            assert result["fused_score"] > 0
-            assert "matched_engines" in result
-            assert isinstance(result["matched_engines"], list)
-            assert len(result["matched_engines"]) > 0
+    def test_file_paths_is_list_of_strings(self):
+        data = tool_call("search", {"query": "test", "top_k": 3})
+        results = tool_result(data)
+        if not results:
+            pytest.skip("no results to check")
+        fps = results[0]["file_paths"]
+        assert isinstance(fps, list)
+        assert all(isinstance(p, str) for p in fps)
+
+    def test_top_k_respected(self):
+        data = tool_call("search", {"query": "test", "top_k": 2})
+        results = tool_result(data)
+        assert len(results) <= 2, f"top_k=2 but got {len(results)} results"

@@ -1,24 +1,25 @@
 """Smoke test for hybrid fusion (TEST-04)."""
 
-import httpx
 import pytest
 
-pytestmark = [pytest.mark.smoke, pytest.mark.usefixtures("ensure_indexed")]
+from tests.smoke.conftest import tool_call, tool_result
+
+pytestmark = pytest.mark.smoke
 
 
 class TestHybridFusion:
-    """Hybrid mode fuses results from multiple engines."""
+    """Search fuses results from multiple engines."""
 
-    def test_hybrid_combines_multiple_engines(self, client: httpx.Client):
-        """TEST-04: Hybrid returns results from at least 2 engines."""
-        r = client.get("/search", params={"q": "test", "top_k": 50, "mode": "hybrid"})
-        assert r.status_code == 200
-        data = r.json()
-        assert data["count"] > 0, "Hybrid search returned no results"
+    def test_search_returns_multi_engine_results(self):
+        """TEST-04: search returns results hit by at least 2 distinct engines."""
+        data = tool_call("search", {"query": "test", "top_k": 50})
+        results = tool_result(data)
+        assert len(results) > 0, "search returned no results"
 
-        all_engines = set()
-        for result in data["results"]:
-            all_engines.update(result["matched_engines"])
+        all_engines: set[str] = set()
+        for r in results:
+            engines = r.get("matched_engines") or []
+            all_engines.update(engines)
 
         assert len(all_engines) >= 2, (
             f"Expected results from >= 2 engines, got only: {all_engines}"

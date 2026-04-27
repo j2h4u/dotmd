@@ -256,6 +256,82 @@ class GraphStoreProtocol(Protocol):
         """Return sorted entity names mentioned in sections belonging to file_path."""
         return []
 
+    # -- batch write helpers -----------------------------------------------
+    # Default implementations loop over the individual methods.
+    # Backends with native batch support (e.g. FalkorDB UNWIND) override these.
+
+    def batch_add_section_nodes(self, sections: list[dict]) -> None:
+        """Upsert Section nodes in bulk.
+
+        Parameters
+        ----------
+        sections:
+            List of dicts with keys ``chunk_id``, ``heading``, ``level``,
+            ``file_path``, ``text_preview``.
+        """
+        for s in sections:
+            self.add_section_node(
+                chunk_id=s["chunk_id"],
+                heading=s["heading"],
+                level=s["level"],
+                file_path=s["file_path"],
+                text_preview=s["text_preview"],
+            )
+
+    def batch_add_entity_nodes(self, entities: list[dict]) -> None:
+        """Upsert Entity nodes in bulk.
+
+        Parameters
+        ----------
+        entities:
+            List of dicts with keys ``name``, ``entity_type``, ``source``.
+        """
+        for e in entities:
+            self.add_entity_node(
+                name=e["name"],
+                entity_type=e["entity_type"],
+                source=e["source"],
+            )
+
+    def batch_add_tag_nodes(self, tags: list[str]) -> None:
+        """Upsert Tag nodes in bulk.
+
+        Parameters
+        ----------
+        tags:
+            List of tag name strings.
+        """
+        for tag in tags:
+            self.add_tag_node(tag)
+
+    def batch_add_file_nodes(self, files: list[dict]) -> None:
+        """Upsert File nodes in bulk.
+
+        Parameters
+        ----------
+        files:
+            List of dicts with keys ``file_path``, ``title``.
+        """
+        for f in files:
+            self.add_file_node(file_path=f["file_path"], title=f["title"])
+
+    def batch_add_edges(self, edges: list[dict]) -> None:
+        """Upsert directed edges in bulk.
+
+        Parameters
+        ----------
+        edges:
+            List of dicts with keys ``source_id``, ``target_id``,
+            ``relation_type``, and optional ``weight`` (default ``1.0``).
+        """
+        for e in edges:
+            self.add_edge(
+                source_id=e["source_id"],
+                target_id=e["target_id"],
+                relation_type=e["relation_type"],
+                weight=e.get("weight", 1.0),
+            )
+
     def delete_all(self) -> None:
         """Remove **all** nodes and edges from the graph."""
         ...
