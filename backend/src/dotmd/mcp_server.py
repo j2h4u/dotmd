@@ -55,16 +55,18 @@ def _get_service() -> DotMDService:
 
 
 def _init_for_stdio() -> None:
-    """Initialize service for the stdio transport path (no trickle).
+    """Initialize service for the stdio transport path (no trickle, no warmup).
 
     The stdio entry point (``dotmd mcp``) calls ``mcp_app.run()`` directly,
     bypassing ``create_app()``.  Call this before ``mcp_app.run()`` to set up
     the service so tool handlers can reach it via ``_get_service()``.
+
+    Warmup is intentionally skipped: it blocks for 10-15s while loading ML
+    models, which causes MCP clients (Claude Desktop) to timeout before the
+    ``initialize`` handshake completes.  Models load lazily on first use.
     """
     global _service  # noqa: PLW0603
-    svc = DotMDService(Settings())
-    svc.warmup()
-    _service = svc
+    _service = DotMDService(Settings())
 
 
 def create_app() -> Starlette:
