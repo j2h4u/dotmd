@@ -324,6 +324,58 @@ FastMCP поддерживает `Context.session.send_tool_list_changed()`. В 
 
 ---
 
+### Phase 999.14: Migrate vector store from sqlite-vec to pgvector — shared Postgres service (BACKLOG)
+
+**Goal:** Replace sqlite-vec with pgvector for native UPDATE semantics on vector components (e_text, e_meta, e_fused). Enables clean N-vector component updates without DELETE+INSERT choreography.
+
+**Context 2026-04-27:** Evaluated during Phase 999.12 design. Decision: stay on sqlite-vec for now (all vectors rebuilt anyway on 999.12 deploy; DELETE+INSERT for ~8 rows/file is not meaningful overhead; atomic transactions with FTS5/metadata in single index.db is a real advantage). Revisit if performance issues arise at scale.
+
+**Prerequisite:** voiceprint-postgres (`pgvector/pgvector:pg18`) is already running on senbonzakura but belongs to voiceprint service. Before dotmd can adopt pgvector, Postgres must be extracted into a shared service (`shared-postgres`) independent of voiceprint. Both voiceprint and dotmd then connect to the shared instance.
+
+**Migration scope:**
+- Extract `voiceprint-postgres` → `shared-postgres` standalone Docker service
+- Implement `PgVectorVectorStore` adapter (existing `VectorStoreProtocol` abstraction makes this clean)
+- Full index rebuild required (no vector portability from sqlite-vec)
+- FTS5 and metadata stay in SQLite (pgvector handles vectors only)
+- Transactions across vector updates and metadata/FTS5 updates become eventually-consistent (currently atomic)
+
+**Trigger:** Performance issues with sqlite-vec at scale, or when N-vector component updates become a meaningful operational pain.
+
+**Plans:**
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+---
+
+### Phase 999.15: Автокалибровка весов фьюзинга через кросс-энкодер (BACKLOG)
+
+**Goal:** Автоматически подбирать веса `DOTMD_EMBEDDING_WEIGHTS` без ручной разметки, используя кросс-энкодер как оракул качества.
+
+**Mechanism:** По накопленному журналу запросов (`search_log` в index.db, введён в Phase 999.12): взять N последних запросов → для каждого прогнать топ-K результатов через cross-encoder reranker → получить "правильный" ranking → sweep весов → выбрать веса при которых e_fused ranking ближе всего к reranker ranking → записать лучшие веса в `vec_config` → пересчитать e_fused (локальная математика, секунды) → применить.
+
+**Depends on:** Phase 999.12 (query logging + N-vector scheme)
+
+**Trigger:** Накоплено достаточно запросов в `search_log` для статистически значимого sweep (~100+ запросов).
+
+**Plans:**
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+---
+
+### Phase 999.16: Автокалибровка весов через межмодульное согласие (BACKLOG)
+
+**Goal:** Использовать согласие между semantic + FTS5 + graph как несупервизированный сигнал качества для калибровки весов фьюзинга.
+
+**Mechanism:** Когда все три движка возвращают один результат в топе — это сильный сигнал что результат правильный. Использовать эти "consensus hits" для оценки качества разных весов без единой размеченной метки.
+
+**Depends on:** Phase 999.12 (query logging)
+
+**Note:** Более шумный сигнал чем кросс-энкодер (999.15). Полезен как дополнительная валидация или когда reranker недоступен.
+
+**Plans:**
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+---
+
 ### Future ideas:
 - Semantic chunking (split by topic similarity, not just structure)
 - Doc-level chunks (whole-document embeddings for broad queries)
