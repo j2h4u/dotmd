@@ -653,8 +653,7 @@ class IndexingPipeline:
         Canonical form: absolute, symlink-resolved POSIX path string.
         Equivalent to str(pathlib.Path(path).resolve()).
 
-        (Addresses Codex HIGH Cycle 3 concern: centralize meta entity_id generation
-        so every GET call site uses the identical canonical form as the store call.)
+        Every GET call site must use the identical canonical form as the store call.
 
         Call sites that MUST use this helper:
           - _embed_meta_component()         — stores meta component
@@ -687,7 +686,6 @@ class IndexingPipeline:
         Raises ValueError if e_text and e_meta have different dimensions.
         Silent truncation would be data corruption: both vectors must come from
         the same TEI model with the same output dimension.
-        (Addresses Codex MEDIUM review concern: raise on mismatch, do not truncate.)
         """
         if len(e_text) != len(e_meta):
             raise ValueError(
@@ -710,7 +708,6 @@ class IndexingPipeline:
 
         Entity_id always obtained via _meta_entity_id() — the single canonical path
         normalizer. Never call str(Path(...).resolve()) directly at a store/get site.
-        (Addresses Codex HIGH Cycle 3 concern: centralize meta entity_id generation.)
         """
         title = file_info.frontmatter.get("title", "") if file_info.frontmatter else ""
         tags = file_info.frontmatter.get("tags", []) if file_info.frontmatter else []
@@ -751,7 +748,6 @@ class IndexingPipeline:
 
         _index_file_embed() is the SINGLE transaction owner for embed→fuse→store.
         _ingest_and_finalize() owns chunking/FTS/graph — they are separate.
-        (Addresses OpenCode HIGH-3 Cycle 3: call site was undefined.)
 
         ``chunks=[]`` is valid: when the list is empty, chunks are loaded internally
         from metadata_store via ``_metadata_store.get_chunk_ids_by_file``. This path
@@ -803,7 +799,7 @@ class IndexingPipeline:
         weights = self._settings.parsed_embedding_weights
 
         # ── COMPUTE VECTORS OUTSIDE TRANSACTION (TEI calls must not hold SQLite lock) ──
-        # Two-phase design (addresses Codex HIGH Cycle 3: transaction scope):
+        # Two-phase design (transaction scope):
         #   Phase 1 — compute all vectors (TEI calls, cache reads) outside any transaction
         #   Phase 2 — atomically write all state inside BEGIN...COMMIT
         # This prevents long-held write locks during network I/O.
@@ -1208,7 +1204,7 @@ class IndexingPipeline:
         Updated in Phase 999.12: now computes separate e_text (per chunk) and
         e_meta (per file), fuses locally, writes e_fused to vec0.
 
-        Chunk-to-file grouping (addresses OpenCode HIGH-1 Cycle 3):
+        Chunk-to-file grouping:
         The M2M schema allows one chunk to appear in multiple files. For fusion,
         each chunk uses the e_meta of the FileInfo that owns it in this indexing
         run (keyed by chunk.file_paths[0] matching a file's path). When a chunk
@@ -1510,7 +1506,7 @@ class IndexingPipeline:
             t0 = time.perf_counter()
             _beacon("save+fts5")
             # Phase 16 M2M write path: INSERT OR IGNORE on chunks_* + M2M.
-            # For each chunk, check payload consistency on conflict (Review-HIGH-P3).
+            # For each chunk, check payload consistency on conflict.
             # Wrap the full per-file write loop in a single transaction so that
             # insert_chunk and add_file_path are atomic: a crash between the two
             # cannot leave a chunks_* row without a chunk_file_paths_* entry.
@@ -2077,8 +2073,6 @@ class IndexingPipeline:
             Both e_text and e_meta are stale (different model). Re-encode both via TEI.
             Do NOT read e_text from VecComponentStore — it was encoded by a different
             model and must not be used for fusion with the new model's e_meta.
-            (Addresses OpenCode HIGH-2 Cycle 3: prevents model-switch silently using
-            stale e_text from VecComponentStore.)
 
         model_switch=False — Cached e_text path (metadata-only equivalent):
             e_text in VecComponentStore is valid (same model, body unchanged).
@@ -2102,7 +2096,6 @@ class IndexingPipeline:
                 # ── MODEL SWITCH: full re-encoding (both e_text and e_meta stale) ──
                 # Do NOT use _embed_chunks() — it reads VecComponentStore (Layer 1) which
                 # contains e_text from the OLD model and would silently return stale vectors.
-                # (Addresses OpenCode HIGH-2 Cycle 3: bypass VecComponentStore for model switch.)
                 # Call encode_batch directly so all chunks go through TEI regardless of cache.
                 texts = [c.text for c in chunks]
                 e_text_vectors = self._semantic_engine.encode_batch(texts)
@@ -2316,7 +2309,6 @@ class IndexingPipeline:
         - Sentinel is updated ONLY if the recompute was complete (no files skipped due to
           missing components). Partial recompute leaves sentinel unchanged so the next
           startup detects the change and retries.
-          (Addresses Codex MEDIUM: do not update sentinel on partial recompute.)
 
         Stored weights are in vec_config key 'weights_used' (JSON string).
         """
