@@ -2081,8 +2081,16 @@ class IndexingPipeline:
 
             if model_switch:
                 # ── MODEL SWITCH: full re-encoding (both e_text and e_meta stale) ──
-                # Do NOT read VecComponentStore — stale e_text from old model
-                e_text_vectors, text_hashes = self._embed_chunks(chunks)  # TEI: all chunks
+                # Do NOT use _embed_chunks() — it reads VecComponentStore (Layer 1) which
+                # contains e_text from the OLD model and would silently return stale vectors.
+                # (Addresses OpenCode HIGH-2 Cycle 3: bypass VecComponentStore for model switch.)
+                # Call encode_batch directly so all chunks go through TEI regardless of cache.
+                texts = [c.text for c in chunks]
+                e_text_vectors = self._semantic_engine.encode_batch(texts)
+                text_hashes = {
+                    c.chunk_id: blake3.blake3(c.text.encode()).hexdigest()
+                    for c in chunks
+                }
                 e_meta = self._embed_meta_component(fi)                    # TEI: 1 call
                 e_fused_vectors = [
                     self._fuse_vectors(e_t, e_meta, weights) for e_t in e_text_vectors
