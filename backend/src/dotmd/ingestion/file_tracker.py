@@ -89,7 +89,8 @@ class FileTracker:
             ADR: Two-fingerprint architecture. Each tracker uses a different
             checksum function to detect different kinds of changes:
             - chunk_tracker uses ``chunk_checksum`` (body + kind) → re-chunking
-            - embed_tracker uses ``embed_checksum`` (body + kind + title + tags) → re-embedding + FTS5 + graph
+            - meta_tracker uses ``meta_checksum`` (title + tags) → 1 TEI call for
+              e_meta + local fusion recompute (Phase 999.12 dual-encoder)
             This lets metadata-only changes (title/tags) trigger the lighter
             embed path without unnecessary re-chunking.
         """

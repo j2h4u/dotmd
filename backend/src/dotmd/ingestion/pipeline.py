@@ -38,7 +38,8 @@ from dotmd.extraction.structural import StructuralExtractor
 import dotmd.ingestion.chunker as _chunker_module
 from dotmd.ingestion.content_handlers import get_handler
 from dotmd.ingestion.file_tracker import FileDiff, FileTracker
-from dotmd.ingestion.reader import chunk_checksum, discover_files, embed_checksum, parse_frontmatter, read_file
+from dotmd.ingestion.reader import chunk_checksum, meta_checksum, discover_files, parse_frontmatter, read_file
+from dotmd.storage.vec_components import VecComponentStore
 from dotmd.search.fts5 import FTS5SearchEngine
 from dotmd.search.semantic import SemanticSearchEngine
 from dotmd.storage.base import GraphStoreProtocol, VectorStoreProtocol
@@ -144,7 +145,7 @@ class IndexingPipeline:
         self._fts_table = f"chunks_fts_{strategy}"
         vec_table = f"vec_chunks_{strategy}{model_suffix}"
         chunk_fp_table = f"chunk_fingerprints_{strategy}"
-        embed_fp_table = f"embed_fingerprints_{strategy}{model_suffix}"
+        meta_fp_table = f"meta_fingerprints_{strategy}{model_suffix}"
 
         # -- storage backends --------------------------------------------------
         self._metadata_store = SQLiteMetadataStore(
@@ -171,14 +172,23 @@ class IndexingPipeline:
         # -- Two file trackers with different checksum formulas -----------------
         # ADR: Two-fingerprint architecture for granular change detection.
         # chunk_tracker: hash(body + kind) → detects content/kind changes → re-chunk
-        # embed_tracker: hash(body + kind + title + tags) → also detects metadata
-        #   changes → re-embed + FTS5 + graph (skip re-chunking)
+        # meta_tracker: hash(title + tags) → detects metadata-only changes →
+        #   1 TEI call (e_meta) + local fusion recompute (no body re-embed)
         # This prevents 26hr full reindex when only tags/title change.
         self._chunk_tracker = FileTracker(
             self._conn, table_name=chunk_fp_table, checksum_fn=chunk_checksum,
         )
-        self._embed_tracker = FileTracker(
-            self._conn, table_name=embed_fp_table, checksum_fn=embed_checksum,
+        self._meta_tracker = FileTracker(
+            self._conn, table_name=meta_fp_table, checksum_fn=meta_checksum,
+        )
+
+        # -- VecComponentStore: raw per-component embedding BLOBs ---------------
+        # Stores e_text (per chunk_id) and e_meta (per canonical file path)
+        # for the dual-encoder architecture. Authoritative e_text source for
+        # the metadata-only fast path and weight-change recompute.
+        vec_components_table = f"vec_components_{strategy}{model_suffix}"
+        self._vec_components = VecComponentStore(
+            conn=self._conn, table_name=vec_components_table,
         )
 
         # -- search engines (used for encoding during indexing) ----------------
@@ -280,7 +290,7 @@ class IndexingPipeline:
         if not diff.new and not diff.modified and not diff.deleted:
             # No chunk-level changes.  Still check if embed-only work needed
             # (e.g. after a model switch, all files need re-embedding).
-            embed_diff = self._embed_tracker.diff(files)
+            embed_diff = self._meta_tracker.diff(files)
             embed_needed = set(embed_diff.new) | set(embed_diff.modified)
             if not embed_needed:
                 logger.info("[%s] no changes — skipping (%.2fs total)", run_id, time.perf_counter() - t_start)
@@ -331,7 +341,7 @@ class IndexingPipeline:
         logger.info("All stores cleared")
 
     def drop_vectors(self) -> None:
-        """Drop vec tables + embed_fingerprints for current (strategy, model).
+        """Drop vec tables + meta_fingerprints for current (strategy, model).
 
         Removes only the vector-layer data.  Chunks, FTS5, and graph remain
         intact so BM25 and graph search continue to work.
@@ -342,12 +352,17 @@ class IndexingPipeline:
         vec_table = f"vec_chunks_{strategy}{model_suffix}"
         meta_table = f"vec_meta_{strategy}{model_suffix}"
         config_table = f"vec_config_{strategy}{model_suffix}"
-        embed_fp_table = f"embed_fingerprints_{strategy}{model_suffix}"
+        meta_fp_table = f"meta_fingerprints_{strategy}{model_suffix}"
+        vec_components_table = f"vec_components_{strategy}{model_suffix}"
 
         for table in (vec_table, meta_table, config_table):
             self._conn.execute(f"DROP TABLE IF EXISTS {table}")
         try:
-            self._conn.execute(f"DELETE FROM {embed_fp_table}")
+            self._conn.execute(f"DELETE FROM {meta_fp_table}")
+        except sqlite3.OperationalError:
+            pass  # table may not exist yet
+        try:
+            self._conn.execute(f"DELETE FROM {vec_components_table}")
         except sqlite3.OperationalError:
             pass  # table may not exist yet
         self._conn.commit()
@@ -383,11 +398,14 @@ class IndexingPipeline:
         except sqlite3.OperationalError:
             pass  # table may not exist
 
-        # 3. CASCADE: drop ALL vec_*_{strategy}_* and embed_fp_{strategy}_*
+        # 3. CASCADE: drop ALL vec_*_{strategy}_* and meta_fp_{strategy}_* tables.
         #    Discover tables via sqlite_master.
         prefix_vec = f"vec_chunks_{strategy}_"
         prefix_meta = f"vec_meta_{strategy}_"
         prefix_config = f"vec_config_{strategy}_"
+        prefix_meta_fp = f"meta_fingerprints_{strategy}_"
+        prefix_vec_components = f"vec_components_{strategy}_"
+        # Also handle legacy embed_fingerprints tables if present.
         prefix_embed_fp = f"embed_fingerprints_{strategy}_"
 
         tables_dropped = 0
@@ -399,6 +417,8 @@ class IndexingPipeline:
                 name.startswith(prefix_vec)
                 or name.startswith(prefix_meta)
                 or name.startswith(prefix_config)
+                or name.startswith(prefix_meta_fp)
+                or name.startswith(prefix_vec_components)
                 or name.startswith(prefix_embed_fp)
             ):
                 self._conn.execute(f"DROP TABLE IF EXISTS {name}")
@@ -422,101 +442,183 @@ class IndexingPipeline:
     # Embedding
     # ------------------------------------------------------------------
 
-    def _enrich_for_embedding(self, chunk: Chunk, fm_cache: dict[Path, dict]) -> str:
-        """Enrich chunk text for embedding using kind-appropriate handler.
-
-        Reads frontmatter from the source file (cached per-file) and
-        delegates to the handler's ``enrich`` function.
-        """
-        # Phase 16: Chunk.file_path → file_paths[0] (primary path).
-        file_path = chunk.file_paths[0] if chunk.file_paths else Path("/dev/null")
-        if file_path not in fm_cache:
-            try:
-                content = read_file(file_path)
-                fm_cache[file_path], _ = parse_frontmatter(content)
-            except OSError:
-                logger.warning("Cannot read %s for enrichment, embedding without metadata", file_path)
-                fm_cache[file_path] = {}
-        handler = get_handler(chunk.kind)
-        return handler.enrich(chunk.text, fm_cache[file_path])
-
     def _embed_chunks(
         self, chunks: list[Chunk],
     ) -> tuple[list[list[float]], dict[str, str]]:
-        """Embed chunks with context prefix injection and text_hash reuse.
+        """Embed chunk body text, return (e_text_vectors, text_hashes).
 
-        Each chunk's text is enriched via kind-appropriate handler before
-        encoding. The text_hash is computed on the ENRICHED text so that
-        cache reuse is correct (same text + same title = same embedding).
+        PURE: does not write to storage. Caller is responsible for storing
+        e_text in VecComponentStore and committing.
 
-        Returns ``(embeddings, text_hashes)`` where *text_hashes* maps
-        ``chunk_id → text_hash``.
+        text_hash = hash(chunk.text only) — no title/tags prefix.
+        Cross-strategy reuse: same chunk body in different strategies shares hash.
+
+        Cache ordering (three layers, innermost → outermost):
+          1. VecComponentStore get_batch(chunk_ids, 'text') — authoritative e_text source.
+             chunk_id is stable across metadata-only changes; body changes cause chunk_tracker
+             to re-chunk, assigning new chunk_ids, so stale e_text is never served.
+          2. embedding_cache.lookup(text_hashes) — global cache keyed by content hash.
+             Shared across strategies/models for same text content.
+          3. TEI encode_batch — computed from scratch.
+
+        NOTE: lookup_embeddings_by_text_hash() (sqlite_vec.py) is intentionally NOT used here.
+        That method JOINs vec_meta with vec0; post-Phase 999.12 vec0 stores e_fused (not e_text).
+        Using it here would return e_fused instead of e_text for shared-content chunks,
+        causing double-fusion and silent search quality degradation. VecComponentStore
+        is the correct authoritative source for e_text after Phase 999.12.
+
+        Returns:
+            e_text_vectors: list aligned with input chunks (no None values)
+            text_hashes: {chunk_id: text_hash}
         """
         if not chunks:
             return [], {}
 
-        # Enrich texts using kind-aware handlers (frontmatter cached per file)
-        fm_cache: dict[Path, dict] = {}
-        enriched_texts: dict[str, str] = {
-            c.chunk_id: self._enrich_for_embedding(c, fm_cache) for c in chunks
-        }
-
-        # text_hash on enriched text (prefix changes embedding → different hash)
+        # text_hash on raw chunk.text (no enrichment) — true cross-strategy reuse
         text_hashes: dict[str, str] = {
-            cid: blake3.blake3(text.encode()).hexdigest()
-            for cid, text in enriched_texts.items()
+            c.chunk_id: blake3.blake3(c.text.encode()).hexdigest()
+            for c in chunks
         }
 
-        # Lookup existing embeddings by text_hash (same model, any strategy)
-        existing: dict[str, list[float]] = {}
-        if hasattr(self._vector_store, "lookup_embeddings_by_text_hash"):
-            existing = self._vector_store.lookup_embeddings_by_text_hash(
-                list(text_hashes.values()),
-            )
+        # Layer 1: VecComponentStore e_text BLOB lookup (authoritative source)
+        # chunk_id is stable for unchanged body content, so this hit is always safe.
+        component_hits = self._vec_components.get_batch(
+            [c.chunk_id for c in chunks], "text"
+        )
 
-        # Global embedding cache lookup — fills misses from vec_meta only.
-        # setdefault() ensures vec_meta wins on overlap (never overwrites an existing hit).
-        global_hits = self._embedding_cache.lookup(list(text_hashes.values()))
-        for k, v in global_hits.items():
-            existing.setdefault(k, v)
+        # Layer 2: global embedding_cache (shared across strategies/models)
+        # Only look up hashes not already found in VecComponentStore.
+        missing_chunk_ids_for_cache = [
+            c.chunk_id for c in chunks if c.chunk_id not in component_hits
+        ]
+        missing_hashes = list({
+            text_hashes[cid] for cid in missing_chunk_ids_for_cache
+        })
+        global_hits: dict[str, list[float]] = {}
+        if missing_hashes:
+            global_hits = self._embedding_cache.lookup(missing_hashes)
 
         hits = 0
         to_encode_indices: list[int] = []
-        embeddings: list[list[float] | None] = [None] * len(chunks)
+        embeddings: list[list[float]] = []
 
         for i, chunk in enumerate(chunks):
-            th = text_hashes[chunk.chunk_id]
-            if th in existing:
-                embeddings[i] = existing[th]
+            if chunk.chunk_id in component_hits:
+                embeddings.append(component_hits[chunk.chunk_id])
                 hits += 1
             else:
-                to_encode_indices.append(i)
+                th = text_hashes[chunk.chunk_id]
+                if th in global_hits:
+                    embeddings.append(global_hits[th])
+                    hits += 1
+                else:
+                    embeddings.append([])  # placeholder; filled below
+                    to_encode_indices.append(i)
 
         if to_encode_indices:
-            texts_to_encode = [
-                enriched_texts[chunks[i].chunk_id] for i in to_encode_indices
-            ]
+            texts_to_encode = [chunks[i].text for i in to_encode_indices]
             new_embeddings = self._semantic_engine.encode_batch(texts_to_encode)
             for j, idx in enumerate(to_encode_indices):
                 embeddings[idx] = new_embeddings[j]
-
-            # Persist new embeddings to global cache. No commit here — deferred to caller
-            # (pipeline already commits after _vector_store.add_chunks()).
+            # Store new embeddings in global cache (no VecComponentStore write here — caller does it)
             for j, idx in enumerate(to_encode_indices):
                 th = text_hashes[chunks[idx].chunk_id]
                 self._embedding_cache.store(th, new_embeddings[j])
 
         total = len(chunks)
         logger.info(
-            "embed: %d chunks, %d cache hits (%.1f%%), %d computed",
-            total,
-            hits,
-            hits / total * 100 if total else 0,
-            len(to_encode_indices),
+            "embed_text: %d chunks, %d hits (%.1f%%), %d computed",
+            total, hits, hits / total * 100 if total else 0, len(to_encode_indices),
         )
 
-        # Type narrowing: all None slots are now filled.
-        return embeddings, text_hashes  # type: ignore[return-value]
+        return embeddings, text_hashes
+
+    # ------------------------------------------------------------------
+    # Pure helpers: normalization, fusion, meta encoding
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _meta_entity_id(path: str | Path) -> str:
+        """Return canonical entity_id for a file's meta component.
+
+        ALL VecComponentStore store/get calls for the 'meta' component MUST use
+        this helper — never raw str(path). This prevents silent normalization
+        divergence between bulk run() and trickle index_file() paths, which would
+        cause the metadata-only fast path to miss stored e_meta entries and fall
+        back to full re-embed.
+
+        Canonical form: absolute, symlink-resolved POSIX path string.
+        Equivalent to str(pathlib.Path(path).resolve()).
+
+        (Addresses Codex HIGH Cycle 3 concern: centralize meta entity_id generation
+        so every GET call site uses the identical canonical form as the store call.)
+
+        Call sites that MUST use this helper:
+          - _embed_meta_component()         — stores meta component
+          - _index_file_embed()             — reads meta component (fast path)
+          - _save_and_embed_chunks()        — stores and reads meta component
+          - _embed_existing_chunks()        — stores meta component (both sub-paths)
+          - reindex_vectors()               — stores meta component
+          - _check_weights_changed()        — reads meta component
+          - run() bulk embed loop           — stores meta component
+        """
+        return str(Path(path).resolve())
+
+    @staticmethod
+    def _normalize_vector(v: list[float]) -> list[float]:
+        """Normalize vector to unit length. Returns v unchanged if magnitude is 0."""
+        import math
+        mag = math.sqrt(sum(x * x for x in v))
+        return [x / mag for x in v] if mag > 0.0 else list(v)
+
+    def _fuse_vectors(
+        self,
+        e_text: list[float],
+        e_meta: list[float],
+        weights: dict[str, float],
+    ) -> list[float]:
+        """Compute e_fused = normalize(w_text*norm(e_text) + w_meta*norm(e_meta)).
+
+        Pure local computation — no TEI calls. stdlib math only (no numpy).
+
+        Raises ValueError if e_text and e_meta have different dimensions.
+        Silent truncation would be data corruption: both vectors must come from
+        the same TEI model with the same output dimension.
+        (Addresses Codex MEDIUM review concern: raise on mismatch, do not truncate.)
+        """
+        if len(e_text) != len(e_meta):
+            raise ValueError(
+                f"_fuse_vectors: dimension mismatch — "
+                f"e_text has {len(e_text)} dims, e_meta has {len(e_meta)} dims. "
+                f"Both must come from the same TEI model."
+            )
+        w_text = weights.get("text", 0.7)
+        w_meta = weights.get("meta", 0.3)
+        nt = self._normalize_vector(e_text)
+        nm = self._normalize_vector(e_meta)
+        raw = [w_text * a + w_meta * b for a, b in zip(nt, nm)]
+        return self._normalize_vector(raw)
+
+    def _embed_meta_component(self, file_info: FileInfo) -> list[float]:
+        """Encode title+tags for a file into e_meta. 1 TEI call per file.
+
+        Does NOT commit. Caller is transaction-owner.
+        Stores result in VecComponentStore keyed by (_meta_entity_id(file_info.path), 'meta').
+
+        Entity_id always obtained via _meta_entity_id() — the single canonical path
+        normalizer. Never call str(Path(...).resolve()) directly at a store/get site.
+        (Addresses Codex HIGH Cycle 3 concern: centralize meta entity_id generation.)
+        """
+        title = file_info.frontmatter.get("title", "") if file_info.frontmatter else ""
+        tags = file_info.frontmatter.get("tags", []) if file_info.frontmatter else []
+        tags = tags or []
+        tags_str = ", ".join(str(t) for t in tags) if tags else ""
+        meta_text = f"{title} {tags_str}".strip() or str(title) or ""
+        result = self._semantic_engine.encode_batch([meta_text])
+        e_meta = result[0]
+        # Use _meta_entity_id() — the single canonical path normalizer for meta component
+        self._vec_components.store(self._meta_entity_id(file_info.path), "meta", e_meta)
+        return e_meta
 
     # ------------------------------------------------------------------
     # Granular reindex (rebuild one store from metadata chunks)
@@ -631,7 +733,7 @@ class IndexingPipeline:
         """
         self.drop_vectors()
         self._chunk_tracker.clear()
-        self._embed_tracker.clear()
+        self._meta_tracker.clear()
         # Clear FTS5 content before re-indexing (safety net against duplicates).
         try:
             self._conn.execute(f"DELETE FROM {self._fts_table}")
@@ -673,7 +775,7 @@ class IndexingPipeline:
         unchanged_files = [fi for fi in all_files if str(fi.path) not in changed_paths and str(fi.path) not in set(diff.deleted)]
         embed_only_files: list[FileInfo] = []
         if unchanged_files:
-            embed_diff = self._embed_tracker.diff(unchanged_files)
+            embed_diff = self._meta_tracker.diff(unchanged_files)
             embed_needed = set(embed_diff.new) | set(embed_diff.modified)
             if embed_needed:
                 embed_only_files = [fi for fi in unchanged_files if str(fi.path) in embed_needed]
@@ -832,10 +934,10 @@ class IndexingPipeline:
     def _save_all_fingerprints(
         self, files: list[FileInfo], run_id: str,
     ) -> None:
-        """Save chunk + embed fingerprints after successful ingestion."""
+        """Save chunk + meta fingerprints after successful ingestion."""
         t0 = time.perf_counter()
         self._update_chunk_fingerprints(files)
-        self._update_embed_fingerprints(files)
+        self._update_meta_fingerprints(files)
         logger.info("[%s] fingerprints: %d files (%.2fs)", run_id, len(files), time.perf_counter() - t0)
 
     def _rebuild_acronyms(self, run_id: str) -> list[Chunk]:
@@ -1100,15 +1202,15 @@ class IndexingPipeline:
             chunks = []
 
         # --- Phase 2: Embed + metadata refresh ---
-        # ADR: embed_tracker uses embed_checksum (body+kind+title+tags).
-        # When only title/tags changed (chunk_diff=unchanged, embed_diff=modified),
+        # ADR: meta_tracker uses meta_checksum (title+tags only).
+        # When only title/tags changed (chunk_diff=unchanged, meta_diff=modified),
         # we skip re-chunking but still re-embed, update FTS5 columns, and
         # refresh graph metadata. This is the "lightweight metadata update" path.
         metadata_only = False
         if not needs_embed:
-            embed_diff = self._embed_tracker.diff([file_info])
+            meta_diff = self._meta_tracker.diff([file_info])
             needs_embed = (
-                path_str in embed_diff.new or path_str in embed_diff.modified
+                path_str in meta_diff.new or path_str in meta_diff.modified
             )
             metadata_only = needs_embed
 
@@ -1143,7 +1245,7 @@ class IndexingPipeline:
                     )
 
             _beacon("fingerprint")
-            self._save_embed_fingerprint(file_info)
+            self._save_meta_fingerprint(file_info)
 
         _beacon("idle")
         t_total = time.perf_counter() - t_file
@@ -1302,7 +1404,7 @@ class IndexingPipeline:
         # Fingerprints: keyed on file_path, safe to remove unconditionally.
         try:
             self._chunk_tracker.remove_fingerprint(file_path)
-            self._embed_tracker.remove_fingerprint(file_path)
+            self._meta_tracker.remove_fingerprint(file_path)
         except Exception as e:  # noqa: BLE001
             logger.warning(
                 "fingerprint cleanup failed after DB commit: %s (file=%s)", e, file_path,
@@ -1543,9 +1645,9 @@ class IndexingPipeline:
         """Save a file fingerprint using the tracker's checksum function.
 
         ADR: Each tracker has its own checksum formula (injected at construction).
-        chunk_tracker uses chunk_checksum (body+kind), embed_tracker uses
-        embed_checksum (body+kind+title+tags). This method delegates to the
-        tracker's formula so fingerprints match the diff() comparison.
+        chunk_tracker uses chunk_checksum (body+kind), meta_tracker uses
+        meta_checksum (title+tags). This method delegates to the tracker's
+        formula so fingerprints match the diff() comparison.
         """
         try:
             stat = fi.path.stat()
@@ -1560,18 +1662,18 @@ class IndexingPipeline:
     def _save_chunk_fingerprint(self, fi: FileInfo) -> None:
         self._save_fingerprint(self._chunk_tracker, fi)
 
-    def _save_embed_fingerprint(self, fi: FileInfo) -> None:
-        self._save_fingerprint(self._embed_tracker, fi)
+    def _save_meta_fingerprint(self, fi: FileInfo) -> None:
+        self._save_fingerprint(self._meta_tracker, fi)
 
     def _update_chunk_fingerprints(self, files: list[FileInfo]) -> None:
         """Save chunk fingerprints for successfully chunked files."""
         for fi in files:
             self._save_chunk_fingerprint(fi)
 
-    def _update_embed_fingerprints(self, files: list[FileInfo]) -> None:
-        """Save embed fingerprints for successfully embedded files."""
+    def _update_meta_fingerprints(self, files: list[FileInfo]) -> None:
+        """Save meta fingerprints for successfully embedded files."""
         for fi in files:
-            self._save_embed_fingerprint(fi)
+            self._save_meta_fingerprint(fi)
 
     def _embed_existing_chunks(
         self,
@@ -1600,7 +1702,7 @@ class IndexingPipeline:
                 chunks, embeddings, overwrite=False,
                 text_hashes=text_hashes,
             )
-            self._save_embed_fingerprint(fi)
+            self._save_meta_fingerprint(fi)
 
         logger.info(
             "[%s] embed_existing: %d files processed", run_id, len(files),
@@ -1641,9 +1743,9 @@ class IndexingPipeline:
         return self._chunk_tracker
 
     @property
-    def embed_tracker(self) -> FileTracker:
-        """Embed-level file tracker (strategy+model-scoped)."""
-        return self._embed_tracker
+    def meta_tracker(self) -> FileTracker:
+        """Meta-level file tracker (strategy+model-scoped). Detects title/tags changes."""
+        return self._meta_tracker
 
     @property
     def file_tracker(self) -> FileTracker:

@@ -8,6 +8,12 @@ Why: unify all content hashing under BLAKE3 so the codebase stops carrying
 multiple hash algorithms. See ROADMAP.md Phase 999.4 context and the
 2026-04-24 discussion in session notes.
 
+Note (Phase 999.12): embed_tracker has been replaced by meta_tracker in the
+production pipeline. This migration script handles historical embed_fingerprints.*
+tables only. New deployments use meta_fingerprints.* tables with meta_checksum.
+The internal ``_compute_embed_checksum_blake3`` function is retained for migration
+of existing embed_fingerprints rows and must NOT be removed.
+
 CRITICAL ordering constraint:
     This script MUST run BEFORE the code in ``reader.py`` switches
     ``chunk_checksum`` / ``embed_checksum`` to BLAKE3. If the code were
