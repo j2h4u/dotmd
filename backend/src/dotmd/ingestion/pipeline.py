@@ -629,7 +629,7 @@ class IndexingPipeline:
                 self._embedding_cache.store(th, new_embeddings[j])
 
         total = len(chunks)
-        logger.info(
+        logger.debug(
             "embed_text: %d chunks, %d hits (%.1f%%), %d computed",
             total, hits, hits / total * 100 if total else 0, len(to_encode_indices),
         )
@@ -870,12 +870,12 @@ class IndexingPipeline:
         self._save_meta_fingerprint(file_info)
 
         if body_changed:
-            logger.info(
+            logger.debug(
                 "Full embed for %s: %d chunks, e_text + e_meta encoded",
                 file_info.path, len(chunks),
             )
         else:
-            logger.info(
+            logger.debug(
                 "Metadata-only fast path for %s: 1 TEI call (e_meta), "
                 "%d fused vectors recomputed locally (weights=%s)",
                 file_info.path, len(chunks), weights,
@@ -1625,7 +1625,7 @@ class IndexingPipeline:
         logger.info(
             "pipeline: %s DONE %d chunks %.1fs"
             " (chunk %.2f / save %.2f / extract %.2f / graph %.2f / embed %.2f / vec %.2f)",
-            file_info.path.name,
+            file_info.path,
             len(chunks) if chunks else 0,
             t_total,
             t_chunk, t_save, t_extract, t_graph, t_embed, t_vec,

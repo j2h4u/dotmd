@@ -206,6 +206,8 @@ class DotMDService:
         list[SearchResult]
             Ranked search results, at most *top_k* items.
         """
+        logger.info("search: query=%r mode=%s top_k=%d rerank=%s", query[:100], mode, top_k, rerank)
+
         # -- Optional query expansion -----------------------------------------
         search_query = query
         if expand:
@@ -220,14 +222,18 @@ class DotMDService:
         # -- Determine pool size for reranking --------------------------------
         pool_size = self._settings.rerank_pool_size if rerank else top_k
 
-        return self._execute_search(
-            search_query=search_query,
-            original_query=query,
-            top_k=top_k,
-            mode=mode,
-            rerank=rerank,
-            pool_size=pool_size,
-        )
+        try:
+            return self._execute_search(
+                search_query=search_query,
+                original_query=query,
+                top_k=top_k,
+                mode=mode,
+                rerank=rerank,
+                pool_size=pool_size,
+            )
+        except Exception:
+            logger.error("search failed: query=%r mode=%s", query[:100], mode, exc_info=True)
+            raise
 
     def _execute_search(
         self,
