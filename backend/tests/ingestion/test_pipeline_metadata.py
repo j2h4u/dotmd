@@ -164,9 +164,12 @@ def test_body_change_triggers_chunk_reembedding(minimal_settings, tmp_path):
     _write_md(doc, "Test Doc", ["alpha"], "Completely different body text now.")
     pipeline.index(minimal_settings.data_dir)
 
+    chunk_count = pipeline._conn.execute(
+        f"SELECT COUNT(*) FROM chunks_{pipeline._strategy}"
+    ).fetchone()[0]
     total_texts = sum(len(c) for c in call_log)
-    assert total_texts >= 2, (
-        f"Body change must encode more than just e_meta. "
+    assert total_texts >= chunk_count + 1, (
+        f"Body change must encode chunk bodies ({chunk_count}) + e_meta (1). "
         f"Got {total_texts} total texts in {len(call_log)} calls."
     )
 
@@ -201,9 +204,13 @@ def test_both_body_and_metadata_change_uses_full_path(minimal_settings, tmp_path
     _write_md(doc, "New Title", ["alpha", "beta"], "New body content altogether.")
     pipeline.index(minimal_settings.data_dir)
 
+    chunk_count = pipeline._conn.execute(
+        f"SELECT COUNT(*) FROM chunks_{pipeline._strategy}"
+    ).fetchone()[0]
     total_texts = sum(len(c) for c in call_log)
-    assert total_texts >= 2, (
-        "Body + metadata change must trigger full embed path (chunk bodies + e_meta)."
+    assert total_texts >= chunk_count + 1, (
+        f"Body + metadata change must trigger full embed path "
+        f"(chunk bodies ({chunk_count}) + e_meta (1))."
     )
 
 
@@ -229,10 +236,13 @@ def test_metadata_only_with_missing_etext_falls_back_to_full_embed(minimal_setti
     pipeline.index(minimal_settings.data_dir)
 
     # Fallback must have re-embedded chunk bodies (more than just 1 call for e_meta)
+    chunk_count = pipeline._conn.execute(
+        f"SELECT COUNT(*) FROM chunks_{pipeline._strategy}"
+    ).fetchone()[0]
     total_texts = sum(len(c) for c in call_log)
-    assert total_texts >= 2, (
+    assert total_texts >= chunk_count + 1, (
         f"Missing e_text BLOBs must trigger fallback to full embed. "
-        f"Got {total_texts} total texts."
+        f"Got {total_texts} total texts (expected >= {chunk_count + 1})."
     )
 
 
@@ -288,6 +298,21 @@ def test_schema_version_wipe_clears_all_state(minimal_settings, tmp_path):
     assert row is not None and row[0] == pipeline.SCHEMA_VERSION, (
         f"schema_version sentinel must be updated to {pipeline.SCHEMA_VERSION!r}"
     )
+
+    # 6. vec0 fused vector table (delete_all() drops it entirely)
+    vec0_exists = pipeline._conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        (pipeline._vector_store._VEC_TABLE,),
+    ).fetchone()
+    assert vec0_exists is None, f"vec0 table must be dropped by wipe (still exists: {pipeline._vector_store._VEC_TABLE!r})"
+
+    # 7. vec_meta text_hash index (cleared by delete_all, not dropped)
+    # Note: chunks_*, chunk_file_paths_*, and FTS5 are intentionally NOT cleared —
+    # schema wipe only resets vector state so trickle can rebuild embeddings.
+    vec_meta_count = pipeline._conn.execute(
+        f"SELECT COUNT(*) FROM {pipeline._vector_store._META_TABLE}"
+    ).fetchone()[0]
+    assert vec_meta_count == 0, f"vec_meta must be wiped (got {vec_meta_count} rows)"
 
 
 # ── Weight change recompute ──────────────────────────────────────────────────

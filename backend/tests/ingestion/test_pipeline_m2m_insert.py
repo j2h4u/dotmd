@@ -72,7 +72,7 @@ class TestInsertOrIgnoreOnRepeat:
         from dotmd.ingestion.pipeline import IndexingPipeline
         from dotmd.core.config import Settings
 
-        db_path, strategy, _model_key = _build_post_v16_db(tmp_path)
+        _, strategy, _model_key = _build_post_v16_db(tmp_path)
         settings = Settings(index_dir=tmp_path)
 
         # Build a stub file
@@ -83,26 +83,22 @@ class TestInsertOrIgnoreOnRepeat:
         # Index once
         pipeline.index_file(md_file)
 
-        conn = sqlite3.connect(str(db_path))
-        count_after_1 = conn.execute(
+        count_after_1 = pipeline._conn.execute(
             f"SELECT COUNT(*) FROM chunks_{strategy}"
         ).fetchone()[0]
-        text_after_1 = conn.execute(
+        text_after_1 = pipeline._conn.execute(
             f"SELECT text FROM chunks_{strategy} LIMIT 1"
         ).fetchone()
-        conn.close()
 
         # Index the same file again
         pipeline.index_file(md_file)
 
-        conn = sqlite3.connect(str(db_path))
-        count_after_2 = conn.execute(
+        count_after_2 = pipeline._conn.execute(
             f"SELECT COUNT(*) FROM chunks_{strategy}"
         ).fetchone()[0]
-        text_after_2 = conn.execute(
+        text_after_2 = pipeline._conn.execute(
             f"SELECT text FROM chunks_{strategy} LIMIT 1"
         ).fetchone()
-        conn.close()
 
         assert count_after_1 == count_after_2, (
             "Re-indexing should not add rows to chunks_*"
@@ -120,7 +116,7 @@ class TestTwoFilesIdenticalContentShareChunk:
         from dotmd.ingestion.pipeline import IndexingPipeline
         from dotmd.core.config import Settings
 
-        db_path, strategy, _model_key = _build_post_v16_db(tmp_path)
+        _, strategy, _model_key = _build_post_v16_db(tmp_path)
         settings = Settings(index_dir=tmp_path)
         pipeline = IndexingPipeline(settings)
 
@@ -133,14 +129,12 @@ class TestTwoFilesIdenticalContentShareChunk:
         pipeline.index_file(file_a)
         pipeline.index_file(file_b)
 
-        conn = sqlite3.connect(str(db_path))
-        chunk_count = conn.execute(
+        chunk_count = pipeline._conn.execute(
             f"SELECT COUNT(*) FROM chunks_{strategy}"
         ).fetchone()[0]
-        m2m_count = conn.execute(
+        m2m_count = pipeline._conn.execute(
             f"SELECT COUNT(*) FROM chunk_file_paths_{strategy}"
         ).fetchone()[0]
-        conn.close()
 
         assert chunk_count == 1, (
             f"Expected 1 shared chunks_* row for identical content, got {chunk_count}"
@@ -160,7 +154,7 @@ class TestRepeatedHeadingInSameFile:
         from dotmd.ingestion.pipeline import IndexingPipeline
         from dotmd.core.config import Settings
 
-        db_path, strategy, _model_key = _build_post_v16_db(tmp_path)
+        _, strategy, _model_key = _build_post_v16_db(tmp_path)
         settings = Settings(index_dir=tmp_path)
         pipeline = IndexingPipeline(settings)
 
@@ -174,12 +168,10 @@ class TestRepeatedHeadingInSameFile:
         md_file.write_text(body)
         pipeline.index_file(md_file)
 
-        conn = sqlite3.connect(str(db_path))
-        m2m_rows = conn.execute(
+        m2m_rows = pipeline._conn.execute(
             f"SELECT chunk_id, file_path, chunk_index FROM chunk_file_paths_{strategy} "
             f"ORDER BY chunk_index"
         ).fetchall()
-        conn.close()
 
         # Two M2M rows for the same file (different chunk_index → different chunk_ids)
         assert len(m2m_rows) >= 2, (
@@ -197,7 +189,7 @@ class TestVecMetaNotRewrittenOnReindex:
         from dotmd.ingestion.pipeline import IndexingPipeline
         from dotmd.core.config import Settings
 
-        db_path, strategy, model_key = _build_post_v16_db(tmp_path)
+        _, strategy, model_key = _build_post_v16_db(tmp_path)
         settings = Settings(index_dir=tmp_path)
         pipeline = IndexingPipeline(settings)
 
@@ -205,20 +197,16 @@ class TestVecMetaNotRewrittenOnReindex:
         md_file.write_text("# Cache Test\n\nContent for vec_meta idempotency.\n")
         pipeline.index_file(md_file)
 
-        conn = sqlite3.connect(str(db_path))
-        count1 = conn.execute(
+        count1 = pipeline._conn.execute(
             f"SELECT COUNT(*) FROM vec_meta_{strategy}_{model_key}"
         ).fetchone()[0]
-        conn.close()
 
         # Index again
         pipeline.index_file(md_file)
 
-        conn = sqlite3.connect(str(db_path))
-        count2 = conn.execute(
+        count2 = pipeline._conn.execute(
             f"SELECT COUNT(*) FROM vec_meta_{strategy}_{model_key}"
         ).fetchone()[0]
-        conn.close()
 
         assert count1 == count2, (
             f"vec_meta_* grew from {count1} to {count2} on reindex — cache not honoured"
@@ -236,7 +224,7 @@ class TestPayloadMismatchLogsWarn:
         from dotmd.core.config import Settings
         from dotmd.core.models import Chunk
 
-        db_path, strategy, _model_key = _build_post_v16_db(tmp_path)
+        _, strategy, _model_key = _build_post_v16_db(tmp_path)
         settings = Settings(index_dir=tmp_path)
         pipeline = IndexingPipeline(settings)
 
@@ -245,14 +233,12 @@ class TestPayloadMismatchLogsWarn:
         conflict_text = "Second writer text — must NOT overwrite first"
         fixed_chunk_id = "a" * 64  # Valid 64-char id
 
-        conn = sqlite3.connect(str(db_path))
-        conn.execute(
+        pipeline._conn.execute(
             f"INSERT INTO chunks_{strategy} (chunk_id, heading_hierarchy, level, text) "
             "VALUES (?, '[]', 0, ?)",
             (fixed_chunk_id, first_text),
         )
-        conn.commit()
-        conn.close()
+        pipeline._conn.commit()
 
         # Monkeypatch the chunker to emit a Chunk with the same chunk_id but different text
         md_file = tmp_path / "mismatch.md"
@@ -291,12 +277,10 @@ class TestPayloadMismatchLogsWarn:
             pip_logger.removeHandler(handler)
 
         # Row must retain first-writer's text
-        conn = sqlite3.connect(str(db_path))
-        stored_text = conn.execute(
+        stored_text = pipeline._conn.execute(
             f"SELECT text FROM chunks_{strategy} WHERE chunk_id=?",
             (fixed_chunk_id,),
         ).fetchone()[0]
-        conn.close()
         assert stored_text == first_text, (
             f"First-writer text overwritten: stored={stored_text!r}"
         )

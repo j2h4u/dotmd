@@ -134,8 +134,11 @@ def test_body_change_triggers_full_reembedding(pipeline_settings):
     _write_md(doc, "Test Document", ["alpha"], "Completely different body text now.")
     pipeline.index(pipeline_settings.data_dir)
 
+    chunk_count = pipeline._conn.execute(
+        f"SELECT COUNT(*) FROM chunks_{pipeline._strategy}"
+    ).fetchone()[0]
     total_texts = sum(len(c) for c in encode_calls)
-    assert total_texts >= 2, (
-        f"Body change must encode chunk bodies + e_meta (>= 2 texts total). "
+    assert total_texts >= chunk_count + 1, (
+        f"Body change must encode chunk bodies ({chunk_count}) + e_meta (1). "
         f"Got {total_texts} total texts across {len(encode_calls)} calls."
     )

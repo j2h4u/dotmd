@@ -216,14 +216,10 @@ def test_m2m_shared_chunk_behavior_documented(pipeline_settings, tmp_path):
 
     # vec0 must have rows (fusion produced valid fused vectors)
     vec0_table = pipeline._vector_store._VEC_TABLE
-    try:
-        row_count = pipeline._conn.execute(
-            f"SELECT COUNT(*) FROM {vec0_table}"
-        ).fetchone()[0]
-        assert row_count > 0, "vec0 must have rows after indexing shared-body files"
-    except Exception:
-        # vec0 is a virtual table — count may behave differently; skip this assertion
-        pass
+    row_count = pipeline._conn.execute(
+        f"SELECT COUNT(*) FROM {vec0_table}"
+    ).fetchone()[0]
+    assert row_count > 0, "vec0 must have rows after indexing shared-body files"
 
 
 def test_embed_existing_chunks_model_switch_does_not_use_cached_etext(pipeline_settings, tmp_path):
@@ -257,8 +253,7 @@ def test_embed_existing_chunks_model_switch_does_not_use_cached_etext(pipeline_s
     # Load chunks for this file
     canonical = pipeline._meta_entity_id(doc)
     chunk_ids = pipeline._metadata_store.get_chunk_ids_by_file(pipeline._strategy, canonical)
-    if not chunk_ids:
-        pytest.skip("No chunks indexed — cannot test _embed_existing_chunks")
+    assert chunk_ids, f"get_chunk_ids_by_file returned empty after confirmed index (canonical={canonical!r})"
 
     # Construct a valid FileInfo for the file
     stat = doc.stat()
@@ -277,9 +272,10 @@ def test_embed_existing_chunks_model_switch_does_not_use_cached_etext(pipeline_s
 
     # With model_switch=True: encode_batch must have been called for chunk bodies
     # (not just 1 call for e_meta — should be at least 2 calls or 1 call with N>1 texts)
+    chunk_count = len(chunk_ids)
     total_texts = sum(len(c['texts']) for c in call_log)
-    assert total_texts >= 2, (
-        f"model_switch=True must re-encode chunk bodies + e_meta (>= 2 texts total). "
+    assert total_texts >= chunk_count + 1, (
+        f"model_switch=True must re-encode chunk bodies ({chunk_count}) + e_meta (1). "
         f"Got {total_texts} texts across {len(call_log)} calls. "
         f"If only 1 call with 1 text, the method is only encoding e_meta and reusing "
         f"stale e_text from VecComponentStore — this is the HIGH-2 bug."
