@@ -318,6 +318,11 @@ class FalkorDBGraphStore:
         )
         return sorted(str(row[0]) for row in result.result_set)
 
+    def delete_isolated_nodes(self) -> int:
+        """Delete nodes with no edges. Returns the number of nodes removed."""
+        result = self._graph.query("MATCH (n) WHERE NOT (n)--() DELETE n")
+        return result.nodes_deleted
+
     def delete_all(self) -> None:
         """Remove all nodes and edges from the graph."""
         self._graph.query("MATCH (n) DETACH DELETE n")

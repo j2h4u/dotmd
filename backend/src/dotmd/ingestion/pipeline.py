@@ -38,7 +38,6 @@ from dotmd.extraction.keyterms import KeyTermExtractor
 from dotmd.extraction.ner import NERExtractor
 from dotmd.extraction.structural import StructuralExtractor
 import dotmd.ingestion.chunker as _chunker_module
-from dotmd.ingestion.content_handlers import get_handler
 from dotmd.ingestion.file_tracker import FileDiff, FileTracker
 from dotmd.ingestion.reader import chunk_checksum, meta_checksum, discover_files, parse_frontmatter, read_file
 from dotmd.storage.vec_components import VecComponentStore
@@ -976,6 +975,13 @@ class IndexingPipeline:
         logger.info("reindex_fts5: %d chunks re-indexed", len(all_chunks))
         return len(all_chunks)
 
+    def sweep_graph_orphans(self) -> int:
+        """Delete graph nodes with no edges. Returns the number of nodes removed."""
+        removed = self._graph_store.delete_isolated_nodes()
+        if removed:
+            logger.info("graph_orphan_sweep: removed %d isolated nodes", removed)
+        return removed
+
     def reindex_graph(self) -> int:
         """Rebuild knowledge graph from stored chunks. Returns chunk count."""
         all_chunks = self._metadata_store.get_all_chunks()
@@ -1435,7 +1441,7 @@ class IndexingPipeline:
         # Timing accumulators — always defined so the DONE summary can reference
         # them unconditionally regardless of which code paths were taken.
         t_file = time.perf_counter()
-        t_purge = t_chunk = t_save = t_extract = t_graph = t_embed = t_vec = 0.0
+        t_chunk = t_save = t_extract = t_graph = t_embed = t_vec = 0.0
 
         # --- Phase 1: Chunk ---
         chunk_diff = self._chunk_tracker.diff([file_info])
@@ -1484,8 +1490,6 @@ class IndexingPipeline:
                         "graph chunk cleanup failed during reindex: %s (file=%s)",
                         _ge, path_str,
                     )
-            t_purge = time.perf_counter() - t0
-
             _beacon("chunk")
             t0 = time.perf_counter()
             content = read_file(file_info.path)
@@ -2227,11 +2231,18 @@ class IndexingPipeline:
 
         elif stored_version is None:
             # No sentinel present. Two sub-cases:
-            # A) Fresh database (vec_components empty) — just write the sentinel and return.
-            # B) Pre-999.12 database that already ran partial 999.12 indexing (vec_components
-            #    has orphaned rows from an aborted deployment). Wipe those stale BLOBs so
-            #    _embed_chunks() Layer-1 cache doesn't return wrong vectors.
-            if self._vec_components.count() == 0:
+            # A) Fresh database — just write the sentinel and return.
+            # B) Pre-999.12 database (chunk_fingerprints populated, vec_components absent),
+            #    or partial 999.12 deployment (vec_components has orphaned rows).
+            #    Wipe so stale vectors and fingerprints don't block a clean rebuild.
+            #
+            # Detection uses chunk_fingerprints, not vec_components: vec_components is new
+            # in 999.12 and is always empty on a pre-999.12 DB, making it unable to
+            # distinguish a fresh DB from an old one.
+            n_chunk_fingerprints = self._conn.execute(
+                f"SELECT COUNT(*) FROM {self._chunk_tracker._table}"
+            ).fetchone()[0]
+            if n_chunk_fingerprints == 0 and self._vec_components.count() == 0:
                 # Case A: fresh DB — nothing to wipe.
                 self._conn.execute(
                     f"INSERT OR REPLACE INTO {config_table} (key, value)"
@@ -2240,10 +2251,12 @@ class IndexingPipeline:
                 )
                 self._conn.commit()
                 return
-            # Case B: orphaned partial data — fall through to wipe path.
+            # Case B: pre-existing data — fall through to wipe path.
             logger.warning(
-                "_check_schema_version: stored_version=None but VecComponentStore is non-empty "
-                "— treating as partial pre-999.12 deployment; wiping stale components"
+                "_check_schema_version: stored_version=None but pre-existing data detected "
+                "(chunk_fingerprints=%d, vec_components=%d) "
+                "— treating as pre-999.12 or partial deployment; wiping stale state",
+                n_chunk_fingerprints, self._vec_components.count(),
             )
 
         else:
@@ -2267,15 +2280,20 @@ class IndexingPipeline:
             self._conn.commit()
 
             # 1. Wipe embedding cache (text_hash semantics changed)
-            _wipe_step = 1; self._embedding_cache.clear()
+            _wipe_step = 1
+            self._embedding_cache.clear()
             # 2. Wipe vec_components (stale e_text BLOBs)
-            _wipe_step = 2; self._vec_components.delete_all()
+            _wipe_step = 2
+            self._vec_components.delete_all()
             # 3. Wipe vec0 + vec_meta (SQLiteVecVectorStore.delete_all handles both)
-            _wipe_step = 3; self._vector_store.delete_all()
+            _wipe_step = 3
+            self._vector_store.delete_all()
             # 4. Clear chunk_tracker
-            _wipe_step = 4; self._chunk_tracker.clear()
+            _wipe_step = 4
+            self._chunk_tracker.clear()
             # 5. Clear meta_tracker
-            _wipe_step = 5; self._meta_tracker.clear()
+            _wipe_step = 5
+            self._meta_tracker.clear()
             # 6. Clear stored weights sentinel (re-written by _check_weights_changed)
             _wipe_step = 6
             self._conn.execute(

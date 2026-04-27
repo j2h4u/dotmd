@@ -248,6 +248,23 @@ class LadybugDBGraphStore:
                 parameters={"fp": file_path},
             )
 
+    def delete_isolated_nodes(self) -> int:
+        """Delete nodes with no edges. Returns the number of nodes removed."""
+        removed = 0
+        with self._connection() as conn:
+            for label in ("Entity", "Tag"):
+                try:
+                    before_df = conn.execute(
+                        f"MATCH (n:{label}) WHERE NOT (n)--() RETURN count(n)"
+                    ).get_as_df()
+                    count = int(before_df.iloc[0, 0]) if not before_df.empty else 0
+                    if count:
+                        conn.execute(f"MATCH (n:{label}) WHERE NOT (n)--() DELETE n")
+                        removed += count
+                except Exception:
+                    logger.warning("delete_isolated_nodes failed for %s", label, exc_info=True)
+        return removed
+
     def delete_all(self) -> None:
         """Remove all nodes and edges from the graph."""
         with self._connection() as conn:

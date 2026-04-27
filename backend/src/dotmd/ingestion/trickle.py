@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
-import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -502,7 +501,7 @@ class TrickleIndexer:
                 except Exception:
                     logger.exception("Watch: failed to index %s", path_str)
 
-            # Deferred VACUUM: run when idle, after orphan cleanup or deletions
+            # Deferred VACUUM + graph orphan sweep: run when idle, after deletions
             if self._needs_vacuum:
                 try:
                     logger.info("Running VACUUM (deferred)")
@@ -513,6 +512,10 @@ class TrickleIndexer:
                     logger.info("VACUUM complete")
                 except Exception:
                     logger.exception("VACUUM failed — will retry next idle")
+                try:
+                    await asyncio.to_thread(self._pipeline.sweep_graph_orphans)
+                except Exception:
+                    logger.exception("Graph orphan sweep failed")
 
             # Wait for shutdown or poll interval timeout
             try:

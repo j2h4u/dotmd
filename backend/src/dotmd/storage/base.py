@@ -281,6 +281,10 @@ class GraphStoreProtocol(Protocol):
         """Return the total number of edges in the graph."""
         ...
 
+    def delete_isolated_nodes(self) -> int:
+        """Delete nodes with no edges. Returns the number of nodes removed."""
+        ...
+
     def get_graph_data(self) -> dict:
         """Return all nodes and edges for visualization.
 
