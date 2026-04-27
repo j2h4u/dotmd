@@ -2172,11 +2172,20 @@ class IndexingPipeline:
     def _check_schema_version(self) -> None:
         """Check schema version sentinel; wipe ALL vector state if version mismatch.
 
-        Entire wipe is wrapped in a single BEGIN...COMMIT transaction so that a
-        crash mid-wipe leaves the database in a state where the sentinel is NOT
-        written (schema_version != SCHEMA_VERSION), causing a clean re-wipe on
-        next startup. A crash after COMMIT is safe: the state is fully wiped and
-        consistent.
+        Each sub-operation (delete_all, clear) commits internally, so the wipe cannot
+        be wrapped in a single atomic transaction. Crash-safe semantics are achieved via
+        a two-sentinel protocol:
+
+          Step 0: Write sentinel = 'WIPE_IN_PROGRESS' (marks start of wipe)
+          Steps 1-6: Idempotent wipes (each commits individually)
+          Step 7: Write sentinel = SCHEMA_VERSION (marks completed wipe)
+
+        On next startup:
+          - sentinel == SCHEMA_VERSION → nothing to do (normal case)
+          - sentinel == 'WIPE_IN_PROGRESS' → previous wipe was interrupted; re-run all steps
+            (all wipes are idempotent: double-delete is a no-op)
+          - sentinel == None → fresh DB or pre-999.12 DB (see None branch below)
+          - sentinel == something else → explicit version mismatch; wipe and upgrade
 
         Clears all 7 state components:
           1. embedding_cache (text_hash semantics changed: body-only hash)
@@ -2185,7 +2194,7 @@ class IndexingPipeline:
           4. chunk_tracker (force full re-chunk on next trickle run)
           5. meta_tracker (force full re-embed on next trickle run)
           6. weights_used sentinel (cleared; re-written by weight detection after startup)
-          7. schema_version sentinel (written last, inside same transaction)
+          7. schema_version sentinel (written last — marks clean state)
 
         After wipe: trickle rebuilds from scratch on next run.
         Expected rebuild time: several days on current hardware (Xeon E3-1245 V2, CPU-only TEI).
@@ -2203,30 +2212,54 @@ class IndexingPipeline:
         if stored_version == self.SCHEMA_VERSION:
             return  # Up to date
 
-        if stored_version is None:
-            # First startup with this sentinel (fresh DB or pre-999.12 DB that predates
-            # SCHEMA_VERSION tracking). Write the sentinel and return — no wipe needed.
-            # Future version bumps ("2" → "3") will have an explicit stored_version and
-            # will correctly trigger the wipe path below.
+        if stored_version == "WIPE_IN_PROGRESS":
+            # Previous startup crashed mid-wipe. Re-run all wipe steps (idempotent).
+            logger.warning(
+                "_check_schema_version: previous wipe was interrupted (WIPE_IN_PROGRESS) "
+                "— resuming idempotent wipe"
+            )
+            # Fall through to wipe path below
+
+        elif stored_version is None:
+            # No sentinel present. Two sub-cases:
+            # A) Fresh database (vec_components empty) — just write the sentinel and return.
+            # B) Pre-999.12 database that already ran partial 999.12 indexing (vec_components
+            #    has orphaned rows from an aborted deployment). Wipe those stale BLOBs so
+            #    _embed_chunks() Layer-1 cache doesn't return wrong vectors.
+            if self._vec_components.count() == 0:
+                # Case A: fresh DB — nothing to wipe.
+                self._conn.execute(
+                    f"INSERT OR REPLACE INTO {config_table} (key, value)"
+                    f" VALUES ('schema_version', ?)",
+                    (self.SCHEMA_VERSION,),
+                )
+                self._conn.commit()
+                return
+            # Case B: orphaned partial data — fall through to wipe path.
+            logger.warning(
+                "_check_schema_version: stored_version=None but VecComponentStore is non-empty "
+                "— treating as partial pre-999.12 deployment; wiping stale components"
+            )
+
+        else:
+            # Explicit version mismatch (e.g. "1" → "2"). Full wipe required.
+            logger.warning(
+                "schema_version mismatch: stored=%r expected=%r — wiping all vector state. "
+                "trickle will rebuild from scratch. Expected rebuild time: several days.",
+                stored_version, self.SCHEMA_VERSION,
+            )
+            # Fall through to wipe path below
+
+        # ── WIPE PATH ────────────────────────────────────────────────────────────────
+        # Step 0: Write in-progress sentinel FIRST so a crash before Step 7 is detected
+        # on next startup and the wipe is resumed (not silently skipped as a fresh DB).
+        try:
             self._conn.execute(
-                f"INSERT OR REPLACE INTO {config_table} (key, value) VALUES ('schema_version', ?)",
-                (self.SCHEMA_VERSION,),
+                f"INSERT OR REPLACE INTO {config_table} (key, value)"
+                f" VALUES ('schema_version', 'WIPE_IN_PROGRESS')"
             )
             self._conn.commit()
-            return
 
-        logger.warning(
-            "schema_version mismatch: stored=%r expected=%r — wiping all vector state. "
-            "trickle will rebuild from scratch. Expected rebuild time: several days.",
-            stored_version, self.SCHEMA_VERSION,
-        )
-
-        # Each sub-operation below commits internally (delete_all, clear all call
-        # conn.commit()). An outer BEGIN/COMMIT cannot wrap them atomically.
-        # Safety: each operation is idempotent. If a crash occurs mid-wipe, the
-        # schema_version sentinel is NOT written (it's last), so the next startup
-        # sees stored_version != SCHEMA_VERSION and repeats the wipe safely.
-        try:
             # 1. Wipe embedding cache (text_hash semantics changed)
             self._embedding_cache.clear()
             # 2. Wipe vec_components (stale e_text BLOBs)
@@ -2241,7 +2274,8 @@ class IndexingPipeline:
             self._conn.execute(
                 f"DELETE FROM {config_table} WHERE key = 'weights_used'"
             )
-            # 7. Write new schema_version sentinel (last step — marks clean state)
+            self._conn.commit()
+            # 7. Write final sentinel (marks clean state — replaces WIPE_IN_PROGRESS)
             self._conn.execute(
                 f"INSERT OR REPLACE INTO {config_table} (key, value) VALUES ('schema_version', ?)",
                 (self.SCHEMA_VERSION,),
