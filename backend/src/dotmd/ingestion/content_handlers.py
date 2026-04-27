@@ -56,6 +56,10 @@ def enrich_with_title_and_tags(text: str, frontmatter: dict) -> str:
     which places the chunk closer to queries about Alice or budgets in vector
     space. This is the semantic equivalent of FTS5 column weighting -- each
     search engine receives the same metadata through its native channel.
+
+    No longer called from the embedding path (Phase 999.12). Retained for
+    reference. title+tags are now encoded separately as the e_meta vector
+    component via _embed_meta_component() in the pipeline.
     """
     title = frontmatter.get("title", "")
     tags = frontmatter.get("tags", [])
@@ -67,6 +71,16 @@ def enrich_with_title_and_tags(text: str, frontmatter: dict) -> str:
         parts.append(tags_str)
     if parts:
         return "\n".join(parts) + "\n\n" + text
+    return text
+
+
+def _enrich_noop(text: str, frontmatter: dict) -> str:
+    """No-op enrichment — chunk text embedded as-is (Phase 999.12 dual-encoder).
+
+    title+tags are now a separate e_meta vector component; not prepended to
+    e_text. FTS5 path does not use this registry enrich function (verified
+    999.12): keyword_engine.add_chunks() receives file_meta separately.
+    """
     return text
 
 
@@ -84,17 +98,17 @@ class ContentHandler(NamedTuple):
 
 DEFAULT_HANDLER = ContentHandler(
     pre_split=split_default,
-    enrich=enrich_with_title_and_tags,
+    enrich=_enrich_noop,
 )
 
 HANDLERS: dict[str, ContentHandler] = {
     DocKind.MEETING_TRANSCRIPT: ContentHandler(
         pre_split=split_by_speaker_turns,
-        enrich=enrich_with_title_and_tags,
+        enrich=_enrich_noop,
     ),
     DocKind.VOICENOTE: ContentHandler(
         pre_split=split_by_paragraphs,
-        enrich=enrich_with_title_and_tags,
+        enrich=_enrich_noop,
     ),
 }
 
