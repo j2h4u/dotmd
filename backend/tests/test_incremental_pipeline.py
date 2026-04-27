@@ -121,8 +121,9 @@ class TestFirstIndex:
         assert stats.total_files == 2
         assert stats.total_chunks == 2
         # Verify chunks were saved
-        # Two-fingerprint arch reads each new file twice (chunk + embed tracker paths)
-        assert mock_read_file.call_count == 4
+        # meta_tracker uses meta_checksum(title+tags) from FileInfo — no read_file call.
+        # Only the chunk tracker path reads the file (once per file).
+        assert mock_read_file.call_count == 2
         assert mock_chunk_file.call_count == 2
 
 
@@ -211,8 +212,8 @@ class TestModifiedFile:
         stats = pipeline.index(md_dir)
 
         # Only file A should be re-read (modified), not file B (unchanged)
-        # Two-fingerprint arch reads each changed file twice (chunk + embed tracker paths)
-        assert mock_read_file.call_count == 2
+        # meta_tracker uses meta_checksum(title+tags) from FileInfo — no read_file call.
+        assert mock_read_file.call_count == 1
         assert mock_chunk_file.call_count == 1
         assert stats.total_chunks >= 1
 
@@ -308,8 +309,8 @@ class TestNewFileAdded:
         stats = pipeline.index(md_dir)
 
         # Only file c should be read (new), not file a (unchanged)
-        # Two-fingerprint arch reads each new file twice (chunk + embed tracker paths)
-        assert mock_read_file.call_count == 2
+        # meta_tracker uses meta_checksum(title+tags) from FileInfo — no read_file call.
+        assert mock_read_file.call_count == 1
         assert stats.total_files == 2  # both files counted
 
 
@@ -411,8 +412,8 @@ class TestForceReindex:
         # force=True should process all files even though nothing changed
         stats = pipeline.index(md_dir, force=True)
 
-        # Two-fingerprint arch reads each file twice (chunk + embed tracker paths)
-        assert mock_read_file.call_count == 4
+        # meta_tracker uses meta_checksum(title+tags) from FileInfo — no read_file call.
+        assert mock_read_file.call_count == 2
         assert mock_chunk_file.call_count == 2
         assert stats.total_files == 2
 

@@ -130,6 +130,7 @@ class IndexingPipeline:
         # file trackers.  sqlite-vec extension loaded once here.
         self._conn = sqlite3.connect(
             str(settings.index_db_path), check_same_thread=False,
+            isolation_level=None,  # autocommit — pipeline manages all transactions explicitly
         )
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.enable_load_extension(True)
@@ -737,43 +738,35 @@ class IndexingPipeline:
                 self._fuse_vectors(e_text_map[c.chunk_id], e_meta, weights) for c in chunks
             ]
 
-        # ── ATOMIC WRITE PHASE ────────────────────────────────────────────────────────
-        self._conn.execute("BEGIN")
-        try:
-            if body_changed:
-                # Store e_text components for all chunks
-                for chunk, e_text in zip(chunks, e_text_vectors):
-                    self._vec_components.store(chunk.chunk_id, "text", e_text)
-            else:
-                # Store only newly-computed fallback e_text for missing chunks
-                if missing_chunk_ids:
-                    for chunk in chunks:
-                        if chunk.chunk_id in missing_chunk_ids:
-                            self._vec_components.store(
-                                chunk.chunk_id, "text", e_text_map[chunk.chunk_id]
-                            )
+        # ── WRITE PHASE ───────────────────────────────────────────────────────────────
+        # Each store call owns its own commit. Cross-store atomicity is not achievable
+        # here because SQLiteVecVectorStore.add_chunks() commits internally — wrapping
+        # it in an explicit BEGIN/COMMIT causes "cannot commit - no transaction active".
+        # Acceptable: trickle re-indexes the file on next run if a crash occurs mid-write.
+        if body_changed:
+            # Store e_text components for all chunks
+            for chunk, e_text in zip(chunks, e_text_vectors):
+                self._vec_components.store(chunk.chunk_id, "text", e_text)
+        else:
+            # Store only newly-computed fallback e_text for missing chunks
+            if missing_chunk_ids:
+                for chunk in chunks:
+                    if chunk.chunk_id in missing_chunk_ids:
+                        self._vec_components.store(
+                            chunk.chunk_id, "text", e_text_map[chunk.chunk_id]
+                        )
 
-            # Store e_meta component (canonical path via _meta_entity_id)
-            self._vec_components.store(
-                self._meta_entity_id(file_info.path), "meta", e_meta
-            )
-            # Write e_fused to vec0
-            self._vector_store.add_chunks(
-                chunks, e_fused_vectors, overwrite=True,
-                text_hashes=text_hashes if text_hashes else None,
-            )
-            # Save meta fingerprint
-            self._save_meta_fingerprint(file_info)
-
-            self._conn.execute("COMMIT")
-
-        except Exception:
-            self._conn.execute("ROLLBACK")
-            logger.error(
-                "_index_file_embed: transaction rolled back for %s", file_info.path,
-                exc_info=True,
-            )
-            raise
+        # Store e_meta component (canonical path via _meta_entity_id)
+        self._vec_components.store(
+            self._meta_entity_id(file_info.path), "meta", e_meta
+        )
+        # Write e_fused to vec0 (add_chunks commits internally)
+        self._vector_store.add_chunks(
+            chunks, e_fused_vectors, overwrite=True,
+            text_hashes=text_hashes if text_hashes else None,
+        )
+        # Save meta fingerprint
+        self._save_meta_fingerprint(file_info)
 
         if body_changed:
             logger.info(
@@ -2094,6 +2087,10 @@ class IndexingPipeline:
         After wipe: trickle rebuilds from scratch on next run.
         Expected rebuild time: several days on current hardware (Xeon E3-1245 V2, CPU-only TEI).
         """
+        # Force vec_config table creation before reading from it.
+        # SQLiteVecVectorStore creates tables lazily via _get_conn(); bypassing
+        # it with self._conn directly would fail on a fresh database (#999.12).
+        self._vector_store._get_conn()
         config_table = self._vector_store._CONFIG_TABLE
         row = self._conn.execute(
             f"SELECT value FROM {config_table} WHERE key = 'schema_version'"
@@ -2102,6 +2099,18 @@ class IndexingPipeline:
 
         if stored_version == self.SCHEMA_VERSION:
             return  # Up to date
+
+        if stored_version is None:
+            # First startup with this sentinel (fresh DB or pre-999.12 DB that predates
+            # SCHEMA_VERSION tracking). Write the sentinel and return — no wipe needed.
+            # Future version bumps ("2" → "3") will have an explicit stored_version and
+            # will correctly trigger the wipe path below.
+            self._conn.execute(
+                f"INSERT OR REPLACE INTO {config_table} (key, value) VALUES ('schema_version', ?)",
+                (self.SCHEMA_VERSION,),
+            )
+            self._conn.commit()
+            return
 
         logger.warning(
             "schema_version mismatch: stored=%r expected=%r — wiping all vector state. "
