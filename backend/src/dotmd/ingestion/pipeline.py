@@ -786,23 +786,82 @@ class IndexingPipeline:
     # ------------------------------------------------------------------
 
     def reindex_vectors(self) -> int:
-        """Rebuild vector store from stored chunks. Returns chunk count."""
-        all_chunks = self._metadata_store.get_all_chunks()
-        if not all_chunks:
-            logger.info("reindex_vectors: no chunks in metadata")
+        """Rebuild vector store from stored chunks. Returns chunk count.
+
+        Groups chunks by file (for e_meta computation), then for each file:
+        embeds chunks (e_text), encodes metadata (e_meta, batched), fuses, stores.
+        Uses _meta_entity_id() for canonical path normalization throughout.
+        """
+        # Discover all distinct file paths from M2M table
+        m2m_table = f"chunk_file_paths_{self._strategy}"
+        try:
+            rows = self._conn.execute(
+                f"SELECT DISTINCT file_path FROM {m2m_table}"
+            ).fetchall()
+            all_file_paths = [row[0] for row in rows]
+        except Exception:
+            logger.warning("reindex_vectors: cannot read M2M table — falling back to no files")
+            all_file_paths = []
+
+        if not all_file_paths:
+            logger.info("reindex_vectors: no file paths in metadata")
             return 0
+
+        # Wipe vector state before rebuild
         self._vector_store.delete_all()
-        embeddings, text_hashes = self._embed_chunks(all_chunks)
-        self._vector_store.add_chunks(
-            all_chunks, embeddings, overwrite=True,
-            text_hashes=text_hashes,
-        )
+        self._vec_components.delete_all()
+
+        # Build FileInfo for all files (read frontmatter from disk)
+        file_infos: list[FileInfo] = []
+        for fp in all_file_paths:
+            try:
+                content = read_file(Path(fp))
+                fm, _ = parse_frontmatter(content)
+            except Exception:
+                fm = {}
+            file_infos.append(FileInfo(path=Path(fp), frontmatter=fm))
+
+        # Batch encode e_meta for ALL files in a single TEI call (1 batch for all metadata)
+        weights = self._settings.parsed_embedding_weights
+        meta_texts: list[str] = []
+        for fi in file_infos:
+            title = str(fi.frontmatter.get("title", "") or "") if fi.frontmatter else ""
+            tags = (fi.frontmatter.get("tags", []) or []) if fi.frontmatter else []
+            tags_str = ", ".join(str(t) for t in tags) if tags else ""
+            meta_texts.append(f"{title} {tags_str}".strip() or title or "")
+
+        e_meta_all = self._semantic_engine.encode_batch(meta_texts)
+
+        total = 0
+        for fi, e_meta in zip(file_infos, e_meta_all):
+            canonical_path = self._meta_entity_id(fi.path)
+            self._vec_components.store(canonical_path, "meta", e_meta)
+            chunk_ids = self._metadata_store.get_chunk_ids_by_file(
+                self._strategy, canonical_path
+            ) or []
+            chunks = self._metadata_store.get_chunks(chunk_ids) if chunk_ids else []
+            if not chunks:
+                continue
+            e_text_vectors, text_hashes = self._embed_chunks(chunks)
+            for chunk, e_text in zip(chunks, e_text_vectors):
+                self._vec_components.store(chunk.chunk_id, "text", e_text)
+            e_fused = [
+                self._fuse_vectors(e_t, e_meta, weights) for e_t in e_text_vectors
+            ]
+            self._vector_store.add_chunks(
+                chunks, e_fused, overwrite=True, text_hashes=text_hashes
+            )
+            total += len(chunks)
+
+        self._conn.commit()
         if hasattr(self._vector_store, "set_model_name"):
             model_id = self._semantic_engine.get_tei_model_id() or self._settings.embedding_model
             self._vector_store.set_model_name(model_id)  # type: ignore[attr-defined]
             self._vector_store.set_distance_metric("cosine")  # type: ignore[attr-defined]
-        logger.info("reindex_vectors: %d chunks re-embedded", len(all_chunks))
-        return len(all_chunks)
+        logger.info(
+            "reindex_vectors: rebuilt %d chunks from %d files", total, len(file_infos)
+        )
+        return total
 
     def reindex_fts5(self) -> int:
         """Rebuild FTS5 keyword index from stored chunks. Returns chunk count."""
@@ -1040,20 +1099,76 @@ class IndexingPipeline:
         overwrite_vectors: bool = True,
         run_id: str = "",
     ) -> None:
-        """Save chunks to metadata, embed, store vectors, update FTS5."""
+        """Save chunks to metadata, embed, fuse with file metadata, store vectors, update FTS5.
+
+        Updated in Phase 999.12: now computes separate e_text (per chunk) and
+        e_meta (per file), fuses locally, writes e_fused to vec0.
+
+        Chunk-to-file grouping (addresses OpenCode HIGH-1 Cycle 3):
+        The M2M schema allows one chunk to appear in multiple files. For fusion,
+        each chunk uses the e_meta of the FileInfo that owns it in this indexing
+        run (keyed by chunk.file_paths[0] matching a file's path). When a chunk
+        is shared across files, the LAST file's e_meta to write to vec0 wins
+        (last-write-wins — pre-existing M2M constraint, not a regression of 999.12).
+
+        M2M shared-chunk behavior (documented per both reviewers, Cycle 3):
+        If the same chunk_id appears in multiple files (same body text, different
+        titles), the chunk gets one row in vec0 with e_fused computed from the
+        LAST file's e_meta that writes to it (last-write-wins). This is a known
+        pre-existing design constraint of the M2M content-addressed schema.
+        """
         t0 = time.perf_counter()
         self._metadata_store.save_chunks(chunks)
         logger.info("[%s] metadata_save: %d chunks (%.2fs)", run_id, len(chunks), time.perf_counter() - t0)
 
+        weights = self._settings.parsed_embedding_weights
+
+        # Build file_path → FileInfo index for chunk grouping
+        fi_by_path: dict[str, FileInfo] = {str(fi.path): fi for fi in files}
+
+        # Group chunks by their primary file path (file_paths[0])
+        # Chunks with no file_paths are assigned to the first available file.
+        from collections import defaultdict
+        chunks_by_file: dict[str, list[Chunk]] = defaultdict(list)
+        fallback_path = str(files[0].path) if files else ""
+        for chunk in chunks:
+            fp = str(chunk.file_paths[0]) if chunk.file_paths else fallback_path
+            chunks_by_file[fp].append(chunk)
+
         t0 = time.perf_counter()
-        embeddings, text_hashes = self._embed_chunks(chunks)
+        all_e_fused: list[list[float]] = []
+        all_text_hashes: dict[str, str] = {}
+        chunk_order: list[Chunk] = []
+
+        for fp, file_chunks in chunks_by_file.items():
+            fi = fi_by_path.get(fp) or (files[0] if files else None)
+            if fi is None:
+                continue
+            # Embed chunk bodies (pure, no storage)
+            e_text_vectors, text_hashes = self._embed_chunks(file_chunks)
+            # Store e_text in VecComponentStore for future fast-path reads
+            for chunk, e_text in zip(file_chunks, e_text_vectors):
+                self._vec_components.store(chunk.chunk_id, "text", e_text)
+            # Encode file metadata → e_meta (1 TEI call per unique file)
+            e_meta = self._embed_meta_component(fi)
+            # Fuse per chunk
+            e_fused = [
+                self._fuse_vectors(e_t, e_meta, weights) for e_t in e_text_vectors
+            ]
+            all_e_fused.extend(e_fused)
+            all_text_hashes.update(text_hashes)
+            chunk_order.extend(file_chunks)
+
         t_embed = time.perf_counter() - t0
-        logger.info("[%s] embed: %d chunks (%.1fs, %.0f chunks/s)", run_id, len(chunks), t_embed, len(chunks) / t_embed if t_embed > 0 else 0)
+        logger.info(
+            "[%s] embed: %d chunks (%.1fs, %.0f chunks/s)",
+            run_id, len(chunks), t_embed, len(chunks) / t_embed if t_embed > 0 else 0,
+        )
 
         t0 = time.perf_counter()
         self._vector_store.add_chunks(
-            chunks, embeddings, overwrite=overwrite_vectors,
-            text_hashes=text_hashes,
+            chunk_order, all_e_fused, overwrite=overwrite_vectors,
+            text_hashes=all_text_hashes,
         )
         logger.info("[%s] vector_store: %d vectors (%.2fs)", run_id, len(chunks), time.perf_counter() - t0)
         if hasattr(self._vector_store, "set_model_name"):
@@ -1835,13 +1950,31 @@ class IndexingPipeline:
         self,
         files: list[FileInfo],
         *,
+        model_switch: bool = False,
         run_id: str = "",
     ) -> None:
-        """Embed-only pass for files whose chunks already exist in DB.
+        """Re-embed chunks for embed-only files (body unchanged, embedding needs update).
 
-        Used when embed_diff detects files that need embedding but
-        chunk_diff says they are unchanged (e.g. after a model switch).
+        Used when meta_diff detects files that need embedding but chunk_diff says
+        they are unchanged (e.g. after a model switch or metadata-only update).
+
+        Updated in Phase 999.12: now computes e_meta, fuses e_text+e_meta, writes
+        all three components (e_text, e_meta, e_fused). Two sub-paths:
+
+        model_switch=True — Full re-encoding path:
+            Both e_text and e_meta are stale (different model). Re-encode both via TEI.
+            Do NOT read e_text from VecComponentStore — it was encoded by a different
+            model and must not be used for fusion with the new model's e_meta.
+            (Addresses OpenCode HIGH-2 Cycle 3: prevents model-switch silently using
+            stale e_text from VecComponentStore.)
+
+        model_switch=False — Cached e_text path (metadata-only equivalent):
+            e_text in VecComponentStore is valid (same model, body unchanged).
+            Only e_meta needs encoding (1 TEI call). Read cached e_text, fuse locally.
+            Same logic as _index_file_embed() fast path.
         """
+        weights = self._settings.parsed_embedding_weights
+
         for fi in files:
             path_str = str(fi.path)
             chunk_ids = self._metadata_store.get_chunk_ids_by_file(
@@ -1853,15 +1986,81 @@ class IndexingPipeline:
             if not chunks:
                 continue
 
-            embeddings, text_hashes = self._embed_chunks(chunks)
-            self._vector_store.add_chunks(
-                chunks, embeddings, overwrite=False,
-                text_hashes=text_hashes,
-            )
+            if model_switch:
+                # ── MODEL SWITCH: full re-encoding (both e_text and e_meta stale) ──
+                # Do NOT read VecComponentStore — stale e_text from old model
+                e_text_vectors, text_hashes = self._embed_chunks(chunks)  # TEI: all chunks
+                e_meta = self._embed_meta_component(fi)                    # TEI: 1 call
+                e_fused_vectors = [
+                    self._fuse_vectors(e_t, e_meta, weights) for e_t in e_text_vectors
+                ]
+                self._conn.execute("BEGIN")
+                try:
+                    for chunk, e_text in zip(chunks, e_text_vectors):
+                        self._vec_components.store(chunk.chunk_id, "text", e_text)
+                    self._vec_components.store(
+                        self._meta_entity_id(fi.path), "meta", e_meta
+                    )
+                    self._vector_store.add_chunks(
+                        chunks, e_fused_vectors, overwrite=True, text_hashes=text_hashes
+                    )
+                    self._conn.execute("COMMIT")
+                except Exception:
+                    self._conn.execute("ROLLBACK")
+                    raise
+                logger.info(
+                    "_embed_existing_chunks (model_switch): %s — %d chunks, e_text + e_meta re-encoded",
+                    fi.path, len(chunks),
+                )
+
+            else:
+                # ── CACHED E_TEXT: read from VecComponentStore, only encode e_meta ──
+                e_text_map = self._vec_components.get_batch(
+                    [c.chunk_id for c in chunks], "text"
+                )
+                missing = [c for c in chunks if c.chunk_id not in e_text_map]
+                if missing:
+                    logger.warning(
+                        "_embed_existing_chunks: %d missing e_text BLOBs for %s — "
+                        "falling back to full encode for missing chunks",
+                        len(missing), fi.path,
+                    )
+                    missing_vecs, missing_hashes = self._embed_chunks(missing)
+                    for chunk, e_t in zip(missing, missing_vecs):
+                        e_text_map[chunk.chunk_id] = e_t
+                e_meta = self._embed_meta_component(fi)  # 1 TEI call
+                e_fused_vectors = [
+                    self._fuse_vectors(e_text_map[c.chunk_id], e_meta, weights)
+                    for c in chunks
+                ]
+                self._conn.execute("BEGIN")
+                try:
+                    if missing:
+                        for chunk in missing:
+                            self._vec_components.store(
+                                chunk.chunk_id, "text", e_text_map[chunk.chunk_id]
+                            )
+                    self._vec_components.store(
+                        self._meta_entity_id(fi.path), "meta", e_meta
+                    )
+                    self._vector_store.add_chunks(
+                        chunks, e_fused_vectors, overwrite=True,
+                    )
+                    self._conn.execute("COMMIT")
+                except Exception:
+                    self._conn.execute("ROLLBACK")
+                    raise
+                logger.info(
+                    "_embed_existing_chunks (cached e_text): %s — 1 TEI call (e_meta), "
+                    "%d fused vectors recomputed locally",
+                    fi.path, len(chunks),
+                )
+
             self._save_meta_fingerprint(fi)
 
         logger.info(
-            "[%s] embed_existing: %d files processed", run_id, len(files),
+            "[%s] embed_existing: %d files processed (model_switch=%s)",
+            run_id, len(files), model_switch,
         )
 
     # ------------------------------------------------------------------
