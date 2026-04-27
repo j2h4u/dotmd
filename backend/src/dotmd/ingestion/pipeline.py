@@ -194,6 +194,29 @@ class IndexingPipeline:
             conn=self._conn, table_name=vec_components_table,
         )
 
+        # -- search_log table --------------------------------------------------
+        # Shared log for all (strategy, model) combos — no suffix needed.
+        # mode/reranked columns included for Phase 999.15/999.16 calibration use.
+        # reranked is INTEGER (0/1) — SQLite has no native BOOLEAN type.
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS search_log (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                query        TEXT NOT NULL,
+                timestamp    TEXT NOT NULL,
+                weights_used TEXT NOT NULL,
+                top_results  TEXT NOT NULL,
+                mode         TEXT NOT NULL DEFAULT 'hybrid',
+                reranked     INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        # id INTEGER PRIMARY KEY AUTOINCREMENT already creates an efficient rowid
+        # index. The explicit index below enables efficient DELETE...ORDER BY id
+        # trimming and potential future covering indexes.
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS search_log_id_idx ON search_log(id)"
+        )
+        self._conn.commit()
+
         # -- search engines (used for encoding during indexing) ----------------
         self._semantic_engine = SemanticSearchEngine(
             self._vector_store,
@@ -248,6 +271,77 @@ class IndexingPipeline:
         # Startup integrity checks (order matters: schema wipe first, then weights)
         self._check_schema_version()   # Must run first (may wipe state)
         self._check_weights_changed()  # Runs after schema check (uses intact state)
+
+    # ------------------------------------------------------------------
+    # Search logging
+    # ------------------------------------------------------------------
+
+    _SEARCH_LOG_MAX_ROWS = 10_000
+
+    def log_search(
+        self,
+        query: str,
+        weights_used: dict[str, float],
+        top_results: list[dict],
+        *,
+        mode: str = "hybrid",
+        reranked: bool = False,
+    ) -> None:
+        """Log a search request to search_log for observability and future calibration.
+
+        Writes one row per search. Trims oldest rows when count exceeds
+        _SEARCH_LOG_MAX_ROWS (10,000) to bound table size (~3 MB max at ~300 bytes/row).
+
+        Non-fatal: all errors are caught; search() never fails due to logging.
+
+        Parameters
+        ----------
+        query:
+            Raw search query string.
+        weights_used:
+            Current fusion weights dict, e.g. {"text": 0.7, "meta": 0.3}.
+            Logs the PARSED effective weights (not the raw env var string).
+        top_results:
+            List of dicts with keys: chunk_id (str), score (float), engine (str).
+            Top-k results after reranking. Chunk text is NOT stored (privacy + size).
+        mode:
+            Search mode used: 'hybrid', 'semantic', 'keyword', 'graph'. Default: 'hybrid'.
+        reranked:
+            Whether cross-encoder reranking was applied. Default: False.
+
+        Concurrent write safety: shares self._conn with trickle indexer; both operate
+        on index.db in WAL mode. The try/except handles any write failure gracefully.
+        """
+        import json
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            self._conn.execute(
+                "INSERT INTO search_log (query, timestamp, weights_used, top_results, mode, reranked) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    query,
+                    now,
+                    json.dumps(weights_used, sort_keys=True),
+                    json.dumps(top_results),
+                    mode,
+                    int(reranked),
+                ),
+            )
+            # Trim oldest rows if over cap — uses indexed id column for efficiency
+            count = self._conn.execute(
+                "SELECT COUNT(*) FROM search_log"
+            ).fetchone()[0]
+            if count > self._SEARCH_LOG_MAX_ROWS:
+                excess = count - self._SEARCH_LOG_MAX_ROWS
+                self._conn.execute(
+                    "DELETE FROM search_log WHERE id IN ("
+                    "  SELECT id FROM search_log ORDER BY id ASC LIMIT ?"
+                    ")",
+                    (excess,),
+                )
+            self._conn.commit()
+        except Exception:
+            logger.warning("search_log write failed — non-fatal", exc_info=True)
 
     # ------------------------------------------------------------------
     # Public API
