@@ -112,7 +112,7 @@ def index(ctx: click.Context, directory: Path, extract_depth: str, entity_types:
 @click.pass_context
 def search(ctx: click.Context, query: str, top: int, mode: str, no_rerank: bool, no_expand: bool) -> None:
     """Search the indexed knowledgebase."""
-    service = _get_service_from_ctx(ctx, read_only=True)
+    service = _get_service_from_ctx(ctx)
     results = service.search(
         query=query,
         top_k=top,
@@ -150,7 +150,7 @@ def search(ctx: click.Context, query: str, top: int, mode: str, no_rerank: bool,
 @click.pass_context
 def status(ctx: click.Context, verbose: bool) -> None:
     """Show index statistics."""
-    service = _get_service_from_ctx(ctx, read_only=True)
+    service = _get_service_from_ctx(ctx)
     stats = service.status()
 
     click.echo(f"Files:    {stats.total_files}")

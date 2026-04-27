@@ -56,19 +56,14 @@ class LadybugDBGraphStore:
         File-system path for the embedded LadybugDB database directory.
     """
 
-    def __init__(self, db_path: Path, *, read_only: bool = False) -> None:
+    def __init__(self, db_path: Path) -> None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db_path = str(db_path)
-        self._read_only = read_only
         self._db: lb.Database | None = None
         self._conn: lb.Connection | None = None
-        if not read_only:
-            self._db = lb.Database(self._db_path)
-            self._conn = lb.Connection(self._db)
-            self._init_schema()
-        elif Path(self._db_path).exists():
-            self._db = lb.Database(self._db_path, read_only=True)
-            self._conn = lb.Connection(self._db)
+        self._db = lb.Database(self._db_path)
+        self._conn = lb.Connection(self._db)
+        self._init_schema()
 
     @contextmanager
     def _connection(self) -> Iterator[lb.Connection]:
@@ -86,7 +81,7 @@ class LadybugDBGraphStore:
 
     def _init_schema(self) -> None:
         """Create node and relationship tables if they don't exist."""
-        assert self._conn is not None  # only called from __init__ when not read_only
+        assert self._conn is not None
         for stmt in _SCHEMA_INIT:
             try:
                 self._conn.execute(stmt)

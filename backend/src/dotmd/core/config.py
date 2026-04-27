@@ -108,7 +108,6 @@ class Settings(BaseSettings):
 
     # Graph
     graph_max_hops: int = 2
-    read_only: bool = False
     graph_backend: Literal["ladybugdb", "falkordb"] = "ladybugdb"
     # FalkorDB connection URL (Redis protocol). Only used when graph_backend="falkordb".
     falkordb_url: str = "redis://localhost:6379"

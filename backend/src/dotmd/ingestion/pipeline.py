@@ -98,9 +98,7 @@ def _create_graph_store(settings: Settings) -> GraphStoreProtocol:
         )
     from dotmd.storage.graph import LadybugDBGraphStore
 
-    return LadybugDBGraphStore(
-        settings.graph_db_path, read_only=settings.read_only,
-    )
+    return LadybugDBGraphStore(settings.graph_db_path)
 
 
 class IndexingPipeline:
