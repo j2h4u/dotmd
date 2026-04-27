@@ -111,8 +111,6 @@ class Settings(BaseSettings):
     graph_backend: Literal["ladybugdb", "falkordb"] = "ladybugdb"
     # FalkorDB connection URL (Redis protocol). Only used when graph_backend="falkordb".
     falkordb_url: str = "redis://localhost:6379"
-    # FalkorDB graph name. Must differ from Graphiti's "knowledgebase" graph.
-    falkordb_graph_name: str = "dotmd"
 
     @classmethod
     def settings_customise_sources(

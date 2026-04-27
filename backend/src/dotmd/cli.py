@@ -160,7 +160,7 @@ def status(ctx: click.Context, verbose: bool) -> None:
     # Graph backend info
     settings = Settings()
     if settings.graph_backend == "falkordb":
-        click.echo(f"Graph:    falkordb @ {settings.falkordb_url}/{settings.falkordb_graph_name}")
+        click.echo(f"Graph:    falkordb @ {settings.falkordb_url}/dotmd")
     else:
         click.echo(f"Graph:    ladybugdb @ {settings.graph_db_path}")
     if stats.last_indexed:
