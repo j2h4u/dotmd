@@ -135,6 +135,8 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 
 v1.3 shipped and archived. Production packaging complete: parameterized docker-compose with bundled profiles, health endpoint, WAL mode, production include-based overlay. External smoke tests (5 tests). TEI/GLiNER benchmarks closed out concurrent optimization paths. FTS5 replaced rank_bm25+pickle for incremental BM25. Background trickle indexer live with watchdog+polling, per-file pipeline, TOML config, progress reporting. Quality sweep shipped: error handling, naming, enums, observability. Search pipeline fixed: graph→post-fusion enrichment, cosine distance metric, E5 prefixes, cross-encoder quality gate, auto-calibrating score floor. Granular reindex command. Embedding model mismatch detection via TEI /info. TEI serves multilingual-e5-large (1024-dim). pplx-embed-context-v1-0.6B researched as candidate replacement for v1.4.
 
+Phase 999.12 complete (2026-04-27): Dual-encoder unified embedding shipped. Metadata-only changes (tag updates, title renames) now require 1 TEI call per document instead of N calls per chunk. VecComponentStore stores raw e_text/e_meta BLOBs; meta_tracker (title+tags checksum) triggers fast path when only metadata changes. search_log table added. 189 tests pass.
+
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
@@ -153,4 +155,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-30 after v1.3 milestone archived*
+*Last updated: 2026-04-27 after Phase 999.12 complete*
