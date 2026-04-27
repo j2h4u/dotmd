@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
-status: executing
+status: ready_to_plan
 last_updated: "2026-04-27T11:35:51.944Z"
 last_activity: 2026-04-27
 progress:
   total_phases: 16
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 12
   completed_plans: 9
-  percent: 75
+  percent: 19
 ---
 
 # GSD State
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 **v1.4 — Search Quality Evaluations**
 
-Phase: 11 of 12 (Embedding Model Swap)
-Plan: 3 plans (11-01 Wave 1, 11-02 Wave 1, 11-03 Wave 2)
-Status: Executing Phase 999.12
+Phase: 999.13 of 12 (вернуть stateful mcp режим + notifications/tools/list_changed (backlog))
+Plan: Not started
+Status: Ready to plan
 Last activity: 2026-04-27
 
 Progress: [░░░░░░░░░░] 0%
@@ -37,7 +37,7 @@ Progress: [░░░░░░░░░░] 0%
 
 **Velocity:**
 
-- Total plans completed: 18 (across v1.1 + v1.2 + v1.3)
+- Total plans completed: 21 (across v1.1 + v1.2 + v1.3)
 - Average duration: ~3 min
 - Total execution time: —
 
@@ -52,6 +52,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 10 | 4 | 12min | 3min |
 | Phase 11 P02 | 2min | 2 tasks | 6 files |
 | Phase 11-embedding-model-swap P01 | 2min | 2 tasks | 2 files |
+| 999.12 | 3 | - | - |
 
 ## Accumulated Context
 
