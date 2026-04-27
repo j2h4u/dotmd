@@ -2310,6 +2310,14 @@ class IndexingPipeline:
         total_recomputed = 0
         files_skipped = 0
 
+        # Wipe vec0 once before the loop. Using overwrite=True inside the per-file
+        # loop deletes the ENTIRE table on every iteration (sqlite_vec DELETE FROM vec_chunks
+        # runs before each INSERT batch), leaving only the most-recently-written file's
+        # vectors in the table until the loop finishes — wrong and very slow for large indexes.
+        # One delete_all() here + overwrite=False per file is correct: table is cleared once,
+        # then each file's rows are inserted fresh.
+        self._vector_store.delete_all()
+
         # Process in batches of 1000 files to avoid OOM on ~1.4M chunks (~5.6GB raw vectors)
         BATCH_SIZE = 1000
         for batch_start in range(0, len(all_file_paths), BATCH_SIZE):
@@ -2345,7 +2353,7 @@ class IndexingPipeline:
                     self._fuse_vectors(e_text_map[c.chunk_id], e_meta, weights)
                     for c in chunks
                 ]
-                self._vector_store.add_chunks(chunks, e_fused, overwrite=True)
+                self._vector_store.add_chunks(chunks, e_fused, overwrite=False)
                 total_recomputed += len(chunks)
 
         if files_skipped > 0:
