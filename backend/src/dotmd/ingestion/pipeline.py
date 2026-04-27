@@ -2338,6 +2338,8 @@ class IndexingPipeline:
         total_recomputed = 0
         files_skipped = 0
 
+        # M2M read (above) MUST precede delete_all(). If swapped: M2M read fails after wipe
+        # → early return → vec0 already empty → permanent empty index until manual reindex.
         # Wipe vec0 once before the loop. Using overwrite=True inside the per-file
         # loop deletes the ENTIRE table on every iteration (sqlite_vec DELETE FROM vec_chunks
         # runs before each INSERT batch), leaving only the most-recently-written file's
@@ -2387,10 +2389,11 @@ class IndexingPipeline:
         if files_skipped > 0:
             # Partial recompute — do NOT update sentinel
             # Next startup will detect weights_used != current and retry
-            logger.warning(
-                "_check_weights_changed: %d files skipped due to missing components — "
+            logger.error(
+                "_check_weights_changed: %d/%d files skipped (%d chunks recomputed so far) — "
+                "vec0 is partially populated; search results are incomplete until next successful startup. "
                 "NOT updating weights_used sentinel; will retry on next startup.",
-                files_skipped,
+                files_skipped, len(all_file_paths), total_recomputed,
             )
             return
 

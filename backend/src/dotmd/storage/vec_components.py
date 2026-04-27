@@ -237,6 +237,6 @@ class VecComponentStore:
             return self._conn.execute(
                 f"SELECT COUNT(*) FROM {self._TABLE}"
             ).fetchone()[0]
-        except Exception:  # noqa: BLE001
+        except sqlite3.OperationalError:
             logger.warning("Failed to count vec_components rows", exc_info=True)
             return 0
