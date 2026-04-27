@@ -248,6 +248,7 @@ def test_metadata_only_with_missing_etext_falls_back_to_full_embed(minimal_setti
 
 # ── Schema version wipe ──────────────────────────────────────────────────────
 
+@pytest.mark.real_schema_check
 def test_schema_version_wipe_clears_all_state(minimal_settings, tmp_path):
     """_check_schema_version() with stale version clears all 7 state components."""
     doc = minimal_settings.data_dir / "test.md"

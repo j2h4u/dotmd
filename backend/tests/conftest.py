@@ -81,6 +81,24 @@ def _mock_semantic_engine() -> Generator[None, None, None]:
         yield
 
 
+@pytest.fixture(autouse=True)
+def _mock_schema_version_check(request: pytest.FixtureRequest) -> Generator[None, None, None]:
+    """Patch _check_schema_version to no-op in all tests.
+
+    Prevents the schema wipe from firing when tests construct an IndexingPipeline
+    with a pre-populated fixture DB (which has chunk_fingerprints rows and therefore
+    looks like a pre-999.12 DB to the real check).
+
+    Tests that specifically exercise _check_schema_version must opt out with:
+        @pytest.mark.real_schema_check
+    """
+    if request.node.get_closest_marker("real_schema_check"):
+        yield
+        return
+    with patch("dotmd.ingestion.pipeline.IndexingPipeline._check_schema_version"):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Shared convenience fixtures (used by pre-phase-16 test files)
 # ---------------------------------------------------------------------------

@@ -21,7 +21,8 @@ def pytest_collection_modifyitems(config, items):
         reason=f"dotMD stack not reachable at {DOTMD_URL}"
     )
     for item in items:
-        item.add_marker(skip_marker)
+        if "smoke" in str(item.fspath):
+            item.add_marker(skip_marker)
 
 
 @pytest.fixture(scope="session")

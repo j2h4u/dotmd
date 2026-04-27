@@ -212,4 +212,5 @@ def pytest_collection_modifyitems(config, items):
 
     skip = pytest.mark.skip(reason="dotMD MCP server not reachable at http://localhost:8080")
     for item in items:
-        item.add_marker(skip)
+        if "e2e" in str(item.fspath):
+            item.add_marker(skip)
