@@ -50,7 +50,7 @@ class DotMDService:
             embedding_url=self._settings.embedding_url,
             tei_batch_size=self._settings.tei_batch_size,
             use_prefix=self._settings.needs_embedding_prefix,
-            query_instruction=self._settings.needs_query_instruction,
+            query_instruction=self._settings.query_instruction,
         )
         self._keyword_engine = self._pipeline.keyword_engine
         self._graph_engine = GraphSearchEngine(

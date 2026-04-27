@@ -390,9 +390,9 @@ class IndexingPipeline:
         if not diff.new and not diff.modified and not diff.deleted:
             # No chunk-level changes.  Still check if embed-only work needed
             # (e.g. after a model switch, all files need re-embedding).
-            embed_diff = self._meta_tracker.diff(files)
-            embed_needed = set(embed_diff.new) | set(embed_diff.modified)
-            if not embed_needed:
+            meta_diff = self._meta_tracker.diff(files)
+            meta_changed_paths = set(meta_diff.new) | set(meta_diff.modified)
+            if not meta_changed_paths:
                 logger.info("[%s] no changes — skipping (%.2fs total)", run_id, time.perf_counter() - t_start)
                 stats = self._metadata_store.get_stats() or IndexStats()
                 stats.new_files = 0
@@ -405,9 +405,9 @@ class IndexingPipeline:
             # Embed-only: chunks unchanged, but embeddings needed.
             logger.info(
                 "[%s] chunk_diff: no changes, but %d files need embedding",
-                run_id, len(embed_needed),
+                run_id, len(meta_changed_paths),
             )
-            embed_only_files = [fi for fi in files if str(fi.path) in embed_needed]
+            embed_only_files = [fi for fi in files if str(fi.path) in meta_changed_paths]
             self._embed_existing_chunks(embed_only_files, run_id=run_id)
             stats = self._metadata_store.get_stats() or IndexStats()
             stats.new_files = 0
@@ -694,9 +694,9 @@ class IndexingPipeline:
             )
         w_text = weights.get("text", 0.7)
         w_meta = weights.get("meta", 0.3)
-        nt = self._normalize_vector(e_text)
-        nm = self._normalize_vector(e_meta)
-        raw = [w_text * a + w_meta * b for a, b in zip(nt, nm)]
+        e_text_norm = self._normalize_vector(e_text)
+        e_meta_norm = self._normalize_vector(e_meta)
+        raw = [w_text * a + w_meta * b for a, b in zip(e_text_norm, e_meta_norm)]
         return self._normalize_vector(raw)
 
     def _embed_meta_component(self, file_info: FileInfo) -> list[float]:
@@ -1086,18 +1086,18 @@ class IndexingPipeline:
         changed_paths = set(diff.new) | set(diff.modified)
         files_to_ingest = [fi for fi in all_files if str(fi.path) in changed_paths]
 
-        # 4. Check embed_diff for files unchanged in chunk_diff.
+        # 4. Check meta_diff for files unchanged in chunk_diff.
         #    These files already have chunks but may need embedding
         #    (e.g. after a model switch).
         unchanged_files = [fi for fi in all_files if str(fi.path) not in changed_paths and str(fi.path) not in set(diff.deleted)]
         embed_only_files: list[FileInfo] = []
         if unchanged_files:
-            embed_diff = self._meta_tracker.diff(unchanged_files)
-            embed_needed = set(embed_diff.new) | set(embed_diff.modified)
-            if embed_needed:
-                embed_only_files = [fi for fi in unchanged_files if str(fi.path) in embed_needed]
+            meta_diff = self._meta_tracker.diff(unchanged_files)
+            meta_changed_paths = set(meta_diff.new) | set(meta_diff.modified)
+            if meta_changed_paths:
+                embed_only_files = [fi for fi in unchanged_files if str(fi.path) in meta_changed_paths]
                 logger.info(
-                    "[%s] embed_diff: %d files need embedding (unchanged chunks)",
+                    "[%s] meta_diff: %d files need embedding (unchanged chunks)",
                     run_id, len(embed_only_files),
                 )
 

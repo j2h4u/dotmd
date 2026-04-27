@@ -49,7 +49,7 @@ def split_default(text: str) -> list[str]:
 
 
 
-def _enrich_noop(text: str, frontmatter: dict) -> str:
+def _enrich_passthrough(text: str, frontmatter: dict) -> str:
     """No-op enrichment — chunk text embedded as-is (Phase 999.12 dual-encoder).
 
     title+tags are now a separate e_meta vector component; not prepended to
@@ -73,17 +73,17 @@ class ContentHandler(NamedTuple):
 
 DEFAULT_HANDLER = ContentHandler(
     pre_split=split_default,
-    enrich=_enrich_noop,
+    enrich=_enrich_passthrough,
 )
 
 HANDLERS: dict[str, ContentHandler] = {
     DocKind.MEETING_TRANSCRIPT: ContentHandler(
         pre_split=split_by_speaker_turns,
-        enrich=_enrich_noop,
+        enrich=_enrich_passthrough,
     ),
     DocKind.VOICENOTE: ContentHandler(
         pre_split=split_by_paragraphs,
-        enrich=_enrich_noop,
+        enrich=_enrich_passthrough,
     ),
 }
 

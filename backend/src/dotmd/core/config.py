@@ -216,7 +216,7 @@ class Settings(BaseSettings):
         return "e5" in model_lower or "bge" in model_lower
 
     @property
-    def needs_query_instruction(self) -> str:
+    def query_instruction(self) -> str:
         """Instruction string for query encoding, or empty string if not needed.
 
         Qwen3-Embedding and similar instruction-aware models encode queries as:
