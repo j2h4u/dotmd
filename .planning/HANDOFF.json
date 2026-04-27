@@ -1,43 +1,73 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-27T14:38:25Z",
+  "timestamp": "2026-04-27T15:52:56Z",
   "phase": "999.12",
-  "phase_name": "dual-encoder-unified-embedding-decoupled-metadata-vectors",
+  "phase_name": "graph-batch-ops-fix",
   "phase_dir": ".planning/phases/999.12-dual-encoder-unified-embedding-decoupled-metadata-vectors-ba",
-  "plan": 3,
+  "plan": null,
   "task": null,
   "total_tasks": null,
   "status": "paused",
   "completed_tasks": [
-    {"id": 1, "name": "Phase 999.12 execution (3 plans)", "status": "done", "commit": "2ff38eb"},
-    {"id": 2, "name": "Code review findings fix", "status": "done", "commit": "7ded65c"},
-    {"id": 3, "name": "Quality sweep waves 1-10 (34 fixes)", "status": "done", "commit": "19c1c11"}
+    {"id": 1, "name": "Phase 999.12 execution + code review + quality sweep", "status": "done", "commit": "19c1c11"},
+    {"id": 2, "name": "Deploy: backup, merge dev, docker compose up", "status": "done", "commit": "ae065ae"},
+    {"id": 3, "name": "Fix _check_schema_version Case A bug (chunk_fingerprints detection)", "status": "done", "commit": "ae065ae"},
+    {"id": 4, "name": "Add graph orphan sweep (delete_isolated_nodes + trickle wiring)", "status": "done", "commit": "ae065ae"},
+    {"id": 5, "name": "Fix smoke/e2e conftest global skip (pytest_collection_modifyitems scoped)", "status": "done", "commit": "a991f18"},
+    {"id": 6, "name": "Add tests/ bind-mount + pytest in Dockerfile + smoke URL 8321→8080", "status": "done", "commit": "1cdda7b"}
   ],
   "remaining_tasks": [
-    {"id": 4, "name": "Production deployment", "status": "not_started", "notes": "backup first, then merge branch, then restart container"},
-    {"id": 5, "name": "Monitor reindex", "status": "not_started", "notes": "check trickle logs, ETA visible per-file after 3 files + 2 min"}
-  ],
-  "blockers": [],
-  "human_actions_pending": [
     {
-      "action": "Create borg backup before deploy",
-      "context": "Wipe-on-deploy migration destroys all current vectors. Backup ensures rollback path.",
-      "blocking": true
+      "id": 7,
+      "name": "Batch FalkorDB graph writes with UNWIND",
+      "status": "not_started",
+      "notes": "CRITICAL. Sequential add_edge calls = ~1500 round-trips per large file = 470s for README.md (73 chunks), 251s for AGENTS.md (50 chunks). Fix: add batch_add_section_nodes(), batch_add_entity_nodes(), batch_add_tag_nodes(), batch_add_edges() to FalkorDBGraphStore using UNWIND. Update pipeline._populate_graph() and _frontmatter_to_graph() to collect all nodes/edges per file, then call batch methods. Base Protocol needs batch methods too. LadybugDB needs stub implementations."
+    },
+    {
+      "id": 8,
+      "name": "Add graph wipe to _check_schema_version",
+      "status": "not_started",
+      "notes": "Add self._graph_store.delete_all() as step 3b in _check_schema_version (between vec_components wipe and vec_store wipe). This ensures future schema migrations start with a clean graph. Currently missing — graph was NOT wiped during today's schema migration."
+    },
+    {
+      "id": 9,
+      "name": "Rewrite smoke tests against MCP",
+      "status": "not_started",
+      "notes": "REST API (/search, /status) removed in commit 98c6b99 (260425-rel). Smoke tests in tests/smoke/ still call these endpoints → JSONDecodeError at fixture setup. Must be rewritten. E2e tests (tests/e2e/) already correct (MCP). Pattern: use httpx to call MCP HTTP endpoint at http://localhost:8080/mcp, send tool calls via SSE/JSON. See tests/e2e/ for working examples."
+    },
+    {
+      "id": 10,
+      "name": "Fix test_pipeline_reindex_shared_chunk.py collection error",
+      "status": "not_started",
+      "notes": "File instantiates Settings() at module level, fails at collection because DOTMD_EMBEDDING_URL not set (autouse monkeypatch is function-scope, not module-scope). Either make the import lazy or use a conftest session-scope fixture."
+    },
+    {
+      "id": 11,
+      "name": "Wipe state and restart reindex",
+      "status": "not_started",
+      "notes": "After tasks 7+8 merged and tested: (1) reset sentinel: docker exec dotmd python -c \"import sqlite3; conn=sqlite3.connect('/dotmd-index/index.db'); conn.execute(\\\"DELETE FROM vec_config_contextual_512_50_multilingual_e5_large WHERE key='schema_version'\\\"); conn.commit()\", (2) clear FalkorDB graph via pipeline.reindex_graph() or graph_store.delete_all(), (3) docker compose restart dotmd. Reindex starts clean with fast batched graph ops."
     }
   ],
+  "blockers": [],
+  "human_actions_pending": [],
   "decisions": [
     {
-      "decision": "Wipe-on-deploy migration (D-14)",
-      "rationale": "text_hash semantics changed: hash(title+tags+body) → hash(body only). Old vectors incompatible, cannot reuse.",
+      "decision": "UNWIND batch approach for graph writes (not label-specific MATCH alone)",
+      "rationale": "Root cause is sequential round-trips: ~1500 calls × ~300ms = 470s/file. UNWIND collapses to 3-4 calls per file regardless of entity count. Label-specific MATCH is secondary improvement.",
       "phase": "999.12"
     },
     {
-      "decision": "~300 files, reindex expected several hours (not days)",
-      "rationale": "Initial CONTEXT.md said 'several days' — that was for a larger dataset. Actual file count is ~300.",
+      "decision": "dotmd container stopped — reindex halted at 9/734 files",
+      "rationale": "Reindex ETA degraded from 9.7h to 30h after 9 files due to O(n²) graph behavior with 9587 pre-existing nodes. Not worth continuing without UNWIND batch fix.",
+      "phase": "999.12"
+    },
+    {
+      "decision": "index.db.bak exists in dotmd volume as rollback",
+      "rationale": "Created before wipe-on-deploy. Located at /var/lib/docker/volumes/dotmd_dotmd-index/_data/index.db.bak",
       "phase": "999.12"
     }
   ],
   "uncommitted_files": [],
-  "next_action": "Run borg backup, then merge feature/dual-encoder-unified-embeddings to dev, then docker compose up -d dotmd",
-  "context_notes": "Branch is fully ready. 189 tests pass. Quality sweep complete. Only remaining work is ops: backup + deploy + monitor reindex."
+  "next_action": "Implement UNWIND batch graph ops: add batch_add_*() methods to FalkorDBGraphStore, update pipeline._populate_graph() to collect then batch. Then add graph wipe to _check_schema_version. Run tests inside container. Then wipe state and restart container.",
+  "context_notes": "Phase 999.12 dual-encoder code is correct and tested (189 unit tests + 24 e2e pass inside container). Graph correctness is fine (MERGE = no duplicates). The only problem is write performance: sequential Cypher round-trips. FalkorDB THREAD_COUNT=8 is configured but irrelevant — threads help concurrent queries, not sequential ones. The UNWIND fix is self-contained in falkordb_graph.py + pipeline._populate_graph()/_frontmatter_to_graph(). Smoke tests are broken independently (pre-existing: REST API was removed 3 days ago in 260425-rel, tests were not updated at that time — acknowledged failure)."
 }
