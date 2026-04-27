@@ -753,6 +753,10 @@ class IndexingPipeline:
         _ingest_and_finalize() owns chunking/FTS/graph — they are separate.
         (Addresses OpenCode HIGH-3 Cycle 3: call site was undefined.)
 
+        ``chunks=[]`` is valid: when the list is empty, chunks are loaded internally
+        from metadata_store via ``_metadata_store.get_chunk_ids_by_file``. This path
+        is used by the metadata-only fast path where chunks are already stored.
+
         Branching logic (three mutually exclusive paths):
 
         Case 1 — body changed (body_changed=True):
@@ -2036,6 +2040,12 @@ class IndexingPipeline:
         self._save_fingerprint(self._chunk_tracker, fi)
 
     def _save_meta_fingerprint(self, fi: FileInfo) -> None:
+        """Write meta_tracker sentinel after successful embedding.
+
+        Prevents trickle from re-triggering the metadata-only fast path on the
+        next cycle for files whose title/tags changed but whose body did not.
+        Without this sentinel, trickle would re-embed e_meta on every startup.
+        """
         self._save_fingerprint(self._meta_tracker, fi)
 
     def _update_chunk_fingerprints(self, files: list[FileInfo]) -> None:

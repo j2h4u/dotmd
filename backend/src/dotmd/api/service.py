@@ -205,6 +205,8 @@ class DotMDService:
         -------
         list[SearchResult]
             Ranked search results, at most *top_k* items.
+
+        Side effect: appends one row to ``search_log`` in ``index.db`` on every call.
         """
         logger.info("search: query=%r mode=%s top_k=%d rerank=%s", query[:100], mode, top_k, rerank)
 

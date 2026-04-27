@@ -80,7 +80,10 @@ def meta_checksum(path: Path) -> str:
     Uses same defensive pattern as chunk_checksum.
 
     Data source: reads frontmatter via parse_frontmatter(read_file(path)),
-    same as chunk_checksum.
+    same as chunk_checksum. Reads the file from disk on every call — no caching.
+
+    Raises:
+        FileNotFoundError: if ``path`` does not exist on disk.
     """
     content = read_file(path)
     frontmatter, _ = parse_frontmatter(content)
