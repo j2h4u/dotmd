@@ -117,6 +117,8 @@ class IndexingPipeline:
         extraction options are all derived from this object.
     """
 
+    SCHEMA_VERSION = "2"  # Phase 999.12: text_hash=hash(body only), vec_components added
+
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
 
@@ -241,6 +243,10 @@ class IndexingPipeline:
             self._embedding_cache.clear()
         else:
             self._embedding_cache.update_model_sentinel()
+
+        # Startup integrity checks (order matters: schema wipe first, then weights)
+        self._check_schema_version()   # Must run first (may wipe state)
+        self._check_weights_changed()  # Runs after schema check (uses intact state)
 
     # ------------------------------------------------------------------
     # Public API
@@ -2061,6 +2067,195 @@ class IndexingPipeline:
         logger.info(
             "[%s] embed_existing: %d files processed (model_switch=%s)",
             run_id, len(files), model_switch,
+        )
+
+    # ------------------------------------------------------------------
+    # Startup integrity checks
+    # ------------------------------------------------------------------
+
+    def _check_schema_version(self) -> None:
+        """Check schema version sentinel; wipe ALL vector state if version mismatch.
+
+        Entire wipe is wrapped in a single BEGIN...COMMIT transaction so that a
+        crash mid-wipe leaves the database in a state where the sentinel is NOT
+        written (schema_version != SCHEMA_VERSION), causing a clean re-wipe on
+        next startup. A crash after COMMIT is safe: the state is fully wiped and
+        consistent.
+
+        Clears all 7 state components:
+          1. embedding_cache (text_hash semantics changed: body-only hash)
+          2. vec_components (stale e_text BLOBs encoded with old enriched text)
+          3. vec0 / vec_meta (stale enriched vectors)
+          4. chunk_tracker (force full re-chunk on next trickle run)
+          5. meta_tracker (force full re-embed on next trickle run)
+          6. weights_used sentinel (cleared; re-written by weight detection after startup)
+          7. schema_version sentinel (written last, inside same transaction)
+
+        After wipe: trickle rebuilds from scratch on next run.
+        Expected rebuild time: several days on current hardware (Xeon E3-1245 V2, CPU-only TEI).
+        """
+        config_table = self._vector_store._CONFIG_TABLE
+        row = self._conn.execute(
+            f"SELECT value FROM {config_table} WHERE key = 'schema_version'"
+        ).fetchone()
+        stored_version = row[0] if row else None
+
+        if stored_version == self.SCHEMA_VERSION:
+            return  # Up to date
+
+        logger.warning(
+            "schema_version mismatch: stored=%r expected=%r — wiping all vector state. "
+            "trickle will rebuild from scratch. Expected rebuild time: several days.",
+            stored_version, self.SCHEMA_VERSION,
+        )
+
+        # Entire wipe runs in a single transaction for atomicity.
+        # Crash before COMMIT → sentinel not written → re-wipe on next startup (safe).
+        # Crash after COMMIT → fully wiped and consistent (safe).
+        self._conn.execute("BEGIN")
+        try:
+            # 1. Wipe embedding cache (text_hash semantics changed)
+            self._embedding_cache.clear()
+            # 2. Wipe vec_components (stale e_text BLOBs)
+            self._vec_components.delete_all()
+            # 3. Wipe vec0 + vec_meta (SQLiteVecVectorStore.delete_all handles both)
+            self._vector_store.delete_all()
+            # 4. Clear chunk_tracker
+            self._chunk_tracker.clear()
+            # 5. Clear meta_tracker
+            self._meta_tracker.clear()
+            # 6. Clear stored weights sentinel (re-written by _check_weights_changed)
+            self._conn.execute(
+                f"DELETE FROM {config_table} WHERE key = 'weights_used'"
+            )
+            # 7. Write new schema_version sentinel (last step — marks clean state)
+            self._conn.execute(
+                f"INSERT OR REPLACE INTO {config_table} (key, value) VALUES ('schema_version', ?)",
+                (self.SCHEMA_VERSION,),
+            )
+            self._conn.execute("COMMIT")
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            logger.error("_check_schema_version: wipe failed — rolled back", exc_info=True)
+            raise
+
+        logger.info(
+            "schema_version sentinel written: %s. Vector rebuild in progress.", self.SCHEMA_VERSION
+        )
+
+    def _check_weights_changed(self) -> None:
+        """Detect weight change; if changed, recompute e_fused from stored components.
+
+        Changing weights is cheap: read stored e_text + e_meta BLOBs from vec_components,
+        fuse locally with new weights, bulk-update vec0. No TEI calls.
+
+        Guards:
+        - If VecComponentStore is empty (e.g. fresh install or post-wipe), skip entirely.
+        - Recompute is batched at 1000 files at a time to avoid OOM on large indexes.
+        - Sentinel is updated ONLY if the recompute was complete (no files skipped due to
+          missing components). Partial recompute leaves sentinel unchanged so the next
+          startup detects the change and retries.
+          (Addresses Codex MEDIUM: do not update sentinel on partial recompute.)
+
+        Stored weights are in vec_config key 'weights_used' (JSON string).
+        """
+        import json as _json
+
+        # Guard: skip if store is empty (fresh install or post schema-version wipe)
+        if self._vec_components.count() == 0:
+            logger.debug("_check_weights_changed: VecComponentStore is empty — skipping")
+            return
+
+        config_table = self._vector_store._CONFIG_TABLE
+        current_weights = self._settings.parsed_embedding_weights
+        current_weights_json = _json.dumps(current_weights, sort_keys=True)
+
+        row = self._conn.execute(
+            f"SELECT value FROM {config_table} WHERE key = 'weights_used'"
+        ).fetchone()
+        stored_weights_json = row[0] if row else None
+
+        if stored_weights_json == current_weights_json:
+            return  # No change
+
+        logger.info(
+            "Embedding weights changed: stored=%r current=%r — recomputing e_fused from components.",
+            stored_weights_json, current_weights_json,
+        )
+
+        weights = current_weights
+        # Get all distinct file paths from M2M table
+        m2m_table = f"chunk_file_paths_{self._strategy}"
+        try:
+            rows = self._conn.execute(
+                f"SELECT DISTINCT file_path FROM {m2m_table}"
+            ).fetchall()
+            all_file_paths = [row[0] for row in rows]
+        except Exception:
+            logger.warning("_check_weights_changed: cannot read M2M table — skipping")
+            return
+
+        total_recomputed = 0
+        files_skipped = 0
+
+        # Process in batches of 1000 files to avoid OOM on ~1.4M chunks (~5.6GB raw vectors)
+        BATCH_SIZE = 1000
+        for batch_start in range(0, len(all_file_paths), BATCH_SIZE):
+            batch = all_file_paths[batch_start: batch_start + BATCH_SIZE]
+            for fp in batch:
+                # Always use _meta_entity_id() for canonical path normalization
+                canonical_fp = self._meta_entity_id(fp)
+                chunk_ids = self._metadata_store.get_chunk_ids_by_file(
+                    self._strategy, canonical_fp
+                ) or []
+                chunks = self._metadata_store.get_chunks(chunk_ids) if chunk_ids else []
+                if not chunks:
+                    continue
+                e_meta = self._vec_components.get(canonical_fp, "meta")
+                if e_meta is None:
+                    logger.warning(
+                        "_check_weights_changed: no e_meta for %s — skipping file", fp
+                    )
+                    files_skipped += 1
+                    continue
+                e_text_map = self._vec_components.get_batch(
+                    [c.chunk_id for c in chunks], "text"
+                )
+                missing = [c for c in chunks if c.chunk_id not in e_text_map]
+                if missing:
+                    logger.warning(
+                        "_check_weights_changed: %d missing e_text BLOBs for %s — skipping file",
+                        len(missing), fp,
+                    )
+                    files_skipped += 1
+                    continue
+                e_fused = [
+                    self._fuse_vectors(e_text_map[c.chunk_id], e_meta, weights)
+                    for c in chunks
+                ]
+                self._vector_store.add_chunks(chunks, e_fused, overwrite=True)
+                total_recomputed += len(chunks)
+
+        if files_skipped > 0:
+            # Partial recompute — do NOT update sentinel
+            # Next startup will detect weights_used != current and retry
+            logger.warning(
+                "_check_weights_changed: %d files skipped due to missing components — "
+                "NOT updating weights_used sentinel; will retry on next startup.",
+                files_skipped,
+            )
+            return
+
+        # Full recompute — safe to update sentinel
+        self._conn.execute(
+            f"INSERT OR REPLACE INTO {config_table} (key, value) VALUES ('weights_used', ?)",
+            (current_weights_json,),
+        )
+        self._conn.commit()
+        logger.info(
+            "_check_weights_changed: recomputed %d fused vectors (no TEI calls). "
+            "weights_used sentinel updated.",
+            total_recomputed,
         )
 
     # ------------------------------------------------------------------
