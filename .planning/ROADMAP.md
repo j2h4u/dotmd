@@ -387,6 +387,17 @@ Plans:
 
 ---
 
+### Phase 999.18: Extend devtools MCP client to support HTTP/streamable-http transport (BACKLOG)
+
+**Goal:** Extend `backend/devtools/mcp_client/` to support HTTP transport alongside existing stdio. Accept a URL, connect via `streamablehttp_client`, run MCP initialize + tool calls — same interface as current stdio client.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+---
+
 ### Future ideas:
 - Semantic chunking (split by topic similarity, not just structure)
 - Doc-level chunks (whole-document embeddings for broad queries)
