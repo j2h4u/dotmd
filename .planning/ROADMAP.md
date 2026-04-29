@@ -120,8 +120,13 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 **Plans:** 3 plans
 
 Plans:
+**Wave 1**
 - [ ] 17-01-PLAN.md — Verify Tailscale path-stripping (A1), add base_url to Settings, set DOTMD_BASE_URL in .env
+
+**Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 17-02-PLAN.md — Implement DotMDOAuthProvider (auth.py, all 9 methods, JSON persistence)
+
+**Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 17-03-PLAN.md — Wire auth into mcp_server.py, end-to-end OAuth flow verification
 
 ---
