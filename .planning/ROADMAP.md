@@ -417,6 +417,17 @@ Plans:
 
 ---
 
+### Phase 999.19: Обновить transformers с 4.57.6 до 5.x (BACKLOG)
+
+**Goal:** Перевести в отдельной ветке на transformers 5.x (текущая 5.7.0), проверить совместимость с GLiNER и sentence-transformers, убедиться что CPU-only wheels работают. Потенциально устраняет warning про sentencepiece fast tokenizer.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+---
+
 ### Future ideas:
 - Semantic chunking (split by topic similarity, not just structure)
 - Doc-level chunks (whole-document embeddings for broad queries)
