@@ -6,12 +6,18 @@ Verifies that all RRF fusion candidates survive through reranking:
 - Diagnostic logging reports keyword-only survival counts
 """
 
+from __future__ import annotations
+
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
+if TYPE_CHECKING:
+    from dotmd.api.service import DotMDService
 
-def _make_service(tmp_path: Path) -> "DotMDService":
+
+def _make_service(tmp_path: Path) -> DotMDService:
     """Create a DotMDService with real internals for integration testing."""
     from dotmd.api.service import DotMDService
     from dotmd.core.config import Settings
@@ -66,7 +72,6 @@ class TestMergeBackBeyondPoolSize:
             return_value=[mock_chunk]
         )
 
-        results_raw = []
 
         # Patch build_search_results to capture fused list before it's truncated
         original_build = None

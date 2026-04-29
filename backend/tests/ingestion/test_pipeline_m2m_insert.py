@@ -11,7 +11,6 @@ These tests will FAIL until P3 (wave 3) implements the M2M ingest path.
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from pathlib import Path
 from unittest.mock import patch
@@ -69,8 +68,8 @@ class TestInsertOrIgnoreOnRepeat:
 
     def test_insert_or_ignore_on_repeat(self, tmp_path: Path) -> None:
         """Indexing the same file twice: chunks_* row count unchanged, text unchanged."""
-        from dotmd.ingestion.pipeline import IndexingPipeline
         from dotmd.core.config import Settings
+        from dotmd.ingestion.pipeline import IndexingPipeline
 
         _, strategy, _model_key = _build_post_v16_db(tmp_path)
         settings = Settings(index_dir=tmp_path)
@@ -113,8 +112,8 @@ class TestTwoFilesIdenticalContentShareChunk:
 
     def test_two_files_identical_content_share_chunk(self, tmp_path: Path) -> None:
         """Identical content → 1 chunks_* row, 2 chunk_file_paths_* rows."""
-        from dotmd.ingestion.pipeline import IndexingPipeline
         from dotmd.core.config import Settings
+        from dotmd.ingestion.pipeline import IndexingPipeline
 
         _, strategy, _model_key = _build_post_v16_db(tmp_path)
         settings = Settings(index_dir=tmp_path)
@@ -151,8 +150,8 @@ class TestRepeatedHeadingInSameFile:
         self, tmp_path: Path
     ) -> None:
         """File with repeated heading at chunk_index 0 and 1 → 2 M2M rows sharing chunk_id."""
-        from dotmd.ingestion.pipeline import IndexingPipeline
         from dotmd.core.config import Settings
+        from dotmd.ingestion.pipeline import IndexingPipeline
 
         _, strategy, _model_key = _build_post_v16_db(tmp_path)
         settings = Settings(index_dir=tmp_path)
@@ -186,8 +185,8 @@ class TestVecMetaNotRewrittenOnReindex:
 
     def test_vec_meta_not_rewritten_on_reindex(self, tmp_path: Path) -> None:
         """Second index_file call for the same chunks does not add vec_meta_* rows."""
-        from dotmd.ingestion.pipeline import IndexingPipeline
         from dotmd.core.config import Settings
+        from dotmd.ingestion.pipeline import IndexingPipeline
 
         _, strategy, model_key = _build_post_v16_db(tmp_path)
         settings = Settings(index_dir=tmp_path)
@@ -220,9 +219,9 @@ class TestPayloadMismatchLogsWarn:
         self, tmp_path: Path
     ) -> None:
         """Monkeypatched chunker emitting same chunk_id with different text logs WARN; first-writer survives."""
-        from dotmd.ingestion.pipeline import IndexingPipeline
         from dotmd.core.config import Settings
         from dotmd.core.models import Chunk
+        from dotmd.ingestion.pipeline import IndexingPipeline
 
         _, strategy, _model_key = _build_post_v16_db(tmp_path)
         settings = Settings(index_dir=tmp_path)

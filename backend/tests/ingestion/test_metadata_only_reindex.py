@@ -6,8 +6,9 @@ This is the core correctness guarantee of Phase 999.12:
 No live TEI required — encode_batch is mocked.
 """
 import pathlib
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 
 def _write_md(path: pathlib.Path, title: str, tags: list, body: str) -> None:

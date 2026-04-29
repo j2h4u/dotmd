@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import blake3
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
+import blake3
 import yaml  # type: ignore[import-untyped]
 
 from dotmd.core.models import DocKind, FileInfo
@@ -145,7 +145,7 @@ def discover_files(directory: Path) -> list[FileInfo]:
                     path=md_path,
                     title=_extract_title(content, md_path, frontmatter),
                     last_modified=datetime.fromtimestamp(
-                        stat.st_mtime, tz=timezone.utc
+                        stat.st_mtime, tz=UTC
                     ),
                     size_bytes=stat.st_size,
                     kind=frontmatter.get("kind", DocKind.DOCUMENT),
@@ -306,7 +306,7 @@ def _add_file(
             FileInfo(
                 path=md_path,
                 title=_extract_title(content, md_path, frontmatter),
-                last_modified=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+                last_modified=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
                 size_bytes=stat.st_size,
                 kind=frontmatter.get("kind", DocKind.DOCUMENT),
                 frontmatter=frontmatter,

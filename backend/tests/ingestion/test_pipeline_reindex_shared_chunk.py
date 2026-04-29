@@ -40,7 +40,6 @@ from unittest.mock import patch
 
 import pytest
 
-
 try:
     from dotmd.core.config import Settings as _Settings
     STRATEGY: str = _Settings().chunk_strategy
@@ -188,8 +187,8 @@ def _m2m_exists(db_path: Path, chunk_id: str, file_path: str) -> bool:
 
 
 def _get_pipeline(db_path: Path):  # type: ignore[no-untyped-def]
-    from dotmd.ingestion.pipeline import IndexingPipeline
     from dotmd.core.config import Settings
+    from dotmd.ingestion.pipeline import IndexingPipeline
     settings = Settings(index_dir=db_path.parent)
     return IndexingPipeline(settings)
 
@@ -473,13 +472,11 @@ class TestEditHolderAwareCascadeAtomicUnderFailure:
                 )
             ]
 
-        with patch.object(_chunker, "chunk_file", patched_chunk_file):
-            with patch(
-                "dotmd.storage.metadata.SQLiteMetadataStore.delete_orphan_chunks",
-                side_effect=RuntimeError("Simulated mid-cascade failure"),
-            ):
-                with pytest.raises(RuntimeError, match="mid-cascade"):
-                    pipeline.index_file(file_a)
+        with patch.object(_chunker, "chunk_file", patched_chunk_file), patch(
+            "dotmd.storage.metadata.SQLiteMetadataStore.delete_orphan_chunks",
+            side_effect=RuntimeError("Simulated mid-cascade failure"),
+        ), pytest.raises(RuntimeError, match="mid-cascade"):
+            pipeline.index_file(file_a)
 
         # All tables must be in pre-edit state (ROLLBACK honoured)
         assert _count(db_path, f"chunks_{STRATEGY}") == pre_chunks, \
@@ -534,9 +531,9 @@ class TestPropertyReindexHolderInvariant:
     def test_property_reindex_holder_invariant(self, tmp_path: Path) -> None:
         """Random create+edit sequence over 5 files, 3 chunks; invariant holds throughout."""
         import dotmd.ingestion.chunker as _chunker
+        from dotmd.core.config import Settings
         from dotmd.core.models import Chunk
         from dotmd.ingestion.pipeline import IndexingPipeline
-        from dotmd.core.config import Settings
 
         db_path = _build_db(tmp_path)
         settings = Settings(index_dir=tmp_path)

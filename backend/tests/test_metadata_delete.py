@@ -11,11 +11,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from dotmd.core.models import Chunk
 from dotmd.storage.metadata import SQLiteMetadataStore
-
 
 STRATEGY = "heading_512_50"
 

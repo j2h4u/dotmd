@@ -34,9 +34,9 @@ def _import():  # type: ignore[no-untyped-def]
     """Deferred import — raises ImportError until P1 ships migration_v16."""
     from dotmd.ingestion.migration_v16 import (
         PayloadDivergenceBlocked,
-        run_migration_v16,
-        run_invariants,
         needs_migration_v16,
+        run_invariants,
+        run_migration_v16,
         status,
     )
     return PayloadDivergenceBlocked, run_migration_v16, run_invariants, needs_migration_v16, status
@@ -105,7 +105,7 @@ class TestShadowColumnFlow:
         _, run_migration_v16, *_ = _import()
         try:
             report = run_migration_v16(collision_rich_db)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             pytest.fail(f"Migration raised unexpectedly: {exc!r}")
         assert report.completed is True
 
@@ -143,6 +143,7 @@ class TestPayloadInvariantMismatch:
     ) -> None:
         """Two chunks with same blake3 but different heading_hierarchy → PayloadDivergenceBlocked."""
         import blake3 as _blake3
+
         from dotmd.ingestion.migration_v16 import PayloadDivergenceBlocked
         _, run_migration_v16, *_ = _import()
         conn = _conn(tmp_index_db)
@@ -388,7 +389,7 @@ class TestM2MRemapCoverage:
         paths = ["/path/file_A.md", "/path/file_B.md", "/path/file_C.md"]
         old_ids = ["old_id_aaaa", "old_id_bbbb", "old_id_cccc"]
 
-        for old_id, fp in zip(old_ids, paths):
+        for old_id, fp in zip(old_ids, paths, strict=False):
             conn.execute(
                 f"INSERT INTO {table} (chunk_id, file_path, heading_hierarchy, level, text, chunk_index, char_offset) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -541,6 +542,7 @@ class TestMigratedChunkIdMatchesChunker:
              match those produced by chunk_file() in step 2.
         """
         import blake3 as _blake3
+
         from dotmd.ingestion.chunker import chunk_file
         from dotmd.ingestion.reader import parse_frontmatter
 

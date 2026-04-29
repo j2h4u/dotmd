@@ -58,7 +58,7 @@ class LanceDBVectorStore:
                 "vector": embedding,
                 "chunk_id": chunk.chunk_id,
             }
-            for chunk, embedding in zip(chunks, embeddings)
+            for chunk, embedding in zip(chunks, embeddings, strict=False)
         ]
         self._db.create_table(self._table_name, data, mode="overwrite")
 
@@ -68,7 +68,7 @@ class LanceDBVectorStore:
             self._db.drop_table(self._table_name)
         except FileNotFoundError:
             pass  # Table does not exist yet
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("Failed to delete LanceDB table %s", self._table_name, exc_info=True)
 
     # -- queries ------------------------------------------------------------
@@ -97,7 +97,7 @@ class LanceDBVectorStore:
             table = self._db.open_table(self._table_name)
         except FileNotFoundError:
             return []  # No index yet
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("Failed to open LanceDB table for search", exc_info=True)
             return []
 
@@ -124,6 +124,6 @@ class LanceDBVectorStore:
             return table.count_rows()
         except FileNotFoundError:
             return 0  # No index yet
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("Failed to count LanceDB vectors", exc_info=True)
             return 0

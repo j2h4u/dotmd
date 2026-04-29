@@ -1,7 +1,7 @@
 """Tests for meta_checksum change detection invariants (Phase 999.12)."""
 import pathlib
-import pytest
-from dotmd.ingestion.reader import meta_checksum, chunk_checksum
+
+from dotmd.ingestion.reader import chunk_checksum, meta_checksum
 
 
 def _write(path: pathlib.Path, title: str, tags: list, body: str) -> None:

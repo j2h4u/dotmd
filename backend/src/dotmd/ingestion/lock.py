@@ -17,16 +17,14 @@ def indexing_lock(index_dir: Path):
     Lock is released automatically on process exit (kernel cleanup).
     """
     lock_path = index_dir / "indexing.lock"
-    fd = None
-    try:
-        fd = open(lock_path, "w")
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        if fd is not None:
-            fd.close()
-        raise IndexingLockError("Indexing already in progress. Stop the server first.")
-    try:
-        yield
-    finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        fd.close()
+    with open(lock_path, "w") as fd:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            raise IndexingLockError(
+                "Indexing already in progress. Stop the server first."
+            ) from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)

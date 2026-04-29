@@ -111,7 +111,7 @@ class Settings(BaseSettings):
             except ValueError:
                 raise ValueError(
                     f"embedding_weights: value for {key!r} is not a float: {val!r}"
-                )
+                ) from None
             parsed[key] = w
             total += w
         if abs(total - 1.0) > 0.001:

@@ -19,7 +19,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from dotmd.core.models import FileInfo
@@ -181,7 +181,7 @@ class FileTracker:
                 mtime,
                 size,
                 checksum,
-                datetime.now(tz=timezone.utc).isoformat(),
+                datetime.now(tz=UTC).isoformat(),
             ),
         )
         self._conn.commit()

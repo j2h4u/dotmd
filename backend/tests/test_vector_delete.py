@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-
 from dotmd.core.models import Chunk
 from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
 

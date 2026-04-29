@@ -9,9 +9,10 @@ Cycle 3 review additions:
 No live TEI required — encode_batch is mocked.
 """
 import pathlib
-import pytest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
+
+import pytest
 
 
 def _write_md(path: pathlib.Path, title: str, tags: list, body: str) -> None:
@@ -121,7 +122,7 @@ def test_bulk_path_chunks_stored_with_correct_etext(pipeline_settings, tmp_path)
     doc = pipeline_settings.data_dir / "test.md"
     _write_md(doc, "Test Doc", ["foo"], "Body text with enough content to chunk.")
 
-    pipeline, call_log = _make_pipeline_tracking_inputs(pipeline_settings)
+    pipeline, _call_log = _make_pipeline_tracking_inputs(pipeline_settings)
     pipeline.index(pipeline_settings.data_dir)
 
     # VecComponentStore must have text components after bulk index
@@ -129,8 +130,8 @@ def test_bulk_path_chunks_stored_with_correct_etext(pipeline_settings, tmp_path)
         f"SELECT COUNT(*) FROM {pipeline._vec_components._TABLE} WHERE component = 'text'"
     ).fetchone()[0]
     assert text_count > 0, (
-        f"_save_and_embed_chunks() must store e_text components in VecComponentStore. "
-        f"Got 0 text entries."
+        "_save_and_embed_chunks() must store e_text components in VecComponentStore. "
+        "Got 0 text entries."
     )
 
     # VecComponentStore must have meta component for the file
@@ -138,8 +139,8 @@ def test_bulk_path_chunks_stored_with_correct_etext(pipeline_settings, tmp_path)
         f"SELECT COUNT(*) FROM {pipeline._vec_components._TABLE} WHERE component = 'meta'"
     ).fetchone()[0]
     assert meta_count > 0, (
-        f"_save_and_embed_chunks() must store e_meta component in VecComponentStore. "
-        f"Got 0 meta entries."
+        "_save_and_embed_chunks() must store e_meta component in VecComponentStore. "
+        "Got 0 meta entries."
     )
 
 
@@ -195,7 +196,7 @@ def test_m2m_shared_chunk_behavior_documented(pipeline_settings, tmp_path):
     _write_md(file_a, "File A Title", ["tag_a"], shared_body)
     _write_md(file_b, "File B Title", ["tag_b"], shared_body)
 
-    pipeline, call_log = _make_pipeline_tracking_inputs(pipeline_settings)
+    pipeline, _call_log = _make_pipeline_tracking_inputs(pipeline_settings)
 
     # Must not raise — shared chunks are a valid state in the M2M schema
     pipeline.index(pipeline_settings.data_dir)
@@ -232,9 +233,8 @@ def test_embed_existing_chunks_model_switch_does_not_use_cached_etext(pipeline_s
     chunk bodies AND metadata via TEI (not just e_meta), even when VecComponentStore
     has stored e_text from the old model.
     """
-    from dotmd.ingestion.pipeline import IndexingPipeline
     from dotmd.core.models import FileInfo
-    from dotmd.ingestion.reader import parse_frontmatter, read_file
+    from dotmd.ingestion.reader import parse_frontmatter
 
     doc = pipeline_settings.data_dir / "switch.md"
     _write_md(doc, "Switch Doc", ["foo"], "Body text for model switch test.")
@@ -262,7 +262,7 @@ def test_embed_existing_chunks_model_switch_does_not_use_cached_etext(pipeline_s
     fi = FileInfo(
         path=doc,
         title=fm.get("title", "Switch Doc"),
-        last_modified=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+        last_modified=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
         size_bytes=stat.st_size,
         frontmatter=fm,
     )

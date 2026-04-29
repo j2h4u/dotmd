@@ -10,7 +10,6 @@ import pytest
 
 from dotmd.core.models import Chunk, FileInfo
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -256,7 +255,7 @@ class TestDeletedFile:
         file_b_again = _make_file_info(str(md_dir / "b.md"), "File B")
         mock_discover.return_value = [file_b_again]
 
-        stats = pipeline.index(md_dir)
+        pipeline.index(md_dir)
 
         # No new files to read (b is unchanged)
         assert mock_read_file.call_count == 0
@@ -345,7 +344,6 @@ class TestFingerprintTiming:
 
         # Track the order of operations
         call_order = []
-        original_encode = pipeline._semantic_engine.encode_batch
 
         def tracking_encode(texts):
             call_order.append("encode")

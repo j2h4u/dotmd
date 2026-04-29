@@ -13,11 +13,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 
 def _get_cli():  # type: ignore[no-untyped-def]
     from click.testing import CliRunner
+
     from dotmd.cli import main
     return CliRunner, main
 
@@ -42,8 +41,8 @@ class TestSingleHolderRendering:
     ) -> None:
         """CLI search result with one file_path renders '[i] /path/to/file.md'."""
         CliRunner, main = _get_cli()
-        from dotmd.core.models import SearchResult
         from unittest.mock import patch
+
 
         single_path = Path("/some/single/file.md")
         stub_result = _make_search_result([single_path])

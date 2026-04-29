@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncIterator
 
 from fastapi import FastAPI, Query, Request
 from pydantic import BaseModel
@@ -32,8 +32,8 @@ def _get_service() -> DotMDService:
 
 
 @asynccontextmanager
-async def _lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
-    global _service  # noqa: PLW0603
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    global _service
     _service = DotMDService(Settings())
     _service.warmup()
     yield
@@ -48,7 +48,7 @@ app = FastAPI(
 
 
 @app.middleware("http")
-async def _log_requests(request: Request, call_next):  # noqa: ANN001
+async def _log_requests(request: Request, call_next):
     """Log every HTTP request with method, path, status, and duration."""
     t0 = time.perf_counter()
     response = await call_next(request)

@@ -11,10 +11,6 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from unittest.mock import patch
-
-import pytest
-
 
 MODEL = "multilingual_e5_large"
 
@@ -71,8 +67,8 @@ def _populate(db_path: Path, strategy: str, chunk_id: str, file_path: str) -> No
 
 
 def _get_pipeline(db_path: Path):  # type: ignore[no-untyped-def]
-    from dotmd.ingestion.pipeline import IndexingPipeline
     from dotmd.core.config import Settings
+    from dotmd.ingestion.pipeline import IndexingPipeline
     settings = Settings(index_dir=db_path.parent)
     return IndexingPipeline(settings)
 
@@ -168,7 +164,7 @@ class TestOrphanSweepMultiStrategy:
         conn.close()
 
         missing_paths = [f"/gone/{s}_file.md" for s in strategies]
-        for s, fp in zip(strategies, missing_paths):
+        for s, fp in zip(strategies, missing_paths, strict=False):
             cid = ("a" if s == "heading_512_50" else "b") * 64
             _populate(db_path, s, cid, fp)
 

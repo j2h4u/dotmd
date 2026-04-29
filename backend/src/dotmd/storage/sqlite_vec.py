@@ -115,7 +115,7 @@ class SQLiteVecVectorStore:
                     f"ALTER TABLE {self._META_TABLE} ADD COLUMN text_hash TEXT"
                 )
                 logger.info("Migrated %s: added text_hash column", self._META_TABLE)
-        except Exception:  # noqa: BLE001
+        except Exception:
             # Table might not exist yet (CREATE IF NOT EXISTS hasn't run),
             # or PRAGMA returned nothing — both are fine, column will be
             # present after the CREATE statement above.
@@ -227,7 +227,7 @@ class SQLiteVecVectorStore:
             conn.execute(f"DELETE FROM {self._VEC_TABLE}")
             conn.execute(f"DELETE FROM {self._META_TABLE}")
 
-        for chunk, embedding in zip(chunks, embeddings):
+        for chunk, embedding in zip(chunks, embeddings, strict=False):
             th = text_hashes.get(chunk.chunk_id) if text_hashes else None
             # Phase 16: use INSERT OR IGNORE so that re-indexing a chunk_id
             # that already has a vector (e.g. identical content from another
@@ -358,7 +358,7 @@ class SQLiteVecVectorStore:
             conn.execute(f"DELETE FROM {self._META_TABLE}")
             conn.execute(f"DELETE FROM {self._CONFIG_TABLE}")
             conn.commit()
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("Failed to delete all vectors", exc_info=True)
 
     # -- queries ------------------------------------------------------------
@@ -408,7 +408,7 @@ class SQLiteVecVectorStore:
                     """,
                     batch,
                 ).fetchall()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning(
                     "lookup_embeddings_by_text_hash failed — vec0 may not "
                     "support direct SELECT on embedding column. "
@@ -439,7 +439,7 @@ class SQLiteVecVectorStore:
     ) -> list[tuple[str, float]]:
         try:
             conn = self._get_conn()
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("Vector search failed: cannot open connection", exc_info=True)
             return []
 
@@ -459,7 +459,7 @@ class SQLiteVecVectorStore:
                 """,
                 (_serialize_f32(query_embedding), top_k),
             ).fetchall()
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("Vector search query failed", exc_info=True)
             return []
 
@@ -470,6 +470,6 @@ class SQLiteVecVectorStore:
         try:
             conn = self._get_conn()
             return conn.execute(f"SELECT COUNT(*) FROM {self._META_TABLE}").fetchone()[0]
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("Failed to count vectors", exc_info=True)
             return 0

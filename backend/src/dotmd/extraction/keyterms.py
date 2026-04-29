@@ -147,7 +147,7 @@ class KeyTermExtractor:
 
         max_df = int(n_chunks * self._max_df_ratio)
 
-        for chunk, tf in zip(chunks, chunk_tfs):
+        for chunk, tf in zip(chunks, chunk_tfs, strict=False):
             # Score each term by TF-IDF
             scored: list[tuple[str, float]] = []
             for term, count in tf.items():
@@ -162,7 +162,7 @@ class KeyTermExtractor:
 
             scored.sort(key=lambda x: x[1], reverse=True)
 
-            for term, score in scored[: self._top_k_per_chunk]:
+            for term, _score in scored[: self._top_k_per_chunk]:
                 key = term.lower()
                 if key in seen:
                     existing = seen[key]
@@ -205,7 +205,7 @@ class KeyTermExtractor:
                 chunk_entities.setdefault(cid, []).append(ent.name)
 
         co_occur_seen: set[tuple[str, str]] = set()
-        for cid, ent_names in chunk_entities.items():
+        for _cid, ent_names in chunk_entities.items():
             for i, a in enumerate(ent_names):
                 for b in ent_names[i + 1 :]:
                     pair = (min(a, b), max(a, b))

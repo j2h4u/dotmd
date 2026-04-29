@@ -76,10 +76,9 @@ def _normalise(text: str) -> set[str]:
             continue
         # Normalise internal whitespace to single spaces
         s = re.sub(r"\s+", " ", s)
-        if re.match(r"CREATE\b", s, re.IGNORECASE):
-            # Exclude internal SQLite tables (sqlite_sequence, etc.)
-            if "sqlite_sequence" not in s:
-                result.add(s)
+        # Exclude internal SQLite tables (sqlite_sequence, etc.)
+        if re.match(r"CREATE\b", s, re.IGNORECASE) and "sqlite_sequence" not in s:
+            result.add(s)
     return result
 
 

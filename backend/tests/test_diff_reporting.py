@@ -3,16 +3,12 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-from dotmd.core.models import Chunk, ExtractionResult, FileInfo, IndexStats
-from dotmd.ingestion.file_tracker import FileDiff
+from dotmd.core.models import Chunk, FileInfo, IndexStats
 from dotmd.storage.metadata import SQLiteMetadataStore
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -101,7 +97,7 @@ class TestMetadataStoreDiffFields:
     """SQLiteMetadataStore persists and reads diff fields and data_dir."""
 
     def test_save_and_get_with_diff_fields(self, metadata_store: SQLiteMetadataStore):
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         stats = IndexStats(
             total_files=10,
             total_chunks=50,
@@ -138,7 +134,7 @@ class TestSchemaMigration:
     def test_migration_idempotent(self, tmp_dir: Path):
         """Creating two stores on same DB should not fail."""
         db_path = tmp_dir / "idempotent.db"
-        store1 = SQLiteMetadataStore(db_path)
+        SQLiteMetadataStore(db_path)
         store2 = SQLiteMetadataStore(db_path)
         # Both should work without error
         stats = IndexStats(new_files=5, data_dir="/test")

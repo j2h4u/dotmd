@@ -8,9 +8,9 @@ zero-configuration graph storage.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
 import real_ladybug as lb  # type: ignore[import-untyped]
 

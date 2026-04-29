@@ -46,7 +46,7 @@ def _extract_best_snippet(text: str, query: str, length: int = 300) -> str:
         word_starts.append(idx)
         char_pos = idx + len(w)
 
-    for i, start in enumerate(word_starts):
+    for _i, start in enumerate(word_starts):
         end = start + length
         if end > len(text):
             start = max(0, len(text) - length)
@@ -178,7 +178,7 @@ def build_search_results(
     # Pre-index per-engine scores for O(1) lookup.
     engine_scores: dict[str, dict[str, float]] = {}
     for engine, engine_results in per_engine.items():
-        engine_scores[engine] = {cid: score for cid, score in engine_results}
+        engine_scores[engine] = dict(engine_results)
 
     top_ids = [cid for cid, _ in fused[:top_k]]
     chunks_by_id = {c.chunk_id: c for c in metadata_store.get_chunks(top_ids)}

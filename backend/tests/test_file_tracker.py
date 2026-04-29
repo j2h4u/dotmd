@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-import os
 import sqlite3
-import time
 from datetime import datetime
 from pathlib import Path
 
-import pytest
-
 from dotmd.core.models import FileInfo
-from dotmd.ingestion.file_tracker import FileDiff, FileTracker
+from dotmd.ingestion.file_tracker import FileTracker
 
 
 def _make_file(tmp_path: Path, name: str, content: str) -> FileInfo:
@@ -143,7 +139,7 @@ class TestFileTrackerPersistence:
 
         # Reopen connection and check
         conn2 = sqlite3.connect(db_path)
-        tracker2 = FileTracker(conn2)
+        FileTracker(conn2)
         cur = conn2.execute(
             "SELECT mtime, size_bytes, checksum FROM file_fingerprints WHERE file_path = ?",
             ("/test/file.md",),

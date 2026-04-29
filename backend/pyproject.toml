@@ -31,7 +31,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "pyright>=1.1.380",
+]
 lancedb = [
     "lancedb>=0.6",
 ]
@@ -55,3 +59,68 @@ markers = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/dotmd"]
 sources = ["src"]
+
+# ---------------------------------------------------------------------------
+# Linting (ruff) — formatting + lint
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests", "devtools"]
+extend-exclude = [".venv", "build", "dist", "**/__pycache__"]
+
+[tool.ruff.lint]
+# Conservative-but-useful rule selection.  Adds bug-catchers (B, F, RUF, SIM,
+# UP, C4) on top of the pycodestyle/pyflakes baseline.  Naming (N) is on, but
+# we explicitly opt out of N802/N803/N806 because PascalCase MCP tool names
+# and the underscore-prefixed kwargs FastMCP picks up are intentional.
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # import sort
+    "B",      # bugbear
+    "C4",     # comprehensions
+    "SIM",    # simplify
+    "UP",     # pyupgrade
+    "RUF",    # ruff-specific
+    "N",      # pep8-naming
+]
+ignore = [
+    "E501",   # line-too-long handled by formatter / context
+    "B008",   # default arg with function call (FastAPI/click rely on this)
+    "N802",   # snake_case override — MCP tool fns intentionally lowercase
+    "N803",   # snake_case argument names
+    "N806",   # variable lowercase rule clashes with Pydantic Field-style names
+    "SIM108", # ternary not always clearer
+    "RUF002", # ambiguous-unicode in docstrings — Russian text is intentional
+    "RUF003", # ambiguous-unicode in comments — Russian text is intentional
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "S101",   # asserts in tests are fine
+    "B017",   # broad except in tests is sometimes intentional
+]
+"src/dotmd/cli.py" = ["E402"]  # late imports are fine in click commands
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+# ---------------------------------------------------------------------------
+# Type checking (pyright)
+# ---------------------------------------------------------------------------
+
+[tool.pyright]
+include = ["src", "tests", "devtools"]
+exclude = ["**/__pycache__", "**/.venv", "build", "dist"]
+pythonVersion = "3.12"
+pythonPlatform = "Linux"
+typeCheckingMode = "standard"
+useLibraryCodeForTypes = true
+reportMissingImports = true
+reportMissingTypeStubs = false
+reportPrivateImportUsage = false

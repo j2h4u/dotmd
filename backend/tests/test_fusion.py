@@ -1,5 +1,6 @@
 """Tests for fusion math and weight validation (Phase 999.12)."""
 import math
+
 import pytest
 
 
@@ -62,7 +63,7 @@ def test_fuse_vectors_text_only_weight():
     weights = {"text": 1.0, "meta": 0.0}
     e_fused = p._fuse_vectors(e_text, e_meta, weights)
     expected = _normalize(e_text)
-    assert all(abs(a - b) < 1e-6 for a, b in zip(e_fused, expected))
+    assert all(abs(a - b) < 1e-6 for a, b in zip(e_fused, expected, strict=False))
 
 
 def test_fuse_vectors_dimension_mismatch_raises():

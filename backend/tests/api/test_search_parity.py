@@ -20,9 +20,9 @@ _STUB_DIM = 8
 
 
 def _import():  # type: ignore[no-untyped-def]
-    from dotmd.ingestion.migration_v16 import run_migration_v16
     from dotmd.api.service import DotMDService
     from dotmd.core.config import Settings
+    from dotmd.ingestion.migration_v16 import run_migration_v16
     return run_migration_v16, DotMDService, Settings
 
 

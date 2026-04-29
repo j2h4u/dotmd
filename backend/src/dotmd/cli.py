@@ -11,6 +11,7 @@ from dotmd.api.service import DotMDService
 from dotmd.core.config import Settings
 from dotmd.core.exceptions import IndexingLockError
 from dotmd.core.models import SearchMode, TrickleStatus
+from dotmd.feedback import FeedbackStore
 from dotmd.utils.logging import setup_logging
 
 
@@ -87,7 +88,7 @@ def index(ctx: click.Context, directory: Path, extract_depth: str, entity_types:
         stats = service.index(directory, force=force)
     except IndexingLockError as e:
         click.echo(str(e), err=True)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     click.echo(
         f"{stats.new_files} new, {stats.modified_files} modified, "
         f"{stats.deleted_files} deleted, {stats.unchanged_files} unchanged"
@@ -271,7 +272,7 @@ def reindex_vectors() -> None:
         n = service.reindex("vectors")
     except IndexingLockError as e:
         click.echo(str(e), err=True)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     click.echo(f"Done. {n} chunks re-embedded.")
 
 
@@ -284,7 +285,7 @@ def reindex_fts5() -> None:
         n = service.reindex("fts5")
     except IndexingLockError as e:
         click.echo(str(e), err=True)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     click.echo(f"Done. {n} chunks re-indexed.")
 
 
@@ -297,7 +298,7 @@ def reindex_graph() -> None:
         n = service.reindex("graph")
     except IndexingLockError as e:
         click.echo(str(e), err=True)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     click.echo(f"Done. {n} chunks processed.")
 
 
@@ -310,7 +311,7 @@ def reindex_all() -> None:
         n = service.reindex("all")
     except IndexingLockError as e:
         click.echo(str(e), err=True)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     click.echo(f"Done. {n} chunks across all stores.")
 
 
@@ -330,7 +331,7 @@ def reset_model(name: str) -> None:
         service.drop_vectors()
     except IndexingLockError as e:
         click.echo(str(e), err=True)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     click.echo(f"Dropped vectors for model '{name}'.")
 
 
@@ -347,7 +348,7 @@ def reset_strategy(name: str) -> None:
         service.drop_chunks()
     except IndexingLockError as e:
         click.echo(str(e), err=True)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     click.echo(f"Dropped strategy '{name}' and all associated data.")
 
 
@@ -374,7 +375,9 @@ def mcp(transport: str, host: str, port: int) -> None:
 
     if transport == "streamable-http":
         import uvicorn
-        from dotmd.mcp_server import create_app, mcp as mcp_app
+
+        from dotmd.mcp_server import create_app
+        from dotmd.mcp_server import mcp as mcp_app
         from dotmd.utils.logging import setup_logging
 
         # FastMCP.__init__ installs a RichHandler on the root logger at import
@@ -394,7 +397,8 @@ def mcp(transport: str, host: str, port: int) -> None:
         )
         asyncio.run(uvicorn.Server(config).serve())
     else:
-        from dotmd.mcp_server import _init_for_stdio, mcp as mcp_app
+        from dotmd.mcp_server import _init_for_stdio
+        from dotmd.mcp_server import mcp as mcp_app
         from dotmd.utils.logging import setup_logging
 
         setup_logging()
@@ -532,7 +536,7 @@ def migrate_run(
             sys.exit(2)
         click.echo(f"UNEXPECTED ERROR: {msg}", err=True)
         sys.exit(3)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         click.echo(f"UNEXPECTED ERROR: {exc}", err=True)
         sys.exit(3)
 
@@ -628,7 +632,7 @@ def migrate_status(ctx: click.Context) -> None:
 
     try:
         report = _m16.status(index_db)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         click.echo(f"ERROR reading migration status: {exc}", err=True)
         sys.exit(3)
 
@@ -672,4 +676,91 @@ def migrate_status(ctx: click.Context) -> None:
     else:
         click.echo("\nAdvisory lock: clear")
 
+
+# ---------------------------------------------------------------------------
+# feedback command group
+# ---------------------------------------------------------------------------
+
+
+def _get_feedback_store(ctx: click.Context) -> FeedbackStore:
+    index_dir = (ctx.obj or {}).get("index_dir")
+    if index_dir is None:
+        index_dir = Settings().index_dir
+    return FeedbackStore(Path(index_dir) / "feedback.db")
+
+
+@main.group()
+def feedback() -> None:
+    """Review and manage agent feedback submissions."""
+
+
+@feedback.command("list")
+@click.option("--limit", "-n", default=50, help="Maximum rows to show.")
+@click.option("--all", "show_all", is_flag=True, help="Include done and dismissed entries.")
+@click.pass_context
+def feedback_list(ctx: click.Context, limit: int, show_all: bool) -> None:
+    """List open feedback submissions (newest first).
+
+    By default shows only open and in_progress entries.
+    Use --all to include done and dismissed history.
+    """
+    import datetime
+
+    store = _get_feedback_store(ctx)
+    rows = store.list_all(limit=limit, include_closed=show_all)
+
+    if not rows:
+        if show_all:
+            click.echo("No feedback submissions found.")
+        else:
+            click.echo("No open or in-progress feedback. Use --all to show history.")
+        return
+
+    for row in rows:
+        ts = datetime.datetime.fromtimestamp(row["submitted_at"]).strftime("%Y-%m-%d %H:%M")
+        severity = f"[{row['severity']}]" if row["severity"] else "[?]"
+        status = f"[{row['status']}]"
+        meta = f"id={row['id']} {severity} {status} {ts}"
+        if row.get("model"):
+            meta += f" model={row['model']}"
+        if row.get("harness"):
+            meta += f" harness={row['harness']}"
+        click.echo(meta)
+        click.echo(f"  message: {row['message']}")
+        if row.get("context"):
+            click.echo(f"  context: {row['context']}")
+        if row.get("status_comment"):
+            click.echo(f"  status_comment: {row['status_comment']}")
+        click.echo()
+
+
+@feedback.command("status")
+@click.argument("feedback_id", type=int)
+@click.argument("new_status", metavar="STATUS", type=click.Choice(["open", "in_progress", "done", "dismissed"]))
+@click.option("--reason", default=None, help="Optional reason for the status change.")
+@click.pass_context
+def feedback_status(ctx: click.Context, feedback_id: int, new_status: str, reason: str | None) -> None:
+    """Update the status of a feedback entry.
+
+    STATUS must be one of: open, in_progress, done, dismissed.
+    """
+    store = _get_feedback_store(ctx)
+    if store.set_status(feedback_id, new_status, reason):
+        click.echo(f"Feedback {feedback_id} → {new_status}")
+    else:
+        click.echo(f"Feedback {feedback_id} not found.", err=True)
+        raise SystemExit(1) from None
+
+
+@feedback.command("delete")
+@click.argument("feedback_id", type=int)
+@click.pass_context
+def feedback_delete(ctx: click.Context, feedback_id: int) -> None:
+    """Permanently delete a feedback entry."""
+    store = _get_feedback_store(ctx)
+    if store.delete(feedback_id):
+        click.echo(f"Feedback {feedback_id} deleted.")
+    else:
+        click.echo(f"Feedback {feedback_id} not found.", err=True)
+        raise SystemExit(1) from None
 

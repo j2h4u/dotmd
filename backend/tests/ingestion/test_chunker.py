@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from dotmd.ingestion.chunker import chunk_file  # noqa: F401
 from dotmd.core.models import Chunk
+from dotmd.ingestion.chunker import chunk_file
 
 
 class TestChunkerEmitsNoCharOffset:

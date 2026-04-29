@@ -11,11 +11,10 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-import pytest
-
 
 def _get_cli():  # type: ignore[no-untyped-def]
     from click.testing import CliRunner
+
     from dotmd.cli import main
     return CliRunner, main
 

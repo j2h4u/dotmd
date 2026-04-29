@@ -17,14 +17,12 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 # These imports will ImportError or AttributeError until P1 ships:
 from dotmd.core.models import Chunk
 from dotmd.storage.metadata import SQLiteMetadataStore
-
 
 STRATEGY = "heading_512_50"
 MODEL = "multilingual_e5_large"
@@ -101,7 +99,7 @@ class TestGetFilePathsSortedLex:
         store.insert_chunk(STRATEGY, VALID_CHUNK_ID, ["H"], 1, "text")
 
         paths = ["/z/last.md", "/a/first.md", "/m/middle.md"]
-        for i, fp in enumerate(paths):
+        for _i, fp in enumerate(paths):
             store.add_file_path(STRATEGY, VALID_CHUNK_ID, fp, chunk_index=0)
 
         result = store.get_file_paths_by_chunk_id(STRATEGY, VALID_CHUNK_ID)

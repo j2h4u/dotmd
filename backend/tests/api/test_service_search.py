@@ -8,9 +8,7 @@ Imports are deferred so --collect-only works before P5 ships.
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 
 def _get_service(tmp_path: Path):  # type: ignore[no-untyped-def]

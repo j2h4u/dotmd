@@ -18,7 +18,6 @@ from unittest.mock import patch
 
 import pytest
 
-
 STRATEGIES = ["heading_512_50"]
 MODEL = "multilingual_e5_large"
 
@@ -95,8 +94,8 @@ def _count(db_path: Path, table: str) -> int:
 
 def _get_pipeline(db_path: Path):  # type: ignore[no-untyped-def]
     """Deferred import of IndexingPipeline — raises ImportError until P3/P4 ships."""
-    from dotmd.ingestion.pipeline import IndexingPipeline
     from dotmd.core.config import Settings
+    from dotmd.ingestion.pipeline import IndexingPipeline
     settings = Settings(index_dir=db_path.parent)
     return IndexingPipeline(settings)
 
@@ -200,9 +199,8 @@ class TestPurgeIsTransactional:
         with patch(
             "dotmd.storage.sqlite_vec.SQLiteVecVectorStore.delete_by_chunk_ids",
             side_effect=RuntimeError("Simulated failure in vector cascade"),
-        ):
-            with pytest.raises(RuntimeError):
-                pipeline._purge_file("/file_A.md")
+        ), pytest.raises(RuntimeError):
+            pipeline._purge_file("/file_A.md")
 
         # All tables restored to pre-purge state
         assert _count(db_path, f"chunks_{strategy}") == pre_chunks

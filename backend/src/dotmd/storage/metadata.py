@@ -18,15 +18,15 @@ Phase 16 changes (Decision #1, #3, #7, #8):
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 from collections import defaultdict
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Sequence
 
 from dotmd.core.models import Chunk, IndexStats
-
 
 # ---------------------------------------------------------------------------
 # _ConnProxy — thin wrapper around sqlite3.Connection
@@ -191,12 +191,10 @@ class SQLiteMetadataStore:
             ("unchanged_files", "INTEGER NOT NULL DEFAULT 0"),
             ("data_dir", "TEXT"),
         ]:
-            try:
+            with contextlib.suppress(sqlite3.OperationalError):  # column already exists
                 self._conn.execute(
                     f"ALTER TABLE stats ADD COLUMN {col} {typedef}"
                 )
-            except sqlite3.OperationalError:
-                pass  # Column already exists
         self._conn.commit()
 
     # -- M2M table management -----------------------------------------------
@@ -641,10 +639,8 @@ class SQLiteMetadataStore:
         self._conn.execute(f"DELETE FROM {self._table}")
         self._conn.execute("DELETE FROM stats")
         # Clear FTS5 index if it exists
-        try:
+        with contextlib.suppress(sqlite3.OperationalError):  # FTS5 table not yet created
             self._conn.execute(f"DELETE FROM {self._fts_table}")
-        except sqlite3.OperationalError:
-            pass  # FTS5 table not yet created
         self._conn.commit()
 
     # -- helpers ------------------------------------------------------------

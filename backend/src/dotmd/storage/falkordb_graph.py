@@ -54,10 +54,12 @@ class FalkorDBGraphStore:
         self._graph_name = graph_name
 
         # Create range indexes for performance (idempotent).
-        for label in ("File", "Section", "Entity", "Tag"):
+        # Node is a universal base label on all nodes — enables index-based MATCH
+        # in batch_add_edges without needing to know source/target label at call time.
+        for label in ("File", "Section", "Entity", "Tag", "Node"):
             try:
                 self._graph.query(f"CREATE INDEX FOR (n:{label}) ON (n.id)")
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.debug("Index for %s already exists or creation skipped", label)
 
     # -- node creation ------------------------------------------------------
@@ -77,7 +79,7 @@ class FalkorDBGraphStore:
             Human-readable title for the file.
         """
         self._graph.query(
-            "MERGE (f:File {id: $id}) SET f.title = $title",
+            "MERGE (f:File:Node {id: $id}) SET f.title = $title",
             params={"id": file_path, "title": title},
         )
 
@@ -105,7 +107,7 @@ class FalkorDBGraphStore:
             Short preview of the section body.
         """
         self._graph.query(
-            "MERGE (s:Section {id: $id}) "
+            "MERGE (s:Section:Node {id: $id}) "
             "SET s.heading = $heading, s.level = $level, "
             "s.file_path = $file_path, s.text_preview = $text_preview",
             params={
@@ -135,7 +137,7 @@ class FalkorDBGraphStore:
             Provenance information (e.g. chunk id or file path).
         """
         self._graph.query(
-            "MERGE (e:Entity {id: $id}) "
+            "MERGE (e:Entity:Node {id: $id}) "
             "SET e.type = $type, e.source = $source",
             params={"id": name, "type": entity_type, "source": source},
         )
@@ -149,7 +151,7 @@ class FalkorDBGraphStore:
             The tag label.
         """
         self._graph.query(
-            "MERGE (t:Tag {id: $id})",
+            "MERGE (t:Tag:Node {id: $id})",
             params={"id": name},
         )
 
@@ -180,7 +182,7 @@ class FalkorDBGraphStore:
             Edge weight (default ``1.0``).
         """
         self._graph.query(
-            "MATCH (a {id: $src}), (b {id: $tgt}) "
+            "MATCH (a:Node {id: $src}), (b:Node {id: $tgt}) "
             "MERGE (a)-[r:REL]->(b) "
             "SET r.rel_type = $rel_type, r.weight = $weight",
             params={
@@ -199,7 +201,7 @@ class FalkorDBGraphStore:
             return
         self._graph.query(
             "UNWIND $rows AS row "
-            "MERGE (s:Section {id: row.chunk_id}) "
+            "MERGE (s:Section:Node {id: row.chunk_id}) "
             "SET s.heading = row.heading, s.level = row.level, "
             "s.file_path = row.file_path, s.text_preview = row.text_preview",
             params={"rows": sections},
@@ -211,7 +213,7 @@ class FalkorDBGraphStore:
             return
         self._graph.query(
             "UNWIND $rows AS row "
-            "MERGE (e:Entity {id: row.name}) "
+            "MERGE (e:Entity:Node {id: row.name}) "
             "SET e.type = row.entity_type, e.source = row.source",
             params={"rows": entities},
         )
@@ -221,7 +223,7 @@ class FalkorDBGraphStore:
         if not tags:
             return
         self._graph.query(
-            "UNWIND $ids AS id MERGE (t:Tag {id: id})",
+            "UNWIND $ids AS id MERGE (t:Tag:Node {id: id})",
             params={"ids": tags},
         )
 
@@ -231,7 +233,7 @@ class FalkorDBGraphStore:
             return
         self._graph.query(
             "UNWIND $rows AS row "
-            "MERGE (f:File {id: row.file_path}) "
+            "MERGE (f:File:Node {id: row.file_path}) "
             "SET f.title = row.title",
             params={"rows": files},
         )
@@ -242,7 +244,7 @@ class FalkorDBGraphStore:
             return
         self._graph.query(
             "UNWIND $rows AS row "
-            "MATCH (a {id: row.source_id}), (b {id: row.target_id}) "
+            "MATCH (a:Node {id: row.source_id}), (b:Node {id: row.target_id}) "
             "MERGE (a)-[r:REL]->(b) "
             "SET r.rel_type = row.relation_type, r.weight = row.weight",
             params={"rows": edges},
@@ -307,7 +309,7 @@ class FalkorDBGraphStore:
                     "MATCH (s:Section {id: $id}) DETACH DELETE s",
                     params={"id": chunk_id},
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.debug(
                     "delete_chunks_from_graph failed for chunk_id=%s", chunk_id,
                     exc_info=True,
@@ -388,14 +390,14 @@ class FalkorDBGraphStore:
         """
         try:
             self._graph.delete()
-        except Exception:  # noqa: BLE001
+        except Exception:
             # Graph may not exist yet on a fresh install.
             logger.debug("delete_all: GRAPH.DELETE failed (graph may not exist)", exc_info=True)
         self._graph = self._db.select_graph(self._graph_name)
-        for label in ("File", "Section", "Entity", "Tag"):
+        for label in ("File", "Section", "Entity", "Tag", "Node"):
             try:
                 self._graph.query(f"CREATE INDEX FOR (n:{label}) ON (n.id)")
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.debug("Index for %s already exists or creation skipped", label)
 
     def node_count(self) -> int:
@@ -441,7 +443,7 @@ class FalkorDBGraphStore:
                                 props["ner_entities"] = [
                                     str(r[0]) for r in ent_result.result_set
                                 ]
-                        except Exception:  # noqa: BLE001
+                        except Exception:
                             logger.debug("Failed to enrich Section %s with NER entities", node_id, exc_info=True)
                     nodes.append({
                         "id": str(node_id),

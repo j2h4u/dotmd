@@ -18,12 +18,11 @@ import json
 import random
 import sqlite3
 import struct
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import blake3 as _blake3
-
 import pytest
 
 # ---------------------------------------------------------------------------
@@ -258,7 +257,7 @@ def _insert_chunk_row(
         f"INSERT OR IGNORE INTO {fts_table} (chunk_id, text) VALUES (?, ?)",
         (chunk_id, text),
     )
-    seed = vec_seed if vec_seed is not None else abs(hash(chunk_id)) % (2**31)
+    vec_seed if vec_seed is not None else abs(hash(chunk_id)) % (2**31)
     conn.execute(
         f"INSERT OR IGNORE INTO {vm_table} (chunk_id, text_hash) VALUES (?, ?)",
         (chunk_id, hashlib.md5(text.encode()).hexdigest()),
@@ -470,7 +469,7 @@ def post_v15_pre_v16_db(collision_rich_db: Path) -> Path:
         ).fetchall()
 
         id_map: dict[str, str] = {}
-        for old_id, fp, hh, lv, text, ci in rows:
+        for old_id, _fp, _hh, _lv, text, ci in rows:
             new_id = _make_blake3_chunk_id(text, ci, strategy)
             id_map[old_id] = new_id
 

@@ -15,8 +15,8 @@ import asyncio
 import json
 import os
 import threading
+from collections.abc import Callable
 from contextlib import AsyncExitStack
-from typing import Callable
 
 import httpx
 import pytest
@@ -96,8 +96,9 @@ class _StdioSession:
         self._startup_error: BaseException | None = None
 
     def start(self) -> None:
-        from mcp import ClientSession
         from mcp.client.stdio import StdioServerParameters, stdio_client
+
+        from mcp import ClientSession
 
         async def _run() -> None:
             try:

@@ -123,7 +123,7 @@ class Reranker:
         # Apply length penalty to short chunks if enabled
         if self._length_penalty:
             adjusted_scores = []
-            for score, (cid, text) in zip(scores, id_text_pairs):
+            for score, (_cid, text) in zip(scores, id_text_pairs, strict=False):
                 text_length = len(text)
                 if text_length < self._min_length:
                     # Penalty factor: 0.8 at length=0, 1.0 at min_length
@@ -134,7 +134,7 @@ class Reranker:
 
         scored = [
             (cid, float(score))
-            for (cid, _text), score in zip(id_text_pairs, scores)
+            for (cid, _text), score in zip(id_text_pairs, scores, strict=False)
             if score >= self._relevance_floor
         ]
         scored.sort(key=lambda x: x[1], reverse=True)

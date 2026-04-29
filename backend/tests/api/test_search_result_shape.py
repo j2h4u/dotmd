@@ -14,8 +14,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 
 def _import_search_result():  # type: ignore[no-untyped-def]
     """Deferred import — raises ImportError/AttributeError until P5 ships."""

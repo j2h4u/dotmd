@@ -35,6 +35,7 @@ Run offline (container must be stopped):
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import math
@@ -45,14 +46,13 @@ import socket
 import sqlite3
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import blake3 as _blake3
 
 import dotmd.ingestion.chunker as _chunker_module
-from dotmd.storage.lock_constants import LOCK_TABLE
 
 logger = logging.getLogger("dotmd-migrate")
 
@@ -81,7 +81,7 @@ def _validate_strategy(strategy: str) -> str:
 # Public exception
 # ---------------------------------------------------------------------------
 
-class PayloadDivergenceBlocked(RuntimeError):
+class PayloadDivergenceBlocked(RuntimeError):  # noqa: N818 — name reflects fail-closed semantics (refusal, not runtime error)
     """Raised when collision groups have diverging heading_hierarchy or level.
 
     Decision #10 fail-closed: no override flag exists (YAGNI cleanup 2026-04-25).
@@ -116,7 +116,7 @@ class MigrationReport:
     disk_delta_estimate: int | None = None  # bytes, dry-run only
     # verify-only: result of run_invariants() so CLI can reuse it without
     # re-opening the DB.  None for dry-run and real-run paths.
-    invariant_report: "InvariantReport | None" = None
+    invariant_report: InvariantReport | None = None
 
 
 @dataclass
@@ -325,12 +325,10 @@ def _ensure_state_table(conn: sqlite3.Connection) -> None:
         ("payload_divergences", "TEXT"),
         ("status", "TEXT NOT NULL DEFAULT 'complete'"),
     ]:
-        try:
+        with contextlib.suppress(sqlite3.OperationalError):  # column already exists
             conn.execute(
                 f"ALTER TABLE migration_v16_state ADD COLUMN {col} {typedef}"
             )
-        except sqlite3.OperationalError:
-            pass  # column already exists
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS migration_v16_lock (
@@ -364,7 +362,7 @@ def _acquire_lock(
             "INSERT INTO migration_v16_lock (id, locked_at, pid, host, mode) "
             "VALUES (1, ?, ?, ?, ?)",
             (
-                datetime.now(timezone.utc).isoformat(),
+                datetime.now(UTC).isoformat(),
                 os.getpid(),
                 socket.gethostname(),
                 mode,
@@ -399,7 +397,7 @@ def _release_lock(conn: sqlite3.Connection, *, commit: bool = True) -> None:
         conn.execute("DELETE FROM migration_v16_lock WHERE id = 1")
         if commit:
             conn.commit()
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.warning("Failed to release migration_v16_lock", exc_info=True)
 
 
@@ -453,7 +451,7 @@ def _drop_column_or_rebuild(
     ]
     col_defs = []
     for r in keep_cols:
-        cid, cname, ctype, notnull, dflt, pk = r
+        _cid, cname, ctype, notnull, dflt, pk = r
         parts = [f"{cname} {ctype}"]
         if pk:
             parts.append("PRIMARY KEY")
@@ -582,7 +580,7 @@ def _migrate_strategy(
     dry_run: bool,
     verify_only: bool,
     run_dir: Path,
-    reporter: "ProgressReporter | None" = None,
+    reporter: ProgressReporter | None = None,
 ) -> tuple[int, int, int, list[dict], bool]:
     """Migrate a single strategy inside an open connection.
 
@@ -630,12 +628,10 @@ def _migrate_strategy(
         """)
 
     # --- Step 3: Add shadow column new_chunk_id ---
-    try:
+    with contextlib.suppress(sqlite3.OperationalError):  # column already exists from a previous interrupted run
         conn.execute(
             f"ALTER TABLE {table} ADD COLUMN new_chunk_id TEXT"
         )
-    except sqlite3.OperationalError:
-        pass  # Column already exists from a previous interrupted run
 
     # --- Step 4: Compute new_chunk_id for every row ---
     # chunk_index must exist (it's in M2M now, but still on chunks_* pre-drop)
@@ -729,7 +725,7 @@ def _migrate_strategy(
         "SELECT name FROM sqlite_master WHERE name=?", (fts_table,)
     ).fetchone()
 
-    for new_chunk_id, old_ids_concat, n in collision_rows:
+    for new_chunk_id, old_ids_concat, _n in collision_rows:
         old_ids: list[str] = old_ids_concat.split("|")
 
         # --- Step 5a: payload_invariant_check ---
@@ -929,10 +925,7 @@ def needs_migration_v16(index_db: Path) -> bool:
         strategies = _discover_strategies(conn)
         if not strategies:
             return False
-        for s in strategies:
-            if _strategy_needs_migration(conn, s):
-                return True
-        return False
+        return any(_strategy_needs_migration(conn, s) for s in strategies)
     finally:
         conn.close()
 
@@ -1040,7 +1033,7 @@ def run_migration_v16(
                 for cid, new_id in id_to_new.items():
                     groups[new_id].append(cid)
 
-                for new_id, old_ids in groups.items():
+                for _new_id, old_ids in groups.items():
                     if len(old_ids) <= 1:
                         continue
                     # Check for heading divergence
@@ -1179,7 +1172,7 @@ def run_migration_v16(
                     report.disk_delta_estimate += collisions * avg_row_size
 
                     all_divs = prog.get("_all_divergences", [])
-                    div_count = len([d for d in all_divs]) if all_divs else 0
+                    div_count = len(list(all_divs)) if all_divs else 0
                     logger.info(
                         "mode=dry-run strategy=%s collisions=%d "
                         "divergence_warnings=%d payload_mismatch_warnings=%d "
@@ -1199,7 +1192,7 @@ def run_migration_v16(
                         ) VALUES (?, 'complete', ?, ?, ?, ?, ?)
                     """, (
                         strategy,
-                        datetime.now(timezone.utc).isoformat(),
+                        datetime.now(UTC).isoformat(),
                         collisions,
                         div_warns,
                         pm_warns,
@@ -1225,7 +1218,7 @@ def run_migration_v16(
                         ) VALUES (?, 'payload_divergence_blocked', ?, 0, 0, 0, ?)
                     """, (
                         strategy,
-                        datetime.now(timezone.utc).isoformat(),
+                        datetime.now(UTC).isoformat(),
                         json.dumps([
                             d for d in all_divergences
                             if d["strategy"] == strategy
@@ -1252,10 +1245,8 @@ def run_migration_v16(
     finally:
         if is_no_persist:
             # Roll back the outer transaction — leaves DB byte-identical
-            try:
+            with contextlib.suppress(Exception):
                 conn.execute("ROLLBACK")
-            except Exception:  # noqa: BLE001
-                pass
         elif not _lock_released:
             # Only release if not already released by the PayloadDivergenceBlocked
             # handler — avoids a spurious WARNING on an already-closed connection.

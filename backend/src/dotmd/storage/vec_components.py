@@ -45,7 +45,6 @@ manage the connection.  ``store()`` and ``delete_by_entity_ids()`` do not call
 from __future__ import annotations
 
 import logging
-import pathlib
 import sqlite3
 import struct
 

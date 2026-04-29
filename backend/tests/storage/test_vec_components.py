@@ -1,7 +1,8 @@
 """Tests for VecComponentStore (Phase 999.12)."""
 import sqlite3
-import struct
+
 import pytest
+
 from dotmd.storage.vec_components import VecComponentStore
 
 
@@ -21,7 +22,7 @@ def test_store_and_get_roundtrip(store):
     result = store.get("chunk_abc", "text")
     assert result is not None
     assert len(result) == 4
-    assert all(abs(a - b) < 1e-6 for a, b in zip(result, vec))
+    assert all(abs(a - b) < 1e-6 for a, b in zip(result, vec, strict=False))
 
 
 def test_get_missing_returns_none(store):

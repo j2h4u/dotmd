@@ -306,7 +306,7 @@ class DotMDService:
                 # outrank direct hits.
                 fused_floor = fused[-1][1] if fused else 0.0
                 fused_ids = {cid for cid, _ in fused}
-                for cid, gscore in graph_hits:
+                for cid, _gscore in graph_hits:
                     if cid not in fused_ids:
                         fused.append((cid, fused_floor * 0.5))
                         fused_ids.add(cid)
@@ -316,7 +316,7 @@ class DotMDService:
         if rerank and fused:
             rerank_candidates = fused[:pool_size]
             chunk_ids = [cid for cid, _ in rerank_candidates]
-            fused_scores = {cid: score for cid, score in fused}  # ALL fused, not just pool_size
+            fused_scores = dict(fused)  # ALL fused, not just pool_size
             reranked = self._reranker.rerank(
                 search_query,
                 chunk_ids,
@@ -460,6 +460,12 @@ class DotMDService:
             ).fetchone()[0]
         except Exception:
             logger.debug("live chunk/file count failed", exc_info=True)
+        # Live graph counts (stats table is only updated by batch run(), not trickle)
+        try:
+            stats.total_entities = self._pipeline.graph_store.node_count()
+            stats.total_edges = self._pipeline.graph_store.edge_count()
+        except Exception:
+            logger.debug("live graph count failed", exc_info=True)
         # Change detection: run live diff against all known paths (skip for MCP)
         if live_diff:
             try:

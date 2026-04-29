@@ -1,18 +1,22 @@
 """Tests for force parameter threading through DotMDService."""
 
-from unittest.mock import MagicMock, patch
-from pathlib import Path
+from __future__ import annotations
 
-import pytest
+from pathlib import Path
+from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
+
+if TYPE_CHECKING:
+    from dotmd.api.service import DotMDService
 
 
 class TestServiceForceParameter:
     """Verify DotMDService.index passes force to pipeline."""
 
-    def _make_service(self, tmp_path: Path) -> "DotMDService":
+    def _make_service(self, tmp_path: Path) -> DotMDService:
         """Create a DotMDService with mocked-out heavy deps."""
-        from dotmd.core.config import Settings
         from dotmd.api.service import DotMDService
+        from dotmd.core.config import Settings
 
         settings = Settings(index_dir=tmp_path / "idx", embedding_url="http://test:8088")
         service = DotMDService(settings=settings)

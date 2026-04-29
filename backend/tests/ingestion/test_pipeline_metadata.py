@@ -10,10 +10,9 @@ Covers:
 All tests mock encode_batch — no live TEI required.
 """
 import pathlib
-import sqlite3
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
+import pytest
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -78,7 +77,6 @@ def test_embed_chunks_returns_etext_not_efused_from_cache(minimal_settings, tmp_
     in vec0). A future developer adding lookup_embeddings_by_text_hash back
     to _embed_chunks() would break this test.
     """
-    from dotmd.ingestion.pipeline import IndexingPipeline
     from dotmd.core.models import Chunk
 
     pipeline, call_log = _make_pipeline_with_mock_encode(minimal_settings)
@@ -104,7 +102,7 @@ def test_embed_chunks_returns_etext_not_efused_from_cache(minimal_settings, tmp_
 
     # Call _embed_chunks with this chunk
     call_log.clear()
-    e_text_vectors, text_hashes = pipeline._embed_chunks([chunk])
+    e_text_vectors, _text_hashes = pipeline._embed_chunks([chunk])
 
     # Result must be e_text_known from VecComponentStore (not e_fused from vec0)
     assert len(e_text_vectors) == 1

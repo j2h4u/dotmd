@@ -7,10 +7,7 @@ the delete_file_subgraph() method behavior.
 
 from __future__ import annotations
 
-import pytest
-
 from dotmd.storage.graph import LadybugDBGraphStore
-
 
 # ---------------------------------------------------------------------------
 # Helpers

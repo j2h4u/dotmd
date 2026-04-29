@@ -346,6 +346,7 @@ def _safe_rename(src: Path, dst: Path) -> None:
 
 if __name__ == "__main__":
     import sys
+
     from dotmd.utils.logging import setup_logging
 
     setup_logging(verbose=True)

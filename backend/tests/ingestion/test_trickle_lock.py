@@ -10,7 +10,6 @@ These tests will FAIL until P3 (wave 3) implements the startup lock check.
 from __future__ import annotations
 
 import sqlite3
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,7 +22,7 @@ LOCK_TABLE = "migration_v16_lock"  # module-level default; overridden by the hel
 
 def _get_lock_table() -> str:
     """Import LOCK_TABLE from lock_constants (raises ImportError until P3 ships)."""
-    from dotmd.storage.lock_constants import LOCK_TABLE as _LT  # noqa: PLC0415
+    from dotmd.storage.lock_constants import LOCK_TABLE as _LT
     return _LT
 
 
@@ -55,8 +54,8 @@ def _start_trickle(db_path: Path):  # type: ignore[no-untyped-def]
     Returns the TrickleIndexer instance on success, or raises SystemExit / an
     exception on refused startup.
     """
-    from dotmd.ingestion.trickle import TrickleIndexer
     from dotmd.core.config import Settings
+    from dotmd.ingestion.trickle import TrickleIndexer
 
     # Build a minimal settings pointing at tmp DB
     settings = Settings(index_dir=db_path.parent)

@@ -11,8 +11,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 
 def _import():  # type: ignore[no-untyped-def]
     from dotmd.ingestion.migration_v16 import run_migration_v16
