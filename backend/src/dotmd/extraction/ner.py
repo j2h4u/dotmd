@@ -14,6 +14,7 @@ from dotmd.core.models import Chunk, Entity, ExtractDepth, ExtractionResult, Rel
 
 if TYPE_CHECKING:
     from gliner import GLiNER  # type: ignore[import-untyped]
+
     from dotmd.storage.cache import ExtractionCache
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,7 @@ class NERExtractor:
         entity_types: list[str] | None = None,
         model_name: str = _DEFAULT_MODEL_NAME,
         threshold: float = 0.5,
-        extraction_cache: "ExtractionCache | None" = None,
+        extraction_cache: ExtractionCache | None = None,
     ) -> None:
         self._entity_types: list[str] = entity_types or list(_DEFAULT_ENTITY_TYPES)
         self._model_name: str = model_name
@@ -76,7 +77,7 @@ class NERExtractor:
 
         Cache stores only chunk-id-independent data:
         - entities: {name, type, source} — no chunk_ids in stored rows
-        - co_occurs: CO_OCCURS relations keyed on entity names
+        - co_occurs: CO_OCCURS relations keyed on entity names, scoped to ONE chunk
 
         MENTIONS relations are rebuilt here at read time using current chunk.chunk_id.
         This makes cached results safe to reuse after Plan 03 chunk_id migration.
@@ -85,8 +86,6 @@ class NERExtractor:
             return self.extract(chunks)
 
         cached_hits, miss_chunks = self._extraction_cache.lookup_batch(chunks)
-
-        # Build a chunk_id lookup for MENTIONS reconstruction
         chunk_by_id: dict[str, Chunk] = {c.chunk_id: c for c in chunks}
 
         entities: list[Entity] = []
@@ -95,7 +94,7 @@ class NERExtractor:
 
         # Restore cached results and rebuild MENTIONS at read time
         for chunk_id, (ents_data, co_occurs_data) in cached_hits.items():
-            chunk = chunk_by_id[chunk_id]
+            _ = chunk_by_id[chunk_id]  # validate chunk_id present in batch
             span_counter: Counter[str] = Counter()
 
             for d in ents_data:
@@ -127,41 +126,41 @@ class NERExtractor:
                     weight=float(freq),
                 ))
 
-        # Run GLiNER only on cache misses
-        new_results_per_chunk: dict[str, tuple[list, list]] = {}
+        # Run GLiNER only on cache misses, with per-chunk attribution preserved
         if miss_chunks:
-            miss_result = self.extract(miss_chunks)
+            per_chunk_misses = self._extract_per_chunk(miss_chunks)
+            new_results_per_chunk: dict[str, tuple[list, list]] = {}
 
-            # Split miss_result into per-chunk data for cache storage.
-            # extract() returns a combined ExtractionResult — we split it
-            # back into per-chunk cache payloads for storage.
-            entities.extend(miss_result.entities)
-
-            # Separate MENTIONS from CO_OCCURS for per-chunk cache storage
             for chunk in miss_chunks:
-                chunk_mentions = [
-                    r for r in miss_result.relations
-                    if r.relation_type == "MENTIONS" and r.source_id == chunk.chunk_id
-                ]
-                chunk_co_occurs = [
-                    r for r in miss_result.relations
-                    if r.relation_type == "CO_OCCURS"
-                ]
-                # Entities referenced by this chunk (those that mention this chunk_id)
-                mentioned_names = {r.target_id for r in chunk_mentions}
-                chunk_entities = [
-                    e for e in miss_result.entities
-                    if e.name in mentioned_names
-                ]
+                chunk_entities, chunk_relations = per_chunk_misses.get(
+                    chunk.chunk_id, ([], [])
+                )
 
+                # Aggregate this chunk's entities into global result (dedup by key)
+                for e in chunk_entities:
+                    key = (e.name.lower(), e.type.lower())
+                    if key not in seen_entities:
+                        seen_entities[key] = e
+                        entities.append(e)
+                    else:
+                        existing = seen_entities[key]
+                        if chunk.chunk_id not in existing.chunk_ids:
+                            existing.chunk_ids.append(chunk.chunk_id)
+
+                relations.extend(chunk_relations)
+
+                # Build per-chunk cache payload (entities + CO_OCCURS for THIS chunk only)
+                chunk_co_occurs = [
+                    r for r in chunk_relations if r.relation_type == "CO_OCCURS"
+                ]
                 entities_to_cache = [
                     {"name": e.name, "type": e.type, "source": e.source}
                     for e in chunk_entities
                 ]
                 co_occurs_to_cache = [r.model_dump() for r in chunk_co_occurs]
-                new_results_per_chunk[chunk.chunk_id] = (entities_to_cache, co_occurs_to_cache)
-
-            relations.extend(miss_result.relations)
+                new_results_per_chunk[chunk.chunk_id] = (
+                    entities_to_cache, co_occurs_to_cache
+                )
 
             if new_results_per_chunk:
                 self._extraction_cache.store_batch(miss_chunks, new_results_per_chunk)
@@ -169,17 +168,16 @@ class NERExtractor:
         return ExtractionResult(entities=entities, relations=relations)
 
     def extract(self, chunks: list[Chunk]) -> ExtractionResult:
-        """Run GLiNER NER over *chunks* and return entities and relations.
+        """Run GLiNER NER over *chunks* and return aggregated entities and relations.
 
-        ADR: Uses inference() with pre-computed label embeddings
-        for ~2.5x speedup over per-chunk predict_entities() calls (sequence
-        packing in GLiNER 0.2.23+). Label embeddings are computed once and
-        reused across all chunks in the batch.
+        Aggregates per-chunk results: dedupes entities by ``(name.lower(), type.lower())``
+        and accumulates ``chunk_ids`` on the kept Entity object. Order of first
+        appearance (chunk-order) is preserved in the entities list.
 
         For each chunk the extractor:
 
-        1. Predicts entities using GLiNER zero-shot NER (batched).
-        2. Creates ``Entity`` objects for each unique entity found.
+        1. Predicts entities using GLiNER zero-shot NER (batched, see _extract_per_chunk).
+        2. Creates ``Entity`` objects for each unique (name, type) found.
         3. Creates ``CO_OCCURS`` relations between every pair of entities
            found within the same chunk (weight = 1.0).
         4. Creates ``MENTIONS`` relations from the chunk to each entity
@@ -188,9 +186,49 @@ class NERExtractor:
         if not chunks:
             return ExtractionResult()
 
+        per_chunk = self._extract_per_chunk(chunks)
+
+        entities: list[Entity] = []
+        relations: list[Relation] = []
+        seen_entities: dict[tuple[str, str], Entity] = {}
+
+        for chunk in chunks:
+            chunk_entities, chunk_relations = per_chunk.get(chunk.chunk_id, ([], []))
+
+            for e in chunk_entities:
+                key = (e.name.lower(), e.type.lower())
+                if key not in seen_entities:
+                    seen_entities[key] = e
+                    entities.append(e)
+                else:
+                    existing = seen_entities[key]
+                    if chunk.chunk_id not in existing.chunk_ids:
+                        existing.chunk_ids.append(chunk.chunk_id)
+
+            relations.extend(chunk_relations)
+
+        return ExtractionResult(entities=entities, relations=relations)
+
+    def _extract_per_chunk(
+        self, chunks: list[Chunk]
+    ) -> dict[str, tuple[list[Entity], list[Relation]]]:
+        """Run GLiNER and return per-chunk (entities, relations), without global dedup.
+
+        Each chunk's Entity has ``chunk_ids = [chunk.chunk_id]`` (single-chunk).
+        Each chunk's relations include only that chunk's MENTIONS and CO_OCCURS.
+
+        ADR: Uses inference() with pre-computed label embeddings for ~2.5x speedup
+        over per-chunk predict_entities() calls (sequence packing in GLiNER 0.2.23+).
+
+        Per-chunk attribution lets ``extract_with_cache`` write the correct subset
+        of relations to each chunk's cache row, avoiding the N×N batch-bloat bug
+        where every chunk's row stored every other chunk's CO_OCCURS pairs.
+        """
+        if not chunks:
+            return {}
+
         model = self._get_model()
 
-        # Batch inference: all chunks at once with pre-computed label embeddings.
         texts = [chunk.text for chunk in chunks]
         batch_predictions: list[list[dict[str, Any]]] = model.inference(
             texts,
@@ -198,14 +236,17 @@ class NERExtractor:
             threshold=self._threshold,
         )
 
-        entities: list[Entity] = []
-        relations: list[Relation] = []
-        seen_entities: dict[tuple[str, str], Entity] = {}
+        per_chunk: dict[str, tuple[list[Entity], list[Relation]]] = {}
 
-        for chunk, predictions in zip(chunks, batch_predictions):
+        for chunk, predictions in zip(chunks, batch_predictions, strict=False):
+            chunk_entities: list[Entity] = []
+            chunk_relations: list[Relation] = []
+
             if not predictions:
+                per_chunk[chunk.chunk_id] = (chunk_entities, chunk_relations)
                 continue
 
+            seen_in_chunk: dict[tuple[str, str], Entity] = {}
             span_counter: Counter[str] = Counter()
             chunk_entity_keys: list[tuple[str, str]] = []
 
@@ -219,36 +260,32 @@ class NERExtractor:
                 key = (name.lower(), etype.lower())
                 chunk_entity_keys.append(key)
 
-                if key not in seen_entities:
+                if key not in seen_in_chunk:
                     entity = Entity(
                         name=name,
                         type=etype,
                         source=ExtractDepth.NER,
                         chunk_ids=[chunk.chunk_id],
                     )
-                    seen_entities[key] = entity
-                    entities.append(entity)
-                else:
-                    existing = seen_entities[key]
-                    if chunk.chunk_id not in existing.chunk_ids:
-                        existing.chunk_ids.append(chunk.chunk_id)
+                    seen_in_chunk[key] = entity
+                    chunk_entities.append(entity)
 
             unique_keys = list(dict.fromkeys(chunk_entity_keys))
 
             for key_a, key_b in combinations(unique_keys, 2):
-                relations.append(
+                chunk_relations.append(
                     Relation(
-                        source_id=seen_entities[key_a].name,
-                        target_id=seen_entities[key_b].name,
+                        source_id=seen_in_chunk[key_a].name,
+                        target_id=seen_in_chunk[key_b].name,
                         relation_type="CO_OCCURS",
                         weight=1.0,
                     )
                 )
 
             for key in unique_keys:
-                entity = seen_entities[key]
+                entity = seen_in_chunk[key]
                 freq = span_counter[entity.name]
-                relations.append(
+                chunk_relations.append(
                     Relation(
                         source_id=chunk.chunk_id,
                         target_id=entity.name,
@@ -257,7 +294,9 @@ class NERExtractor:
                     )
                 )
 
-        return ExtractionResult(entities=entities, relations=relations)
+            per_chunk[chunk.chunk_id] = (chunk_entities, chunk_relations)
+
+        return per_chunk
 
     # ------------------------------------------------------------------
     # Private helpers
