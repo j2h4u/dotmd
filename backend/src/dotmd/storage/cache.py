@@ -16,11 +16,11 @@ from __future__ import annotations
 
 import json
 import logging
-
-import blake3
 import sqlite3
 import struct
 from typing import TYPE_CHECKING
+
+import blake3
 
 if TYPE_CHECKING:
     from dotmd.core.models import Chunk
@@ -369,6 +369,52 @@ class ExtractionCache:
     # ------------------------------------------------------------------
     # Store
     # ------------------------------------------------------------------
+
+    def prune_orphans(self, live_chunk_texts: list[str]) -> int:
+        """Delete cache rows whose key has no matching chunk in the live corpus.
+
+        The cache is content-addressed, so file deletions don't directly remove
+        cache entries.  Over many add/delete cycles the cache accumulates rows
+        for chunk texts that no longer exist anywhere in the index.  This
+        method takes a snapshot of all live chunk texts (typically built by
+        IndexingPipeline.prune_extraction_cache from chunks_* tables) and
+        deletes any cache row not corresponding to a current chunk.
+
+        Defensive: if ``live_chunk_texts`` is empty (suggests caller error or
+        empty index) the method is a no-op rather than wiping the entire cache.
+
+        Parameters
+        ----------
+        live_chunk_texts:
+            All chunk texts currently present across all strategies.
+
+        Returns
+        -------
+        Number of orphan rows deleted.
+        """
+        if not live_chunk_texts:
+            return 0
+
+        live_keys = {self._make_key(t) for t in live_chunk_texts}
+        all_keys = {
+            row[0]
+            for row in self._conn.execute("SELECT cache_key FROM extraction_cache")
+        }
+        orphan_keys = all_keys - live_keys
+        if not orphan_keys:
+            return 0
+
+        # Delete in batches to keep the parameter list within SQLite limits.
+        orphan_list = list(orphan_keys)
+        for i in range(0, len(orphan_list), self._BATCH):
+            batch = orphan_list[i : i + self._BATCH]
+            placeholders = ",".join("?" * len(batch))
+            self._conn.execute(
+                f"DELETE FROM extraction_cache WHERE cache_key IN ({placeholders})",
+                batch,
+            )
+        self._conn.commit()
+        return len(orphan_keys)
 
     def store_batch(
         self,

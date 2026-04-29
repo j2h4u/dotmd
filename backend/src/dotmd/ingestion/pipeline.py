@@ -17,7 +17,7 @@ multi-strategy experimentation without data collision.
 
 from __future__ import annotations
 
-import blake3
+import contextlib
 import json
 import logging
 import re
@@ -26,26 +26,42 @@ import tempfile
 import time
 import uuid
 from dataclasses import dataclass as _dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
+import blake3
 import sqlite_vec  # type: ignore[import-untyped]
 
+import dotmd.ingestion.chunker as _chunker_module
 from dotmd.core.config import Settings
-from dotmd.core.models import Chunk, DocKind, EntityType, ExtractDepth, ExtractionResult, FileInfo, IndexStats, RelationType
+from dotmd.core.models import (
+    Chunk,
+    DocKind,
+    EntityType,
+    ExtractDepth,
+    ExtractionResult,
+    FileInfo,
+    IndexStats,
+    RelationType,
+)
 from dotmd.extraction.acronyms import extract_acronyms_from_chunks
 from dotmd.extraction.keyterms import KeyTermExtractor
 from dotmd.extraction.ner import NERExtractor
 from dotmd.extraction.structural import StructuralExtractor
-import dotmd.ingestion.chunker as _chunker_module
 from dotmd.ingestion.file_tracker import FileDiff, FileTracker
-from dotmd.ingestion.reader import chunk_checksum, meta_checksum, discover_files, parse_frontmatter, read_file
-from dotmd.storage.vec_components import VecComponentStore
+from dotmd.ingestion.reader import (
+    chunk_checksum,
+    discover_files,
+    meta_checksum,
+    parse_frontmatter,
+    read_file,
+)
 from dotmd.search.fts5 import FTS5SearchEngine
 from dotmd.search.semantic import SemanticSearchEngine
 from dotmd.storage.base import GraphStoreProtocol, VectorStoreProtocol
 from dotmd.storage.cache import EmbeddingCache, ExtractionCache
 from dotmd.storage.metadata import SQLiteMetadataStore
+from dotmd.storage.vec_components import VecComponentStore
 
 logger = logging.getLogger(__name__)
 
@@ -312,7 +328,7 @@ class IndexingPipeline:
         on index.db in WAL mode. The try/except handles any write failure gracefully.
         """
         try:
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             self._conn.execute(
                 "INSERT INTO search_log (query, timestamp, weights_used, top_results, mode, reranked) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
@@ -456,14 +472,10 @@ class IndexingPipeline:
 
         for table in (vec_table, meta_table, config_table):
             self._conn.execute(f"DROP TABLE IF EXISTS {table}")
-        try:
+        with contextlib.suppress(sqlite3.OperationalError):  # table may not exist yet
             self._conn.execute(f"DELETE FROM {meta_fp_table}")
-        except sqlite3.OperationalError:
-            pass  # table may not exist yet
-        try:
+        with contextlib.suppress(sqlite3.OperationalError):  # table may not exist yet
             self._conn.execute(f"DELETE FROM {vec_components_table}")
-        except sqlite3.OperationalError:
-            pass  # table may not exist yet
         self._conn.commit()
 
         # Re-ensure tables so the pipeline can immediately re-index.
@@ -492,10 +504,8 @@ class IndexingPipeline:
         self._conn.execute(f"DROP TABLE IF EXISTS {fts_table}")
 
         # 2. Clear chunk fingerprints
-        try:
+        with contextlib.suppress(sqlite3.OperationalError):  # table may not exist
             self._conn.execute(f"DELETE FROM {chunk_fp_table}")
-        except sqlite3.OperationalError:
-            pass  # table may not exist
 
         # 3. CASCADE: drop ALL vec_*_{strategy}_* and meta_fp_{strategy}_* tables.
         #    Discover tables via sqlite_master.
@@ -696,7 +706,7 @@ class IndexingPipeline:
         w_meta = weights.get("meta", 0.3)
         e_text_norm = self._normalize_vector(e_text)
         e_meta_norm = self._normalize_vector(e_meta)
-        raw = [w_text * a + w_meta * b for a, b in zip(e_text_norm, e_meta_norm)]
+        raw = [w_text * a + w_meta * b for a, b in zip(e_text_norm, e_meta_norm, strict=False)]
         return self._normalize_vector(raw)
 
     def _embed_meta_component(self, file_info: FileInfo) -> list[float]:
@@ -830,7 +840,7 @@ class IndexingPipeline:
                 )
                 missing_chunks = [c for c in chunks if c.chunk_id in missing_chunk_ids]
                 missing_e_text, missing_hashes = self._embed_chunks(missing_chunks)  # TEI outside tx
-                for chunk, e_text in zip(missing_chunks, missing_e_text):
+                for chunk, e_text in zip(missing_chunks, missing_e_text, strict=False):
                     e_text_map[chunk.chunk_id] = e_text
                 text_hashes = missing_hashes
             e_meta = self._embed_meta_component(file_info)  # exactly 1 TEI call outside tx
@@ -845,7 +855,7 @@ class IndexingPipeline:
         # Acceptable: trickle re-indexes the file on next run if a crash occurs mid-write.
         if body_changed:
             # Store e_text components for all chunks
-            for chunk, e_text in zip(chunks, e_text_vectors):
+            for chunk, e_text in zip(chunks, e_text_vectors, strict=False):
                 self._vec_components.store(chunk.chunk_id, "text", e_text)
         else:
             # Store only newly-computed fallback e_text for missing chunks
@@ -934,7 +944,7 @@ class IndexingPipeline:
         e_meta_all = self._semantic_engine.encode_batch(meta_texts)
 
         total = 0
-        for fi, e_meta in zip(file_infos, e_meta_all):
+        for fi, e_meta in zip(file_infos, e_meta_all, strict=False):
             canonical_path = self._meta_entity_id(fi.path)
             self._vec_components.store(canonical_path, "meta", e_meta)
             chunk_ids = self._metadata_store.get_chunk_ids_by_file(
@@ -944,7 +954,7 @@ class IndexingPipeline:
             if not chunks:
                 continue
             e_text_vectors, text_hashes = self._embed_chunks(chunks)
-            for chunk, e_text in zip(chunks, e_text_vectors):
+            for chunk, e_text in zip(chunks, e_text_vectors, strict=False):
                 self._vec_components.store(chunk.chunk_id, "text", e_text)
             e_fused = [
                 self._fuse_vectors(e_t, e_meta, weights) for e_t in e_text_vectors
@@ -982,6 +992,40 @@ class IndexingPipeline:
         removed = self._graph_store.delete_isolated_nodes()
         if removed:
             logger.info("graph_orphan_sweep: removed %d isolated nodes", removed)
+        return removed
+
+    def prune_extraction_cache(self) -> int:
+        """Delete orphan rows from extraction_cache.
+
+        The NER extraction cache is content-addressed (key = blake3 of chunk
+        text + model_sig).  Deleting a file removes its chunks from chunks_*
+        and the M2M tables, but leaves matching cache rows untouched — the
+        same text could reappear in another file and benefit from the cache.
+
+        For chunks that never reappear, the cache row is dead weight.  This
+        method snapshots all live chunk texts across present strategies, asks
+        the cache to delete keys not in that set, and returns the row count
+        removed.
+
+        Called from trickle's deferred-maintenance block (after deletions,
+        before VACUUM) so reclaimed pages are immediately compactable.
+        """
+        if self._ner_extractor is None or self._ner_extractor._extraction_cache is None:
+            return 0
+
+        live_texts: list[str] = []
+        for strategy in self._present_strategies(self.conn):
+            rows = self.conn.execute(
+                f"SELECT text FROM chunks_{strategy}"
+            ).fetchall()
+            live_texts.extend(text for (text,) in rows)
+
+        if not live_texts:
+            return 0
+
+        removed = self._ner_extractor._extraction_cache.prune_orphans(live_texts)
+        if removed:
+            logger.info("extraction_cache_prune: removed %d orphan rows", removed)
         return removed
 
     def reindex_graph(self) -> int:
@@ -1268,7 +1312,7 @@ class IndexingPipeline:
             # VecComponentStore.store() does not call commit() (caller owns boundary).
             # With isolation_level=None each INSERT auto-commits, but we flush explicitly
             # so all per-file BLOBs are durable before vec0 is written.
-            for chunk, e_text in zip(file_chunks, e_text_vectors):
+            for chunk, e_text in zip(file_chunks, e_text_vectors, strict=False):
                 self._vec_components.store(chunk.chunk_id, "text", e_text)
             self._conn.commit()  # flush VecComponentStore writes before vec0
             # Encode file metadata → e_meta (1 TEI call per unique file)
@@ -1385,7 +1429,7 @@ class IndexingPipeline:
             total_chunks=len(all_chunks),
             total_entities=all_entities_count,
             total_edges=all_edges_count,
-            last_indexed=datetime.now(tz=timezone.utc),
+            last_indexed=datetime.now(tz=UTC),
             new_files=_dc.get("new", 0),
             modified_files=_dc.get("modified", 0),
             deleted_files=_dc.get("deleted", 0),
@@ -1432,7 +1476,7 @@ class IndexingPipeline:
             file_info = FileInfo(
                 path=_p,
                 title=str(_fm.get("title", _p.stem)),
-                last_modified=datetime.fromtimestamp(_stat.st_mtime, tz=timezone.utc),
+                last_modified=datetime.fromtimestamp(_stat.st_mtime, tz=UTC),
                 size_bytes=_stat.st_size,
                 frontmatter=_fm,
                 kind=_kind,
@@ -1492,12 +1536,12 @@ class IndexingPipeline:
                     # re-populated in the graph phase below.
                     try:
                         self._graph_store.delete_file_subgraph(path_str)
-                    except Exception as _ge:  # noqa: BLE001
+                    except Exception as _ge:
                         logger.warning(
                             "graph cleanup (fallback) failed during reindex: %s (file=%s)",
                             _ge, path_str,
                         )
-                except Exception as _ge:  # noqa: BLE001
+                except Exception as _ge:
                     logger.warning(
                         "graph chunk cleanup failed during reindex: %s (file=%s)",
                         _ge, path_str,
@@ -1625,11 +1669,7 @@ class IndexingPipeline:
             if metadata_only:
                 file_meta = self._build_file_meta_from_fileinfo([file_info])
                 self._keyword_engine.add_chunks(
-                    self._metadata_store.get_chunks(
-                        self._metadata_store.get_chunk_ids_by_file(
-                            self._strategy, path_str
-                        ) or []
-                    ) if not chunks else chunks,
+                    chunks if chunks else self._metadata_store.get_chunks(self._metadata_store.get_chunk_ids_by_file(self._strategy, path_str) or []),
                     file_meta=file_meta,
                 )
                 self._frontmatter_to_graph([file_info])
@@ -1780,12 +1820,12 @@ class IndexingPipeline:
             # Fall back to the broad delete_file_subgraph (pre-M2M behaviour).
             try:
                 self._graph_store.delete_file_subgraph(file_path)
-            except Exception as _e:  # noqa: BLE001
+            except Exception as _e:
                 logger.warning(
                     "graph cleanup (fallback) failed after DB commit: %s (file=%s)",
                     _e, file_path,
                 )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning(
                 "graph cleanup failed after DB commit: %s (file=%s)", e, file_path,
             )
@@ -1794,7 +1834,7 @@ class IndexingPipeline:
         try:
             self._chunk_tracker.remove_fingerprint(file_path)
             self._meta_tracker.remove_fingerprint(file_path)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning(
                 "fingerprint cleanup failed after DB commit: %s (file=%s)", e, file_path,
             )
@@ -1860,7 +1900,7 @@ class IndexingPipeline:
             try:
                 self._purge_file(file_path)
                 files_removed += 1
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.exception(
                     "purge_orphaned_files: failed to purge %s — skipping", file_path,
                 )
@@ -2136,7 +2176,7 @@ class IndexingPipeline:
                 ]
                 # Note: no explicit BEGIN here — add_chunks() commits internally.
                 # VecComponentStore.store() calls are auto-committed in WAL autocommit mode.
-                for chunk, e_text in zip(chunks, e_text_vectors):
+                for chunk, e_text in zip(chunks, e_text_vectors, strict=False):
                     self._vec_components.store(chunk.chunk_id, "text", e_text)
                 self._vec_components.store(
                     self._meta_entity_id(fi.path), "meta", e_meta
@@ -2162,8 +2202,8 @@ class IndexingPipeline:
                         "falling back to full encode for missing chunks",
                         len(missing), fi.path,
                     )
-                    missing_vecs, missing_hashes = self._embed_chunks(missing)
-                    for chunk, e_t in zip(missing, missing_vecs):
+                    missing_vecs, _missing_hashes = self._embed_chunks(missing)
+                    for chunk, e_t in zip(missing, missing_vecs, strict=False):
                         e_text_map[chunk.chunk_id] = e_t
                 e_meta = self._embed_meta_component(fi)  # 1 TEI call
                 e_fused_vectors = [
@@ -2373,6 +2413,18 @@ class IndexingPipeline:
         if stored_weights_json == current_weights_json:
             return  # No change
 
+        if stored_weights_json is None:
+            # weights_used missing = post-wipe state (wipe step 7 deletes it).
+            # vec_components is non-empty because trickle is mid-rebuild.
+            # Write current weights as baseline — no recompute needed since vec_meta
+            # is being rebuilt from scratch with correct weights already.
+            self._conn.execute(
+                f"INSERT OR REPLACE INTO {config_table} (key, value) VALUES ('weights_used', ?)",
+                (current_weights_json,),
+            )
+            self._conn.commit()
+            return
+
         logger.info(
             "Embedding weights changed: stored=%r current=%r — recomputing e_fused from components.",
             stored_weights_json, current_weights_json,
@@ -2402,6 +2454,14 @@ class IndexingPipeline:
         # One delete_all() here + overwrite=False per file is correct: table is cleared once,
         # then each file's rows are inserted fresh.
         self._vector_store.delete_all()
+        # delete_all() clears the entire config table including schema_version.
+        # Re-write it immediately so the next startup does not mistake the empty
+        # sentinel for a pre-999.12 DB and trigger an unnecessary full wipe.
+        self._conn.execute(
+            f"INSERT OR REPLACE INTO {config_table} (key, value) VALUES ('schema_version', ?)",
+            (self.SCHEMA_VERSION,),
+        )
+        self._conn.commit()
 
         # Process in batches of 1000 files to avoid OOM on ~1.4M chunks (~5.6GB raw vectors)
         BATCH_SIZE = 1000

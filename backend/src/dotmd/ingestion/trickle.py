@@ -12,7 +12,7 @@ import logging
 import sqlite3
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -71,28 +71,31 @@ class _MarkdownEventHandler(PatternMatchingEventHandler):
         self._exclude = exclude
         self._debounce: dict[str, float] = {}
 
-    def on_created(self, event):  # noqa: ANN001
+    def on_created(self, event):
         self._enqueue(event.src_path)
 
-    def on_modified(self, event):  # noqa: ANN001
+    def on_modified(self, event):
         self._enqueue(event.src_path)
 
-    def on_deleted(self, event):  # noqa: ANN001
+    def on_deleted(self, event):
         self._enqueue(event.src_path)
 
     def _enqueue(self, path_str: str) -> None:
         now = time.monotonic()
+        p = Path(path_str)
         # Debounce: ignore events within 2 seconds for same file
         if path_str in self._debounce and now - self._debounce[path_str] < 2.0:
+            logger.debug("Watch: debounced %s", p.name)
             return
         self._debounce[path_str] = now
         # Check exclude patterns
-        p = Path(path_str)
         for pattern in self._exclude:
             bare = pattern.replace("**/", "").replace("*/", "")
             if bare in p.parts:
+                logger.debug("Watch: excluded %s (matched %s)", p.name, pattern)
                 return
         self._loop.call_soon_threadsafe(self._queue.put_nowait, path_str)
+        logger.info("Watch: enqueued %s", p.name)
 
 
 # ---------------------------------------------------------------------------
@@ -256,12 +259,21 @@ class TrickleIndexer:
         if shutdown.is_set():
             return
 
+        # Start the inotify observer BEFORE backlog so that any files written
+        # during backlog scan are queued via inotify and picked up by the drain
+        # loop in watch mode.  Without this, files created in the window
+        # between discovery and observer start are missed by both, and only
+        # caught by the next polling fallback (up to poll_interval_seconds
+        # later).  Re-discovery is harmless: content-checksum dedup ensures
+        # already-indexed files are skipped on the second pass.
+        self._start_observer()
+
         # Phase 1: Process existing backlog
         await self._process_backlog(shutdown)
         if shutdown.is_set():
             return
 
-        # Phase 2: Watch mode
+        # Phase 2: Watch mode (observer already running)
         await self._watch_mode(shutdown)
 
     # ------------------------------------------------------------------
@@ -411,7 +423,7 @@ class TrickleIndexer:
             succeeded += 1
             self._state.indexed_count = succeeded
             self._state.total_chunks_done += n_chunks or 0
-            self._state.last_indexed_at = datetime.now(timezone.utc)
+            self._state.last_indexed_at = datetime.now(UTC)
             self._update_eta(i + 1, len(unindexed))
 
             # Progress log every file
@@ -446,18 +458,25 @@ class TrickleIndexer:
     # ------------------------------------------------------------------
 
     async def _watch_mode(self, shutdown: asyncio.Event) -> None:
-        """Watch configured paths for new files via inotify + polling fallback."""
+        """Watch configured paths for new files via inotify + polling fallback.
+
+        The watchdog Observer is started by _run_index_loop BEFORE backlog so
+        inotify events accumulate in _file_queue while backlog runs.  The drain
+        loop below picks them up on the first iteration here.
+        """
         self._state.status = TrickleStatus.WATCHING
         logger.info(
             "Entering watch mode (poll interval: %ds)",
             int(self._settings.poll_interval_seconds),
         )
 
-        self._start_observer()
-
         while not shutdown.is_set():
             # Process any files queued by watchdog events
             while not self._file_queue.empty():
+                # Initialise before try so the outer except can reference it
+                # safely even if get_nowait() raises (shouldn't, given the
+                # empty() guard, but pyright cannot infer that invariant).
+                path_str: str = "<unknown>"
                 try:
                     path_str = self._file_queue.get_nowait()
                     file_path = Path(path_str)
@@ -486,7 +505,7 @@ class TrickleIndexer:
                         path=file_path,
                         title=file_path.stem,
                         last_modified=datetime.fromtimestamp(
-                            stat.st_mtime, tz=timezone.utc
+                            stat.st_mtime, tz=UTC
                         ),
                         size_bytes=stat.st_size,
                     )
@@ -494,15 +513,28 @@ class TrickleIndexer:
                     try:
                         await asyncio.to_thread(self._process_one_file, fi)
                         self._state.indexed_count += 1
-                        self._state.last_indexed_at = datetime.now(timezone.utc)
+                        self._state.last_indexed_at = datetime.now(UTC)
                         logger.info("Watch: indexed %s", file_path.name)
                     finally:
                         self._state.current_file = None
                 except Exception:
                     logger.exception("Watch: failed to index %s", path_str)
 
-            # Deferred VACUUM + graph orphan sweep: run when idle, after deletions
+            # Deferred maintenance: run when idle, after deletions.
+            # Order matters — DELETE all orphans BEFORE VACUUM so the freed
+            # pages are reclaimed in a single pass:
+            #   1. Graph orphan sweep   (drops isolated graph nodes)
+            #   2. extraction_cache prune (drops cache rows for removed chunks)
+            #   3. VACUUM                (compacts DB file)
             if self._needs_vacuum:
+                try:
+                    await asyncio.to_thread(self._pipeline.sweep_graph_orphans)
+                except Exception:
+                    logger.exception("Graph orphan sweep failed")
+                try:
+                    await asyncio.to_thread(self._pipeline.prune_extraction_cache)
+                except Exception:
+                    logger.exception("Extraction cache prune failed")
                 try:
                     logger.info("Running VACUUM (deferred)")
                     await asyncio.to_thread(
@@ -512,25 +544,41 @@ class TrickleIndexer:
                     logger.info("VACUUM complete")
                 except Exception:
                     logger.exception("VACUUM failed — will retry next idle")
-                try:
-                    await asyncio.to_thread(self._pipeline.sweep_graph_orphans)
-                except Exception:
-                    logger.exception("Graph orphan sweep failed")
 
-            # Wait for shutdown or poll interval timeout
+            # Wait for: shutdown OR queue item OR poll interval timeout.
+            # Earlier versions awaited only shutdown.wait() with a long timeout,
+            # which left inotify-queued files sitting in _file_queue for up to
+            # poll_interval_seconds before the drain loop ran again.  Watching
+            # the queue here lets watchdog events wake us within milliseconds.
+            shutdown_task = asyncio.create_task(shutdown.wait())
+            queue_task = asyncio.create_task(self._file_queue.get())
             try:
-                await asyncio.wait_for(
-                    shutdown.wait(),
+                done, _ = await asyncio.wait(
+                    {shutdown_task, queue_task},
                     timeout=self._settings.poll_interval_seconds,
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
-                return  # shutdown signaled
-            except asyncio.TimeoutError:
-                # Polling fallback: re-scan for files inotify may have missed
-                logger.debug("Polling fallback: re-scanning paths")
-                try:
-                    await self._process_backlog(shutdown)
-                except Exception:
-                    logger.exception("Poll-cycle backlog scan failed — will retry next interval")
+            finally:
+                for t in (shutdown_task, queue_task):
+                    if not t.done():
+                        t.cancel()
+
+            if shutdown_task in done:
+                return
+            if queue_task in done:
+                # Re-enqueue so the drain loop at the top of the next iteration
+                # processes it (keeps a single drain code path).
+                self._file_queue.put_nowait(queue_task.result())
+                continue
+
+            # Polling fallback: timeout fired with no queue activity.
+            # _process_backlog logs at INFO when it finds files; only this
+            # entry-point line stays at DEBUG to avoid polluting steady-state.
+            logger.debug("Polling fallback: re-scanning paths")
+            try:
+                await self._process_backlog(shutdown)
+            except Exception:
+                logger.exception("Poll-cycle backlog scan failed — will retry next interval")
 
     # ------------------------------------------------------------------
     # Per-file processing (synchronous, runs in thread pool)
