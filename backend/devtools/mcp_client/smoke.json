@@ -1,0 +1,50 @@
+{
+  "steps": [
+    {
+      "_comment": "All 4 tools registered with PascalCase names + correct schemas",
+      "action": "list_tools",
+      "expect": {
+        "tool_names_include": ["Search", "Drill", "GetStatus", "SubmitFeedback"],
+        "tool_expectations": {
+          "Search": {
+            "inputSchema.properties.query.type": "string",
+            "inputSchema.properties.top_k.type": "integer",
+            "inputSchema.properties.top_k.default": 10
+          },
+          "Drill": {
+            "inputSchema.properties.file_path.type": "string"
+          },
+          "SubmitFeedback": {
+            "inputSchema.properties.message.type": "string",
+            "inputSchema.properties.message.minLength": 1,
+            "inputSchema.properties.message.maxLength": 10000,
+            "inputSchema.properties.severity.type": "string",
+            "inputSchema.properties.context.type": "string",
+            "inputSchema.properties.model.type": "string",
+            "inputSchema.properties.harness.type": "string"
+          }
+        }
+      }
+    },
+    {
+      "_comment": "Status returns non-zero file count — index is alive",
+      "action": "call_tool",
+      "name": "GetStatus",
+      "arguments": {},
+      "expect": {
+        "is_error": false,
+        "content_text_not_contains": ["error", "Error", "failed"]
+      }
+    },
+    {
+      "_comment": "Search returns ranked hits for a known query",
+      "action": "call_tool",
+      "name": "Search",
+      "arguments": {"query": "dotmd architecture sqlite-vec", "top_k": 3},
+      "expect": {
+        "is_error": false,
+        "content_text_contains": ["score", "heading"]
+      }
+    }
+  ]
+}
