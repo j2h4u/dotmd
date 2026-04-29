@@ -374,6 +374,17 @@ FastMCP поддерживает `Context.session.send_tool_list_changed()`. В 
 **Plans:**
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
+### Phase 999.17: Fix shared-chunk e_fused — per-file fused vector for multi-file chunks (BACKLOG)
+
+**Goal:** Устранить edge case: один e_fused на chunk_id при shared chunks. Текущее состояние — фьюзинг использует e_meta первого файла навсегда.
+**Context:** Аудит 2026-04-29: 299/18515 (1.61%) чанков shared. Большинство — один файл в двух местах (skills cache + source repo) или voicenotes одной сессии → e_meta практически идентична, семантическое воздействие минимально. Но архитектурно некорректно.
+**Fix cost when needed:** Без TEI-запросов — переиспользовать хранящиеся e_text + e_meta_правильного_файла, пересчитать e_fused математически только для ~300 чанков. Требует изменения схемы vec_meta: UNIQUE(chunk_id) → UNIQUE(chunk_id, file_path) для shared chunks.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
 ---
 
 ### Future ideas:
