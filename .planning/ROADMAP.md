@@ -417,6 +417,33 @@ Plans:
 
 ---
 
+### Phase 999.20: Заменить English-only reranker на мультиязычный (BACKLOG)
+
+**Goal:** Текущий cross-encoder `cross-encoder/ms-marco-MiniLM-L-6-v2` обучен только на английском (MS MARCO). При русскоязычных запросах выдаёт бессмысленные скоры, что убивает качество семантического поиска — выживают только точные FTS5-совпадения. Заменить на мультиязычную модель.
+
+**Контекст:** Blend в пайплайне — `0.4 * norm_fused + 0.6 * norm_re`. При garbage-скорах cross-encoder для русского текста 60% веса на шум = семантика теряется.
+
+**Кандидаты (апрель 2026):**
+
+| Модель | Параметры | Обновление | CPU-скорость | Примечание |
+|--------|----------|------------|-------------|-----------|
+| `cross-encoder/ms-marco-MiniLM-L-6-v2` (**текущий**) | ~66M | 2021 | Быстро | English-only, не работает на русском |
+| `Alibaba-NLP/gte-multilingual-reranker-base` | 306M | Март 2024 | Быстрее всех среди мультиязычных | TEI-native (нужен отдельный TEI-инстанс), Apache 2.0 |
+| `BAAI/bge-reranker-v2-m3` | 568M | Фев 2024 | ~2x медленнее gte | 9.1M скачиваний/мес, самый проверенный, работает с `CrossEncoder` |
+| `nreimers/mmarco-mMiniLMv2-L12-H384-v1` | 117M | 2022 | Быстро | Trained on multilingual mMARCO (incl. Russian), не обновлялся |
+
+**Архитектурный выбор:**
+- `bge-reranker-v2-m3` — drop-in замена (работает с `sentence_transformers.CrossEncoder` без изменений архитектуры)
+- `gte-multilingual-reranker-base` — TEI-native, требует отдельного TEI-инстанса для reranking
+
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+---
+
 ### Phase 999.19: Обновить transformers с 4.57.6 до 5.x (BACKLOG)
 
 **Goal:** Перевести в отдельной ветке на transformers 5.x (текущая 5.7.0), проверить совместимость с GLiNER и sentence-transformers, убедиться что CPU-only wheels работают. Потенциально устраняет warning про sentencepiece fast tokenizer.
