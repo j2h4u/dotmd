@@ -91,7 +91,7 @@ Search pipeline: query → expand → 3 engines parallel (semantic + FTS5 + grap
 Production index lives on docker volume `dotmd_dotmd-index` (mapped to `/dotmd-index/` in container):
 - `index.db` — unified database: chunk metadata, FTS5 tables, sqlite-vec embeddings, fingerprints, M2M file_paths
 
-Graph stored externally in FalkorDB (shared `graphiti_default` Docker network).
+Graph stored externally in FalkorDB (shared `falkordb` Docker network).
 
 ## Configuration
 
@@ -124,7 +124,7 @@ exec dotmd mcp --transport streamable-http --host 0.0.0.0 --port 8080
 
 External dependencies (separate containers):
 - TEI (`embeddings` service, port 8088) — embedding server
-- FalkorDB (`graphiti-falkordb-1`) — knowledge graph
+- FalkorDB (`falkordb`) — knowledge graph (standalone container)
 
 Source code is bind-mounted into the container — code changes take effect on container restart, no image rebuild needed. Rebuild only when `pyproject.toml` or `start.sh` changes.
 
