@@ -111,13 +111,13 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 | 14. Frontmatter-Driven Indexing | v1.4 | Complete | 2026-04-02 |
 | 15. Content-addressed caching | 2/3 | In Progress|  |
 | 16. Content-dedup schema | 6/6 | Complete   | 2026-04-25 |
-| 17. MCP OAuth 2.0 — Claude Desktop connector | 2/3 | In Progress|  |
+| 17. MCP OAuth 2.0 — Claude Desktop connector | 3/3 | Complete   | 2026-04-30 |
 
 ### Phase 17: MCP OAuth 2.0 — Claude Desktop remote connector support
 
 **Goal:** Implement OAuth 2.0 Authorization Server inside the existing FastMCP server so Claude Desktop can connect via the remote MCP connector flow (UI-based, not config-file). Auto-approve for trusted Tailnet users (no user interaction), persistent token storage on docker volume, DOTMD_BASE_URL env var.
 **Requirements:** OAUTH-ENV-01, OAUTH-ENV-02, OAUTH-PROVIDER-01, OAUTH-PROVIDER-02, OAUTH-PROVIDER-03, OAUTH-WIRE-01, OAUTH-E2E-01
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 **Wave 1**
@@ -127,7 +127,7 @@ Plans:
 - [x] 17-02-PLAN.md — Implement DotMDOAuthProvider (auth.py, all 9 methods, JSON persistence)
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 17-03-PLAN.md — Wire auth into mcp_server.py, end-to-end OAuth flow verification
+- [x] 17-03-PLAN.md — Wire auth into mcp_server.py, end-to-end OAuth flow verification
 
 ---
 
