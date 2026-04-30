@@ -216,6 +216,7 @@ def create_app() -> Starlette:
     return Starlette(
         debug=mcp.settings.debug,
         routes=mcp_starlette.routes,
+        middleware=mcp_starlette.user_middleware,
         lifespan=_server_lifespan,
     )
 
