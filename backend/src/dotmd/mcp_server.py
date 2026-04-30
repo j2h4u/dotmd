@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import re
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -16,8 +17,10 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field, model_serializer
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 from dotmd.api.service import DotMDService
 from dotmd.auth import DotMDOAuthProvider
@@ -131,6 +134,29 @@ def _auth_settings(base_url: str) -> AuthSettings:
     )
 
 
+class _AccessLogMiddleware(BaseHTTPMiddleware):
+    """Log MCP HTTP requests after upstream proxies have rewritten paths."""
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        t0 = time.perf_counter()
+        response = await call_next(request)
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        client = request.client.host if request.client else "-"
+        path = request.url.path
+        if request.url.query:
+            path = f"{path}?{request.url.query}"
+        log = logger.error if response.status_code >= 500 else logger.info
+        log(
+            "HTTP %s %s %d %.0fms client=%s",
+            request.method,
+            path,
+            response.status_code,
+            elapsed_ms,
+            client,
+        )
+        return response
+
+
 mcp = FastMCP(
     "dotmd",
     instructions=_INSTRUCTIONS,
@@ -236,7 +262,7 @@ def create_app() -> Starlette:
     return Starlette(
         debug=mcp.settings.debug,
         routes=mcp_starlette.routes,
-        middleware=mcp_starlette.user_middleware,
+        middleware=[*mcp_starlette.user_middleware, Middleware(_AccessLogMiddleware)],
         lifespan=_server_lifespan,
     )
 
