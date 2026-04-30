@@ -16,7 +16,7 @@ OAuth, DNS, and Funnel behavior during future incidents.
 
 ## Known-Good Shape
 
-Use one public Tailscale Funnel root proxy:
+For one MCP server on the host node, use one public Tailscale Funnel root proxy:
 
 ```text
 https://senbonzakura.tailf87223.ts.net/
@@ -44,6 +44,61 @@ https://senbonzakura.tailf87223.ts.net/dotmd
 Path-prefixed issuers require extra `/.well-known/.../dotmd/...` routes. Those
 worked inside the tailnet but failed intermittently through public Funnel with
 `502`, so the reliable production shape is a single root proxy.
+
+For multiple MCP servers, prefer one public Tailscale hostname per MCP server:
+
+```text
+https://dotmd.tailf87223.ts.net/mcp
+https://calendar.tailf87223.ts.net/mcp
+https://other-mcp.tailf87223.ts.net/mcp
+```
+
+Each hostname should still proxy `/` to exactly one MCP server, and each MCP
+server should use its own root-based OAuth issuer:
+
+```env
+DOTMD_BASE_URL=https://dotmd.tailf87223.ts.net
+```
+
+Do not put multiple hosted Claude MCP servers under one hostname with path
+prefixes. It complicates OAuth discovery and was the source of the earlier
+`/.well-known/.../dotmd/...` Funnel failures.
+
+### Important Tailscale Services Caveat
+
+Tailscale has a feature named "Services" (`svc:<name>`), but it is not the same
+thing as a public Funnel hostname for hosted Claude connectors.
+
+Observed on this host:
+
+```bash
+tailscale serve --service dotmd --bg --yes http://127.0.0.1:18082
+# invalid service name: "dotmd"
+
+tailscale serve --service svc:dotmd --bg --yes http://127.0.0.1:18082
+# service hosts must be tagged nodes
+```
+
+Official Tailscale Services are tailnet resources advertised by tagged service
+hosts and governed by ACL grants. They are useful for internal tailnet service
+discovery, but the current `tailscale funnel` CLI does not expose a `--service`
+flag. Hosted Claude connectors need public internet reachability, so the
+practical multi-MCP public pattern is one Tailscale node hostname per MCP
+server, usually implemented with a Tailscale sidecar/container per MCP service.
+
+Sidecar pattern:
+
+```text
+dotmd container        listens on http://dotmd:8080
+tailscale-dotmd node   hostname dotmd, Funnel / -> http://dotmd:8080
+
+calendar container     listens on http://calendar:8080
+tailscale-calendar     hostname calendar, Funnel / -> http://calendar:8080
+```
+
+This requires a Tailscale auth key or device-auth flow for each sidecar node.
+Use tagged, ephemeral auth keys if possible, and restrict what those tagged
+nodes can access.
 
 ## Security Model
 
@@ -242,6 +297,86 @@ Do not configure separate handlers like:
 ```
 
 Those routes are the failure-prone shape this playbook replaces.
+
+## Multi-MCP Hostname Pattern
+
+Use this pattern when exposing several MCP servers from neighboring containers.
+
+Target URL shape:
+
+```text
+https://<mcp-service>.tailf87223.ts.net/mcp
+```
+
+Recommended topology:
+
+```text
+Docker network: mcp
+
+dotmd service
+  container: dotmd
+  listens:   http://dotmd:8080
+
+dotmd Tailscale sidecar
+  container: tailscale-dotmd
+  hostname:  dotmd
+  funnel:    / -> http://dotmd:8080
+```
+
+Repeat the pattern per MCP server. Do not share OAuth state between MCP servers.
+Each server needs its own `DOTMD_BASE_URL`/issuer and its own token store.
+
+Example sidecar command shape:
+
+```bash
+docker run -d \
+  --name tailscale-dotmd \
+  --hostname dotmd \
+  --network mcp \
+  -e TS_AUTHKEY="$TS_AUTHKEY_DOTMD" \
+  -e TS_STATE_DIR=/var/lib/tailscale \
+  -v tailscale-dotmd-state:/var/lib/tailscale \
+  tailscale/tailscale:stable
+```
+
+Then, inside the sidecar, configure Funnel:
+
+```bash
+docker exec tailscale-dotmd tailscale funnel --bg --yes http://dotmd:8080
+docker exec tailscale-dotmd tailscale funnel status
+```
+
+Set the MCP server env to the sidecar hostname:
+
+```env
+DOTMD_BASE_URL=https://dotmd.tailf87223.ts.net
+```
+
+Connector URL:
+
+```text
+https://dotmd.tailf87223.ts.net/mcp
+```
+
+Security setup sequence:
+
+1. Temporarily enable registration:
+
+```env
+DOTMD_OAUTH_DYNAMIC_REGISTRATION=true
+```
+
+2. Connect Claude once.
+3. Disable registration:
+
+```env
+DOTMD_OAUTH_DYNAMIC_REGISTRATION=false
+```
+
+4. Recreate the MCP container.
+
+Do not reuse one sidecar node for multiple path-prefixed MCPs unless the client
+is tailnet-local and does not need hosted OAuth discovery.
 
 ## Smoke Tests
 
