@@ -361,7 +361,6 @@ def _oauth_metadata_response() -> JSONResponse:
             "grant_types_supported": ["authorization_code", "refresh_token"],
             "token_endpoint_auth_methods_supported": ["none", "client_secret_post", "client_secret_basic"],
             "code_challenge_methods_supported": ["S256"],
-            "authorization_response_iss_parameter_supported": True,
         },
         headers={"Cache-Control": "public, max-age=3600"},
     )
