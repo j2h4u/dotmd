@@ -20,18 +20,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 17 — mcp-oauth-2-0-claude-desktop-remote-connector-support
+**Current focus:** No active phase. Ready for next backlog promotion or milestone planning.
 
 ## Current Milestone
 
-**v1.4 — Search Quality Evaluations**
+**v1.4 — Search Quality & Architecture**
 
-Phase: 999.13 of 12 (вернуть stateful mcp режим + notifications/tools/list_changed (backlog))
-Plan: Not started
-Status: Executing Phase 17
+Phase: none active
+Plan: none active
+Status: Complete for shipped local phase accounting
 Last activity: 2026-04-30
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -74,11 +74,12 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None for v1.4.
+None for the shipped v1.4 phase set. Backlog items remain in ROADMAP.md and
+should be promoted explicitly before execution.
 
 ### Blockers/Concerns
 
-None yet.
+None for current local GSD state.
 
 ### Quick Tasks Completed
 
@@ -88,4 +89,4 @@ None yet.
 | 260425-rel | Убрать serve из start.sh — trickle lifespan в mcp_server.py, /health на 8080 | 2026-04-25 | 98c6b99 | [260425-rel-serve-start-sh-trickle-lifespan-mcp-serv](./quick/260425-rel-serve-start-sh-trickle-lifespan-mcp-serv/) |
 
 ---
-*Last updated: 2026-04-02*
+*Last updated: 2026-04-30*
