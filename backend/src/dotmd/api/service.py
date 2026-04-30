@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any, TypedDict
 
 from dotmd.core.config import Settings
 from dotmd.core.models import IndexStats, SearchMode, SearchResult
@@ -21,6 +22,13 @@ from dotmd.search.reranker import Reranker
 from dotmd.search.semantic import SemanticSearchEngine
 
 logger = logging.getLogger(__name__)
+
+
+class ReadPayload(TypedDict):
+    file_path: str
+    total_chunks: int
+    frontmatter: dict[str, Any]
+    chunks: list[dict[str, Any]]  # each: {index: int, heading_hierarchy: list[str], text: str}
 
 
 class DotMDService:
@@ -400,11 +408,12 @@ class DotMDService:
 
         return results
 
-    def drill(self, file_path: str) -> dict:
-        """Return metadata for a file path from search results.
+    def read(self, file_path: str, start: int = 0, end: int | None = None) -> ReadPayload:
+        """Return frontmatter and optionally a chunk range for a known file.
 
-        Reads frontmatter from disk, chunk count from the active strategy's
-        M2M table, and entity names from the graph.
+        When end is None, returns only frontmatter and total_chunks (metadata
+        mode — cheap, useful for planning a subsequent ranged call).
+        When end is provided, also returns chunks[start:end], capped at 50.
         """
         from dotmd.ingestion.reader import parse_frontmatter, read_file
 
@@ -414,16 +423,22 @@ class DotMDService:
         except Exception:
             frontmatter = {}
 
-        chunk_ids = self._pipeline.metadata_store.get_chunk_ids_by_file(
+        total_chunks = self._pipeline.metadata_store.get_chunk_count_for_file(
             self._settings.chunk_strategy, file_path
         )
-        entities = self._pipeline.graph_store.get_entities_by_file(file_path)
+
+        chunks: list[dict] = []
+        if end is not None:
+            end = min(end, start + 50)
+            chunks = self._pipeline.metadata_store.get_chunks_for_file_range(
+                self._settings.chunk_strategy, file_path, start, end
+            )
 
         return {
             "file_path": file_path,
+            "total_chunks": total_chunks,
             "frontmatter": frontmatter,
-            "chunk_count": len(chunk_ids),
-            "entities": entities,
+            "chunks": chunks,
         }
 
     def status(self, live_diff: bool = True) -> IndexStats:

@@ -384,6 +384,42 @@ class SQLiteMetadataStore:
         ).fetchall()
         return [r[0] for r in rows]
 
+    def get_chunk_count_for_file(self, strategy: str, file_path: str) -> int:
+        """Return total number of chunks associated with file_path."""
+        m2m_table = f"chunk_file_paths_{strategy}"
+        row = self._conn.execute(
+            f"SELECT COUNT(*) FROM {m2m_table} WHERE file_path = ?",
+            (file_path,),
+        ).fetchone()
+        return row[0] if row else 0
+
+    def get_chunks_for_file_range(
+        self,
+        strategy: str,
+        file_path: str,
+        start: int,
+        end: int,
+    ) -> list[dict]:
+        """Return chunks for file_path in chunk_index order, slice [start, end)."""
+        m2m_table = f"chunk_file_paths_{strategy}"
+        chunk_table = f"chunks_{strategy}"
+        rows = self._conn.execute(
+            f"SELECT m.chunk_index, c.heading_hierarchy, c.text "
+            f"FROM {m2m_table} m "
+            f"JOIN {chunk_table} c ON c.chunk_id = m.chunk_id "
+            f"WHERE m.file_path = ? AND m.chunk_index >= ? AND m.chunk_index < ? "
+            f"ORDER BY m.chunk_index",
+            (file_path, start, end),
+        ).fetchall()
+        return [
+            {
+                "index": row[0],
+                "heading_hierarchy": json.loads(row[1]),
+                "text": row[2],
+            }
+            for row in rows
+        ]
+
     def delete_m2m_for_file(
         self,
         strategy: str,
