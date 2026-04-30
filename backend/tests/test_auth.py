@@ -169,12 +169,14 @@ def test_rejects_dynamic_registration_by_default(tmp_path: Path, monkeypatch) ->
 
 def test_authorize_stores_code_and_returns_redirect(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
+        monkeypatch.setenv("DOTMD_BASE_URL", "https://dotmd.tailf87223.ts.net")
         provider = _provider(tmp_path, monkeypatch)
         redirect = await provider.authorize(_client(), _params())
         query = _query(redirect)
 
         assert "code" in query
         assert query["state"] == ["state-1"]
+        assert query["iss"] == ["https://dotmd.tailf87223.ts.net/"]
         assert query["code"][0] in provider._state["auth_codes"]
 
     asyncio.run(run())

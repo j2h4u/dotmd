@@ -59,6 +59,11 @@ def _dynamic_registration_enabled() -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _issuer_url() -> str | None:
+    raw = os.environ.get("DOTMD_BASE_URL")
+    return f"{raw.strip().rstrip('/')}/" if raw and raw.strip() else None
+
+
 def _normalize_uri(uri: object) -> str:
     return str(uri).rstrip("/")
 
@@ -167,7 +172,7 @@ class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
             self._state["auth_codes"][code] = auth_code.model_dump(mode="json")
             await self._flush()
         logger.info("OAuth: authorization code issued client_id=%s", client_id)
-        return construct_redirect_uri(str(params.redirect_uri), code=code, state=params.state)
+        return construct_redirect_uri(str(params.redirect_uri), code=code, state=params.state, iss=_issuer_url())
 
     async def load_authorization_code(
         self,
