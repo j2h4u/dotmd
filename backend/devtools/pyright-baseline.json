@@ -13,7 +13,7 @@
   "tests/api/test_search_parity.py": 1,
   "tests/api/test_service_search.py": 1,
   "tests/e2e/conftest.py": 3,
-  "tests/e2e/test_mcp_smoke.py": 15,
+  "tests/e2e/test_mcp_smoke.py": 1,
   "tests/ingestion/test_bulk_fusion_pairing.py": 2,
   "tests/ingestion/test_chunker.py": 1,
   "tests/ingestion/test_metadata_only_reindex.py": 1,

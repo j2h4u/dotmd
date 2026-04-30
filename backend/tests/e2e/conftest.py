@@ -20,6 +20,7 @@ import secrets
 import threading
 from collections.abc import Callable
 from contextlib import AsyncExitStack
+from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
@@ -47,7 +48,7 @@ def _tool_result_text(data: dict) -> str:
     return ""
 
 
-def _tool_result_structured(data: dict) -> object:
+def _tool_result_structured(data: dict) -> Any:
     """Return structuredContent.result when available, else parse first text item.
 
     FastMCP emits structuredContent for typed return values (list[dict], dict).

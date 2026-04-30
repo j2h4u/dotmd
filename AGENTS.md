@@ -60,7 +60,7 @@ dotMD/
 │       ├── storage/      # sqlite-vec (vectors), FalkorDB/LadybugDB (graph), SQLite (metadata + FTS5)
 │       ├── search/       # semantic, FTS5, graph_direct, fusion, reranker, query
 │       ├── api/          # DotMDService facade + FastAPI server
-│       ├── mcp_server.py # FastMCP server (search + status tools)
+│       ├── mcp_server.py # FastMCP server (search, read, feedback tools)
 │       └── cli.py        # Click CLI (thin wrapper over api/service.py)
 ├── .mcp.json             # Claude Code MCP config (stdio via docker exec)
 ├── data/                 # Sample markdown files for testing
@@ -140,7 +140,20 @@ Each session spawns a fresh `dotmd mcp` subprocess inside the running container.
 
 **HTTP (streamable-http)** — for other containers on the Docker network. Endpoint: `http://dotmd:8080/mcp`. Connect by joining the `dotmd_default` network.
 
-Tools exposed: `search(query, top_k, mode, rerank)` and `status()`.
+Tools exposed: `search(query, top_k)`, `read(file_path, start, end)`, `feedback(...)`.
+
+## Agent Feedback
+
+Agents submit feedback via the `feedback` MCP tool. To review:
+
+```bash
+docker exec dotmd dotmd feedback list        # open + in_progress
+docker exec dotmd dotmd feedback list --all  # include done/dismissed
+docker exec dotmd dotmd feedback status <id> done --reason "..."
+docker exec dotmd dotmd feedback delete <id>
+```
+
+Feedback lives in `/dotmd-index/feedback.db` (inside the docker volume). Never query it directly — use the CLI.
 
 ## When Modifying Code
 

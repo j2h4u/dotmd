@@ -14,7 +14,7 @@ from typing import Annotated, Any, Literal
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -22,7 +22,6 @@ from starlette.responses import JSONResponse
 from dotmd.api.service import DotMDService
 from dotmd.auth import DotMDOAuthProvider
 from dotmd.core.config import Settings
-from dotmd.core.models import IndexStats
 from dotmd.feedback import FeedbackStore
 
 logger = logging.getLogger(__name__)
@@ -65,16 +64,36 @@ def _collapse_null(schema: dict) -> None:
 
 class SearchHit(BaseModel):
     file_paths: list[str]
-    heading: str
+    heading: str | None = None
     snippet: str
     score: float
 
+    @model_serializer
+    def _serialize(self) -> dict:
+        d: dict = {"file_paths": self.file_paths, "snippet": self.snippet, "score": self.score}
+        if self.heading:
+            d["heading"] = self.heading
+        return d
 
-class DrillResult(BaseModel):
+
+class ReadChunk(BaseModel):
+    index: int
+    heading: str | None = None
+    text: str
+
+    @model_serializer
+    def _serialize(self) -> dict:
+        d: dict = {"index": self.index, "text": self.text}
+        if self.heading:
+            d["heading"] = self.heading
+        return d
+
+
+class ReadResult(BaseModel):
     file_path: str
+    total_chunks: int
     frontmatter: dict[str, Any]
-    chunk_count: int
-    entities: list[str]
+    chunks: list[ReadChunk] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -85,10 +104,10 @@ _INSTRUCTIONS = """\
 Search a personal markdown knowledgebase — notes, meeting transcripts, voice notes, documentation, project files.
 
 Key workflows:
-SEARCH THEN DRILL: Use Search to locate relevant chunks. Use Drill(file_path=...) on any result to read full frontmatter and extracted entities before drawing conclusions from a snippet alone.
-CHECK BEFORE CONCLUDING: Before telling the user a topic is not in the knowledgebase, call GetStatus to verify indexing is complete — the trickle indexer may still be running.
+SEARCH THEN READ: Use search to locate relevant chunks by topic. Once you know which file matters, use read to consume its content by chunk range — don't keep spinning search queries against a file you've already identified.
+READ IN STEPS: Call read without an end parameter first to get frontmatter and total_chunks, then request ranges. Long transcripts won't fit in one call — plan your ranges.
 
-Use SubmitFeedback immediately when a tool response is wrong, surprising, or missing a useful capability — don't wait until end of session.\
+Use feedback immediately when a tool response is wrong, surprising, or missing a useful capability — don't wait until end of session.\
 """
 
 _base_url: str = os.environ.get("DOTMD_BASE_URL", "").rstrip("/")
@@ -110,6 +129,7 @@ def _auth_settings(base_url: str) -> AuthSettings:
             ),
         }
     )
+
 
 mcp = FastMCP(
     "dotmd",
@@ -227,7 +247,7 @@ def create_app() -> Starlette:
 
 
 @mcp.tool(
-    name="Search",
+    name="search",
     annotations=ToolAnnotations(
         title="Search Knowledgebase",
         readOnlyHint=True,
@@ -243,14 +263,15 @@ async def search(
     """Search the indexed markdown knowledgebase and return ranked chunks.
 
     Use proactively whenever the user asks about notes, meetings, decisions, people,
-    projects, or anything that may have been written down. Prefer Search over
+    projects, or anything that may have been written down. Prefer search over
     relying on your own knowledge for facts about this person's work or life.
 
-    Each result contains: file_paths (source files sharing this chunk), heading
-    context, a cleaned text snippet, and a relevance score. Use Drill on any
-    result to get full frontmatter and entity context before drawing conclusions.
+    Each result contains: file_paths (source files sharing this chunk), a
+    cleaned text snippet, a relevance score, and an optional heading (present
+    only for structured docs with markdown headings).
 
-    Do not call Search for general knowledge questions that don't involve the
+    Once search identifies a relevant file, switch to read for deeper access.
+    Do not call search for general knowledge questions that don't involve the
     user's personal notes or project files.
     """
     if not query.strip():
@@ -261,81 +282,70 @@ async def search(
         return [_format_result(r) for r in results]
     except Exception as exc:
         logger.error("search failed: query=%r", query[:100], exc_info=True)
-        raise RuntimeError(
-            f"Search failed: {exc}. "
-            "Action: call GetStatus to check if the index is healthy and trickle indexer is running."
-        ) from exc
+        raise RuntimeError(f"Search failed: {exc}.") from exc
 
 
 @mcp.tool(
-    name="Drill",
+    name="read",
     annotations=ToolAnnotations(
-        title="Drill Into Document",
+        title="Read Document",
         readOnlyHint=True,
         destructiveHint=False,
         idempotentHint=True,
         openWorldHint=False,
     ),
 )
-async def drill(
-    file_path: Annotated[
-        str,
-        Field(description="Absolute file path from a search() result. Pass file_paths[0] from any search hit."),
-    ],
-) -> DrillResult:
-    """Read metadata for a file returned by search().
+async def read_document(
+    file_path: Annotated[str, Field(description="Absolute file path from a search result.")],
+    start: Annotated[int, Field(description="First chunk index to return (0-based).", ge=0)] = 0,
+    end: Annotated[
+        int | None,
+        Field(
+            description="Exclusive end chunk index. Omit to return only frontmatter and total_chunks without chunk text. Capped at start+50.",
+            ge=1,
+            json_schema_extra=_collapse_null,
+        ),
+    ] = None,
+) -> ReadResult:
+    """Read chunks from a known file by index range.
 
-    Use after Search to get full context before drawing conclusions from a snippet.
-    Returns frontmatter fields (title, date, tags, speaker, etc.), number of indexed
-    chunks, and entity names extracted from the file's knowledge graph nodes.
+    Use after search has identified a relevant file. Always returns frontmatter
+    and total_chunks. When end is provided, also returns chunk text for indices
+    [start, end) — capped at 50 chunks per call.
 
-    Only pass file_paths values from Search results — passing arbitrary paths
-    will return empty results if the file is not indexed.
+    Recommended workflow:
+    1. Call read(file_path) without end to get frontmatter and total_chunks.
+    2. Request ranges as needed: read(file_path, 0, 20), read(file_path, 20, 40), etc.
+
+    Only pass file_paths values from search results.
     """
     try:
         service = _get_service()
-        result = await asyncio.to_thread(service.drill, file_path)
-        return DrillResult(**result)
+        result = await asyncio.to_thread(service.read, file_path, start, end)
+        chunks = [
+            ReadChunk(
+                index=c["index"],
+                heading=" > ".join(c["heading_hierarchy"]) if c["heading_hierarchy"] else None,
+                text=c["text"],
+            )
+            for c in result["chunks"]
+        ]
+        return ReadResult(
+            file_path=result["file_path"],
+            total_chunks=result["total_chunks"],
+            frontmatter=result["frontmatter"],
+            chunks=chunks,
+        )
     except Exception as exc:
-        logger.error("drill failed: file_path=%r", file_path, exc_info=True)
+        logger.error("read failed: file_path=%r", file_path, exc_info=True)
         raise RuntimeError(
-            f"Drill failed for {file_path!r}: {exc}. "
-            "Action: verify the file_path comes from a Search result. "
-            "Call GetStatus to check index health."
+            f"Read failed for {file_path!r}: {exc}. "
+            "Action: verify the file_path comes from a search result."
         ) from exc
 
 
 @mcp.tool(
-    name="GetStatus",
-    annotations=ToolAnnotations(
-        title="Index Status",
-        readOnlyHint=True,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=False,
-    ),
-)
-async def status() -> IndexStats:
-    """Return current index statistics and trickle indexer progress.
-
-    Use proactively before concluding that a topic or file is not in the
-    knowledgebase — the trickle indexer may still be processing files.
-    Also useful for checking total file and chunk counts, indexing speed,
-    and estimated time to completion.
-    """
-    try:
-        service = _get_service()
-        return await asyncio.to_thread(service.status, live_diff=False)
-    except Exception as exc:
-        logger.error("status failed", exc_info=True)
-        raise RuntimeError(
-            f"Status check failed: {exc}. "
-            "Action: retry in a few seconds; if the error persists, the index may be corrupted."
-        ) from exc
-
-
-@mcp.tool(
-    name="SubmitFeedback",
+    name="feedback",
     annotations=ToolAnnotations(
         title="Submit Feedback",
         readOnlyHint=False,
@@ -344,7 +354,7 @@ async def status() -> IndexStats:
         openWorldHint=False,
     ),
 )
-async def submit_feedback(
+async def feedback(
     message: Annotated[
         str,
         Field(description="What was observed; ideally include what you expected instead.", min_length=1, max_length=10000),
@@ -380,9 +390,9 @@ async def submit_feedback(
     if not message.strip():
         return "Feedback not recorded — message was empty."
     try:
-        feedback = _get_feedback()
+        fb = _get_feedback()
         await asyncio.to_thread(
-            feedback.submit,
+            fb.submit,
             message=message.strip(),
             severity=severity,
             context=context,
@@ -391,7 +401,7 @@ async def submit_feedback(
         )
         return "Feedback recorded."
     except Exception as exc:
-        logger.error("submit_feedback failed", exc_info=True)
+        logger.error("feedback failed", exc_info=True)
         raise RuntimeError(
             f"Failed to record feedback: {exc}. "
             "Action: the feedback was not saved; you may retry or note the issue in your response to the user."
@@ -407,24 +417,12 @@ _TIMESTAMP_RE = re.compile(r"\[\d{2}:\d{2}:\d{2}\]\s*")
 
 
 def _format_result(r: Any) -> SearchHit:
-    snippet = r.snippet
-
-    title = ""
-    if snippet.startswith("---"):
-        end = snippet.find("---", 3)
-        if end != -1:
-            for line in snippet[3:end].split("\n"):
-                stripped = line.strip()
-                if stripped.startswith("title:"):
-                    title = stripped[6:].strip().strip("'\"")
-                    break
-
-    clean = _FRONTMATTER_RE.sub("", snippet).strip()
+    clean = _FRONTMATTER_RE.sub("", r.snippet).strip()
     clean = _TIMESTAMP_RE.sub("", clean).strip()
 
     return SearchHit(
         file_paths=[str(p) for p in r.file_paths],
-        heading=r.heading_path or title,
+        heading=r.heading_path or None,
         snippet=clean,
         score=round(r.fused_score, 3),
     )
