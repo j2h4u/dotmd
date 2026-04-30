@@ -169,6 +169,30 @@ class Settings(BaseSettings):
     # FalkorDB connection URL (Redis protocol). Only used when graph_backend="falkordb".
     falkordb_url: str = "redis://localhost:6379"
 
+    # Base URL for OAuth 2.0 endpoints served by FastMCP.
+    # Must be the full Tailscale-facing URL including path prefix
+    # (e.g. https://senbonzakura.tailf87223.ts.net/dotmd).
+    # Note: Tailscale Serve strips the /dotmd prefix before forwarding to the
+    # container, so FastMCP mounts routes at root / (no mount_path needed).
+    # When unset, OAuth auth is disabled; stdio and internal-network transports
+    # work as before.
+    # Set DOTMD_BASE_URL in docker-compose env or /opt/docker/dotmd/.env.
+    base_url: str | None = None
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, v: str | None) -> str | None:
+        """Normalize and validate the public OAuth base URL."""
+        if v is None:
+            return None
+        v = v.rstrip("/")
+        if not v.startswith("https://") and not v.startswith("http://localhost"):
+            raise ValueError(
+                f"DOTMD_BASE_URL must use HTTPS (got {v!r}). "
+                "OAuth 2.0 requires HTTPS except for localhost."
+            )
+        return v
+
     @classmethod
     def settings_customise_sources(
         cls,
