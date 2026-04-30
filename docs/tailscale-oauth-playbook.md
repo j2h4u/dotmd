@@ -1,12 +1,12 @@
 # Tailscale OAuth MCP Playbook
 
 This playbook describes the working pattern for exposing dotMD's HTTP MCP
-server to Claude Desktop through Tailscale Funnel with OAuth 2.0.
+server to hosted MCP connector clients such as ChatGPT and Claude through
+Tailscale Funnel with OAuth 2.0.
 
-Use it when Claude Desktop is configured through the hosted connector UI, not
-through local stdio MCP config. Hosted connectors must reach the MCP URL from
-Anthropic's infrastructure, so a tailnet-only `tailscale serve` endpoint is not
-enough.
+Use it when a connector is configured through a hosted web UI, not through local
+stdio MCP config. Hosted connectors must reach the MCP URL from the provider's
+infrastructure, so a tailnet-only `tailscale serve` endpoint is not enough.
 
 ## What This Is
 
@@ -16,29 +16,29 @@ OAuth, DNS, and Funnel behavior during future incidents.
 
 ## Known-Good Shape
 
-For one MCP server on the host node, use one public Tailscale Funnel root proxy:
+For one MCP server, use one public Tailscale Funnel root proxy:
 
 ```text
-https://senbonzakura.tailf87223.ts.net/
-└── proxy http://127.0.0.1:18082
+https://dotmd.tailf87223.ts.net/
+└── proxy http://127.0.0.1:8080
 ```
 
 Use the root-based MCP URL:
 
 ```text
-https://senbonzakura.tailf87223.ts.net/mcp
+https://dotmd.tailf87223.ts.net/mcp
 ```
 
 Set the OAuth public base URL without a path:
 
 ```env
-DOTMD_BASE_URL=https://senbonzakura.tailf87223.ts.net
+DOTMD_BASE_URL=https://dotmd.tailf87223.ts.net
 ```
 
 Do not use a path-prefixed issuer such as:
 
 ```text
-https://senbonzakura.tailf87223.ts.net/dotmd
+https://dotmd.tailf87223.ts.net/dotmd
 ```
 
 Path-prefixed issuers require extra `/.well-known/.../dotmd/...` routes. Those
@@ -60,31 +60,31 @@ server should use its own root-based OAuth issuer:
 DOTMD_BASE_URL=https://dotmd.tailf87223.ts.net
 ```
 
-Do not put multiple hosted Claude MCP servers under one hostname with path
-prefixes. It complicates OAuth discovery and was the source of the earlier
+Do not put multiple hosted MCP servers under one hostname with path prefixes.
+It complicates OAuth discovery and was the source of the earlier
 `/.well-known/.../dotmd/...` Funnel failures.
 
 ### Important Tailscale Services Caveat
 
 Tailscale has a feature named "Services" (`svc:<name>`), but it is not the same
-thing as a public Funnel hostname for hosted Claude connectors.
+thing as a public Funnel hostname for hosted MCP connectors.
 
 Observed on this host:
 
 ```bash
-tailscale serve --service dotmd --bg --yes http://127.0.0.1:18082
+tailscale serve --service dotmd --bg --yes http://127.0.0.1:8080
 # invalid service name: "dotmd"
 
-tailscale serve --service svc:dotmd --bg --yes http://127.0.0.1:18082
+tailscale serve --service svc:dotmd --bg --yes http://127.0.0.1:8080
 # service hosts must be tagged nodes
 ```
 
 Official Tailscale Services are tailnet resources advertised by tagged service
 hosts and governed by ACL grants. They are useful for internal tailnet service
 discovery, but the current `tailscale funnel` CLI does not expose a `--service`
-flag. Hosted Claude connectors need public internet reachability, so the
-practical multi-MCP public pattern is one Tailscale node hostname per MCP
-server, usually implemented with a Tailscale sidecar/container per MCP service.
+flag. Hosted connectors need public internet reachability, so the practical
+multi-MCP public pattern is one Tailscale node hostname per MCP server, usually
+implemented with a Tailscale sidecar/container per MCP service.
 
 Sidecar pattern:
 
@@ -143,26 +143,28 @@ Initial connector setup or deliberate re-pairing:
 DOTMD_OAUTH_DYNAMIC_REGISTRATION=true
 ```
 
-After Claude connects successfully, set it back to `false` and recreate the
-container. Existing registered clients and refresh tokens continue to work.
+After the connector succeeds, set it back to `false` and recreate the container.
+Existing registered clients and refresh tokens continue to work.
 
-The default allowed redirect URI is:
+Allowed redirect policy:
 
 ```text
-https://claude.ai/api/mcp/auth_callback
+Claude/Anthropic exact callback: https://claude.ai/api/mcp/auth_callback
+ChatGPT callback prefix:        https://chatgpt.com/connector/oauth/
 ```
 
-Override only if adding another trusted hosted MCP client:
+Production env:
 
 ```env
-DOTMD_OAUTH_ALLOWED_REDIRECT_URIS=https://claude.ai/api/mcp/auth_callback,https://trusted.example/callback
+DOTMD_OAUTH_ALLOWED_REDIRECT_URIS=https://claude.ai/api/mcp/auth_callback
+DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES=https://chatgpt.com/connector/oauth/
 ```
 
 Security checks:
 
 ```bash
 # Attacker callback must be rejected.
-curl -i -X POST https://senbonzakura.tailf87223.ts.net/register \
+curl -i -X POST https://dotmd.tailf87223.ts.net/register \
   -H 'Content-Type: application/json' \
   -d '{"client_name":"evil","redirect_uris":["https://evil.example/callback"],"grant_types":["authorization_code","refresh_token"]}'
 
@@ -170,20 +172,20 @@ curl -i -X POST https://senbonzakura.tailf87223.ts.net/register \
 # HTTP/2 400
 # {"error":"invalid_redirect_uri",...}
 
-# With dynamic registration disabled, even a Claude callback must be rejected.
-curl -i -X POST https://senbonzakura.tailf87223.ts.net/register \
+# With dynamic registration disabled, even a trusted callback must be rejected.
+curl -i -X POST https://dotmd.tailf87223.ts.net/register \
   -H 'Content-Type: application/json' \
-  -d '{"client_name":"Claude","redirect_uris":["https://claude.ai/api/mcp/auth_callback"],"grant_types":["authorization_code","refresh_token"]}'
+  -d '{"client_name":"ChatGPT","redirect_uris":["https://chatgpt.com/connector/oauth/test"],"grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none"}'
 
 # Expected in steady state:
 # HTTP/2 400
 # {"error":"invalid_client_metadata","error_description":"OAuth dynamic client registration is disabled"}
 
-# Claude callback should be accepted only during intentional setup with
+# Trusted callbacks should be accepted only during intentional setup with
 # DOTMD_OAUTH_DYNAMIC_REGISTRATION=true.
-curl -i -X POST https://senbonzakura.tailf87223.ts.net/register \
+curl -i -X POST https://dotmd.tailf87223.ts.net/register \
   -H 'Content-Type: application/json' \
-  -d '{"client_name":"Claude","redirect_uris":["https://claude.ai/api/mcp/auth_callback"],"grant_types":["authorization_code","refresh_token"]}'
+  -d '{"client_name":"ChatGPT","redirect_uris":["https://chatgpt.com/connector/oauth/test"],"grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none"}'
 
 # Expected:
 # HTTP/2 201
@@ -191,7 +193,7 @@ curl -i -X POST https://senbonzakura.tailf87223.ts.net/register \
 
 ## Required Endpoints
 
-With `DOTMD_BASE_URL=https://senbonzakura.tailf87223.ts.net`, FastMCP exposes:
+With `DOTMD_BASE_URL=https://dotmd.tailf87223.ts.net`, FastMCP exposes:
 
 ```text
 GET  /                                      health-style root response
@@ -203,18 +205,149 @@ POST /token
 POST /mcp
 ```
 
-The connector URL entered in Claude Desktop is:
+The connector URL entered in the hosted connector UI is:
 
 ```text
-https://senbonzakura.tailf87223.ts.net/mcp
+https://dotmd.tailf87223.ts.net/mcp
 ```
 
 Expected unauthenticated `/mcp` behavior is `401`, not `200`:
 
 ```text
 HTTP/2 401
-www-authenticate: Bearer ... resource_metadata="https://senbonzakura.tailf87223.ts.net/.well-known/oauth-protected-resource/mcp"
+www-authenticate: Bearer ... resource_metadata="https://dotmd.tailf87223.ts.net/.well-known/oauth-protected-resource/mcp"
 ```
+
+Do not expose compatibility aliases unless a specific client proves it needs
+them. The final clean contract intentionally does not serve:
+
+```text
+GET /.well-known/oauth-authorization-server/mcp -> 404
+GET /.well-known/oauth-protected-resource       -> 404
+GET /.well-known/openid-configuration           -> 404
+```
+
+The OIDC probe is harmless; ChatGPT tries it and proceeds with OAuth metadata.
+
+## Connector Setup: Claude/Anthropic
+
+Anthropic's hosted connector flow was straightforward in this deployment. Once
+Funnel, OAuth metadata, and the Claude callback allowlist were correct, it
+connected on the first real attempt.
+
+Use:
+
+```text
+Connector URL: https://dotmd.tailf87223.ts.net/mcp
+Auth mode:     OAuth
+Redirect URI: https://claude.ai/api/mcp/auth_callback
+```
+
+Setup sequence:
+
+1. Set `DOTMD_OAUTH_DYNAMIC_REGISTRATION=true`.
+2. Recreate the `dotmd` container; `docker compose restart` is not enough for env changes.
+3. Create the Claude connector with `https://dotmd.tailf87223.ts.net/mcp`.
+4. Confirm access log shows `/register 201`, `/authorize 302`, `/token 200`, then `/mcp 200`.
+5. Set `DOTMD_OAUTH_DYNAMIC_REGISTRATION=false` and recreate the container.
+
+Expected Claude-style sequence:
+
+```text
+POST /mcp -> 401
+GET  /.well-known/oauth-protected-resource/mcp -> 200
+GET  /.well-known/openid-configuration -> 404
+POST /register -> 201
+GET  /authorize -> 302
+POST /token -> 200
+POST /mcp -> 200
+```
+
+## Connector Setup: ChatGPT
+
+ChatGPT was the difficult case. The final working setup required cleaning stale
+connector state, clearing dotMD OAuth state, recreating the container, and using
+ChatGPT's public PKCE registration flow exactly.
+
+Primary lesson from the incident: do not keep retrying ChatGPT against old
+OAuth state. Most failed attempts were likely made against stale registered
+clients, stale authorization codes, or stale connector state. Once
+`/dotmd-index/oauth_state.json` was removed and the container was recreated,
+ChatGPT connected cleanly twice, including after removing the experimental
+compatibility endpoints.
+
+Use:
+
+```text
+Connector URL:       https://dotmd.tailf87223.ts.net/mcp
+Auth mode:           OAuth
+Registration method: Dynamic Client Registration
+Redirect prefix:     https://chatgpt.com/connector/oauth/
+Client auth:         none
+```
+
+Do not use `Mixed` for this server. In testing, `Mixed` failed immediately in
+ChatGPT's UI; switching back to `OAuth` and recreating the connector produced
+the successful flow.
+
+Before a clean ChatGPT registration:
+
+```bash
+docker exec dotmd sh -lc 'rm -f /dotmd-index/oauth_state.json'
+```
+
+If preserving forensic evidence matters, copy it first:
+
+```bash
+ts=$(date +%Y%m%d%H%M%S)
+docker exec dotmd sh -lc "cp /dotmd-index/oauth_state.json /dotmd-index/oauth_state.json.bak-$ts 2>/dev/null || true; rm -f /dotmd-index/oauth_state.json"
+```
+
+Then recreate the container with registration enabled:
+
+```env
+DOTMD_OAUTH_DYNAMIC_REGISTRATION=true
+```
+
+Successful ChatGPT trace from the final clean flow:
+
+```text
+POST /mcp -> 401
+GET  /.well-known/oauth-protected-resource/mcp -> 200
+GET  /.well-known/oauth-authorization-server -> 200
+GET  /.well-known/openid-configuration -> 404
+POST /register -> 201
+GET  /authorize -> 302 with code, state, iss
+POST /token -> 200
+POST /mcp initialize -> 200
+POST /mcp tools/list -> 200
+POST /mcp resources/list -> 200
+```
+
+The registered ChatGPT client should look like:
+
+```text
+client_name=ChatGPT
+token_endpoint_auth_method=none
+client_secret absent
+redirect_uris=["https://chatgpt.com/connector/oauth/<random-id>"]
+resource=https://dotmd.tailf87223.ts.net/mcp
+scopes=["dotmd"]
+```
+
+Known ChatGPT pitfalls:
+
+- ChatGPT may cache broken connector/OAuth state. If setup keeps failing with
+  `Something went wrong with setting up the connection`, delete the connector
+  and create it again.
+- The redirect URI suffix is random. Allow the prefix
+  `https://chatgpt.com/connector/oauth/`, not one exact callback URL.
+- `/authorize` must redirect directly. Do not put a local consent page in the
+  middle of this flow.
+- The access-log middleware must replay `/token` form bodies after logging; if
+  it consumes the body, `/token` fails.
+- `iss` must be present in the authorization callback and advertised with
+  `authorization_response_iss_parameter_supported=true`.
 
 ## Server Configuration
 
@@ -233,7 +366,7 @@ Relevant env file:
 Required value:
 
 ```env
-DOTMD_BASE_URL=https://senbonzakura.tailf87223.ts.net
+DOTMD_BASE_URL=https://dotmd.tailf87223.ts.net
 ```
 
 During live network debugging, `ENVIRONMENT=prod` may be used in
@@ -255,7 +388,7 @@ Wait for health:
 
 ```bash
 for i in $(seq 1 60); do
-  if curl -fsS http://127.0.0.1:18082/health >/dev/null; then
+  if curl -fsS http://127.0.0.1:8080/health >/dev/null; then
     echo healthy
     break
   fi
@@ -275,17 +408,17 @@ printf 'y\n' | tailscale serve reset
 Start a single root Funnel:
 
 ```bash
-tailscale funnel --bg --yes http://127.0.0.1:18082
+tailscale funnel --bg --yes http://127.0.0.1:8080
 ```
 
 Expected status:
 
 ```text
 # Funnel on:
-#     - https://senbonzakura.tailf87223.ts.net
+#     - https://dotmd.tailf87223.ts.net
 
-https://senbonzakura.tailf87223.ts.net (Funnel on)
-|-- / proxy http://127.0.0.1:18082
+https://dotmd.tailf87223.ts.net (Funnel on)
+|-- / proxy http://127.0.0.1:8080
 ```
 
 Do not configure separate handlers like:
@@ -366,7 +499,7 @@ Security setup sequence:
 DOTMD_OAUTH_DYNAMIC_REGISTRATION=true
 ```
 
-2. Connect Claude once.
+2. Connect the hosted MCP client once.
 3. Disable registration:
 
 ```env
@@ -383,11 +516,11 @@ is tailnet-local and does not need hosted OAuth discovery.
 Run from the host:
 
 ```bash
-curl -i https://senbonzakura.tailf87223.ts.net/
-curl -i https://senbonzakura.tailf87223.ts.net/.well-known/oauth-authorization-server
-curl -i https://senbonzakura.tailf87223.ts.net/.well-known/oauth-protected-resource/mcp
+curl -i https://dotmd.tailf87223.ts.net/
+curl -i https://dotmd.tailf87223.ts.net/.well-known/oauth-authorization-server
+curl -i https://dotmd.tailf87223.ts.net/.well-known/oauth-protected-resource/mcp
 curl -i -H 'Accept: application/json, text/event-stream' \
-  https://senbonzakura.tailf87223.ts.net/mcp
+  https://dotmd.tailf87223.ts.net/mcp
 ```
 
 Expected results:
@@ -406,7 +539,7 @@ curl -i -X OPTIONS \
   -H 'Origin: https://claude.ai' \
   -H 'Access-Control-Request-Method: POST' \
   -H 'Access-Control-Request-Headers: content-type,authorization' \
-  https://senbonzakura.tailf87223.ts.net/mcp
+  https://dotmd.tailf87223.ts.net/mcp
 ```
 
 Expected:
@@ -423,18 +556,19 @@ tailnet IP (`100.x.x.x`) and bypass public Funnel behavior.
 Public DNS should expose Tailscale edge addresses:
 
 ```bash
-dig +trace +short senbonzakura.tailf87223.ts.net A | tail
-dig +short senbonzakura.tailf87223.ts.net AAAA @1.1.1.1
+dig +trace +short dotmd.tailf87223.ts.net A | tail
+dig +short dotmd.tailf87223.ts.net AAAA @1.1.1.1
 ```
 
 Inside the tailnet, `getent hosts` may show the private tailnet IP. That is
-normal, but it is not proof that Claude can reach the endpoint.
+normal, but it is not proof that hosted connector infrastructure can reach the
+endpoint.
 
 ## Manual OAuth + MCP Verification
 
-If Claude reports authorization failures, reproduce the full flow from a shell.
-This confirms whether the server is broken or Claude is reusing stale connector
-state.
+If a connector reports authorization failures, reproduce the full flow from a
+shell. This confirms whether the server is broken or the hosted client is
+reusing stale connector state.
 
 ```bash
 cd backend
@@ -448,7 +582,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 
-BASE = "https://senbonzakura.tailf87223.ts.net"
+BASE = "https://dotmd.tailf87223.ts.net"
 MCP = f"{BASE}/mcp"
 HEADERS = {
     "Content-Type": "application/json",
@@ -458,8 +592,10 @@ HEADERS = {
 with httpx.Client(timeout=30.0, follow_redirects=False) as client:
     reg = client.post(f"{BASE}/register", json={
         "client_name": "dotmd-debug",
-        "redirect_uris": ["https://claude.ai/api/mcp/auth_callback"],
+        "redirect_uris": ["https://chatgpt.com/connector/oauth/debug"],
         "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"],
+        "token_endpoint_auth_method": "none",
     })
     print("register", reg.status_code)
     reg.raise_for_status()
@@ -472,7 +608,7 @@ with httpx.Client(timeout=30.0, follow_redirects=False) as client:
 
     auth = client.get(f"{BASE}/authorize?" + urlencode({
         "client_id": registration["client_id"],
-        "redirect_uri": "https://claude.ai/api/mcp/auth_callback",
+        "redirect_uri": "https://chatgpt.com/connector/oauth/debug",
         "response_type": "code",
         "code_challenge": challenge,
         "code_challenge_method": "S256",
@@ -485,10 +621,10 @@ with httpx.Client(timeout=30.0, follow_redirects=False) as client:
     token = client.post(f"{BASE}/token", data={
         "grant_type": "authorization_code",
         "code": code,
-        "redirect_uri": "https://claude.ai/api/mcp/auth_callback",
+        "redirect_uri": "https://chatgpt.com/connector/oauth/debug",
         "client_id": registration["client_id"],
-        "client_secret": registration["client_secret"],
         "code_verifier": verifier,
+        "resource": MCP,
     })
     print("token", token.status_code)
     token.raise_for_status()
@@ -535,23 +671,23 @@ dotMD access logs:
 docker logs -f dotmd 2>&1 | rg 'dotmd.mcp_server: HTTP|dotmd.auth|OAuth|ERROR|WARNING'
 ```
 
-Useful successful sequence from Claude:
+Useful successful sequence from ChatGPT:
 
 ```text
-POST /mcp 401
-GET  /.well-known/oauth-protected-resource/mcp 200
-GET  /.well-known/openid-configuration 404
-POST /register 201
-GET  /authorize?... 302
-GET  /.well-known/oauth-authorization-server 200
-POST /token 200
-POST /mcp 200
-POST /mcp 202
-POST /mcp 200  # resources/list, prompts/list, tools/list
+POST /mcp -> 401
+GET  /.well-known/oauth-protected-resource/mcp -> 200
+GET  /.well-known/oauth-authorization-server -> 200
+GET  /.well-known/openid-configuration -> 404
+POST /register -> 201
+GET  /authorize -> 302 with code, state, iss
+POST /token -> 200
+POST /mcp initialize -> 200
+POST /mcp tools/list -> 200
+POST /mcp resources/list -> 200
 ```
 
-The `/.well-known/openid-configuration 404` probe is harmless. Claude tries it,
-then falls back to OAuth authorization server metadata.
+The `/.well-known/openid-configuration 404` probe is harmless. ChatGPT tries it
+and proceeds with OAuth authorization server metadata.
 
 Tailscale logs:
 
@@ -578,37 +714,37 @@ Fix:
 ```bash
 printf 'y\n' | tailscale funnel reset
 printf 'y\n' | tailscale serve reset
-tailscale funnel --bg --yes http://127.0.0.1:18082
+tailscale funnel --bg --yes http://127.0.0.1:8080
 ```
 
 Then use:
 
 ```text
-https://senbonzakura.tailf87223.ts.net/mcp
+https://dotmd.tailf87223.ts.net/mcp
 ```
 
 ### `Authorization with the MCP server failed`
 
 If logs show `POST /token 200` and subsequent `POST /mcp 200`, server-side
-authorization succeeded. The usual cause is stale connector credentials in
-Claude from a previous URL.
+authorization succeeded. The usual cause is stale connector credentials in the
+hosted client from a previous URL or previous OAuth state.
 
 Fix:
 
-1. Delete the old connector in Claude.
+1. Delete the old connector in the hosted client.
 2. Clear dotMD OAuth state if needed:
 
 ```bash
 ts=$(date +%Y%m%d%H%M%S)
 docker exec dotmd sh -lc \
   "cp /dotmd-index/oauth_state.json /dotmd-index/oauth_state.json.bak-$ts 2>/dev/null || true; rm -f /dotmd-index/oauth_state.json"
-docker restart dotmd
+COMPOSE_PROJECT_NAME=dotmd docker compose -f /opt/docker/dotmd/docker-compose.yml up -d --force-recreate dotmd
 ```
 
 3. Recreate the connector with:
 
 ```text
-https://senbonzakura.tailf87223.ts.net/mcp
+https://dotmd.tailf87223.ts.net/mcp
 ```
 
 ### Public checks fail but local checks pass
@@ -616,7 +752,7 @@ https://senbonzakura.tailf87223.ts.net/mcp
 Local checks may use tailnet DNS and bypass Funnel:
 
 ```bash
-getent hosts senbonzakura.tailf87223.ts.net
+getent hosts dotmd.tailf87223.ts.net
 ```
 
 If this returns `100.x.x.x`, it proves only tailnet reachability. Test public
@@ -633,8 +769,8 @@ Do not use it for hosted Claude connectors. The reliable Funnel configuration is
 root-based:
 
 ```text
-DOTMD_BASE_URL=https://senbonzakura.tailf87223.ts.net
-MCP URL=https://senbonzakura.tailf87223.ts.net/mcp
+DOTMD_BASE_URL=https://dotmd.tailf87223.ts.net
+MCP URL=https://dotmd.tailf87223.ts.net/mcp
 ```
 
 ## Cleanup Checklist
@@ -658,8 +794,8 @@ tailscale funnel status
 Expected:
 
 ```text
-https://senbonzakura.tailf87223.ts.net (Funnel on)
-|-- / proxy http://127.0.0.1:18082
+https://dotmd.tailf87223.ts.net (Funnel on)
+|-- / proxy http://127.0.0.1:8080
 ```
 
 3. Ensure production env is root-based:
@@ -671,7 +807,7 @@ grep '^DOTMD_BASE_URL=' /opt/docker/dotmd/.env
 Expected:
 
 ```text
-DOTMD_BASE_URL=https://senbonzakura.tailf87223.ts.net
+DOTMD_BASE_URL=https://dotmd.tailf87223.ts.net
 ```
 
 4. Restore pre-flight if it was disabled:

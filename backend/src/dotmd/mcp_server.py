@@ -371,12 +371,6 @@ def _oauth_protected_resource_response() -> JSONResponse:
     )
 
 
-@mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
-async def oauth_protected_resource_root(request: Request) -> JSONResponse:
-    """Compatibility metadata for clients that probe the issuer root first."""
-    return _oauth_protected_resource_response()
-
-
 @mcp.custom_route("/.well-known/oauth-protected-resource/mcp", methods=["GET"])
 async def oauth_protected_resource_mcp(request: Request) -> JSONResponse:
     """Protected-resource metadata for the canonical /mcp resource URL."""
@@ -467,11 +461,6 @@ def create_app() -> Starlette:
             methods=["GET"],
         ),
         Route(
-            "/.well-known/oauth-protected-resource",
-            oauth_protected_resource_root,
-            methods=["GET"],
-        ),
-        Route(
             "/.well-known/oauth-protected-resource/mcp",
             oauth_protected_resource_mcp,
             methods=["GET"],
@@ -487,7 +476,6 @@ def create_app() -> Starlette:
             if getattr(route, "path", None)
             not in {
                 "/.well-known/oauth-authorization-server",
-                "/.well-known/oauth-protected-resource",
                 "/.well-known/oauth-protected-resource/mcp",
                 "/authorize",
             }
