@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
 status: executing
-last_updated: "2026-04-29T14:46:55.489Z"
-last_activity: 2026-04-29
+last_updated: "2026-04-30T08:27:03.426Z"
+last_activity: 2026-04-30
 progress:
-  total_phases: 19
+  total_phases: 22
   completed_phases: 3
   total_plans: 15
   completed_plans: 12
@@ -20,7 +20,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 999.12 — dual-encoder-unified-embedding-decoupled-metadata-vectors-ba
+**Current focus:** Phase 17 — mcp-oauth-2-0-claude-desktop-remote-connector-support
 
 ## Current Milestone
 
@@ -28,8 +28,8 @@ See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 Phase: 999.13 of 12 (вернуть stateful mcp режим + notifications/tools/list_changed (backlog))
 Plan: Not started
-Status: Ready to execute
-Last activity: 2026-04-29
+Status: Executing Phase 17
+Last activity: 2026-04-30
 
 Progress: [░░░░░░░░░░] 0%
 
