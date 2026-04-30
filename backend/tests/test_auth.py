@@ -1,0 +1,209 @@
+"""Tests for dotMD OAuth provider storage behavior."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import time
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+from mcp.server.auth.handlers.authorize import AuthorizationParams
+from mcp.server.auth.provider import AccessToken, RefreshToken
+from mcp.shared.auth import OAuthClientInformationFull
+
+from dotmd.auth import DotMDOAuthProvider
+
+
+def _client() -> OAuthClientInformationFull:
+    return OAuthClientInformationFull(
+        client_id="client-1",
+        client_secret="secret-1",
+        redirect_uris=["https://client.example/callback"],
+        scope="dotmd",
+    )
+
+
+def _params(state: str | None = "state-1") -> AuthorizationParams:
+    return AuthorizationParams(
+        state=state,
+        scopes=["dotmd"],
+        code_challenge="challenge-1",
+        redirect_uri="https://client.example/callback",
+        redirect_uri_provided_explicitly=True,
+        resource="https://senbonzakura.tailf87223.ts.net/dotmd/mcp",
+    )
+
+
+def _provider(tmp_path: Path) -> DotMDOAuthProvider:
+    return DotMDOAuthProvider(tmp_path / "oauth_state.json")
+
+
+def _query(url: str) -> dict[str, list[str]]:
+    return parse_qs(urlparse(url).query)
+
+
+def test_register_and_get_client(tmp_path: Path) -> None:
+    async def run() -> None:
+        provider = _provider(tmp_path)
+        client = _client()
+
+        await provider.register_client(client)
+
+        assert await provider.get_client(client.client_id) == client
+        assert await provider.get_client("unknown") is None
+        state = json.loads((tmp_path / "oauth_state.json").read_text(encoding="utf-8"))
+        assert client.client_id in state["clients"]
+
+    asyncio.run(run())
+
+
+def test_authorize_stores_code_and_returns_redirect(tmp_path: Path) -> None:
+    async def run() -> None:
+        provider = _provider(tmp_path)
+        redirect = await provider.authorize(_client(), _params())
+        query = _query(redirect)
+
+        assert "code" in query
+        assert query["state"] == ["state-1"]
+        assert query["code"][0] in provider._state["auth_codes"]
+
+    asyncio.run(run())
+
+
+def test_load_authorization_code(tmp_path: Path) -> None:
+    async def run() -> None:
+        provider = _provider(tmp_path)
+        client = _client()
+        redirect = await provider.authorize(client, _params())
+        code = _query(redirect)["code"][0]
+
+        auth_code = await provider.load_authorization_code(client, code)
+
+        assert auth_code is not None
+        assert auth_code.code_challenge == "challenge-1"
+        assert await provider.load_authorization_code(client, "missing") is None
+
+    asyncio.run(run())
+
+
+def test_exchange_authorization_code(tmp_path: Path) -> None:
+    async def run() -> None:
+        provider = _provider(tmp_path)
+        client = _client()
+        redirect = await provider.authorize(client, _params())
+        code = _query(redirect)["code"][0]
+        auth_code = await provider.load_authorization_code(client, code)
+        assert auth_code is not None
+
+        token = await provider.exchange_authorization_code(client, auth_code)
+
+        assert code not in provider._state["auth_codes"]
+        assert token.token_type == "Bearer"
+        assert token.expires_in == 86400 * 30
+        assert token.access_token in provider._state["access_tokens"]
+        assert token.refresh_token in provider._state["refresh_tokens"]
+
+    asyncio.run(run())
+
+
+def test_load_access_token_valid(tmp_path: Path) -> None:
+    async def run() -> None:
+        provider = _provider(tmp_path)
+        access = AccessToken(
+            token="access-1",
+            client_id="client-1",
+            scopes=["dotmd"],
+            expires_at=int(time.time()) + 60,
+            resource=None,
+        )
+        provider._state["access_tokens"][access.token] = access.model_dump(mode="json")
+
+        assert await provider.load_access_token(access.token) == access
+
+    asyncio.run(run())
+
+
+def test_load_access_token_expired(tmp_path: Path) -> None:
+    async def run() -> None:
+        provider = _provider(tmp_path)
+        access = AccessToken(
+            token="access-1",
+            client_id="client-1",
+            scopes=["dotmd"],
+            expires_at=int(time.time()) - 60,
+            resource=None,
+        )
+        provider._state["access_tokens"][access.token] = access.model_dump(mode="json")
+
+        assert await provider.load_access_token(access.token) is None
+
+    asyncio.run(run())
+
+
+def test_load_refresh_token(tmp_path: Path) -> None:
+    async def run() -> None:
+        provider = _provider(tmp_path)
+        client = _client()
+        refresh = RefreshToken(token="refresh-1", client_id=client.client_id, scopes=["dotmd"])
+        provider._state["refresh_tokens"][refresh.token] = refresh.model_dump(mode="json")
+
+        assert await provider.load_refresh_token(client, refresh.token) == refresh
+        assert await provider.load_refresh_token(client, "missing") is None
+
+    asyncio.run(run())
+
+
+def test_exchange_refresh_token_rotates_tokens(tmp_path: Path) -> None:
+    async def run() -> None:
+        provider = _provider(tmp_path)
+        client = _client()
+        refresh = RefreshToken(token="refresh-1", client_id=client.client_id, scopes=["dotmd"])
+        provider._state["refresh_tokens"][refresh.token] = refresh.model_dump(mode="json")
+
+        token = await provider.exchange_refresh_token(client, refresh, ["dotmd"])
+
+        assert refresh.token not in provider._state["refresh_tokens"]
+        assert token.access_token in provider._state["access_tokens"]
+        assert token.refresh_token in provider._state["refresh_tokens"]
+        assert token.refresh_token != refresh.token
+
+    asyncio.run(run())
+
+
+def test_revoke_token_removes_token_without_error(tmp_path: Path) -> None:
+    async def run() -> None:
+        provider = _provider(tmp_path)
+        access = AccessToken(token="shared", client_id="client-1", scopes=["dotmd"])
+        refresh = RefreshToken(token="shared", client_id="client-1", scopes=["dotmd"])
+        provider._state["access_tokens"][access.token] = access.model_dump(mode="json")
+        provider._state["refresh_tokens"][refresh.token] = refresh.model_dump(mode="json")
+
+        await provider.revoke_token(access)
+        await provider.revoke_token(access)
+
+        assert access.token not in provider._state["access_tokens"]
+        assert refresh.token not in provider._state["refresh_tokens"]
+
+    asyncio.run(run())
+
+
+def test_json_persistence(tmp_path: Path) -> None:
+    async def run() -> None:
+        state_path = tmp_path / "oauth_state.json"
+        provider = DotMDOAuthProvider(state_path)
+        client = _client()
+        await provider.register_client(client)
+        redirect = await provider.authorize(client, _params())
+        code = _query(redirect)["code"][0]
+        auth_code = await provider.load_authorization_code(client, code)
+        assert auth_code is not None
+        token = await provider.exchange_authorization_code(client, auth_code)
+
+        reloaded = DotMDOAuthProvider(state_path)
+
+        access_token = await reloaded.load_access_token(token.access_token)
+        assert access_token is not None
+        assert access_token.client_id == client.client_id
+
+    asyncio.run(run())
