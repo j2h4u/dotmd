@@ -128,6 +128,11 @@ if _base_url:
     _provider = DotMDOAuthProvider(Path("/dotmd-index/oauth_state.json"))
 
 
+def _oauth_consent_required() -> bool:
+    raw = os.environ.get("DOTMD_OAUTH_REQUIRE_CONSENT", "false")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _auth_settings(base_url: str) -> AuthSettings:
     return AuthSettings.model_validate(
         {
@@ -297,10 +302,10 @@ async def root(request: Request) -> JSONResponse:
 
 @mcp.custom_route("/authorize", methods=["GET"])
 async def authorize(request: Request) -> Response:
-    """Render a minimal OAuth consent page before issuing an authorization code."""
+    """Issue an authorization code, with an optional local consent page."""
     if _provider is None:
         return JSONResponse({"error": "OAuth is not configured"}, status_code=404)
-    if request.query_params.get("__dotmd_confirm") != "1":
+    if _oauth_consent_required() and request.query_params.get("__dotmd_confirm") != "1":
         fields = "\n".join(
             f'<input type="hidden" name="{escape(key)}" value="{escape(value)}">'
             for key, value in request.query_params.multi_items()

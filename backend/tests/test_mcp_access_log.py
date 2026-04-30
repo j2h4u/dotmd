@@ -10,6 +10,7 @@ from starlette.testclient import TestClient
 from dotmd import mcp_server
 from dotmd.mcp_server import (
     _AccessLogMiddleware,
+    _oauth_consent_required,
     _oauth_metadata_response,
     _oauth_protected_resource_response,
 )
@@ -71,3 +72,11 @@ def test_oauth_protected_resource_metadata_includes_scopes(monkeypatch) -> None:
     assert b'"resource":"https://dotmd.example/mcp"' in response.body
     assert b'"authorization_servers":["https://dotmd.example"]' in response.body
     assert b'"scopes_supported":["dotmd"]' in response.body
+
+
+def test_oauth_consent_page_is_opt_in(monkeypatch) -> None:
+    monkeypatch.delenv("DOTMD_OAUTH_REQUIRE_CONSENT", raising=False)
+    assert _oauth_consent_required() is False
+
+    monkeypatch.setenv("DOTMD_OAUTH_REQUIRE_CONSENT", "true")
+    assert _oauth_consent_required() is True
