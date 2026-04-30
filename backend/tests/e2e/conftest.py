@@ -87,7 +87,9 @@ def _http_access_token() -> str | None:
         timeout=60.0,
     )
     register.raise_for_status()
-    client_id = register.json()["client_id"]
+    registration = register.json()
+    client_id = registration["client_id"]
+    client_secret = registration["client_secret"]
 
     verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
     challenge = base64.urlsafe_b64encode(
@@ -116,6 +118,7 @@ def _http_access_token() -> str | None:
             "code": code,
             "redirect_uri": "http://localhost:8888/callback",
             "client_id": client_id,
+            "client_secret": client_secret,
             "code_verifier": verifier,
         },
         timeout=60.0,
