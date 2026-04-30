@@ -8,8 +8,9 @@ import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import pytest
 from mcp.server.auth.handlers.authorize import AuthorizationParams
-from mcp.server.auth.provider import AccessToken, RefreshToken
+from mcp.server.auth.provider import AccessToken, RefreshToken, RegistrationError
 from mcp.shared.auth import OAuthClientInformationFull
 
 from dotmd.auth import DotMDOAuthProvider
@@ -39,7 +40,8 @@ def _params(state: str | None = "state-1") -> AuthorizationParams:
     )
 
 
-def _provider(tmp_path: Path) -> DotMDOAuthProvider:
+def _provider(tmp_path: Path, monkeypatch) -> DotMDOAuthProvider:
+    monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
     return DotMDOAuthProvider(tmp_path / "oauth_state.json")
 
 
@@ -47,9 +49,9 @@ def _query(url: str) -> dict[str, list[str]]:
     return parse_qs(urlparse(url).query)
 
 
-def test_register_and_get_client(tmp_path: Path) -> None:
+def test_register_and_get_client(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
-        provider = _provider(tmp_path)
+        provider = _provider(tmp_path, monkeypatch)
         client = _client()
 
         await provider.register_client(client)
@@ -63,9 +65,20 @@ def test_register_and_get_client(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
-def test_authorize_stores_code_and_returns_redirect(tmp_path: Path) -> None:
+def test_rejects_unallowed_redirect_uri(tmp_path: Path) -> None:
     async def run() -> None:
-        provider = _provider(tmp_path)
+        provider = DotMDOAuthProvider(tmp_path / "oauth_state.json")
+        with pytest.raises(RegistrationError) as exc_info:
+            await provider.register_client(_client())
+        assert exc_info.value.error == "invalid_redirect_uri"
+        assert exc_info.value.error_description == "OAuth client redirect_uri is not allowed"
+
+    asyncio.run(run())
+
+
+def test_authorize_stores_code_and_returns_redirect(tmp_path: Path, monkeypatch) -> None:
+    async def run() -> None:
+        provider = _provider(tmp_path, monkeypatch)
         redirect = await provider.authorize(_client(), _params())
         query = _query(redirect)
 
@@ -76,9 +89,9 @@ def test_authorize_stores_code_and_returns_redirect(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
-def test_load_authorization_code(tmp_path: Path) -> None:
+def test_load_authorization_code(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
-        provider = _provider(tmp_path)
+        provider = _provider(tmp_path, monkeypatch)
         client = _client()
         redirect = await provider.authorize(client, _params())
         code = _query(redirect)["code"][0]
@@ -92,9 +105,9 @@ def test_load_authorization_code(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
-def test_exchange_authorization_code(tmp_path: Path) -> None:
+def test_exchange_authorization_code(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
-        provider = _provider(tmp_path)
+        provider = _provider(tmp_path, monkeypatch)
         client = _client()
         redirect = await provider.authorize(client, _params())
         code = _query(redirect)["code"][0]
@@ -112,9 +125,9 @@ def test_exchange_authorization_code(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
-def test_load_access_token_valid(tmp_path: Path) -> None:
+def test_load_access_token_valid(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
-        provider = _provider(tmp_path)
+        provider = _provider(tmp_path, monkeypatch)
         access = AccessToken(
             token="access-1",
             client_id="client-1",
@@ -129,9 +142,9 @@ def test_load_access_token_valid(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
-def test_load_access_token_expired(tmp_path: Path) -> None:
+def test_load_access_token_expired(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
-        provider = _provider(tmp_path)
+        provider = _provider(tmp_path, monkeypatch)
         access = AccessToken(
             token="access-1",
             client_id="client-1",
@@ -146,9 +159,9 @@ def test_load_access_token_expired(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
-def test_load_refresh_token(tmp_path: Path) -> None:
+def test_load_refresh_token(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
-        provider = _provider(tmp_path)
+        provider = _provider(tmp_path, monkeypatch)
         client = _client()
         assert client.client_id is not None
         refresh = RefreshToken(token="refresh-1", client_id=client.client_id, scopes=["dotmd"])
@@ -160,9 +173,9 @@ def test_load_refresh_token(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
-def test_exchange_refresh_token_rotates_tokens(tmp_path: Path) -> None:
+def test_exchange_refresh_token_rotates_tokens(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
-        provider = _provider(tmp_path)
+        provider = _provider(tmp_path, monkeypatch)
         client = _client()
         assert client.client_id is not None
         refresh = RefreshToken(token="refresh-1", client_id=client.client_id, scopes=["dotmd"])
@@ -178,9 +191,9 @@ def test_exchange_refresh_token_rotates_tokens(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
-def test_revoke_token_removes_token_without_error(tmp_path: Path) -> None:
+def test_revoke_token_removes_token_without_error(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
-        provider = _provider(tmp_path)
+        provider = _provider(tmp_path, monkeypatch)
         access = AccessToken(token="shared", client_id="client-1", scopes=["dotmd"])
         refresh = RefreshToken(token="shared", client_id="client-1", scopes=["dotmd"])
         provider._state["access_tokens"][access.token] = access.model_dump(mode="json")
@@ -195,9 +208,10 @@ def test_revoke_token_removes_token_without_error(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
-def test_json_persistence(tmp_path: Path) -> None:
+def test_json_persistence(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
         state_path = tmp_path / "oauth_state.json"
+        monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
         provider = DotMDOAuthProvider(state_path)
         client = _client()
         await provider.register_client(client)

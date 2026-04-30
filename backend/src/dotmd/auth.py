@@ -13,8 +13,10 @@ from pathlib import Path
 from mcp.server.auth.provider import (
     AccessToken,
     AuthorizationCode,
+    AuthorizeError,
     OAuthAuthorizationServerProvider,
     RefreshToken,
+    RegistrationError,
     construct_redirect_uri,
 )
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
@@ -23,6 +25,18 @@ logger = logging.getLogger(__name__)
 
 _ACCESS_TOKEN_LIFETIME_SECONDS = 86400 * 30
 _AUTH_CODE_LIFETIME_SECONDS = 300
+_DEFAULT_ALLOWED_REDIRECT_URIS = ("https://claude.ai/api/mcp/auth_callback",)
+
+
+def _allowed_redirect_uris() -> set[str]:
+    raw = os.environ.get("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS")
+    if raw is None:
+        return set(_DEFAULT_ALLOWED_REDIRECT_URIS)
+    return {uri.strip().rstrip("/") for uri in raw.split(",") if uri.strip()}
+
+
+def _normalize_uri(uri: object) -> str:
+    return str(uri).rstrip("/")
 
 
 def _new_state() -> dict[str, dict[str, object]]:
@@ -71,6 +85,18 @@ class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         if not client_info.client_id:
             raise ValueError("OAuth client registration requires client_id")
+        allowed = _allowed_redirect_uris()
+        redirect_uris = {_normalize_uri(uri) for uri in client_info.redirect_uris or []}
+        if not redirect_uris or not redirect_uris <= allowed:
+            logger.warning(
+                "OAuth: rejected client registration client_id=%s redirect_uris=%s",
+                client_info.client_id,
+                sorted(redirect_uris),
+            )
+            raise RegistrationError(
+                error="invalid_redirect_uri",
+                error_description="OAuth client redirect_uri is not allowed",
+            )
         async with self._lock:
             self._state["clients"][client_info.client_id] = client_info.model_dump(mode="json")
             await self._flush()
@@ -78,6 +104,18 @@ class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
 
     async def authorize(self, client: OAuthClientInformationFull, params) -> str:
         client_id = _require_client_id(client)
+        client_redirects = {_normalize_uri(uri) for uri in client.redirect_uris or []}
+        redirect_uri = _normalize_uri(params.redirect_uri)
+        if redirect_uri not in client_redirects or redirect_uri not in _allowed_redirect_uris():
+            logger.warning(
+                "OAuth: rejected authorization client_id=%s redirect_uri=%s",
+                client_id,
+                redirect_uri,
+            )
+            raise AuthorizeError(
+                error="unauthorized_client",
+                error_description="OAuth redirect_uri is not allowed",
+            )
         code = secrets.token_urlsafe(32)
         auth_code = AuthorizationCode(
             code=code,

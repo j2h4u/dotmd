@@ -45,6 +45,67 @@ Path-prefixed issuers require extra `/.well-known/.../dotmd/...` routes. Those
 worked inside the tailnet but failed intermittently through public Funnel with
 `502`, so the reliable production shape is a single root proxy.
 
+## Security Model
+
+Tailscale Funnel exposes the HTTP MCP origin to the public internet. Treat this
+as an internet-facing service, not as tailnet-private infrastructure.
+
+Public unauthenticated endpoints are limited to:
+
+```text
+GET  /
+GET  /.well-known/oauth-authorization-server
+GET  /.well-known/oauth-protected-resource/mcp
+POST /register
+GET  /authorize
+POST /token
+```
+
+The MCP tool endpoint itself must require a bearer token:
+
+```text
+POST /mcp -> 401 without Authorization: Bearer ...
+```
+
+The critical hardening rule is: dynamic OAuth client registration must not
+accept arbitrary redirect URIs. If arbitrary redirects are accepted, any internet
+client can register itself, receive an authorization code at its own callback,
+exchange it for a token, and then call `search`/`read` against the personal
+knowledgebase.
+
+dotMD therefore allowlists redirect URIs. The default is:
+
+```text
+https://claude.ai/api/mcp/auth_callback
+```
+
+Override only if adding another trusted hosted MCP client:
+
+```env
+DOTMD_OAUTH_ALLOWED_REDIRECT_URIS=https://claude.ai/api/mcp/auth_callback,https://trusted.example/callback
+```
+
+Security checks:
+
+```bash
+# Attacker callback must be rejected.
+curl -i -X POST https://senbonzakura.tailf87223.ts.net/register \
+  -H 'Content-Type: application/json' \
+  -d '{"client_name":"evil","redirect_uris":["https://evil.example/callback"],"grant_types":["authorization_code","refresh_token"]}'
+
+# Expected:
+# HTTP/2 400
+# {"error":"invalid_redirect_uri",...}
+
+# Claude callback must still be accepted.
+curl -i -X POST https://senbonzakura.tailf87223.ts.net/register \
+  -H 'Content-Type: application/json' \
+  -d '{"client_name":"Claude","redirect_uris":["https://claude.ai/api/mcp/auth_callback"],"grant_types":["authorization_code","refresh_token"]}'
+
+# Expected:
+# HTTP/2 201
+```
+
 ## Required Endpoints
 
 With `DOTMD_BASE_URL=https://senbonzakura.tailf87223.ts.net`, FastMCP exposes:
@@ -463,4 +524,3 @@ in:
 ```
 
 5. Recreate the container after env changes.
-
