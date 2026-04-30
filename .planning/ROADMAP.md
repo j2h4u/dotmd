@@ -7,7 +7,7 @@
 - [x] **v1.1 Incremental Indexing** — Phases 1-3 (shipped 2026-03-26)
 - [x] **v1.2 FalkorDB Migration & Search Fix** — Phases 4-6 (shipped 2026-03-27)
 - [x] **v1.3 Production Packaging & Background Indexing** — Phases 7-10 (shipped 2026-03-28)
-- [ ] **v1.4 Search Quality & Architecture** — Phases 11-14
+- [x] **v1.4 Search Quality & Architecture** — Phases 11-14 (shipped 2026-04-02)
 
 <details>
 <summary>v1.1 Incremental Indexing (Phases 1-3) — SHIPPED 2026-03-26</summary>
@@ -44,7 +44,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 </details>
 
 <details>
-<summary>v1.4 Search Quality & Architecture (Phases 11-13) — SHIPPED 2026-04-02</summary>
+<summary>v1.4 Search Quality & Architecture (Phases 11-14) — SHIPPED 2026-04-02</summary>
 
 ### Phase 11: Embedding Model Evaluation
 - [x] E5-large vs Qwen3-Embedding-0.6B A/B comparison
@@ -76,11 +76,11 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 - **Impact:** 2990 → 7927 chunks (transcripts properly split). "Николай Сенин" rank 6 → rank 1. "инфоцыган" now findable.
 
 ### Phase 14: Frontmatter-Driven Indexing
-- [ ] Strip frontmatter from chunk text, feed parsed dict into each engine structurally
-- [ ] Graph: typed entities from tags namespace directly (bypass NER for known metadata)
-- [ ] FTS5: title + tags as separate columns with bm25 column weights
-- [ ] Embeddings: tags in enrichment prefix
-- [ ] Convention-based per-kind metadata extraction
+- [x] Strip frontmatter from chunk text, feed parsed dict into each engine structurally
+- [x] Graph: typed entities from tags namespace directly (bypass NER for known metadata)
+- [x] FTS5: title + tags as separate columns with bm25 column weights
+- [x] Embeddings: tags in enrichment prefix
+- [x] Convention-based per-kind metadata extraction
 - **Goal:** Frontmatter is the structured contract between upstream producers and dotmd indexer
 
 ### Backlog items completed:
@@ -109,7 +109,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 | 12. Indexing Integrity Rework | v1.4 | Complete | 2026-04-02 |
 | 13. Content-Aware Chunking & Search | v1.4 | Complete | 2026-04-02 |
 | 14. Frontmatter-Driven Indexing | v1.4 | Complete | 2026-04-02 |
-| 15. Content-addressed caching | 2/3 | In Progress|  |
+| 15. Content-addressed caching | 3/3 | Complete | 2026-04-24 |
 | 16. Content-dedup schema | 6/6 | Complete   | 2026-04-25 |
 | 17. MCP OAuth 2.0 — Claude Desktop connector | 3/3 | Complete   | 2026-04-30 |
 
@@ -489,12 +489,12 @@ Plans:
 
 **Goal:** Prevent expensive reindexing (GLiNER + TEI) when files move or mount paths change. Three improvements in order: embedding cache (B) → extraction cache (C) → content-based chunk_id migration (A).
 **Requirements**: TBD
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
-- [ ] Plan 1: Global embedding cache by text_hash (skip TEI on file moves)
-- [ ] Plan 2: Extraction cache by (text_hash + model + entity_types_hash) (skip GLiNER on file moves)
-- [ ] Plan 3: Content-based chunk_id + switch to BLAKE3. chunk_id = blake3(file_content_checksum + ":" + chunk_index + ":" + chunk_strategy). Migration: stop → backup → SQL UPDATE all tables → verify → restart. Depends on Plan 1+2 deployed and warm.
+- [x] Plan 1: Global embedding cache by text_hash (skip TEI on file moves)
+- [x] Plan 2: Extraction cache by (text_hash + model + entity_types_hash) (skip GLiNER on file moves)
+- [x] Plan 3: Content-based chunk_id + switch to BLAKE3. chunk_id = blake3(file_content_checksum + ":" + chunk_index + ":" + chunk_strategy). Migration: stop → backup → SQL UPDATE all tables → verify → restart. Superseded by Phase 16 M2M migration where needed.
 
 ### Phase 16: Content-dedup schema — many-to-many chunks to file_paths
 
@@ -507,13 +507,13 @@ Plans:
 **Context & design notes:** see `.planning/phases/16-content-dedup-schema-many-to-many-chunks-to-file-paths/16-CONTEXT.md` — edge cases, schema sketch, open questions, expected plan breakdown (migrated from backlog 2026-04-24). Researcher audit in `16-RESEARCH.md`.
 
 Plans:
-- [ ] 16-P6-test-suite.md — Wave 0 RED fixtures + test skeletons (conftest, collision/empty/pre-v16 DBs, round-trip parity)
-- [ ] 16-P1-schema-migration-core.md — Wave 2 M2M schema, blake3 remap, collision collapse, char_offset drop, v15 stub
-- [ ] 16-P2-migration-ops-modes.md — Wave 3 `dotmd migrate {run,status}`, --dry-run, --verify-only, progress logs
-- [ ] 16-P3-ingest-flow-rewrite.md — Wave 3 INSERT OR IGNORE ingest + trickle advisory-lock startup check
-- [ ] 16-P4-purge-and-change-detection.md — Wave 3 decrement-cascade _purge_file + M2M orphan sweep
-- [ ] 16-P5-search-api-clean-break.md — Wave 3 SearchResult.file_paths: list[Path] across models/fusion/CLI/MCP
+- [x] 16-06-test-suite-PLAN.md — Wave 0 RED fixtures + test skeletons (conftest, collision/empty/pre-v16 DBs, round-trip parity)
+- [x] 16-01-schema-migration-core-PLAN.md — Wave 2 M2M schema, blake3 remap, collision collapse, char_offset drop, v15 stub
+- [x] 16-02-migration-ops-modes-PLAN.md — Wave 3 `dotmd migrate {run,status}`, --dry-run, --verify-only, progress logs
+- [x] 16-03-ingest-flow-rewrite-PLAN.md — Wave 3 INSERT OR IGNORE ingest + trickle advisory-lock startup check
+- [x] 16-04-purge-and-change-detection-PLAN.md — Wave 3 decrement-cascade _purge_file + M2M orphan sweep
+- [x] 16-05-search-api-clean-break-PLAN.md — Wave 3 SearchResult.file_paths: list[Path] across models/fusion/CLI/MCP
 
 ---
 *Roadmap created: 2026-03-26*
-*Last updated: 2026-04-02*
+*Last updated: 2026-04-30*
