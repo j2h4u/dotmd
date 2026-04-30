@@ -97,6 +97,20 @@ _provider: DotMDOAuthProvider | None = None
 if _base_url:
     _provider = DotMDOAuthProvider(Path("/dotmd-index/oauth_state.json"))
 
+
+def _auth_settings(base_url: str) -> AuthSettings:
+    return AuthSettings.model_validate(
+        {
+            "issuer_url": base_url,
+            "resource_server_url": f"{base_url}/mcp",
+            "client_registration_options": ClientRegistrationOptions(
+                enabled=True,
+                valid_scopes=["dotmd"],
+                default_scopes=["dotmd"],
+            ),
+        }
+    )
+
 mcp = FastMCP(
     "dotmd",
     instructions=_INSTRUCTIONS,
@@ -113,15 +127,7 @@ mcp = FastMCP(
     # - HTTP: server-wide init (service + trickle) lives in create_app() below.
     # - stdio: caller must invoke _init_for_stdio() before mcp_app.run().
     auth_server_provider=_provider,
-    auth=AuthSettings(
-        issuer_url=_base_url,
-        resource_server_url=f"{_base_url}/mcp",
-        client_registration_options=ClientRegistrationOptions(
-            enabled=True,
-            valid_scopes=["dotmd"],
-            default_scopes=["dotmd"],
-        ),
-    ) if _base_url else None,
+    auth=_auth_settings(_base_url) if _base_url else None,
 )
 
 

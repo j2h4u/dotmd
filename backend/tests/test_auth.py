@@ -16,22 +16,26 @@ from dotmd.auth import DotMDOAuthProvider
 
 
 def _client() -> OAuthClientInformationFull:
-    return OAuthClientInformationFull(
-        client_id="client-1",
-        client_secret="secret-1",
-        redirect_uris=["https://client.example/callback"],
-        scope="dotmd",
+    return OAuthClientInformationFull.model_validate(
+        {
+            "client_id": "client-1",
+            "client_secret": "secret-1",
+            "redirect_uris": ["https://client.example/callback"],
+            "scope": "dotmd",
+        }
     )
 
 
 def _params(state: str | None = "state-1") -> AuthorizationParams:
-    return AuthorizationParams(
-        state=state,
-        scopes=["dotmd"],
-        code_challenge="challenge-1",
-        redirect_uri="https://client.example/callback",
-        redirect_uri_provided_explicitly=True,
-        resource="https://senbonzakura.tailf87223.ts.net/dotmd/mcp",
+    return AuthorizationParams.model_validate(
+        {
+            "state": state,
+            "scopes": ["dotmd"],
+            "code_challenge": "challenge-1",
+            "redirect_uri": "https://client.example/callback",
+            "redirect_uri_provided_explicitly": True,
+            "resource": "https://senbonzakura.tailf87223.ts.net/dotmd/mcp",
+        }
     )
 
 
@@ -50,6 +54,7 @@ def test_register_and_get_client(tmp_path: Path) -> None:
 
         await provider.register_client(client)
 
+        assert client.client_id is not None
         assert await provider.get_client(client.client_id) == client
         assert await provider.get_client("unknown") is None
         state = json.loads((tmp_path / "oauth_state.json").read_text(encoding="utf-8"))
@@ -145,6 +150,7 @@ def test_load_refresh_token(tmp_path: Path) -> None:
     async def run() -> None:
         provider = _provider(tmp_path)
         client = _client()
+        assert client.client_id is not None
         refresh = RefreshToken(token="refresh-1", client_id=client.client_id, scopes=["dotmd"])
         provider._state["refresh_tokens"][refresh.token] = refresh.model_dump(mode="json")
 
@@ -158,6 +164,7 @@ def test_exchange_refresh_token_rotates_tokens(tmp_path: Path) -> None:
     async def run() -> None:
         provider = _provider(tmp_path)
         client = _client()
+        assert client.client_id is not None
         refresh = RefreshToken(token="refresh-1", client_id=client.client_id, scopes=["dotmd"])
         provider._state["refresh_tokens"][refresh.token] = refresh.model_dump(mode="json")
 

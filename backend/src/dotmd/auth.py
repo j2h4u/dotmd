@@ -34,6 +34,12 @@ def _new_state() -> dict[str, dict[str, object]]:
     }
 
 
+def _require_client_id(client: OAuthClientInformationFull) -> str:
+    if not client.client_id:
+        raise ValueError("OAuth client_id is required")
+    return client.client_id
+
+
 class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, RefreshToken, AccessToken]):
     """JSON-backed OAuth provider for a trusted single-user Tailnet deployment."""
 
@@ -71,12 +77,13 @@ class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
         logger.info("OAuth: client registered client_id=%s", client_info.client_id)
 
     async def authorize(self, client: OAuthClientInformationFull, params) -> str:
+        client_id = _require_client_id(client)
         code = secrets.token_urlsafe(32)
         auth_code = AuthorizationCode(
             code=code,
             scopes=params.scopes or ["dotmd"],
             expires_at=time.time() + _AUTH_CODE_LIFETIME_SECONDS,
-            client_id=client.client_id,
+            client_id=client_id,
             code_challenge=params.code_challenge,
             redirect_uri=params.redirect_uri,
             redirect_uri_provided_explicitly=params.redirect_uri_provided_explicitly,
@@ -85,7 +92,7 @@ class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
         async with self._lock:
             self._state["auth_codes"][code] = auth_code.model_dump(mode="json")
             await self._flush()
-        logger.info("OAuth: authorization code issued client_id=%s", client.client_id)
+        logger.info("OAuth: authorization code issued client_id=%s", client_id)
         return construct_redirect_uri(str(params.redirect_uri), code=code, state=params.state)
 
     async def load_authorization_code(
@@ -101,19 +108,20 @@ class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
         client: OAuthClientInformationFull,
         authorization_code: AuthorizationCode,
     ) -> OAuthToken:
+        client_id = _require_client_id(client)
         access = secrets.token_urlsafe(32)
         refresh = secrets.token_urlsafe(32)
         exp = int(time.time()) + _ACCESS_TOKEN_LIFETIME_SECONDS
         access_token = AccessToken(
             token=access,
-            client_id=client.client_id,
+            client_id=client_id,
             scopes=authorization_code.scopes,
             expires_at=exp,
             resource=authorization_code.resource,
         )
         refresh_token = RefreshToken(
             token=refresh,
-            client_id=client.client_id,
+            client_id=client_id,
             scopes=authorization_code.scopes,
         )
         async with self._lock:
@@ -121,7 +129,7 @@ class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
             self._state["access_tokens"][access] = access_token.model_dump(mode="json")
             self._state["refresh_tokens"][refresh] = refresh_token.model_dump(mode="json")
             await self._flush()
-        logger.info("OAuth: access token issued client_id=%s expires_at=%s", client.client_id, exp)
+        logger.info("OAuth: access token issued client_id=%s expires_at=%s", client_id, exp)
         return OAuthToken(
             access_token=access,
             token_type="Bearer",
@@ -144,20 +152,21 @@ class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
         refresh_token: RefreshToken,
         scopes: list[str],
     ) -> OAuthToken:
+        client_id = _require_client_id(client)
         new_access = secrets.token_urlsafe(32)
         new_refresh = secrets.token_urlsafe(32)
         exp = int(time.time()) + _ACCESS_TOKEN_LIFETIME_SECONDS
         issued_scopes = scopes or refresh_token.scopes
         access_token = AccessToken(
             token=new_access,
-            client_id=client.client_id,
+            client_id=client_id,
             scopes=issued_scopes,
             expires_at=exp,
             resource=None,
         )
         new_refresh_token = RefreshToken(
             token=new_refresh,
-            client_id=client.client_id,
+            client_id=client_id,
             scopes=issued_scopes,
         )
         async with self._lock:
@@ -165,7 +174,7 @@ class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
             self._state["access_tokens"][new_access] = access_token.model_dump(mode="json")
             self._state["refresh_tokens"][new_refresh] = new_refresh_token.model_dump(mode="json")
             await self._flush()
-        logger.info("OAuth: refresh token rotated client_id=%s expires_at=%s", client.client_id, exp)
+        logger.info("OAuth: refresh token rotated client_id=%s expires_at=%s", client_id, exp)
         return OAuthToken(
             access_token=new_access,
             token_type="Bearer",
