@@ -11,6 +11,7 @@ Imports are deferred so --collect-only works before P5 ships.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -44,14 +45,18 @@ class TestFilePathsIsJsonArray:
 
         if hasattr(mcp, "_format_result"):
             formatted = mcp._format_result(stub_result)
-            assert "file_paths" in formatted, (
-                f"MCP result must have 'file_paths' key after P5: {formatted!r}"
+            payload = cast(
+                dict[str, Any],
+                formatted.model_dump() if hasattr(formatted, "model_dump") else formatted,
             )
-            assert isinstance(formatted["file_paths"], list), (
-                f"file_paths must be a list in MCP output: {formatted!r}"
+            assert "file_paths" in payload, (
+                f"MCP result must have 'file_paths' key after P5: {payload!r}"
             )
-            assert "file_path" not in formatted, (
-                f"MCP result must NOT have singular 'file_path' key after P5: {formatted!r}"
+            assert isinstance(payload["file_paths"], list), (
+                f"file_paths must be a list in MCP output: {payload!r}"
+            )
+            assert "file_path" not in payload, (
+                f"MCP result must NOT have singular 'file_path' key after P5: {payload!r}"
             )
         else:
             # If _format_result not yet added (P5 not shipped), the test fails here
