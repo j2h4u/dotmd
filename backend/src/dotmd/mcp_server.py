@@ -188,6 +188,21 @@ async def root(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok", "service": "dotmd"})
 
 
+@mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
+async def oauth_protected_resource_root(request: Request) -> JSONResponse:
+    """Compatibility metadata for clients that probe the issuer root first."""
+    if not _base_url:
+        return JSONResponse({"error": "OAuth is not configured"}, status_code=404)
+    return JSONResponse(
+        {
+            "resource": f"{_base_url}/mcp",
+            "authorization_servers": [f"{_base_url}/"],
+            "bearer_methods_supported": ["header"],
+        },
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
 def _get_service() -> DotMDService:
     if _service is None:
         raise RuntimeError("Service not initialized — server not started via create_app() or _init_for_stdio()")
