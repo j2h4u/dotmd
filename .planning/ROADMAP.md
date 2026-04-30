@@ -87,6 +87,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 - [x] 999.1 Multi-model vector store — absorbed into Phase 12
 - [x] 999.3 Automatic orphan cleanup — impossible by construction after Phase 16 M2M (2026-04-25)
 - [x] 999.5 Ignore patterns for data discovery — extended default excludes in config.py (2026-04-24)
+- [x] 999.7 Remove migration_v16 dead code after soak — migration CLI/module/tests removed (2026-04-30)
 - [x] 999.10 MCP document metadata — implemented as `drill(file_path)` with frontmatter + entities (2026-04-26)
 
 </details>
@@ -215,27 +216,27 @@ anti-pattern for a production service — they let misconfiguration ship.
 **Plans:**
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
-### Phase 999.7: Remove migration_v16 dead code after soak (BACKLOG)
+### Phase 999.7: Remove migration_v16 dead code after soak (DONE 2026-04-30)
 
 **Goal:** Delete the migration_v16 scaffolding once Phase 16 has soaked in production without rollback need.
 
-**Context (updated 2026-04-25):** Phase 16 shipped to production on 2026-04-25 — `dotmd migrate run` succeeded (486 collisions collapsed, 0 divergence, no override). v15-era dead code (migration_v15 stub, cleanup_v15_pre, v15 tests — 406 lines) was deleted same day in a separate commit since v15 was collision-blocked, never ran in production, and had no rollback path after `pre-phase15.bak` was removed. Only v16 cleanup remains here, gated by soak.
+**Context (updated 2026-04-30):** Phase 16 shipped to production on 2026-04-25 — `dotmd migrate run` succeeded (486 collisions collapsed, 0 divergence, no override). v15-era dead code (migration_v15 stub, cleanup_v15_pre, v15 tests — 406 lines) was deleted same day in a separate commit since v15 was collision-blocked, never ran in production, and had no rollback path after `pre-phase15.bak` was removed. The v16 migration path also soaked successfully and was removed on 2026-04-30.
 
-**Trigger condition:** Phase 16 stable in production for **2–4 weeks** without any rollback need, AND `index.db.v16-backup` is being removed in the same sweep (i.e. committing to "no rollback path" simultaneously with deleting the rollback script).
+**Trigger condition:** Phase 16 stable in production without rollback need, AND `index.db.v16-backup` removed or verified absent in the same sweep (i.e. committing to "no rollback path" simultaneously with deleting the rollback script).
 
 **Scope (one phase, one mental purge):**
-- `backend/src/dotmd/ingestion/migration_v16.py` — full migration logic (~1500 lines); delete.
-- `backend/src/dotmd/cli.py` — remove the `dotmd migrate` Click group entirely (run + status subcommands). `migrate status`'s only purpose is to report "you need to run the migration"; once migration is gone, the status command has no meaning.
-- All migration tests under `backend/tests/ingestion/test_migration_v16*.py` and `backend/tests/cli/test_migrate_cli.py`.
-- `index.db.v16-backup` on the dotmd-index volume (~254 MB).
-- `PayloadDivergenceBlocked` exception class — only raised by migration_v16; delete alongside.
-- Any `chunk_fingerprints_*`-table consumers that exist *only* to feed migration_v16's body_checksum lookup (verify with grep before deletion — fingerprints are also used by `FileTracker`, leave that path intact).
+- [x] `backend/src/dotmd/ingestion/migration_v16.py` — full migration logic deleted.
+- [x] `backend/src/dotmd/cli.py` — `dotmd migrate` Click group removed entirely.
+- [x] Migration tests and pre-v16 schema fixtures removed.
+- [x] `index.db.v16-backup` on the dotmd-index volume verified absent.
+- [x] `PayloadDivergenceBlocked` removed with `migration_v16.py`.
+- [x] `chunk_fingerprints_*` runtime consumers preserved only where still used by `FileTracker`.
+- [x] `migration_v16_lock` startup guard and `lock_constants.py` removed because no process creates that lock anymore.
 
 **Out of scope:**
 - The M2M schema itself, `_holder_aware_chunk_cleanup`, `chunk_file_paths_*` tables — these are now the live schema, not migration code.
 
-**Plans:**
-- [ ] TBD (promote with `/gsd:review-backlog` when soak is done)
+**Plans:** Complete.
 
 ### Phase 999.8: Per-holder heading hierarchy — promote `heading_hierarchy` + `level` to M2M (BACKLOG)
 
