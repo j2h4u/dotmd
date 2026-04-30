@@ -103,6 +103,7 @@ def _http_access_token() -> str | None:
             'code_challenge': challenge,
             'code_challenge_method': 'S256',
             'state': 'e2e',
+            'resource': os.environ["DOTMD_BASE_URL"].rstrip("/") + '/mcp',
         })}",
         follow_redirects=False,
         timeout=60.0,
