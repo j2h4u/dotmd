@@ -188,6 +188,27 @@ async def root(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok", "service": "dotmd"})
 
 
+@mcp.custom_route("/.well-known/openid-configuration", methods=["GET"])
+async def openid_configuration(request: Request) -> JSONResponse:
+    """Compatibility alias for clients that probe OIDC discovery first."""
+    if not _base_url:
+        return JSONResponse({"error": "OAuth is not configured"}, status_code=404)
+    return JSONResponse(
+        {
+            "issuer": f"{_base_url}/",
+            "authorization_endpoint": f"{_base_url}/authorize",
+            "token_endpoint": f"{_base_url}/token",
+            "registration_endpoint": f"{_base_url}/register",
+            "scopes_supported": ["dotmd"],
+            "response_types_supported": ["code"],
+            "grant_types_supported": ["authorization_code", "refresh_token"],
+            "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"],
+            "code_challenge_methods_supported": ["S256"],
+        },
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
 @mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
 async def oauth_protected_resource_root(request: Request) -> JSONResponse:
     """Compatibility metadata for clients that probe the issuer root first."""
