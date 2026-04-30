@@ -50,6 +50,10 @@ def _redirect_uri_allowed(uri: str) -> bool:
     return any(normalized.startswith(prefix) for prefix in _allowed_redirect_uri_prefixes())
 
 
+def _uses_redirect_uri_prefix(client_info: OAuthClientInformationFull, prefix: str) -> bool:
+    return any(_normalize_uri(uri).startswith(prefix) for uri in client_info.redirect_uris or [])
+
+
 def _dynamic_registration_enabled() -> bool:
     raw = os.environ.get("DOTMD_OAUTH_DYNAMIC_REGISTRATION", "false")
     return raw.strip().lower() in {"1", "true", "yes", "on"}
@@ -125,6 +129,10 @@ class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
                 error="invalid_redirect_uri",
                 error_description="OAuth client redirect_uri is not allowed",
             )
+        if _uses_redirect_uri_prefix(client_info, "https://chatgpt.com/connector/oauth/"):
+            client_info.token_endpoint_auth_method = "none"
+            client_info.client_secret = None
+            client_info.client_secret_expires_at = None
         async with self._lock:
             self._state["clients"][client_info.client_id] = client_info.model_dump(mode="json")
             await self._flush()

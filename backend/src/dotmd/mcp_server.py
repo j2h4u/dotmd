@@ -22,6 +22,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+from starlette.routing import Route
 
 from dotmd.api.service import DotMDService
 from dotmd.auth import DotMDOAuthProvider
@@ -188,9 +189,7 @@ async def root(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok", "service": "dotmd"})
 
 
-@mcp.custom_route("/.well-known/openid-configuration", methods=["GET"])
-async def openid_configuration(request: Request) -> JSONResponse:
-    """Compatibility alias for clients that probe OIDC discovery first."""
+def _oauth_metadata_response() -> JSONResponse:
     if not _base_url:
         return JSONResponse({"error": "OAuth is not configured"}, status_code=404)
     return JSONResponse(
@@ -202,11 +201,23 @@ async def openid_configuration(request: Request) -> JSONResponse:
             "scopes_supported": ["dotmd"],
             "response_types_supported": ["code"],
             "grant_types_supported": ["authorization_code", "refresh_token"],
-            "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"],
+            "token_endpoint_auth_methods_supported": ["none", "client_secret_post", "client_secret_basic"],
             "code_challenge_methods_supported": ["S256"],
         },
         headers={"Cache-Control": "public, max-age=3600"},
     )
+
+
+@mcp.custom_route("/.well-known/oauth-authorization-server", methods=["GET"])
+async def oauth_authorization_server(request: Request) -> JSONResponse:
+    """OAuth authorization server metadata with ChatGPT-compatible public-client auth."""
+    return _oauth_metadata_response()
+
+
+@mcp.custom_route("/.well-known/openid-configuration", methods=["GET"])
+async def openid_configuration(request: Request) -> JSONResponse:
+    """Compatibility alias for clients that probe OIDC discovery first."""
+    return _oauth_metadata_response()
 
 
 @mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
@@ -301,9 +312,22 @@ def create_app() -> Starlette:
         _service = None
         _feedback = None
 
+    routes = [
+        Route(
+            "/.well-known/oauth-authorization-server",
+            oauth_authorization_server,
+            methods=["GET"],
+        ),
+        *[
+            route
+            for route in mcp_starlette.routes
+            if getattr(route, "path", None) != "/.well-known/oauth-authorization-server"
+        ],
+    ]
+
     return Starlette(
         debug=mcp.settings.debug,
-        routes=mcp_starlette.routes,
+        routes=routes,
         middleware=[
             Middleware(
                 CORSMiddleware,

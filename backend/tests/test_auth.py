@@ -105,6 +105,10 @@ def test_register_allows_chatgpt_connector_redirect_prefix(tmp_path: Path, monke
 
         assert client.client_id is not None
         assert await provider.get_client(client.client_id) == client
+        stored = await provider.get_client(client.client_id)
+        assert stored is not None
+        assert stored.token_endpoint_auth_method == "none"
+        assert stored.client_secret is None
 
     asyncio.run(run())
 
