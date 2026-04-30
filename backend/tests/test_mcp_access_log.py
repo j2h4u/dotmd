@@ -58,6 +58,7 @@ def test_oauth_metadata_explicitly_disables_authorization_iss(monkeypatch) -> No
     response = _oauth_metadata_response()
 
     assert response.status_code == 200
+    assert b'"issuer":"https://dotmd.example"' in response.body
     assert b'"authorization_response_iss_parameter_supported":false' in response.body
 
 
@@ -68,4 +69,5 @@ def test_oauth_protected_resource_metadata_includes_scopes(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert b'"resource":"https://dotmd.example/mcp"' in response.body
+    assert b'"authorization_servers":["https://dotmd.example"]' in response.body
     assert b'"scopes_supported":["dotmd"]' in response.body

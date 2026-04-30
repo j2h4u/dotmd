@@ -371,7 +371,7 @@ def _oauth_metadata_response() -> JSONResponse:
         return JSONResponse({"error": "OAuth is not configured"}, status_code=404)
     return JSONResponse(
         {
-            "issuer": f"{_base_url}/",
+            "issuer": _base_url,
             "authorization_endpoint": f"{_base_url}/authorize",
             "token_endpoint": f"{_base_url}/token",
             "registration_endpoint": f"{_base_url}/register",
@@ -404,7 +404,7 @@ def _oauth_protected_resource_response() -> JSONResponse:
     return JSONResponse(
         {
             "resource": f"{_base_url}/mcp",
-            "authorization_servers": [f"{_base_url}/"],
+            "authorization_servers": [_base_url],
             "scopes_supported": ["dotmd"],
             "bearer_methods_supported": ["header"],
         },
