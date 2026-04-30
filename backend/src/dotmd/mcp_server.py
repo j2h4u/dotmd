@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, model_serializer
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
@@ -182,6 +183,11 @@ async def health(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
+@mcp.custom_route("/", methods=["GET"])
+async def root(request: Request) -> JSONResponse:
+    return JSONResponse({"status": "ok", "service": "dotmd"})
+
+
 def _get_service() -> DotMDService:
     if _service is None:
         raise RuntimeError("Service not initialized — server not started via create_app() or _init_for_stdio()")
@@ -262,7 +268,17 @@ def create_app() -> Starlette:
     return Starlette(
         debug=mcp.settings.debug,
         routes=mcp_starlette.routes,
-        middleware=[*mcp_starlette.user_middleware, Middleware(_AccessLogMiddleware)],
+        middleware=[
+            Middleware(
+                CORSMiddleware,
+                allow_origin_regex=r"https://([a-zA-Z0-9-]+\.)?claude\.ai",
+                allow_methods=["GET", "POST", "OPTIONS"],
+                allow_headers=["*"],
+                expose_headers=["WWW-Authenticate", "Mcp-Session-Id"],
+            ),
+            *mcp_starlette.user_middleware,
+            Middleware(_AccessLogMiddleware),
+        ],
         lifespan=_server_lifespan,
     )
 
