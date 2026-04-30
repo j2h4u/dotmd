@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
 import time
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -116,6 +118,7 @@ Use feedback immediately when a tool response is wrong, surprising, or missing a
 """
 
 _base_url: str = os.environ.get("DOTMD_BASE_URL", "").rstrip("/")
+_ACCESS_LOG_PATH = Path(os.environ.get("DOTMD_ACCESS_LOG_PATH", "/dotmd-index/logs/access.log"))
 
 _provider: DotMDOAuthProvider | None = None
 if _base_url:
@@ -141,6 +144,8 @@ class _AccessLogMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         t0 = time.perf_counter()
+        request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+        summary = await self._request_summary(request)
         response = await call_next(request)
         elapsed_ms = (time.perf_counter() - t0) * 1000
         client = request.client.host if request.client else "-"
@@ -156,7 +161,87 @@ class _AccessLogMiddleware(BaseHTTPMiddleware):
             elapsed_ms,
             client,
         )
+        self._write_jsonl(
+            {
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "request_id": request_id,
+                "method": request.method,
+                "path": str(request.url.path),
+                "query": str(request.url.query),
+                "status": response.status_code,
+                "duration_ms": round(elapsed_ms, 3),
+                "client": client,
+                "user_agent": request.headers.get("user-agent"),
+                "origin": request.headers.get("origin"),
+                "referer": request.headers.get("referer"),
+                "accept": request.headers.get("accept"),
+                "content_type": request.headers.get("content-type"),
+                "request": summary,
+                "response": self._response_summary(response),
+            }
+        )
         return response
+
+    async def _request_summary(self, request: Request) -> dict[str, Any] | None:
+        if request.url.path == "/register":
+            try:
+                body = await request.json()
+            except Exception:
+                return {"parse_error": "invalid_json"}
+            if not isinstance(body, dict):
+                return {"type": type(body).__name__}
+            return {
+                "client_name": body.get("client_name"),
+                "redirect_uris": body.get("redirect_uris"),
+                "grant_types": body.get("grant_types"),
+                "response_types": body.get("response_types"),
+                "scope": body.get("scope"),
+                "token_endpoint_auth_method": body.get("token_endpoint_auth_method"),
+            }
+        if request.url.path == "/token":
+            try:
+                form = await request.form()
+            except Exception:
+                return {"parse_error": "invalid_form"}
+            return {
+                "grant_type": form.get("grant_type"),
+                "client_id": form.get("client_id"),
+                "redirect_uri": form.get("redirect_uri"),
+                "resource": form.get("resource"),
+                "scope": form.get("scope"),
+                "has_code": bool(form.get("code")),
+                "has_code_verifier": bool(form.get("code_verifier")),
+                "has_client_secret": bool(form.get("client_secret")),
+                "has_refresh_token": bool(form.get("refresh_token")),
+            }
+        if request.url.path == "/mcp" and request.method == "POST":
+            try:
+                body = await request.json()
+            except Exception:
+                return None
+            if isinstance(body, dict):
+                params = body.get("params")
+                return {
+                    "jsonrpc_method": body.get("method"),
+                    "jsonrpc_id": body.get("id"),
+                    "tool_name": params.get("name") if isinstance(params, dict) else None,
+                }
+        return None
+
+    def _response_summary(self, response: Response) -> dict[str, Any]:
+        return {
+            "location": response.headers.get("location"),
+            "www_authenticate": response.headers.get("www-authenticate"),
+            "mcp_session_id": response.headers.get("mcp-session-id"),
+        }
+
+    def _write_jsonl(self, record: dict[str, Any]) -> None:
+        try:
+            _ACCESS_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with _ACCESS_LOG_PATH.open("a", encoding="utf-8") as fp:
+                fp.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+        except Exception:
+            logger.exception("Failed to write access log: %s", _ACCESS_LOG_PATH)
 
 
 mcp = FastMCP(
