@@ -11,9 +11,11 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from html import escape
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
+from mcp.server.auth.handlers.authorize import AuthorizationRequest
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -23,7 +25,7 @@ from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
 from dotmd.api.service import DotMDService
@@ -274,6 +276,77 @@ async def root(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok", "service": "dotmd"})
 
 
+@mcp.custom_route("/authorize", methods=["GET"])
+async def authorize(request: Request) -> Response:
+    """Render a minimal OAuth consent page before issuing an authorization code."""
+    if _provider is None:
+        return JSONResponse({"error": "OAuth is not configured"}, status_code=404)
+    if request.query_params.get("__dotmd_confirm") != "1":
+        fields = "\n".join(
+            f'<input type="hidden" name="{escape(key)}" value="{escape(value)}">'
+            for key, value in request.query_params.multi_items()
+        )
+        return HTMLResponse(
+            f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Authorize dotMD</title>
+    <style>
+      body {{ font-family: ui-sans-serif, system-ui, sans-serif; margin: 3rem; max-width: 42rem; }}
+      .card {{ border: 1px solid #ddd; border-radius: 12px; padding: 1.5rem; }}
+      button {{ font: inherit; padding: .75rem 1rem; border-radius: 8px; border: 0; background: #111; color: white; cursor: pointer; }}
+      code {{ background: #f6f6f6; padding: .1rem .3rem; border-radius: 4px; }}
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>Authorize dotMD</h1>
+      <p>Allow this client to access the dotMD MCP server.</p>
+      <p>Scope: <code>{escape(request.query_params.get("scope", "dotmd"))}</code></p>
+      <form method="get" action="/authorize">
+        {fields}
+        <input type="hidden" name="__dotmd_confirm" value="1">
+        <button type="submit">Authorize</button>
+      </form>
+    </main>
+  </body>
+</html>""",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    try:
+        auth_request = AuthorizationRequest.model_validate(request.query_params)
+        client = await _provider.get_client(auth_request.client_id)
+        if client is None:
+            return JSONResponse({"error": "invalid_request", "error_description": "Unknown client_id"}, status_code=400)
+        redirect_uri = client.validate_redirect_uri(auth_request.redirect_uri)
+        scopes = client.validate_scope(auth_request.scope)
+        from mcp.server.auth.provider import AuthorizationParams
+
+        auth_params = AuthorizationParams(
+            state=auth_request.state,
+            scopes=scopes,
+            code_challenge=auth_request.code_challenge,
+            redirect_uri=redirect_uri,
+            redirect_uri_provided_explicitly=auth_request.redirect_uri is not None,
+            resource=auth_request.resource,
+        )
+        return RedirectResponse(
+            url=await _provider.authorize(client, auth_params),
+            status_code=302,
+            headers={"Cache-Control": "no-store"},
+        )
+    except Exception as exc:
+        logger.exception("OAuth authorize failed")
+        return JSONResponse(
+            {"error": "invalid_request", "error_description": str(exc)},
+            status_code=400,
+            headers={"Cache-Control": "no-store"},
+        )
+
+
 def _oauth_metadata_response() -> JSONResponse:
     if not _base_url:
         return JSONResponse({"error": "OAuth is not configured"}, status_code=404)
@@ -398,10 +471,15 @@ def create_app() -> Starlette:
             oauth_authorization_server,
             methods=["GET"],
         ),
+        Route(
+            "/authorize",
+            authorize,
+            methods=["GET"],
+        ),
         *[
             route
             for route in mcp_starlette.routes
-            if getattr(route, "path", None) != "/.well-known/oauth-authorization-server"
+            if getattr(route, "path", None) not in {"/.well-known/oauth-authorization-server", "/authorize"}
         ],
     ]
 
