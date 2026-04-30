@@ -30,7 +30,7 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Re
 from starlette.routing import Route
 
 from dotmd.api.service import DotMDService
-from dotmd.auth import DotMDOAuthProvider
+from dotmd.auth import DotMDOAuthProvider, authorization_response_iss_enabled
 from dotmd.core.config import Settings
 from dotmd.feedback import FeedbackStore
 
@@ -385,7 +385,7 @@ def _oauth_metadata_response() -> JSONResponse:
             "grant_types_supported": ["authorization_code", "refresh_token"],
             "token_endpoint_auth_methods_supported": ["none", "client_secret_post", "client_secret_basic"],
             "code_challenge_methods_supported": ["S256"],
-            "authorization_response_iss_parameter_supported": False,
+            "authorization_response_iss_parameter_supported": authorization_response_iss_enabled(),
         },
         headers={"Cache-Control": "public, max-age=3600"},
     )

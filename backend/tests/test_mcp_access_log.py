@@ -53,14 +53,15 @@ def test_access_log_middleware_does_not_consume_token_form(tmp_path, monkeypatch
     assert '"client_id": "client-1"' in (tmp_path / "access.log").read_text(encoding="utf-8")
 
 
-def test_oauth_metadata_explicitly_disables_authorization_iss(monkeypatch) -> None:
+def test_oauth_metadata_advertises_authorization_iss(monkeypatch) -> None:
     monkeypatch.setattr(mcp_server, "_base_url", "https://dotmd.example")
+    monkeypatch.delenv("DOTMD_OAUTH_AUTHORIZATION_RESPONSE_ISS", raising=False)
 
     response = _oauth_metadata_response()
 
     assert response.status_code == 200
     assert b'"issuer":"https://dotmd.example"' in response.body
-    assert b'"authorization_response_iss_parameter_supported":false' in response.body
+    assert b'"authorization_response_iss_parameter_supported":true' in response.body
 
 
 def test_oauth_protected_resource_metadata_includes_scopes(monkeypatch) -> None:

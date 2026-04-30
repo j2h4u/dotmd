@@ -181,6 +181,18 @@ def test_authorize_stores_code_and_returns_redirect(tmp_path: Path, monkeypatch)
     asyncio.run(run())
 
 
+def test_authorize_includes_issuer_when_configured(tmp_path: Path, monkeypatch) -> None:
+    async def run() -> None:
+        monkeypatch.setenv("DOTMD_BASE_URL", "https://dotmd.example")
+        provider = _provider(tmp_path, monkeypatch)
+        redirect = await provider.authorize(_client(), _params())
+        query = _query(redirect)
+
+        assert query["iss"] == ["https://dotmd.example"]
+
+    asyncio.run(run())
+
+
 def test_load_authorization_code(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
         provider = _provider(tmp_path, monkeypatch)
