@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager, suppress
 from html import escape
 from pathlib import Path
 from typing import Annotated, Any, Literal
+from urllib.parse import parse_qs
 
 from mcp.server.auth.handlers.authorize import AuthorizationRequest
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
@@ -147,7 +148,8 @@ class _AccessLogMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         t0 = time.perf_counter()
         request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
-        summary = await self._request_summary(request)
+        body = await self._body_for_logging(request)
+        summary = self._request_summary(request, body)
         response = await call_next(request)
         elapsed_ms = (time.perf_counter() - t0) * 1000
         client = request.client.host if request.client else "-"
@@ -184,25 +186,42 @@ class _AccessLogMiddleware(BaseHTTPMiddleware):
         )
         return response
 
-    async def _request_summary(self, request: Request) -> dict[str, Any] | None:
+    async def _body_for_logging(self, request: Request) -> bytes | None:
+        if request.url.path not in {"/register", "/token", "/mcp"}:
+            return None
+        try:
+            body = await request.body()
+        except Exception:
+            return None
+
+        async def receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        # BaseHTTPMiddleware does not guarantee downstream handlers can reread
+        # form bodies after middleware consumes them. Replay the exact bytes so
+        # OAuth token parsing still sees client_id/code/code_verifier.
+        request._receive = receive  # type: ignore[method-assign]
+        return body
+
+    def _request_summary(self, request: Request, body: bytes | None) -> dict[str, Any] | None:
         if request.url.path == "/register":
             try:
-                body = await request.json()
+                payload = json.loads((body or b"").decode("utf-8"))
             except Exception:
                 return {"parse_error": "invalid_json"}
-            if not isinstance(body, dict):
-                return {"type": type(body).__name__}
+            if not isinstance(payload, dict):
+                return {"type": type(payload).__name__}
             return {
-                "client_name": body.get("client_name"),
-                "redirect_uris": body.get("redirect_uris"),
-                "grant_types": body.get("grant_types"),
-                "response_types": body.get("response_types"),
-                "scope": body.get("scope"),
-                "token_endpoint_auth_method": body.get("token_endpoint_auth_method"),
+                "client_name": payload.get("client_name"),
+                "redirect_uris": payload.get("redirect_uris"),
+                "grant_types": payload.get("grant_types"),
+                "response_types": payload.get("response_types"),
+                "scope": payload.get("scope"),
+                "token_endpoint_auth_method": payload.get("token_endpoint_auth_method"),
             }
         if request.url.path == "/token":
             try:
-                form = await request.form()
+                form = {key: values[-1] for key, values in parse_qs((body or b"").decode("utf-8")).items()}
             except Exception:
                 return {"parse_error": "invalid_form"}
             return {
@@ -218,14 +237,14 @@ class _AccessLogMiddleware(BaseHTTPMiddleware):
             }
         if request.url.path == "/mcp" and request.method == "POST":
             try:
-                body = await request.json()
+                payload = json.loads((body or b"").decode("utf-8"))
             except Exception:
                 return None
-            if isinstance(body, dict):
-                params = body.get("params")
+            if isinstance(payload, dict):
+                params = payload.get("params")
                 return {
-                    "jsonrpc_method": body.get("method"),
-                    "jsonrpc_id": body.get("id"),
+                    "jsonrpc_method": payload.get("method"),
+                    "jsonrpc_id": payload.get("id"),
                     "tool_name": params.get("name") if isinstance(params, dict) else None,
                 }
         return None
