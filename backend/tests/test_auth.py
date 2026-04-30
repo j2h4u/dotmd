@@ -169,6 +169,7 @@ def test_rejects_dynamic_registration_by_default(tmp_path: Path, monkeypatch) ->
 
 def test_authorize_stores_code_and_returns_redirect(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
+        monkeypatch.delenv("DOTMD_BASE_URL", raising=False)
         provider = _provider(tmp_path, monkeypatch)
         redirect = await provider.authorize(_client(), _params())
         query = _query(redirect)

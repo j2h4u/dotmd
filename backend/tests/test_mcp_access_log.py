@@ -10,7 +10,6 @@ from starlette.testclient import TestClient
 from dotmd import mcp_server
 from dotmd.mcp_server import (
     _AccessLogMiddleware,
-    _oauth_consent_required,
     _oauth_metadata_response,
     _oauth_protected_resource_response,
 )
@@ -55,7 +54,6 @@ def test_access_log_middleware_does_not_consume_token_form(tmp_path, monkeypatch
 
 def test_oauth_metadata_advertises_authorization_iss(monkeypatch) -> None:
     monkeypatch.setattr(mcp_server, "_base_url", "https://dotmd.example")
-    monkeypatch.delenv("DOTMD_OAUTH_AUTHORIZATION_RESPONSE_ISS", raising=False)
 
     response = _oauth_metadata_response()
 
@@ -73,11 +71,3 @@ def test_oauth_protected_resource_metadata_includes_scopes(monkeypatch) -> None:
     assert b'"resource":"https://dotmd.example/mcp"' in response.body
     assert b'"authorization_servers":["https://dotmd.example"]' in response.body
     assert b'"scopes_supported":["dotmd"]' in response.body
-
-
-def test_oauth_consent_page_is_opt_in(monkeypatch) -> None:
-    monkeypatch.delenv("DOTMD_OAUTH_REQUIRE_CONSENT", raising=False)
-    assert _oauth_consent_required() is False
-
-    monkeypatch.setenv("DOTMD_OAUTH_REQUIRE_CONSENT", "true")
-    assert _oauth_consent_required() is True

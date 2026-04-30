@@ -11,7 +11,6 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
-from html import escape
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import parse_qs
@@ -26,11 +25,11 @@ from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
 from dotmd.api.service import DotMDService
-from dotmd.auth import DotMDOAuthProvider, authorization_response_iss_enabled
+from dotmd.auth import DotMDOAuthProvider
 from dotmd.core.config import Settings
 from dotmd.feedback import FeedbackStore
 
@@ -126,11 +125,6 @@ _ACCESS_LOG_PATH = Path(os.environ.get("DOTMD_ACCESS_LOG_PATH", "/dotmd-index/lo
 _provider: DotMDOAuthProvider | None = None
 if _base_url:
     _provider = DotMDOAuthProvider(Path("/dotmd-index/oauth_state.json"))
-
-
-def _oauth_consent_required() -> bool:
-    raw = os.environ.get("DOTMD_OAUTH_REQUIRE_CONSENT", "false")
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _auth_settings(base_url: str) -> AuthSettings:
@@ -302,43 +296,9 @@ async def root(request: Request) -> JSONResponse:
 
 @mcp.custom_route("/authorize", methods=["GET"])
 async def authorize(request: Request) -> Response:
-    """Issue an authorization code, with an optional local consent page."""
+    """Issue an authorization code and redirect back to the registered client."""
     if _provider is None:
         return JSONResponse({"error": "OAuth is not configured"}, status_code=404)
-    if _oauth_consent_required() and request.query_params.get("__dotmd_confirm") != "1":
-        fields = "\n".join(
-            f'<input type="hidden" name="{escape(key)}" value="{escape(value)}">'
-            for key, value in request.query_params.multi_items()
-        )
-        return HTMLResponse(
-            f"""<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Authorize dotMD</title>
-    <style>
-      body {{ font-family: ui-sans-serif, system-ui, sans-serif; margin: 3rem; max-width: 42rem; }}
-      .card {{ border: 1px solid #ddd; border-radius: 12px; padding: 1.5rem; }}
-      button {{ font: inherit; padding: .75rem 1rem; border-radius: 8px; border: 0; background: #111; color: white; cursor: pointer; }}
-      code {{ background: #f6f6f6; padding: .1rem .3rem; border-radius: 4px; }}
-    </style>
-  </head>
-  <body>
-    <main class="card">
-      <h1>Authorize dotMD</h1>
-      <p>Allow this client to access the dotMD MCP server.</p>
-      <p>Scope: <code>{escape(request.query_params.get("scope", "dotmd"))}</code></p>
-      <form method="get" action="/authorize">
-        {fields}
-        <input type="hidden" name="__dotmd_confirm" value="1">
-        <button type="submit">Authorize</button>
-      </form>
-    </main>
-  </body>
-</html>""",
-            headers={"Cache-Control": "no-store"},
-        )
 
     try:
         auth_request = AuthorizationRequest.model_validate(request.query_params)
@@ -385,7 +345,7 @@ def _oauth_metadata_response() -> JSONResponse:
             "grant_types_supported": ["authorization_code", "refresh_token"],
             "token_endpoint_auth_methods_supported": ["none", "client_secret_post", "client_secret_basic"],
             "code_challenge_methods_supported": ["S256"],
-            "authorization_response_iss_parameter_supported": authorization_response_iss_enabled(),
+            "authorization_response_iss_parameter_supported": True,
         },
         headers={"Cache-Control": "public, max-age=3600"},
     )
@@ -394,12 +354,6 @@ def _oauth_metadata_response() -> JSONResponse:
 @mcp.custom_route("/.well-known/oauth-authorization-server", methods=["GET"])
 async def oauth_authorization_server(request: Request) -> JSONResponse:
     """OAuth authorization server metadata with ChatGPT-compatible public-client auth."""
-    return _oauth_metadata_response()
-
-
-@mcp.custom_route("/.well-known/oauth-authorization-server/mcp", methods=["GET"])
-async def oauth_authorization_server_mcp(request: Request) -> JSONResponse:
-    """Compatibility alias for clients that resolve AS metadata by resource path."""
     return _oauth_metadata_response()
 
 
