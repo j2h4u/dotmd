@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 _ACCESS_TOKEN_LIFETIME_SECONDS = 86400 * 30
 _AUTH_CODE_LIFETIME_SECONDS = 300
 _DEFAULT_ALLOWED_REDIRECT_URIS = ("https://claude.ai/api/mcp/auth_callback",)
+_DEFAULT_ALLOWED_REDIRECT_URI_PREFIXES = ("https://chatgpt.com/connector/oauth/",)
 
 
 def _allowed_redirect_uris() -> set[str]:
@@ -33,6 +34,20 @@ def _allowed_redirect_uris() -> set[str]:
     if raw is None:
         return set(_DEFAULT_ALLOWED_REDIRECT_URIS)
     return {uri.strip().rstrip("/") for uri in raw.split(",") if uri.strip()}
+
+
+def _allowed_redirect_uri_prefixes() -> tuple[str, ...]:
+    raw = os.environ.get("DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES")
+    if raw is None:
+        return _DEFAULT_ALLOWED_REDIRECT_URI_PREFIXES
+    return tuple(uri.strip() for uri in raw.split(",") if uri.strip())
+
+
+def _redirect_uri_allowed(uri: str) -> bool:
+    normalized = _normalize_uri(uri)
+    if normalized in _allowed_redirect_uris():
+        return True
+    return any(normalized.startswith(prefix) for prefix in _allowed_redirect_uri_prefixes())
 
 
 def _dynamic_registration_enabled() -> bool:
@@ -99,9 +114,8 @@ class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
                 error="invalid_client_metadata",
                 error_description="OAuth dynamic client registration is disabled",
             )
-        allowed = _allowed_redirect_uris()
         redirect_uris = {_normalize_uri(uri) for uri in client_info.redirect_uris or []}
-        if not redirect_uris or not redirect_uris <= allowed:
+        if not redirect_uris or not all(_redirect_uri_allowed(uri) for uri in redirect_uris):
             logger.warning(
                 "OAuth: rejected client registration client_id=%s redirect_uris=%s",
                 client_info.client_id,
@@ -120,7 +134,7 @@ class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
         client_id = _require_client_id(client)
         client_redirects = {_normalize_uri(uri) for uri in client.redirect_uris or []}
         redirect_uri = _normalize_uri(params.redirect_uri)
-        if redirect_uri not in client_redirects or redirect_uri not in _allowed_redirect_uris():
+        if redirect_uri not in client_redirects or not _redirect_uri_allowed(redirect_uri):
             logger.warning(
                 "OAuth: rejected authorization client_id=%s redirect_uri=%s",
                 client_id,

@@ -27,6 +27,17 @@ def _client() -> OAuthClientInformationFull:
     )
 
 
+def _client_with_redirect(redirect_uri: str) -> OAuthClientInformationFull:
+    return OAuthClientInformationFull.model_validate(
+        {
+            "client_id": "client-1",
+            "client_secret": "secret-1",
+            "redirect_uris": [redirect_uri],
+            "scope": "dotmd",
+        }
+    )
+
+
 def _params(state: str | None = "state-1") -> AuthorizationParams:
     return AuthorizationParams.model_validate(
         {
@@ -75,6 +86,66 @@ def test_rejects_unallowed_redirect_uri(tmp_path: Path, monkeypatch) -> None:
             await provider.register_client(_client())
         assert exc_info.value.error == "invalid_redirect_uri"
         assert exc_info.value.error_description == "OAuth client redirect_uri is not allowed"
+
+    asyncio.run(run())
+
+
+def test_register_allows_chatgpt_connector_redirect_prefix(tmp_path: Path, monkeypatch) -> None:
+    async def run() -> None:
+        monkeypatch.setenv("DOTMD_OAUTH_DYNAMIC_REGISTRATION", "true")
+        monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
+        monkeypatch.setenv(
+            "DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES",
+            "https://chatgpt.com/connector/oauth/",
+        )
+        provider = DotMDOAuthProvider(tmp_path / "oauth_state.json")
+        client = _client_with_redirect("https://chatgpt.com/connector/oauth/elZoTEQOgIRd")
+
+        await provider.register_client(client)
+
+        assert client.client_id is not None
+        assert await provider.get_client(client.client_id) == client
+
+    asyncio.run(run())
+
+
+def test_authorize_allows_registered_chatgpt_connector_redirect_prefix(tmp_path: Path, monkeypatch) -> None:
+    async def run() -> None:
+        monkeypatch.setenv("DOTMD_OAUTH_DYNAMIC_REGISTRATION", "true")
+        monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
+        monkeypatch.setenv(
+            "DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES",
+            "https://chatgpt.com/connector/oauth/",
+        )
+        provider = DotMDOAuthProvider(tmp_path / "oauth_state.json")
+        redirect_uri = "https://chatgpt.com/connector/oauth/elZoTEQOgIRd"
+        client = _client_with_redirect(redirect_uri)
+        params = _params()
+        params.redirect_uri = redirect_uri
+
+        redirect = await provider.authorize(client, params)
+
+        assert redirect.startswith(f"{redirect_uri}?")
+        assert "code" in _query(redirect)
+
+    asyncio.run(run())
+
+
+def test_register_rejects_chatgpt_lookalike_redirect_prefix(tmp_path: Path, monkeypatch) -> None:
+    async def run() -> None:
+        monkeypatch.setenv("DOTMD_OAUTH_DYNAMIC_REGISTRATION", "true")
+        monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
+        monkeypatch.setenv(
+            "DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES",
+            "https://chatgpt.com/connector/oauth/",
+        )
+        provider = DotMDOAuthProvider(tmp_path / "oauth_state.json")
+        client = _client_with_redirect("https://chatgpt.com.evil.example/connector/oauth/elZoTEQOgIRd")
+
+        with pytest.raises(RegistrationError) as exc_info:
+            await provider.register_client(client)
+
+        assert exc_info.value.error == "invalid_redirect_uri"
 
     asyncio.run(run())
 
