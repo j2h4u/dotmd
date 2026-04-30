@@ -34,7 +34,9 @@ fi
 
 cd "$SRC_ROOT"
 
-echo "==> ENVIRONMENT=dev — running pre-flight gate" >&2
+echo "==> ════════════════════════════════════════════════" >&2
+echo "==> PRE-FLIGHT GATE  $(date '+%Y-%m-%d %H:%M:%S')" >&2
+echo "==> ════════════════════════════════════════════════" >&2
 
 echo "==> [1/3] ruff" >&2
 ruff check --cache-dir /tmp/.ruff_cache src/ tests/ devtools/ >&2
@@ -43,7 +45,7 @@ echo "==> [2/3] pyright ratchet" >&2
 python3 devtools/pyright_ratchet.py >&2
 
 echo "==> [3/3] e2e smoke (server in background, auth disabled)" >&2
-DOTMD_BASE_URL= $SERVE_CMD &
+env -u DOTMD_BASE_URL $SERVE_CMD &
 SERVER_PID=$!
 
 cleanup_and_exit() {
@@ -73,7 +75,7 @@ done
 # Run e2e against the running server.  pytest writes its cache under cwd
 # which is read-only, so redirect cache + tmpdir to /tmp.
 export PYTEST_DEBUG_TEMPROOT=/tmp
-if DOTMD_BASE_URL= pytest -p no:cacheprovider tests/e2e/ --tb=short -q >&2; then
+if env -u DOTMD_BASE_URL pytest -p no:cacheprovider tests/e2e/ --tb=short -q >&2; then
     echo "==> Pre-flight passed — starting final server" >&2
     kill -TERM $SERVER_PID 2>/dev/null || true
     wait $SERVER_PID 2>/dev/null || true
