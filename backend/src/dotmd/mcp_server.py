@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
+from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
@@ -17,6 +20,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from dotmd.api.service import DotMDService
+from dotmd.auth import DotMDOAuthProvider
 from dotmd.core.config import Settings
 from dotmd.core.models import IndexStats
 from dotmd.feedback import FeedbackStore
@@ -87,6 +91,12 @@ CHECK BEFORE CONCLUDING: Before telling the user a topic is not in the knowledge
 Use SubmitFeedback immediately when a tool response is wrong, surprising, or missing a useful capability — don't wait until end of session.\
 """
 
+_base_url: str = os.environ.get("DOTMD_BASE_URL", "").rstrip("/")
+
+_provider: DotMDOAuthProvider | None = None
+if _base_url:
+    _provider = DotMDOAuthProvider(Path("/dotmd-index/oauth_state.json"))
+
 mcp = FastMCP(
     "dotmd",
     instructions=_INSTRUCTIONS,
@@ -102,6 +112,16 @@ mcp = FastMCP(
     # connection for stateless HTTP), not once per server process.
     # - HTTP: server-wide init (service + trickle) lives in create_app() below.
     # - stdio: caller must invoke _init_for_stdio() before mcp_app.run().
+    auth_server_provider=_provider,
+    auth=AuthSettings(
+        issuer_url=_base_url,
+        resource_server_url=f"{_base_url}/mcp",
+        client_registration_options=ClientRegistrationOptions(
+            enabled=True,
+            valid_scopes=["dotmd"],
+            default_scopes=["dotmd"],
+        ),
+    ) if _base_url else None,
 )
 
 
