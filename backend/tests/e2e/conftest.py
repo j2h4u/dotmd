@@ -12,20 +12,26 @@ Run inside container:
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import json
 import os
+import secrets
 import threading
 from collections.abc import Callable
 from contextlib import AsyncExitStack
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 import pytest
 
 MCP_URL = "http://localhost:8080/mcp"
+AUTH_BASE_URL = "http://localhost:8080"
 _MCP_HEADERS = {
     "Content-Type": "application/json",
     "Accept": "application/json, text/event-stream",
 }
+_HTTP_ACCESS_TOKEN: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -62,10 +68,71 @@ def _is_tool_error(data: dict) -> bool:
 # HTTP transport
 # ---------------------------------------------------------------------------
 
+def _http_access_token() -> str | None:
+    """Return a cached OAuth access token when HTTP auth is enabled."""
+    global _HTTP_ACCESS_TOKEN
+
+    if not os.environ.get("DOTMD_BASE_URL"):
+        return None
+    if _HTTP_ACCESS_TOKEN:
+        return _HTTP_ACCESS_TOKEN
+
+    register = httpx.post(
+        f"{AUTH_BASE_URL}/register",
+        json={
+            "client_name": "dotmd-e2e",
+            "redirect_uris": ["http://localhost:8888/callback"],
+            "grant_types": ["authorization_code", "refresh_token"],
+        },
+        timeout=60.0,
+    )
+    register.raise_for_status()
+    client_id = register.json()["client_id"]
+
+    verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
+    challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode()).digest()
+    ).rstrip(b"=").decode()
+    authorize = httpx.get(
+        f"{AUTH_BASE_URL}/authorize?{urlencode({
+            'client_id': client_id,
+            'redirect_uri': 'http://localhost:8888/callback',
+            'response_type': 'code',
+            'code_challenge': challenge,
+            'code_challenge_method': 'S256',
+            'state': 'e2e',
+        })}",
+        follow_redirects=False,
+        timeout=60.0,
+    )
+    assert authorize.status_code == 302
+    location = authorize.headers["location"]
+    code = parse_qs(urlparse(location).query)["code"][0]
+
+    token = httpx.post(
+        f"{AUTH_BASE_URL}/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": "http://localhost:8888/callback",
+            "client_id": client_id,
+            "code_verifier": verifier,
+        },
+        timeout=60.0,
+    )
+    token.raise_for_status()
+    _HTTP_ACCESS_TOKEN = token.json()["access_token"]
+    return _HTTP_ACCESS_TOKEN
+
+
 def _http_call(method: str, params: dict | None = None) -> dict:
     """Single stateless JSON-RPC POST — no session required."""
     body = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}}
-    resp = httpx.post(MCP_URL, json=body, headers=_MCP_HEADERS, timeout=60.0)
+    headers = dict(_MCP_HEADERS)
+    token = _http_access_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    resp = httpx.post(MCP_URL, json=body, headers=headers, timeout=60.0)
     resp.raise_for_status()
     return resp.json()
 
