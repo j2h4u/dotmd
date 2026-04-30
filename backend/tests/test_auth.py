@@ -41,6 +41,7 @@ def _params(state: str | None = "state-1") -> AuthorizationParams:
 
 
 def _provider(tmp_path: Path, monkeypatch) -> DotMDOAuthProvider:
+    monkeypatch.setenv("DOTMD_OAUTH_DYNAMIC_REGISTRATION", "true")
     monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
     return DotMDOAuthProvider(tmp_path / "oauth_state.json")
 
@@ -65,13 +66,28 @@ def test_register_and_get_client(tmp_path: Path, monkeypatch) -> None:
     asyncio.run(run())
 
 
-def test_rejects_unallowed_redirect_uri(tmp_path: Path) -> None:
+def test_rejects_unallowed_redirect_uri(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
+        monkeypatch.setenv("DOTMD_OAUTH_DYNAMIC_REGISTRATION", "true")
+        monkeypatch.delenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", raising=False)
         provider = DotMDOAuthProvider(tmp_path / "oauth_state.json")
         with pytest.raises(RegistrationError) as exc_info:
             await provider.register_client(_client())
         assert exc_info.value.error == "invalid_redirect_uri"
         assert exc_info.value.error_description == "OAuth client redirect_uri is not allowed"
+
+    asyncio.run(run())
+
+
+def test_rejects_dynamic_registration_by_default(tmp_path: Path, monkeypatch) -> None:
+    async def run() -> None:
+        monkeypatch.delenv("DOTMD_OAUTH_DYNAMIC_REGISTRATION", raising=False)
+        monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
+        provider = DotMDOAuthProvider(tmp_path / "oauth_state.json")
+        with pytest.raises(RegistrationError) as exc_info:
+            await provider.register_client(_client())
+        assert exc_info.value.error == "invalid_client_metadata"
+        assert exc_info.value.error_description == "OAuth dynamic client registration is disabled"
 
     asyncio.run(run())
 
@@ -211,6 +227,7 @@ def test_revoke_token_removes_token_without_error(tmp_path: Path, monkeypatch) -
 def test_json_persistence(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
         state_path = tmp_path / "oauth_state.json"
+        monkeypatch.setenv("DOTMD_OAUTH_DYNAMIC_REGISTRATION", "true")
         monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
         provider = DotMDOAuthProvider(state_path)
         client = _client()

@@ -35,6 +35,11 @@ def _allowed_redirect_uris() -> set[str]:
     return {uri.strip().rstrip("/") for uri in raw.split(",") if uri.strip()}
 
 
+def _dynamic_registration_enabled() -> bool:
+    raw = os.environ.get("DOTMD_OAUTH_DYNAMIC_REGISTRATION", "false")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _normalize_uri(uri: object) -> str:
     return str(uri).rstrip("/")
 
@@ -85,6 +90,15 @@ class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         if not client_info.client_id:
             raise ValueError("OAuth client registration requires client_id")
+        if not _dynamic_registration_enabled():
+            logger.warning(
+                "OAuth: rejected client registration client_id=%s reason=dynamic_registration_disabled",
+                client_info.client_id,
+            )
+            raise RegistrationError(
+                error="invalid_client_metadata",
+                error_description="OAuth dynamic client registration is disabled",
+            )
         allowed = _allowed_redirect_uris()
         redirect_uris = {_normalize_uri(uri) for uri in client_info.redirect_uris or []}
         if not redirect_uris or not redirect_uris <= allowed:

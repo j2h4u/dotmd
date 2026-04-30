@@ -73,7 +73,25 @@ client can register itself, receive an authorization code at its own callback,
 exchange it for a token, and then call `search`/`read` against the personal
 knowledgebase.
 
-dotMD therefore allowlists redirect URIs. The default is:
+dotMD therefore disables dynamic client registration by default and also
+allowlists redirect URIs when registration is temporarily enabled.
+
+Normal steady state:
+
+```env
+DOTMD_OAUTH_DYNAMIC_REGISTRATION=false
+```
+
+Initial connector setup or deliberate re-pairing:
+
+```env
+DOTMD_OAUTH_DYNAMIC_REGISTRATION=true
+```
+
+After Claude connects successfully, set it back to `false` and recreate the
+container. Existing registered clients and refresh tokens continue to work.
+
+The default allowed redirect URI is:
 
 ```text
 https://claude.ai/api/mcp/auth_callback
@@ -97,7 +115,17 @@ curl -i -X POST https://senbonzakura.tailf87223.ts.net/register \
 # HTTP/2 400
 # {"error":"invalid_redirect_uri",...}
 
-# Claude callback must still be accepted.
+# With dynamic registration disabled, even a Claude callback must be rejected.
+curl -i -X POST https://senbonzakura.tailf87223.ts.net/register \
+  -H 'Content-Type: application/json' \
+  -d '{"client_name":"Claude","redirect_uris":["https://claude.ai/api/mcp/auth_callback"],"grant_types":["authorization_code","refresh_token"]}'
+
+# Expected in steady state:
+# HTTP/2 400
+# {"error":"invalid_client_metadata","error_description":"OAuth dynamic client registration is disabled"}
+
+# Claude callback should be accepted only during intentional setup with
+# DOTMD_OAUTH_DYNAMIC_REGISTRATION=true.
 curl -i -X POST https://senbonzakura.tailf87223.ts.net/register \
   -H 'Content-Type: application/json' \
   -d '{"client_name":"Claude","redirect_uris":["https://claude.ai/api/mcp/auth_callback"],"grant_types":["authorization_code","refresh_token"]}'
