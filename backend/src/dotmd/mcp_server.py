@@ -300,12 +300,6 @@ async def oauth_authorization_server(request: Request) -> JSONResponse:
     return _oauth_metadata_response()
 
 
-@mcp.custom_route("/.well-known/openid-configuration", methods=["GET"])
-async def openid_configuration(request: Request) -> JSONResponse:
-    """Compatibility alias for clients that probe OIDC discovery first."""
-    return _oauth_metadata_response()
-
-
 @mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
 async def oauth_protected_resource_root(request: Request) -> JSONResponse:
     """Compatibility metadata for clients that probe the issuer root first."""
