@@ -380,6 +380,7 @@ def _oauth_metadata_response() -> JSONResponse:
             "grant_types_supported": ["authorization_code", "refresh_token"],
             "token_endpoint_auth_methods_supported": ["none", "client_secret_post", "client_secret_basic"],
             "code_challenge_methods_supported": ["S256"],
+            "authorization_response_iss_parameter_supported": False,
         },
         headers={"Cache-Control": "public, max-age=3600"},
     )
@@ -391,19 +392,36 @@ async def oauth_authorization_server(request: Request) -> JSONResponse:
     return _oauth_metadata_response()
 
 
-@mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
-async def oauth_protected_resource_root(request: Request) -> JSONResponse:
-    """Compatibility metadata for clients that probe the issuer root first."""
+@mcp.custom_route("/.well-known/oauth-authorization-server/mcp", methods=["GET"])
+async def oauth_authorization_server_mcp(request: Request) -> JSONResponse:
+    """Compatibility alias for clients that resolve AS metadata by resource path."""
+    return _oauth_metadata_response()
+
+
+def _oauth_protected_resource_response() -> JSONResponse:
     if not _base_url:
         return JSONResponse({"error": "OAuth is not configured"}, status_code=404)
     return JSONResponse(
         {
             "resource": f"{_base_url}/mcp",
             "authorization_servers": [f"{_base_url}/"],
+            "scopes_supported": ["dotmd"],
             "bearer_methods_supported": ["header"],
         },
         headers={"Cache-Control": "public, max-age=3600"},
     )
+
+
+@mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
+async def oauth_protected_resource_root(request: Request) -> JSONResponse:
+    """Compatibility metadata for clients that probe the issuer root first."""
+    return _oauth_protected_resource_response()
+
+
+@mcp.custom_route("/.well-known/oauth-protected-resource/mcp", methods=["GET"])
+async def oauth_protected_resource_mcp(request: Request) -> JSONResponse:
+    """Protected-resource metadata for the canonical /mcp resource URL."""
+    return _oauth_protected_resource_response()
 
 
 def _get_service() -> DotMDService:
@@ -490,6 +508,16 @@ def create_app() -> Starlette:
             methods=["GET"],
         ),
         Route(
+            "/.well-known/oauth-protected-resource",
+            oauth_protected_resource_root,
+            methods=["GET"],
+        ),
+        Route(
+            "/.well-known/oauth-protected-resource/mcp",
+            oauth_protected_resource_mcp,
+            methods=["GET"],
+        ),
+        Route(
             "/authorize",
             authorize,
             methods=["GET"],
@@ -497,7 +525,13 @@ def create_app() -> Starlette:
         *[
             route
             for route in mcp_starlette.routes
-            if getattr(route, "path", None) not in {"/.well-known/oauth-authorization-server", "/authorize"}
+            if getattr(route, "path", None)
+            not in {
+                "/.well-known/oauth-authorization-server",
+                "/.well-known/oauth-protected-resource",
+                "/.well-known/oauth-protected-resource/mcp",
+                "/authorize",
+            }
         ],
     ]
 

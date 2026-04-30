@@ -8,7 +8,11 @@ from starlette.routing import Route
 from starlette.testclient import TestClient
 
 from dotmd import mcp_server
-from dotmd.mcp_server import _AccessLogMiddleware
+from dotmd.mcp_server import (
+    _AccessLogMiddleware,
+    _oauth_metadata_response,
+    _oauth_protected_resource_response,
+)
 
 
 async def _token_echo(request: Request) -> JSONResponse:
@@ -46,3 +50,22 @@ def test_access_log_middleware_does_not_consume_token_form(tmp_path, monkeypatch
         "has_code_verifier": True,
     }
     assert '"client_id": "client-1"' in (tmp_path / "access.log").read_text(encoding="utf-8")
+
+
+def test_oauth_metadata_explicitly_disables_authorization_iss(monkeypatch) -> None:
+    monkeypatch.setattr(mcp_server, "_base_url", "https://dotmd.example")
+
+    response = _oauth_metadata_response()
+
+    assert response.status_code == 200
+    assert b'"authorization_response_iss_parameter_supported":false' in response.body
+
+
+def test_oauth_protected_resource_metadata_includes_scopes(monkeypatch) -> None:
+    monkeypatch.setattr(mcp_server, "_base_url", "https://dotmd.example")
+
+    response = _oauth_protected_resource_response()
+
+    assert response.status_code == 200
+    assert b'"resource":"https://dotmd.example/mcp"' in response.body
+    assert b'"scopes_supported":["dotmd"]' in response.body
