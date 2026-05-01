@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     reranker_backend: Literal["cross_encoder"] = "cross_encoder"
     reranker_url: str | None = None
     reranker_model: str = "Qwen/Qwen3-Reranker-0.6B"
+    reranker_name: str = "qwen3-0.6b"
+    reranker_compare_names: str = "qwen3-0.6b,msmarco-minilm,mmarco-minilm,gte-multilingual"
     reranker_relevance_floor: float | None = None
     reranker_length_penalty: bool = True  # penalize very short chunks
     reranker_min_length: int = 50  # chars below which penalty applies
@@ -235,6 +237,15 @@ class Settings(BaseSettings):
                 key, val = pair.split("=", 1)
                 result[key.strip()] = float(val.strip())
         return result
+
+    @property
+    def parsed_reranker_compare_names(self) -> list[str]:
+        """Return configured reranker comparison names as a cleaned list."""
+        return [
+            name.strip()
+            for name in self.reranker_compare_names.split(",")
+            if name.strip()
+        ]
 
     @property
     def config_path(self) -> Path:
