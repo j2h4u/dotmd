@@ -113,6 +113,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 | 15. Content-addressed caching | 3/3 | Complete | 2026-04-24 |
 | 16. Content-dedup schema | 6/6 | Complete   | 2026-04-25 |
 | 17. MCP OAuth 2.0 — Claude Desktop connector | 3/3 | Complete   | 2026-04-30 |
+| 18. Multilingual Reranker | 0/1 | Planned | — |
 
 ### Phase 17: MCP OAuth 2.0 — Claude Desktop remote connector support
 
@@ -129,6 +130,24 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [x] 17-03-PLAN.md — Wire auth into mcp_server.py, end-to-end OAuth flow verification
+
+---
+
+### Phase 18: Multilingual Reranker
+
+**Goal:** Replace or rework the English-oriented reranker so Russian and multilingual queries are not degraded by noisy cross-encoder scores.
+**Backlog source:** 999.20
+**Requirements:** RERANK-SELECT-01, RERANK-SELECT-02, RERANK-SELECT-03, SCORE-01
+**Plans:** 1 plan pending
+
+Phase boundary:
+- Choose a reranker strategy from public multilingual/Russian benchmark evidence available by May 2026.
+- Do not build a local dotMD quality benchmark harness or curated eval set for this phase.
+- Implement `Qwen/Qwen3-Reranker-0.6B` as the first target; ContextualAI rerank-v2 and Jina v3 remain alternates if Qwen integration or latency fails.
+- Fix score-floor/empty-rerank behavior so fused search results are not erased.
+
+Plans:
+- [ ] 18-01-PLAN.md — Implement Qwen3 0.6B multilingual reranker
 
 ---
 
@@ -410,33 +429,6 @@ Plans:
 ### Phase 999.18: Extend devtools MCP client to support HTTP/streamable-http transport (BACKLOG)
 
 **Goal:** Extend `backend/devtools/mcp_client/` to support HTTP transport alongside existing stdio. Accept a URL, connect via `streamablehttp_client`, run MCP initialize + tool calls — same interface as current stdio client.
-**Requirements:** TBD
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (promote with /gsd-review-backlog when ready)
-
----
-
-### Phase 999.20: Заменить English-only reranker на мультиязычный (BACKLOG)
-
-**Goal:** Текущий cross-encoder `cross-encoder/ms-marco-MiniLM-L-6-v2` обучен только на английском (MS MARCO). При русскоязычных запросах выдаёт бессмысленные скоры, что убивает качество семантического поиска — выживают только точные FTS5-совпадения. Заменить на мультиязычную модель.
-
-**Контекст:** Blend в пайплайне — `0.4 * norm_fused + 0.6 * norm_re`. При garbage-скорах cross-encoder для русского текста 60% веса на шум = семантика теряется.
-
-**Кандидаты (апрель 2026):**
-
-| Модель | Параметры | Обновление | CPU-скорость | Примечание |
-|--------|----------|------------|-------------|-----------|
-| `cross-encoder/ms-marco-MiniLM-L-6-v2` (**текущий**) | ~66M | 2021 | Быстро | English-only, не работает на русском |
-| `Alibaba-NLP/gte-multilingual-reranker-base` | 306M | Март 2024 | Быстрее всех среди мультиязычных | TEI-native (нужен отдельный TEI-инстанс), Apache 2.0 |
-| `BAAI/bge-reranker-v2-m3` | 568M | Фев 2024 | ~2x медленнее gte | 9.1M скачиваний/мес, самый проверенный, работает с `CrossEncoder` |
-| `nreimers/mmarco-mMiniLMv2-L12-H384-v1` | 117M | 2022 | Быстро | Trained on multilingual mMARCO (incl. Russian), не обновлялся |
-
-**Архитектурный выбор:**
-- `bge-reranker-v2-m3` — drop-in замена (работает с `sentence_transformers.CrossEncoder` без изменений архитектуры)
-- `gte-multilingual-reranker-base` — TEI-native, требует отдельного TEI-инстанса для reranking
-
 **Requirements:** TBD
 **Plans:** 0 plans
 

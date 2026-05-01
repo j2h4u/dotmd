@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
-status: executing
-last_updated: "2026-04-30T10:09:01.892Z"
-last_activity: 2026-04-30
+status: planned
+last_updated: "2026-05-01T08:49:10.509Z"
+last_activity: 2026-05-01
 progress:
   total_phases: 22
   completed_phases: 4
-  total_plans: 15
+  total_plans: 16
   completed_plans: 15
-  percent: 100
+  percent: 94
 ---
 
 # GSD State
@@ -20,18 +20,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** No active phase. Ready for next backlog promotion or milestone planning.
+**Current focus:** Phase 18 — Multilingual Reranker. Backlog item 999.20 is in age-aware research revision before execution.
 
 ## Current Milestone
 
 **v1.4 — Search Quality & Architecture**
 
-Phase: none active
+Phase: 18
 Plan: none active
-Status: Complete for shipped local phase accounting
-Last activity: 2026-04-30
+Status: Ready to execute
+Last activity: 2026-05-01
 
-Progress: [██████████] 100%
+Progress: [█████████░] 94% with Phase 18 planned and ready to execute
 
 ## Performance Metrics
 
@@ -71,11 +71,12 @@ Recent decisions affecting current work:
 - [v1.4]: Evaluation framework before any model/pipeline changes -- measure first
 - [Phase 11]: Auto-detect E5/BGE prefix need from model name; use_prefix defaults True for backward compat
 - [Phase 11-embedding-model-swap]: GET /search (not POST) for eval scripts -- matches actual API
+- [Phase 18]: Reranker replacement will use public benchmark evidence instead of local eval-set preparation. Publication age is now a hard gate; license is metadata-only for this personal-use project; `Qwen/Qwen3-Reranker-0.6B` is selected as the first implementation target because the top fresh rerankers are close enough in quality that text-only operational fit wins. ContextualAI rerank-v2 and Jina v3 remain real alternates if Qwen integration or latency fails.
 
 ### Pending Todos
 
-None for the shipped v1.4 phase set. Backlog items remain in ROADMAP.md and
-should be promoted explicitly before execution.
+Phase 18 is ready to execute with `Qwen/Qwen3-Reranker-0.6B` as the selected model.
+Do not build local reranker quality benchmarks; use the external benchmark research captured in `18-RESEARCH.md`.
 
 ### Blockers/Concerns
 
@@ -89,4 +90,4 @@ None for current local GSD state.
 | 260425-rel | Убрать serve из start.sh — trickle lifespan в mcp_server.py, /health на 8080 | 2026-04-25 | 98c6b99 | [260425-rel-serve-start-sh-trickle-lifespan-mcp-serv](./quick/260425-rel-serve-start-sh-trickle-lifespan-mcp-serv/) |
 
 ---
-*Last updated: 2026-04-30*
+*Last updated: 2026-05-01*
