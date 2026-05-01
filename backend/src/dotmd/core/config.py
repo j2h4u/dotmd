@@ -49,7 +49,10 @@ class Settings(BaseSettings):
     vector_backend: Literal["lancedb", "sqlite-vec"] = "sqlite-vec"
 
     # Reranker
-    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    reranker_backend: Literal["cross_encoder"] = "cross_encoder"
+    reranker_url: str | None = None
+    reranker_model: str = "Qwen/Qwen3-Reranker-0.6B"
+    reranker_relevance_floor: float | None = None
     reranker_length_penalty: bool = True  # penalize very short chunks
     reranker_min_length: int = 50  # chars below which penalty applies
 
@@ -130,6 +133,14 @@ class Settings(BaseSettings):
                 "embedding_weights: missing required key 'meta' "
                 "(dual-encoder requires both 'text' and 'meta')"
             )
+        return v
+
+    @field_validator("reranker_relevance_floor", mode="before")
+    @classmethod
+    def empty_reranker_floor_is_none(cls, v: object) -> object:
+        """Allow DOTMD_RERANKER_RELEVANCE_FLOOR= to mean no raw-score filter."""
+        if v == "":
+            return None
         return v
 
     # Search

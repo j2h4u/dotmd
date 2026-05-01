@@ -156,6 +156,44 @@ class TestKeywordSurvivalThroughReranking:
         assert "b1" in fused_ids, f"Keyword-only candidate 'b1' missing from final fused: {fused_ids}"
         assert "s1" in fused_ids, f"Semantic candidate 's1' missing from final fused: {fused_ids}"
 
+    def test_empty_reranker_output_falls_back_to_fused(self, tmp_path: Path) -> None:
+        """Empty reranker output must not erase otherwise valid fused results."""
+        from dotmd.core.models import Chunk
+
+        service = _make_service(tmp_path)
+
+        service._semantic_engine = MagicMock()
+        service._semantic_engine.search.return_value = [("s1", 0.9)]
+        service._keyword_engine = MagicMock()
+        service._keyword_engine.search.return_value = [("b1", 5.0)]
+        service._graph_engine = MagicMock()
+        service._graph_engine.search.return_value = []
+        service._graph_direct_engine = MagicMock()
+        service._graph_direct_engine.search.return_value = []
+        service._query_expander = MagicMock()
+        service._query_expander.expand.return_value = MagicMock(expanded_text="test query")
+
+        service._reranker = MagicMock()
+        service._reranker.rerank.return_value = []
+
+        chunks = {
+            cid: Chunk(
+                chunk_id=cid,
+                file_paths=[Path(f"/test/{cid}.md")],
+                heading_hierarchy=[],
+                text=f"Some text for {cid}",
+                chunk_index=i,
+            )
+            for i, cid in enumerate(["s1", "b1"])
+        }
+        service._pipeline.metadata_store.get_chunks = MagicMock(
+            side_effect=lambda ids: [chunks[cid] for cid in ids if cid in chunks]
+        )
+
+        results = service.search("test query", top_k=10, mode="hybrid", rerank=True)
+
+        assert results
+
 
 class TestDiagnosticLogging:
     """Diagnostic logging reports keyword-only survival count."""

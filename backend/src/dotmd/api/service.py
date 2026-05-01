@@ -76,10 +76,18 @@ class DotMDService:
         self._query_expander = QueryExpander(
             acronym_dict=acronym_dict,
         )
+        if self._settings.reranker_backend != "cross_encoder":
+            raise ValueError(f"Unsupported reranker backend: {self._settings.reranker_backend!r}")
+        if self._settings.reranker_url:
+            logger.info(
+                "DOTMD_RERANKER_URL is configured but %s uses the local CrossEncoder backend",
+                self._settings.reranker_backend,
+            )
         self._reranker = Reranker(
             model_name=self._settings.reranker_model,
             length_penalty=self._settings.reranker_length_penalty,
             min_length=self._settings.reranker_min_length,
+            relevance_floor=self._settings.reranker_relevance_floor,
         )
 
         # Background trickle indexer
@@ -331,9 +339,11 @@ class DotMDService:
                 self._pipeline.metadata_store,
                 top_k=pool_size,
             )
-            # Reranker found nothing relevant — cross-encoder says no match
             if not reranked:
-                return []
+                logger.info(
+                    "reranker returned no candidates; falling back to fused ranking"
+                )
+                reranked = []
             # Blend reranker scores with fusion scores via min-max normalization
             if reranked:
                 re_scores = [s for _, s in reranked]
