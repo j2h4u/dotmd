@@ -38,13 +38,16 @@ def _client_with_redirect(redirect_uri: str) -> OAuthClientInformationFull:
     )
 
 
-def _params(state: str | None = "state-1") -> AuthorizationParams:
+def _params(
+    state: str | None = "state-1",
+    redirect_uri: str = "https://client.example/callback",
+) -> AuthorizationParams:
     return AuthorizationParams.model_validate(
         {
             "state": state,
             "scopes": ["dotmd"],
             "code_challenge": "challenge-1",
-            "redirect_uri": "https://client.example/callback",
+            "redirect_uri": redirect_uri,
             "redirect_uri_provided_explicitly": True,
             "resource": "https://senbonzakura.tailf87223.ts.net/dotmd/mcp",
         }
@@ -124,8 +127,7 @@ def test_authorize_allows_registered_chatgpt_connector_redirect_prefix(tmp_path:
         provider = DotMDOAuthProvider(tmp_path / "oauth_state.json")
         redirect_uri = "https://chatgpt.com/connector/oauth/elZoTEQOgIRd"
         client = _client_with_redirect(redirect_uri)
-        params = _params()
-        params.redirect_uri = redirect_uri
+        params = _params(redirect_uri=redirect_uri)
 
         redirect = await provider.authorize(client, params)
 

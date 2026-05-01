@@ -1,77 +1,48 @@
 # dotMD MCP Server
 
-dotMD exposes its markdown knowledgebase search as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server, so AI agents and chat interfaces can query your indexed markdown files directly.
+dotMD exposes the indexed markdown knowledgebase as an MCP server so agents can search and read notes directly.
 
-## Setup
+## Transports
 
-Install dotMD with MCP support:
+### stdio
+
+stdio is useful for local MCP clients that spawn a fresh dotMD process:
 
 ```bash
 cd backend
-pip install -e .
+uv run dotmd mcp
 ```
 
-Index your markdown files first:
+Generate a local client config:
 
 ```bash
-dotmd index /path/to/your/markdown/files
+cd backend
+uv run dotmd mcp-config
 ```
 
-## Running the Server
-
-```bash
-dotmd mcp
-```
-
-Or use the MCP inspector for interactive testing:
-
-```bash
-mcp dev backend/src/dotmd/mcp_server.py
-```
-
-## Agent Configuration
-
-Add dotMD to your agent's MCP server config:
-
-To get the MCP config with absolute paths for your environment:
-
-```bash
-dotmd mcp-config
-```
-
-This outputs JSON you can paste directly into your client's config.
-
-### Claude Code / Claude Desktop
-
-Add to your `claude_desktop_config.json` or `.mcp.json`:
+Example client entry:
 
 ```json
 {
   "mcpServers": {
     "dotmd": {
-      "command": "/absolute/path/to/.venv/bin/dotmd",
+      "command": "/absolute/path/to/backend/.venv/bin/dotmd",
       "args": ["mcp"]
     }
   }
 }
 ```
 
-### Cursor
+### streamable-http
 
-Add to `.cursor/mcp.json` in your project root:
+HTTP transport is the production container path:
 
-```json
-{
-  "mcpServers": {
-    "dotmd": {
-      "command": "/absolute/path/to/.venv/bin/dotmd",
-      "args": ["mcp"]
-    }
-  }
-}
+```bash
+cd backend
+uv run dotmd mcp --transport streamable-http --host 0.0.0.0 --port 8080
 ```
 
-If your client runs from the project root, you can use a relative path like `./backend/.venv/bin/dotmd` instead.
+The Docker entrypoint runs the same command. Health is available at `GET /health`.
 
 ## Tools
 
@@ -81,37 +52,53 @@ Search the indexed markdown knowledgebase.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `query` | string | *(required)* | Natural-language search query |
-| `top_k` | int | `10` | Maximum number of results |
-| `mode` | string | `"hybrid"` | Search strategy: `"semantic"`, `"bm25"`, `"graph"`, or `"hybrid"` |
-| `rerank` | bool | `true` | Rerank results with a cross-encoder |
+| `query` | string | required | Natural-language search query |
+| `top_k` | integer | `10` | Maximum results to return, 1-100 |
 
-**Returns:** List of objects with `chunk_id`, `file_path`, `heading`, `snippet`, `score`, and `matched_engines`.
+Returns ranked hits with source `file_paths`, cleaned snippet text, relevance score, and optional heading.
 
-### `index`
+### `read`
 
-Index all markdown files in a directory.
+Read chunks from a file returned by `search`.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `directory` | string | *(required)* | Path to the directory containing markdown files |
+| `file_path` | string | required | Absolute file path from a search result |
+| `start` | integer | `0` | First chunk index to return |
+| `end` | integer or null | `null` | Exclusive end chunk index; omitted means metadata only |
 
-**Returns:** Object with `total_files`, `total_chunks`, `total_entities`, `total_edges`, and `last_indexed`.
+Use `read(file_path)` first to inspect `frontmatter` and `total_chunks`, then request chunk ranges such as `read(file_path, 0, 20)`.
 
-### `status`
+### `feedback`
 
-Get current index statistics. Takes no parameters.
+Submit agent feedback for later maintainer review.
 
-**Returns:** Object with index stats, or a message indicating no index exists.
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `message` | string | required | What was observed |
+| `severity` | string or null | `null` | `bug`, `suggestion`, or `question` |
+| `context` | string or null | `null` | Tool, arguments, or task context |
+| `model` | string or null | `null` | Agent/model that submitted feedback |
+| `harness` | string or null | `null` | Client or environment |
 
-## Environment Variables
+Feedback is stored in `feedback.db` under the configured index directory and can be reviewed through the CLI:
 
-The server respects all standard dotMD configuration via environment variables (prefix `DOTMD_`):
+```bash
+cd backend
+uv run dotmd feedback list
+uv run dotmd feedback list --all
+uv run dotmd feedback status <id> done --reason "handled"
+```
+
+## Configuration
+
+The server uses the same `DOTMD_` settings as the CLI and REST API. Important variables:
 
 | Variable | Description |
 |----------|-------------|
-| `DOTMD_INDEX_DIR` | Index storage directory (default: `~/.dotmd/`) |
-| `DOTMD_EMBEDDING_MODEL` | Sentence-transformer model name |
-| `DOTMD_EXTRACT_DEPTH` | `"structural"` or `"ner"` |
+| `DOTMD_INDEX_DIR` | Index storage directory |
+| `DOTMD_EMBEDDING_URL` | TEI-compatible embedding endpoint |
+| `DOTMD_GRAPH_BACKEND` | `ladybugdb` or `falkordb` |
+| `DOTMD_BASE_URL` | Public HTTPS base URL for OAuth-enabled remote MCP |
 
-See the main [README](../README.md) for the full list.
+See the main [README](../README.md) for the full configuration table.
