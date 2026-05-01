@@ -208,6 +208,7 @@ def compare(
         row = (
             f"{run['name']} model={run['model_name']} "
             f"elapsed_ms={run['elapsed_ms']:.1f} "
+            f"elapsed={run['elapsed']} "
             f"returned_count={run['returned_count']} "
             f"top_chunk_ids={top_ids} scores={scores}"
         )

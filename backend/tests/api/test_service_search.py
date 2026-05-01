@@ -20,6 +20,15 @@ def _get_service(tmp_path: Path):  # type: ignore[no-untyped-def]
     return DotMDService(settings)
 
 
+def test_format_elapsed_ms_for_human_diagnostics() -> None:
+    from dotmd.api.service import format_elapsed_ms
+
+    assert format_elapsed_ms(123.4) == "123ms"
+    assert format_elapsed_ms(12_592.2) == "13s"
+    assert format_elapsed_ms(197_214.1) == "3m17s"
+    assert format_elapsed_ms(3_723_000.0) == "1h02m03s"
+
+
 class TestSearchReturnsFilePaths:
     """DotMDService.search returns SearchResult instances with file_paths list."""
 
@@ -117,6 +126,7 @@ class TestCompareRerankers:
             isinstance(run["elapsed_ms"], float) and run["elapsed_ms"] >= 0.0
             for run in comparison["rerankers"]
         )
+        assert all(run["elapsed"] for run in comparison["rerankers"])
         for run in comparison["rerankers"]:
             assert run["returned_count"] == len(run["top_chunk_ids"]) == len(run["scores"])
 
@@ -380,6 +390,7 @@ class TestSearchApiRerankerSurfaces:
                     "name": "qwen3-0.6b",
                     "model_name": "Qwen",
                     "elapsed_ms": 12.3,
+                    "elapsed": "12s",
                     "returned_count": 2,
                     "top_chunk_ids": ["c1", "c2"],
                     "scores": [0.9, 0.8],
@@ -389,6 +400,7 @@ class TestSearchApiRerankerSurfaces:
                     "name": "msmarco-minilm",
                     "model_name": "MiniLM",
                     "elapsed_ms": 4.5,
+                    "elapsed": "5s",
                     "returned_count": 1,
                     "top_chunk_ids": ["c2"],
                     "scores": [0.7],
@@ -408,6 +420,7 @@ class TestSearchApiRerankerSurfaces:
         assert response.status_code == 200
         assert response.json()["shared_pool_size"] == 2
         assert response.json()["rerankers"][0]["elapsed_ms"] == 12.3
+        assert response.json()["rerankers"][0]["elapsed"] == "12s"
         service.compare_rerankers.assert_called_once_with(
             query="test",
             reranker_names=["qwen3-0.6b", "msmarco-minilm"],

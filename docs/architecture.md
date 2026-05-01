@@ -132,8 +132,9 @@ search stays single-reranker by default through `DOTMD_RERANKER_NAME=qwen3-0.6b`
 Developer comparison uses `DotMDService.compare_rerankers()`, `GET
 /rerank/compare`, or `dotmd rerank compare` to run expansion, retrieval, graph
 enrichment, and RRF fusion once, then pass the same shared candidate pool to
-multiple adapters. The comparison output includes `elapsed_ms`, top chunk ID
-ordering, scores, returned counts, per-reranker errors, and overlap diagnostics.
+multiple adapters. The comparison output includes `elapsed_ms`, human-readable
+`elapsed`, top chunk ID ordering, scores, returned counts, per-reranker errors,
+and overlap diagnostics.
 This makes Qwen CPU latency visible without making production serve multiple
 rerankers.
 

@@ -118,11 +118,11 @@ uv run dotmd rerank compare "пример запроса" --rerankers qwen3-0.6b
 `dotmd rerank compare` is a developer diagnostic command. It runs query
 expansion, retrieval, graph enrichment, and fusion once, then sends the same
 ordered candidate IDs to each selected reranker. The output reports per-reranker
-`elapsed_ms`, returned ordering, scores, and top-ID overlap so Qwen CPU latency
-can be compared against alternates without changing production behavior. It does
-not make production search serve multiple rerankers and does not require a
-production restart when run locally or inside the container against the current
-code/config.
+`elapsed_ms`, human-readable `elapsed`, returned ordering, scores, and top-ID
+overlap so Qwen CPU latency can be compared against alternates without changing
+production behavior. It does not make production search serve multiple rerankers
+and does not require a production restart when run locally or inside the
+container against the current code/config.
 
 ### REST API
 

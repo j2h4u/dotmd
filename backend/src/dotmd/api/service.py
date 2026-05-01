@@ -48,6 +48,7 @@ class RerankerRunComparison(TypedDict):
     name: str
     model_name: str
     elapsed_ms: float
+    elapsed: str
     returned_count: int
     top_chunk_ids: list[str]
     scores: list[float]
@@ -61,6 +62,24 @@ class RerankerComparison(TypedDict):
     rerankers: list[RerankerRunComparison]
     overlap_reference: str | None
     overlap: dict[str, int]
+
+
+def format_elapsed_ms(elapsed_ms: float) -> str:
+    """Format elapsed milliseconds for human-facing diagnostics."""
+    if elapsed_ms < 1000.0:
+        return f"{round(elapsed_ms):.0f}ms"
+
+    total_seconds = max(1, round(elapsed_ms / 1000.0))
+    seconds = total_seconds % 60
+    total_minutes = total_seconds // 60
+    minutes = total_minutes % 60
+    hours = total_minutes // 60
+
+    if hours:
+        return f"{hours}h{minutes:02d}m{seconds:02d}s"
+    if minutes:
+        return f"{minutes}m{seconds:02d}s"
+    return f"{seconds}s"
 
 
 class DotMDService:
@@ -458,6 +477,7 @@ class DotMDService:
                         "name": name,
                         "model_name": reranker.model_name,
                         "elapsed_ms": elapsed_ms,
+                        "elapsed": format_elapsed_ms(elapsed_ms),
                         "returned_count": len(reranked),
                         "top_chunk_ids": [cid for cid, _score in reranked],
                         "scores": [float(score) for _cid, score in reranked],
@@ -471,6 +491,7 @@ class DotMDService:
                         "name": name,
                         "model_name": reranker.model_name,
                         "elapsed_ms": elapsed_ms,
+                        "elapsed": format_elapsed_ms(elapsed_ms),
                         "returned_count": 0,
                         "top_chunk_ids": [],
                         "scores": [],
