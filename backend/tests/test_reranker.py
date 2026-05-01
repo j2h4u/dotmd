@@ -261,6 +261,7 @@ class TestRerankerScoring:
             "msmarco-minilm",
             "mmarco-minilm",
             "gte-multilingual",
+            "bge-v2-m3",
         ]
 
     def test_settings_parsed_reranker_compare_names_ignores_empty_entries(self) -> None:

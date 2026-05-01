@@ -112,7 +112,7 @@ uv run dotmd search "query" --no-rerank       # skip cross-encoder reranking
 uv run dotmd search "query" --no-expand       # skip query expansion
 uv run dotmd search "query" --top 5           # limit results
 uv run dotmd search "пример запроса" --reranker msmarco-minilm
-uv run dotmd rerank compare "пример запроса" --rerankers qwen3-0.6b,msmarco-minilm,mmarco-minilm,gte-multilingual
+uv run dotmd rerank compare "пример запроса" --rerankers qwen3-0.6b,msmarco-minilm,mmarco-minilm,gte-multilingual,bge-v2-m3
 ```
 
 `dotmd rerank compare` is a developer diagnostic command. It runs query
@@ -195,7 +195,7 @@ Configuration comes from `DOTMD_` environment variables, explicit `Settings(...)
 | `DOTMD_EXTRACT_DEPTH` | `ner` | `structural` or `ner` |
 | `DOTMD_BASE_URL` | unset | Public HTTPS base URL for OAuth-enabled MCP deployments |
 | `DOTMD_RERANKER_NAME` | `qwen3-0.6b` | Stable reranker name selected for normal production search |
-| `DOTMD_RERANKER_COMPARE_NAMES` | `qwen3-0.6b,msmarco-minilm,mmarco-minilm,gte-multilingual` | Default developer comparison set |
+| `DOTMD_RERANKER_COMPARE_NAMES` | `qwen3-0.6b,msmarco-minilm,mmarco-minilm,gte-multilingual,bge-v2-m3` | Default developer comparison set |
 | `DOTMD_RERANKER_BACKEND` | `cross_encoder` | Reranker provider boundary; currently local CrossEncoder |
 | `DOTMD_RERANKER_MODEL` | `Qwen/Qwen3-Reranker-0.6B` | Selected multilingual reranker model |
 | `DOTMD_RERANKER_RELEVANCE_FLOOR` | unset | Optional raw-score floor; unset keeps all reranked candidates |

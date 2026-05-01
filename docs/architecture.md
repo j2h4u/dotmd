@@ -124,7 +124,7 @@ The schema is two-dimensional where needed: `(chunk_strategy, embedding_model)`.
 Rerankers implement `RerankerProtocol`: each adapter exposes a stable `name`, a
 provider `model_name`, `warmup()`, and `rerank()`. Built-in adapters are
 registered by short names such as `qwen3-0.6b`, `msmarco-minilm`,
-`mmarco-minilm`, and `gte-multilingual`; `RerankerFactory` resolves and caches
+`mmarco-minilm`, `gte-multilingual`, and `bge-v2-m3`; `RerankerFactory` resolves and caches
 the selected adapter so normal search does not construct a model per request.
 
 `DotMDService` owns all public reranker selection and comparison flows. Normal

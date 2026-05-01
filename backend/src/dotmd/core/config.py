@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     reranker_backend: Literal["cross_encoder"] = "cross_encoder"
     reranker_model: str = "Qwen/Qwen3-Reranker-0.6B"
     reranker_name: str = "qwen3-0.6b"
-    reranker_compare_names: str = "qwen3-0.6b,msmarco-minilm,mmarco-minilm,gte-multilingual"
+    reranker_compare_names: str = "qwen3-0.6b,msmarco-minilm,mmarco-minilm,gte-multilingual,bge-v2-m3"
     reranker_relevance_floor: float | None = None
     reranker_length_penalty: bool = True  # penalize very short chunks
     reranker_min_length: int = 50  # chars below which penalty applies
