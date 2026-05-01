@@ -159,17 +159,64 @@ class TestCompareRerankers:
 
         comparison = service.compare_rerankers("q", ["qwen3-0.6b", "msmarco-minilm"])
 
-        assert comparison["rerankers"][0]["error"] == "boom"
         assert (
             failing.rerank.call_args.kwargs["raise_on_provider_error"] is True
         )
-        assert comparison["rerankers"][0]["returned_count"] == 0
-        assert comparison["rerankers"][0]["top_chunk_ids"] == []
-        assert comparison["rerankers"][0]["scores"] == []
-        assert comparison["rerankers"][1]["error"] is None
-        assert comparison["rerankers"][1]["top_chunk_ids"] == ["c2"]
-        assert comparison["rerankers"][1]["returned_count"] == 1
-        assert len(comparison["rerankers"][1]["scores"]) == 1
+        by_name = {run["name"]: run for run in comparison["rerankers"]}
+        assert by_name["qwen3-0.6b"]["error"] == "boom"
+        assert by_name["qwen3-0.6b"]["returned_count"] == 0
+        assert by_name["qwen3-0.6b"]["top_chunk_ids"] == []
+        assert by_name["qwen3-0.6b"]["scores"] == []
+        assert by_name["msmarco-minilm"]["error"] is None
+        assert by_name["msmarco-minilm"]["top_chunk_ids"] == ["c2"]
+        assert by_name["msmarco-minilm"]["returned_count"] == 1
+        assert len(by_name["msmarco-minilm"]["scores"]) == 1
+        assert comparison["rerankers"][-1]["name"] == "qwen3-0.6b"
+
+    def test_compare_sorts_successful_rerankers_by_elapsed_time(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = _get_service(tmp_path)
+        service._query_expander = MagicMock()
+        service._query_expander.expand.return_value = MagicMock(expanded_text="expanded q")
+        service._collect_candidate_pool = MagicMock(
+            return_value={
+                "search_query": "expanded q",
+                "original_query": "q",
+                "fused": [("c1", 0.3), ("c2", 0.2)],
+                "engine_results": {},
+                "semantic_hits": [],
+                "keyword_hits": [],
+                "graph_direct_hits": [],
+                "pool_size": 2,
+            }
+        )
+        slow = MagicMock()
+        slow.name = "qwen3-0.6b"
+        slow.model_name = "Qwen"
+        slow.rerank.return_value = [("c1", 0.9)]
+        fast = MagicMock()
+        fast.name = "msmarco-minilm"
+        fast.model_name = "MiniLM"
+        fast.rerank.return_value = [("c2", 0.8)]
+        service._reranker_factory = MagicMock()
+        service._reranker_factory.get.side_effect = [slow, fast]
+
+        with patch(
+            "dotmd.api.service.time.perf_counter",
+            side_effect=[0.0, 2.0, 2.0, 2.5],
+        ):
+            comparison = service.compare_rerankers(
+                "q",
+                ["qwen3-0.6b", "msmarco-minilm"],
+            )
+
+        assert [run["name"] for run in comparison["rerankers"]] == [
+            "msmarco-minilm",
+            "qwen3-0.6b",
+        ]
+        assert comparison["overlap_reference"] == "msmarco-minilm"
 
     def test_compare_default_names_include_configured_qwen(
         self, tmp_path: Path
@@ -203,9 +250,10 @@ class TestCompareRerankers:
 
         comparison = service.compare_rerankers("q")
 
-        assert comparison["rerankers"][0]["name"] == "qwen3-0.6b"
-        assert comparison["rerankers"][0]["top_chunk_ids"] == ["c2", "c1"]
-        assert comparison["rerankers"][0]["scores"] == [0.9, 0.8]
+        by_name = {run["name"]: run for run in comparison["rerankers"]}
+        assert set(by_name) == {"qwen3-0.6b", "msmarco-minilm"}
+        assert by_name["qwen3-0.6b"]["top_chunk_ids"] == ["c2", "c1"]
+        assert by_name["qwen3-0.6b"]["scores"] == [0.9, 0.8]
 
     def test_compare_three_rerankers_reuses_retrieval_engines_once(
         self, tmp_path: Path
@@ -275,10 +323,14 @@ class TestCompareRerankers:
         service._reranker_factory = MagicMock()
         service._reranker_factory.get.side_effect = [failing, reference, candidate]
 
-        comparison = service.compare_rerankers(
-            "q",
-            ["qwen3-0.6b", "msmarco-minilm", "bge-v2-m3"],
-        )
+        with patch(
+            "dotmd.api.service.time.perf_counter",
+            side_effect=[0.0, 1.0, 1.0, 1.5, 1.5, 3.0],
+        ):
+            comparison = service.compare_rerankers(
+                "q",
+                ["qwen3-0.6b", "msmarco-minilm", "bge-v2-m3"],
+            )
 
         assert comparison["overlap_reference"] == "msmarco-minilm"
         assert comparison["overlap"] == {"msmarco-minilm": 2, "bge-v2-m3": 1}
@@ -314,10 +366,9 @@ class TestCompareRerankers:
 
         comparison = service.compare_rerankers("q", ["qwen3-0.6b", "msmarco-minilm"])
 
-        assert [run["error"] for run in comparison["rerankers"]] == [
-            "first failed",
-            "second failed",
-        ]
+        by_name = {run["name"]: run for run in comparison["rerankers"]}
+        assert by_name["qwen3-0.6b"]["error"] == "first failed"
+        assert by_name["msmarco-minilm"]["error"] == "second failed"
         assert comparison["overlap_reference"] is None
         assert comparison["overlap"] == {}
 

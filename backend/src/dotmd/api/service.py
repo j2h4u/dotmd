@@ -499,6 +499,7 @@ class DotMDService:
                     }
                 )
 
+        runs.sort(key=lambda run: (run["error"] is not None, run["elapsed_ms"]))
         successful = [run for run in runs if run["error"] is None]
         overlap_reference = successful[0]["name"] if successful else None
         overlap: dict[str, int] = {}

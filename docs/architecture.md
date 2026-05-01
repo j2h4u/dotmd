@@ -134,7 +134,8 @@ Developer comparison uses `DotMDService.compare_rerankers()`, `GET
 enrichment, and RRF fusion once, then pass the same shared candidate pool to
 multiple adapters. The comparison output includes `elapsed_ms`, human-readable
 `elapsed`, top chunk ID ordering, scores, returned counts, per-reranker errors,
-and overlap diagnostics.
+and overlap diagnostics, sorted fastest successful reranker first with failures
+last.
 This makes Qwen CPU latency visible without making production serve multiple
 rerankers.
 
