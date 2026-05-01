@@ -99,6 +99,65 @@ class TestMergeBackBeyondPoolSize:
         assert len(call_args[0][1]) == 20  # chunk_ids arg
 
 
+class TestRerankCandidatePool:
+    """Reusable candidate pool preserves retrieval/fusion behavior."""
+
+    def test_collect_candidate_pool_appends_graph_enrichment(self, tmp_path: Path) -> None:
+        """Graph enrichment candidates are returned in fused and engine results."""
+        service = _make_service(tmp_path)
+
+        service._semantic_engine = MagicMock()
+        service._semantic_engine.search.return_value = [("s1", 0.9)]
+        service._keyword_engine = MagicMock()
+        service._keyword_engine.search.return_value = [("b1", 5.0)]
+        service._graph_direct_engine = MagicMock()
+        service._graph_direct_engine.search.return_value = [("g1", 0.7)]
+        service._graph_engine = MagicMock()
+        service._graph_engine.search.return_value = [("gx1", 0.6), ("s1", 0.4)]
+
+        pool = service._collect_candidate_pool(
+            search_query="expanded query",
+            original_query="original query",
+            mode="hybrid",
+            pool_size=10,
+        )
+
+        fused_ids = [cid for cid, _score in pool["fused"]]
+        assert "gx1" in fused_ids
+        assert "graph" in pool["engine_results"]
+        assert pool["engine_results"]["graph"] == [("gx1", 0.6), ("s1", 0.4)]
+
+    def test_collect_candidate_pool_calls_each_engine_once(self, tmp_path: Path) -> None:
+        """One search request collects candidates from each engine exactly once."""
+        service = _make_service(tmp_path)
+
+        service._semantic_engine = MagicMock()
+        service._semantic_engine.search.return_value = [("s1", 0.9)]
+        service._keyword_engine = MagicMock()
+        service._keyword_engine.search.return_value = [("b1", 5.0)]
+        service._graph_direct_engine = MagicMock()
+        service._graph_direct_engine.search.return_value = [("g1", 0.7)]
+        service._graph_engine = MagicMock()
+        service._graph_engine.search.return_value = [("gx1", 0.6)]
+
+        pool = service._collect_candidate_pool(
+            search_query="expanded query",
+            original_query="original query",
+            mode="hybrid",
+            pool_size=10,
+        )
+
+        assert pool["fused"]
+        service._semantic_engine.search.assert_called_once_with("expanded query", top_k=10)
+        service._keyword_engine.search.assert_called_once_with("expanded query", top_k=10)
+        service._graph_direct_engine.search.assert_called_once_with("original query", top_k=10)
+        service._graph_engine.search.assert_called_once_with(
+            "expanded query",
+            top_k=10,
+            seed_chunk_ids=[cid for cid, _score in pool["fused"] if cid != "gx1"][:10],
+        )
+
+
 class TestKeywordSurvivalThroughReranking:
     """Keyword-only candidates must survive even with low cross-encoder scores."""
 
