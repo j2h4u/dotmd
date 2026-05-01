@@ -266,3 +266,80 @@ class TestRerankerRegistry:
             BUILTIN_RERANKERS["msmarco-minilm"].model_name
             == "cross-encoder/ms-marco-MiniLM-L-6-v2"
         )
+
+
+class TestRerankerFactory:
+    """Reranker factory resolves stable names to cached adapter instances."""
+
+    def test_create_reranker_resolves_qwen_name(self) -> None:
+        """create_reranker returns an adapter with stable name and model metadata."""
+        from dotmd.core.config import Settings
+        from dotmd.search.reranker import create_reranker
+
+        settings = Settings(embedding_url="http://test:8088")
+
+        reranker = create_reranker("qwen3-0.6b", settings)
+
+        assert reranker.name == "qwen3-0.6b"
+        assert reranker.model_name == "Qwen/Qwen3-Reranker-0.6B"
+
+    def test_create_reranker_rejects_unknown_name(self) -> None:
+        """Unknown reranker names fail loudly with available names."""
+        from dotmd.core.config import Settings
+        from dotmd.search.reranker import create_reranker
+
+        settings = Settings(embedding_url="http://test:8088")
+
+        with pytest.raises(ValueError, match="Unknown reranker.*qwen3-0.6b"):
+            create_reranker("does-not-exist", settings)
+
+    def test_factory_caches_instances_by_name(self) -> None:
+        """A factory instance reuses the same adapter for repeated lookups."""
+        from dotmd.core.config import Settings
+        from dotmd.search.reranker import RerankerFactory
+
+        settings = Settings(embedding_url="http://test:8088")
+        factory = RerankerFactory(settings)
+
+        assert factory.get("qwen3-0.6b") is factory.get("qwen3-0.6b")
+
+    @patch("sentence_transformers.CrossEncoder", autospec=True)
+    def test_cross_encoder_reranker_warmup_loads_model_without_scoring(
+        self,
+        MockCE: MagicMock,
+    ) -> None:
+        """warmup() uses the lazy load path without calling predict()."""
+        from dotmd.search.reranker import CrossEncoderReranker
+
+        mock_model = MagicMock()
+        MockCE.return_value = mock_model
+
+        reranker = CrossEncoderReranker(model_name="test-model", name="test")
+        reranker.warmup()
+
+        MockCE.assert_called_once_with("test-model")
+        mock_model.predict.assert_not_called()
+
+    def test_create_reranker_passes_settings_to_adapter(self) -> None:
+        """Factory passes reranker scoring knobs from Settings into the adapter."""
+        from dotmd.core.config import Settings
+        from dotmd.search.reranker import create_reranker
+
+        settings = Settings(
+            embedding_url="http://test:8088",
+            reranker_length_penalty=False,
+            reranker_min_length=123,
+            reranker_relevance_floor=0.25,
+        )
+
+        reranker = create_reranker("qwen3-0.6b", settings)
+
+        assert reranker._length_penalty is False
+        assert reranker._min_length == 123
+        assert reranker._relevance_floor == 0.25
+
+    def test_legacy_reranker_alias_still_constructs_cross_encoder_adapter(self) -> None:
+        """The legacy Reranker import path remains a compatibility alias."""
+        from dotmd.search.reranker import CrossEncoderReranker, Reranker
+
+        assert Reranker is CrossEncoderReranker
