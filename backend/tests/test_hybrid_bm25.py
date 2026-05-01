@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 if TYPE_CHECKING:
     from dotmd.api.service import DotMDService
 
@@ -385,6 +387,81 @@ class TestRerankerFactorySearchWiring:
 
         assert [result.chunk_id for result in results] == ["s1", "gx1"]
         service._reranker_factory.get.assert_not_called()
+
+
+class TestSearchResultContracts:
+    """Search result construction and logging contracts remain stable."""
+
+    def test_graph_appended_merge_back_keeps_enrichment_score(self, tmp_path: Path) -> None:
+        """Fusion-only merge-back keeps graph-enriched candidate scores unchanged."""
+        service = _make_service(tmp_path)
+        service._semantic_engine = MagicMock()
+        service._semantic_engine.search.return_value = [("s1", 0.9)]
+        service._keyword_engine = MagicMock()
+        service._keyword_engine.search.return_value = []
+        service._graph_direct_engine = MagicMock()
+        service._graph_direct_engine.search.return_value = []
+        service._graph_engine = MagicMock()
+        service._graph_engine.search.return_value = [("gx1", 0.6)]
+        service._query_expander = MagicMock()
+        service._query_expander.expand.return_value = MagicMock(expanded_text="test query")
+
+        reranker = MagicMock()
+        reranker.rerank.return_value = [("s1", 1.0)]
+        service._reranker_factory = MagicMock()
+        service._reranker_factory.get.return_value = reranker
+        service._pipeline.log_search = MagicMock()
+
+        import dotmd.api.service as svc_module
+
+        captured_fused: list[tuple[str, float]] = []
+
+        def capture_build(fused, **kwargs):
+            captured_fused.extend(fused)
+            return []
+
+        with patch.object(svc_module, "build_search_results", side_effect=capture_build):
+            service.search("test query", top_k=10, mode="hybrid", rerank=True)
+
+        fused_scores = dict(captured_fused)
+        expected_graph_score = (1.0 / (service._settings.fusion_k + 1)) * 0.5
+        assert fused_scores["gx1"] == pytest.approx(expected_graph_score)
+
+    def test_scored_reranker_output_logs_reranked_true(self, tmp_path: Path) -> None:
+        """Search logging records reranked=True only when scores were applied."""
+        from dotmd.core.models import Chunk
+
+        service = _make_service(tmp_path)
+        service._semantic_engine = MagicMock()
+        service._semantic_engine.search.return_value = [("s1", 0.9)]
+        service._keyword_engine = MagicMock()
+        service._keyword_engine.search.return_value = []
+        service._graph_engine = MagicMock()
+        service._graph_engine.search.return_value = []
+        service._graph_direct_engine = MagicMock()
+        service._graph_direct_engine.search.return_value = []
+        service._query_expander = MagicMock()
+        service._query_expander.expand.return_value = MagicMock(expanded_text="test query")
+
+        reranker = MagicMock()
+        reranker.rerank.return_value = [("s1", 1.0)]
+        service._reranker_factory = MagicMock()
+        service._reranker_factory.get.return_value = reranker
+
+        chunk = Chunk(
+            chunk_id="s1",
+            file_paths=[Path("/test/s1.md")],
+            heading_hierarchy=[],
+            text="Some text for s1",
+            chunk_index=0,
+        )
+        service._pipeline.metadata_store.get_chunks = MagicMock(return_value=[chunk])
+        service._pipeline.log_search = MagicMock()
+
+        service.search("test query", top_k=10, mode="hybrid", rerank=True)
+
+        service._pipeline.log_search.assert_called_once()
+        assert service._pipeline.log_search.call_args.kwargs["reranked"] is True
 
 
 class TestDiagnosticLogging:
