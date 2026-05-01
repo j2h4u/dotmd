@@ -202,3 +202,38 @@ class TestRerankerScoring:
         assert settings.reranker_backend == "cross_encoder"
         assert settings.reranker_model == "Qwen/Qwen3-Reranker-0.6B"
         assert settings.reranker_relevance_floor is None
+
+    def test_settings_default_reranker_name(self) -> None:
+        """Settings defaults to the stable Qwen reranker name."""
+        from dotmd.core.config import Settings
+
+        settings = Settings(embedding_url="http://test:8088")
+
+        assert settings.reranker_name == "qwen3-0.6b"
+
+    def test_settings_default_parsed_reranker_compare_names(self) -> None:
+        """Settings exposes default comparison names as a parsed list."""
+        from dotmd.core.config import Settings
+
+        settings = Settings(embedding_url="http://test:8088")
+
+        assert settings.parsed_reranker_compare_names == [
+            "qwen3-0.6b",
+            "msmarco-minilm",
+            "mmarco-minilm",
+            "gte-multilingual",
+        ]
+
+    def test_settings_parsed_reranker_compare_names_ignores_empty_entries(self) -> None:
+        """Settings ignores blank entries in comma-separated comparison names."""
+        from dotmd.core.config import Settings
+
+        settings = Settings(
+            embedding_url="http://test:8088",
+            reranker_compare_names="qwen3-0.6b, ,msmarco-minilm",
+        )
+
+        assert settings.parsed_reranker_compare_names == [
+            "qwen3-0.6b",
+            "msmarco-minilm",
+        ]
