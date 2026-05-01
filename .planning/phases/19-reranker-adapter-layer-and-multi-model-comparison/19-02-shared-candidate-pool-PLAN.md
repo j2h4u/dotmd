@@ -15,11 +15,14 @@ requirements:
   - RERANK-ADAPTER-01
   - RERANK-SELECT-04
   - RERANK-COMPARE-01
+requirements_addressed: [RERANK-ADAPTER-01, RERANK-SELECT-04, RERANK-COMPARE-01]
 must_haves:
   truths:
     - "Normal search still runs at most one reranker per request"
     - "Runtime search can select a reranker by name"
     - "Retrieval, graph-direct, RRF fusion, and graph enrichment can be executed once and represented as a reusable candidate pool"
+    - "_collect_candidate_pool returns fused candidates after graph enrichment, so comparison rerankers see the same graph-enriched pool as normal search"
+    - "pool['engine_results'] includes the graph enrichment key whenever graph enrichment appends candidates"
     - "Empty or failed reranker output still falls back to fused ranking"
     - "No index is reloaded per request"
   artifacts:
@@ -52,6 +55,7 @@ This plan preserves production behavior: one configured reranker runs by default
 | Refactor changes ranking semantics before comparison exists | HIGH | Existing hybrid/rerank tests must still pass, including keyword survival and fused fallback. |
 | Runtime override instantiates a new model on every request | HIGH | Use the factory cache created in Plan 01. |
 | Candidate pool helper reloads FTS/vector indexes per request | HIGH | Helper only calls existing search engines; no `load_index()` calls are added. |
+| Comparison rerankers miss graph-enriched candidates | HIGH | `_collect_candidate_pool` returns only after graph enrichment has appended to `fused` and updated `engine_results`. |
 | Unknown runtime reranker falls back silently | HIGH | Let factory `ValueError` propagate to CLI/API in later plans. |
 </threat_model>
 
@@ -80,6 +84,7 @@ In `backend/src/dotmd/api/service.py`, add a private data structure near `ReadPa
 class RerankCandidatePool(TypedDict):
     search_query: str
     original_query: str
+    # Fused candidates after graph enrichment has appended candidates.
     fused: list[tuple[str, float]]
     engine_results: dict[str, list[tuple[str, float]]]
     semantic_hits: list[tuple[str, float]]
@@ -106,7 +111,10 @@ The helper must:
 - run semantic, keyword, and graph-direct engines with existing conditions;
 - return an empty `fused` list if no primary engines return hits;
 - call `fuse_results` once;
-- run graph enrichment exactly as current code does;
+- run graph enrichment exactly as current code does after RRF fusion;
+- return the pool only after graph enrichment has appended to `fused`;
+- include graph enrichment hits in `pool["engine_results"]` under the same key the current `build_search_results` path expects;
+- ensure `pool["fused"]` contains graph-appended candidates when graph enrichment returns extra candidates;
 - not call `load_index()` or instantiate reranker models.
 </action>
 <verify>
@@ -116,6 +124,8 @@ The helper must:
 - `backend/src/dotmd/api/service.py` contains `class RerankCandidatePool`.
 - `backend/src/dotmd/api/service.py` contains `def _collect_candidate_pool`.
 - `backend/src/dotmd/api/service.py` contains no new `load_index(` call inside `_collect_candidate_pool`.
+- `backend/src/dotmd/api/service.py` documents or comments that `pool["fused"]` is post-graph-enrichment.
+- `backend/tests/test_hybrid_bm25.py` or `backend/tests/api/test_service_search.py` asserts that `_collect_candidate_pool` returns graph-appended candidates in `pool["fused"]` and includes the graph enrichment key in `pool["engine_results"]`.
 - Existing tests in `backend/tests/test_hybrid_bm25.py` pass.
 </acceptance_criteria>
 <done>
@@ -142,6 +152,7 @@ Retrieval/fusion candidate pool exists as one reusable helper with behavior-pres
 - Test 2: `service.search(..., reranker_name=None)` calls factory `.get(None)` or default equivalent.
 - Test 3: mocked reranker returning `[]` still preserves fused results.
 - Test 4: `service.search(..., rerank=False, reranker_name="msmarco-minilm")` does not call the factory.
+- Test 5: `service.search(..., rerank=False)` returns results from `pool["fused"]` after graph enrichment without touching `RerankerFactory.get`.
 </behavior>
 <action>
 In `DotMDService.__init__`:
@@ -170,6 +181,7 @@ Update `_execute_search()` signature to accept `reranker_name: str | None`.
 Inside `_execute_search()`:
 - call `_collect_candidate_pool(...)`;
 - return `[]` if `pool["fused"]` is empty;
+- when `rerank=False`, skip `RerankerFactory.get(...)` entirely and build final results from `pool["fused"]`;
 - if `rerank and pool["fused"]`, use `reranker = self._reranker_factory.get(reranker_name)`;
 - call `reranker.rerank(...)`;
 - preserve existing blend and merge-back logic;
@@ -185,6 +197,7 @@ Inside `_execute_search()`:
 - `backend/src/dotmd/api/service.py` contains `self._reranker_factory.get(reranker_name)`.
 - `backend/src/dotmd/api/service.py` no longer constructs `Reranker(` directly in `DotMDService.__init__`.
 - Tests prove `rerank=False` skips factory lookup.
+- Tests prove `rerank=False` still uses the post-graph-enrichment `pool["fused"]` ordering.
 - `cd backend && uv run pytest tests/test_hybrid_bm25.py tests/api/test_service_search.py -q` exits 0.
 </acceptance_criteria>
 <done>
@@ -211,6 +224,7 @@ Normal search uses the adapter factory and supports runtime reranker selection w
 <action>
 After refactoring to candidate pools, re-check these exact behaviors:
 - `engine_results` passed to `build_search_results` includes semantic, keyword, graph-direct, and graph enrichment as before.
+- `fused_scores = dict(pool["fused"])` is computed from the post-graph-enrichment fused list before merge-back, so graph-appended candidates keep their fusion/enrichment scores.
 - candidates not returned by the reranker are merged back with fusion-only scores;
 - `top_k` truncation still happens after rerank/fusion merge-back;
 - `self._pipeline.log_search(... reranked=reranked_applied)` remains non-fatal and uses the final results.

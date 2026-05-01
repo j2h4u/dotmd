@@ -12,12 +12,15 @@ autonomous: true
 requirements:
   - RERANK-ADAPTER-01
   - RERANK-SELECT-04
+requirements_addressed: [RERANK-ADAPTER-01, RERANK-SELECT-04]
 must_haves:
   truths:
     - "Rerankers are selected by stable short name, not only raw model string"
     - "DotMDService can obtain a reranker through a factory/protocol boundary instead of constructing the concrete CrossEncoder wrapper directly"
     - "The production default remains one configured reranker: qwen3-0.6b"
     - "Unknown reranker names fail clearly and list available names"
+    - "CrossEncoderReranker exposes warmup() through the protocol and delegates it to lazy model loading"
+    - "All internal service construction goes through RerankerFactory; the Reranker alias is compatibility-only"
     - "Unit tests mock CrossEncoder and do not download model weights"
   artifacts:
     - path: "backend/src/dotmd/search/reranker.py"
@@ -68,6 +71,7 @@ This plan creates a `RerankerProtocol`, stable name registry, and factory/cache 
 - Test 1: `Settings(embedding_url="http://test:8088").reranker_name == "qwen3-0.6b"`.
 - Test 2: `Settings(...).parsed_reranker_compare_names == ["qwen3-0.6b", "msmarco-minilm", "mmarco-minilm", "gte-multilingual"]`.
 - Test 3: empty entries in `reranker_compare_names` are ignored.
+- Test 4: `Settings(..., reranker_compare_names="qwen3-0.6b, ,msmarco-minilm").parsed_reranker_compare_names` returns exactly `["qwen3-0.6b", "msmarco-minilm"]`.
 </behavior>
 <action>
 In `Settings`, add stable-name settings immediately after the existing reranker fields:
@@ -96,6 +100,7 @@ Do not delete `reranker_backend`, `reranker_url`, `reranker_model`, `reranker_re
 - `backend/src/dotmd/core/config.py` contains `def parsed_reranker_compare_names`.
 - `backend/tests/test_reranker.py` asserts the default `reranker_name`.
 - `backend/tests/test_reranker.py` asserts parsed comparison names.
+- `backend/tests/test_reranker.py` asserts empty comma-separated comparison entries are ignored.
 </acceptance_criteria>
 <done>
 Name-based settings exist and tests pin the default and parsed comparison list.
@@ -198,7 +203,9 @@ Registry metadata exists and is pinned by unit tests.
 - Test 1: `create_reranker("qwen3-0.6b", settings)` returns an object with `name == "qwen3-0.6b"` and `model_name == "Qwen/Qwen3-Reranker-0.6B"`.
 - Test 2: `create_reranker("does-not-exist", settings)` raises `ValueError` containing `Unknown reranker` and `qwen3-0.6b`.
 - Test 3: `RerankerFactory(settings).get("qwen3-0.6b") is RerankerFactory(settings).get("qwen3-0.6b")` on the same factory instance.
-- Test 4: existing `Reranker(...)` import path still works or all imports are updated.
+- Test 4: `CrossEncoderReranker.warmup()` calls the same lazy load path as `rerank()` without scoring any pairs.
+- Test 5: `create_reranker("qwen3-0.6b", settings)` passes `settings.reranker_length_penalty`, `settings.reranker_min_length`, and `settings.reranker_relevance_floor` into `CrossEncoderReranker`.
+- Test 6: existing `Reranker(...)` import path still works, but `DotMDService` does not construct `Reranker(` directly after Plan 02.
 </behavior>
 <action>
 Rename the existing concrete class to `CrossEncoderReranker`, adding public attributes:
@@ -228,6 +235,13 @@ Add:
 Reranker = CrossEncoderReranker
 ```
 
+Add a public warmup method to the concrete adapter:
+
+```python
+def warmup(self) -> None:
+    self._load_model()
+```
+
 Add factory functions/classes:
 
 ```python
@@ -249,6 +263,7 @@ Factory behavior:
 - For `qwen3-0.6b`, allow `settings.reranker_model` to override only if `settings.reranker_name == "qwen3-0.6b"` and the implementation needs backwards compatibility; otherwise use the registry model.
 - Pass `settings.reranker_length_penalty`, `settings.reranker_min_length`, and `settings.reranker_relevance_floor` to the adapter.
 - Reject unsupported `spec.backend` values clearly.
+- Treat `Reranker = CrossEncoderReranker` as a backwards-compatibility alias only. New internal construction paths must use `RerankerFactory.get(...)`.
 </action>
 <verify>
 <automated>cd backend && uv run pytest tests/test_reranker.py -q</automated>
@@ -258,8 +273,11 @@ Factory behavior:
 - `backend/src/dotmd/search/reranker.py` contains `def create_reranker`.
 - `backend/src/dotmd/search/reranker.py` contains `class RerankerFactory`.
 - `backend/src/dotmd/search/reranker.py` contains `Reranker = CrossEncoderReranker`.
+- `backend/src/dotmd/search/reranker.py` contains `def warmup(self) -> None`.
 - `backend/tests/test_reranker.py` tests unknown-name failure.
 - `backend/tests/test_reranker.py` tests factory caching.
+- `backend/tests/test_reranker.py` tests `warmup()` on `CrossEncoderReranker`.
+- `backend/tests/test_reranker.py` tests settings-derived length penalty, min length, and relevance floor are passed into the adapter.
 - `cd backend && uv run pytest tests/test_reranker.py -q` exits 0.
 </acceptance_criteria>
 <done>

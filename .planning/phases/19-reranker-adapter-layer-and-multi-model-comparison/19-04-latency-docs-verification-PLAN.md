@@ -16,11 +16,13 @@ autonomous: true
 requirements:
   - RERANK-COMPARE-01
   - RERANK-LATENCY-01
+requirements_addressed: [RERANK-COMPARE-01, RERANK-LATENCY-01]
 must_haves:
   truths:
     - "Qwen CPU latency is visible in developer comparison output"
     - "Default production search remains single-reranker and qwen3-0.6b by name"
     - "Docs show how to run a comparison without requiring a production restart"
+    - "Docs update reads existing README.md, docs/architecture.md, and .env.example first; docs/architecture.md is created only if it is absent"
     - "Focused tests and ruff checks for all touched Phase 19 files pass"
     - "Phase summary records commands run and whether live CPU smoke was run or skipped"
   artifacts:
@@ -76,6 +78,7 @@ The key business outcome is that dotMD can compare Qwen against alternates over 
 - Test 2: Qwen comparison row contains `name == "qwen3-0.6b"` when configured.
 - Test 3: comparing three rerankers still calls each retrieval engine at most once.
 - Test 4: per-reranker output preserves ordered `top_chunk_ids` and `scores` lengths match `returned_count`.
+- Test 5: if the first configured reranker errors, overlap diagnostics use the first successful reranker as `overlap_reference`.
 </behavior>
 <action>
 Review `compare_rerankers()` and tests from Plan 03. Add missing invariants:
@@ -94,6 +97,7 @@ Do not add model-specific benchmark thresholds. The observed Phase 18 Qwen smoke
 - `backend/tests/api/test_service_search.py` asserts `elapsed_ms`.
 - `backend/tests/api/test_service_search.py` asserts `returned_count == len(top_chunk_ids)`.
 - `backend/tests/api/test_service_search.py` asserts retrieval is not repeated per reranker.
+- `backend/tests/api/test_service_search.py` asserts `overlap_reference` behavior when the first configured reranker errors.
 - `cd backend && uv run pytest tests/api/test_service_search.py -q` exits 0.
 </acceptance_criteria>
 <done>
@@ -133,19 +137,21 @@ Architecture doc requirements:
 - Add a short reranker adapter section naming `RerankerProtocol`, registry, factory/cache, and shared candidate pool.
 - State that `DotMDService` owns selection and comparison through public service methods.
 - State no indexes are reloaded per request.
+- If `docs/architecture.md` exists, edit it in place under the closest search architecture section. If it does not exist, create it with a concise `# Architecture` heading and the reranker adapter section.
 
 `.env.example` requirements:
 - Include `DOTMD_RERANKER_NAME=qwen3-0.6b`.
 - Include `DOTMD_RERANKER_COMPARE_NAMES=qwen3-0.6b,msmarco-minilm,mmarco-minilm,gte-multilingual`.
 </action>
 <verify>
-<automated>grep -R "dotmd rerank compare\\|RerankerProtocol\\|DOTMD_RERANKER_NAME" README.md docs/architecture.md .env.example</automated>
+<automated>rg --no-heading "dotmd rerank compare|RerankerProtocol|DOTMD_RERANKER_NAME" README.md docs/architecture.md .env.example</automated>
 </verify>
 <acceptance_criteria>
 - `README.md` contains `dotmd rerank compare`.
 - `README.md` contains `elapsed_ms`.
 - `docs/architecture.md` contains `RerankerProtocol`.
 - `docs/architecture.md` contains `shared candidate pool`.
+- `docs/architecture.md` exists after the task completes.
 - `.env.example` contains `DOTMD_RERANKER_NAME=qwen3-0.6b`.
 - `.env.example` contains `DOTMD_RERANKER_COMPARE_NAMES=qwen3-0.6b,msmarco-minilm,mmarco-minilm,gte-multilingual`.
 </acceptance_criteria>
@@ -207,7 +213,7 @@ Verification results and Qwen CPU smoke status are recorded for the phase.
 ```bash
 cd backend && uv run pytest tests/test_reranker.py tests/test_hybrid_bm25.py tests/api/test_service_search.py tests/test_cli.py -q
 cd backend && uv run ruff check src/dotmd/core/config.py src/dotmd/search/reranker.py src/dotmd/api/service.py src/dotmd/api/server.py src/dotmd/cli.py tests/test_reranker.py tests/test_hybrid_bm25.py tests/api/test_service_search.py tests/test_cli.py
-grep -R "dotmd rerank compare\\|RerankerProtocol\\|DOTMD_RERANKER_NAME" README.md docs/architecture.md .env.example
+rg --no-heading "dotmd rerank compare|RerankerProtocol|DOTMD_RERANKER_NAME" README.md docs/architecture.md .env.example
 ```
 </verification>
 

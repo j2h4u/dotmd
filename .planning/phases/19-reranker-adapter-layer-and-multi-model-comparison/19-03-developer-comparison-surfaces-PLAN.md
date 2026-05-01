@@ -16,11 +16,14 @@ requirements:
   - RERANK-SELECT-04
   - RERANK-COMPARE-01
   - RERANK-LATENCY-01
+requirements_addressed: [RERANK-SELECT-04, RERANK-COMPARE-01, RERANK-LATENCY-01]
 must_haves:
   truths:
     - "Developer comparison runs retrieval/fusion once and reuses one shared candidate pool"
     - "Comparison reports per-reranker latency, returned count, ordered top chunk IDs, score diagnostics, and overlap"
     - "One failed reranker appears as an error in comparison output and does not abort other rerankers"
+    - "Overlap uses the first successful reranker as the reference and reports that reference explicitly"
+    - "API response construction uses explicit validation/mapping, not fragile ** unpacking between service TypedDict and Pydantic models"
     - "CLI and FastAPI expose runtime reranker selection by name"
     - "CLI and FastAPI expose developer-only comparison; MCP remains unchanged"
   artifacts:
@@ -55,6 +58,7 @@ The comparison is diagnostic output only. It does not replace the production sin
 |---|---:|---|
 | Comparison reruns retrieval per reranker and invalidates results | HIGH | Service test counts engine calls and requires each engine to run once for a multi-reranker comparison. |
 | Slow Qwen comparison blocks all diagnostics without context | HIGH | Report `elapsed_ms` per reranker and preserve partial results when one candidate errors. |
+| TypedDict and Pydantic comparison schemas drift silently | HIGH | Route constructs `RerankerComparisonResponse` via `model_validate` or explicit field mapping, never `**comparison_dict` unpacking. |
 | Developer-only comparison leaks into MCP user search | MEDIUM | Do not alter MCP search tool schema in this phase. |
 | API response shape is untyped ad hoc JSON | MEDIUM | Use explicit Pydantic response models in `api/server.py`. |
 </threat_model>
@@ -97,6 +101,7 @@ class RerankerComparison(TypedDict):
     search_query: str
     shared_pool_size: int
     rerankers: list[RerankerRunComparison]
+    overlap_reference: str | None
     overlap: dict[str, int]
 ```
 
@@ -122,7 +127,8 @@ Implementation requirements:
 - Time only the reranker call with `time.perf_counter()`.
 - Pass the same `chunk_ids = [cid for cid, _ in pool["fused"][:pool_size]]` to each reranker.
 - Record `scores` in the returned reranker order.
-- Compute overlap counts between each candidate's top IDs and the first reranker's top IDs using `set`.
+- Compute overlap counts between each candidate's top IDs and the first successful reranker's top IDs using `set`.
+- Set `overlap_reference` to the first successful reranker name. If all rerankers fail, set `overlap_reference` to `None` and return `overlap == {}` with per-reranker errors.
 - Do not call `build_search_results`; this is a diagnostic, not user search output.
 </action>
 <verify>
@@ -132,8 +138,11 @@ Implementation requirements:
 - `backend/src/dotmd/api/service.py` contains `def compare_rerankers`.
 - `backend/src/dotmd/api/service.py` contains `time.perf_counter`.
 - `backend/src/dotmd/api/service.py` contains `shared_pool_size`.
+- `backend/src/dotmd/api/service.py` contains `overlap_reference`.
 - `backend/tests/api/test_service_search.py` tests that the shared candidate pool is collected once for multiple rerankers.
 - `backend/tests/api/test_service_search.py` tests per-reranker error isolation.
+- `backend/tests/api/test_service_search.py` tests that overlap uses the first successful reranker when the first configured reranker errors.
+- `backend/tests/api/test_service_search.py` tests that all-reranker failure returns per-reranker errors and an empty overlap map instead of misleading zero-overlap values.
 - `cd backend && uv run pytest tests/api/test_service_search.py -q` exits 0.
 </acceptance_criteria>
 <done>
@@ -156,6 +165,8 @@ Service-level comparison exists and proves all rerankers share one candidate poo
 - Test 1: `GET /search` accepts optional `reranker` and passes it to `DotMDService.search(..., reranker_name=...)`.
 - Test 2: `GET /rerank/compare` parses comma-separated rerankers and calls `compare_rerankers`.
 - Test 3: response includes `shared_pool_size` and per-reranker `elapsed_ms`.
+- Test 4: unknown reranker names produce HTTP 400 with the factory's available-name message, not HTTP 500.
+- Test 5: API response construction rejects or surfaces schema drift via Pydantic validation instead of silently dropping fields.
 </behavior>
 <action>
 Update `backend/src/dotmd/api/server.py`:
@@ -179,6 +190,7 @@ class RerankerComparisonResponse(BaseModel):
     search_query: str
     shared_pool_size: int
     rerankers: list[RerankerRunComparisonResponse]
+    overlap_reference: str | None = None
     overlap: dict[str, int]
 ```
 
@@ -194,7 +206,16 @@ async def compare_rerankers(
     expand: bool = Query(True),
 ) -> RerankerComparisonResponse:
     names = [name.strip() for name in rerankers.split(",") if name.strip()] if rerankers else None
-    return RerankerComparisonResponse(**_get_service().compare_rerankers(...))
+    comparison = _get_service().compare_rerankers(...)
+    return RerankerComparisonResponse.model_validate(comparison)
+```
+
+Do not use `RerankerComparisonResponse(**comparison)` or other raw `**` unpacking between the service result and API model. If the executor chooses explicit mapping instead of `model_validate`, the mapping must list every response field by name: `query`, `search_query`, `shared_pool_size`, `rerankers`, `overlap_reference`, and `overlap`.
+
+Wrap the service call so `ValueError` from unknown reranker names becomes:
+
+```python
+raise HTTPException(status_code=400, detail=str(exc)) from exc
 ```
 
 This is a developer route. Do not add authentication, persistence, or a production scheduling layer in this phase.
@@ -206,7 +227,11 @@ This is a developer route. Do not add authentication, persistence, or a producti
 - `backend/src/dotmd/api/server.py` contains `reranker: str | None = Query(None`.
 - `backend/src/dotmd/api/server.py` contains `/rerank/compare`.
 - `backend/src/dotmd/api/server.py` contains `RerankerComparisonResponse`.
+- `backend/src/dotmd/api/server.py` contains `RerankerComparisonResponse.model_validate` or explicit field-by-field response mapping.
+- `backend/src/dotmd/api/server.py` does not contain `RerankerComparisonResponse(**`.
+- `backend/src/dotmd/api/server.py` contains `HTTPException(status_code=400`.
 - API tests cover the new parameter and route.
+- API tests cover unknown reranker names returning 400.
 - `cd backend && uv run pytest tests/api/test_service_search.py -q` exits 0.
 </acceptance_criteria>
 <done>
@@ -266,8 +291,10 @@ def compare(ctx: click.Context, query: str, rerankers: str | None, top: int, mod
 Output requirements:
 - Print `Shared pool: N candidates`.
 - For each reranker, print `name`, `model_name`, `elapsed_ms` formatted to one decimal, `returned_count`, and comma-separated top chunk IDs.
+- Print `Overlap reference: <name>` before the overlap dict, using `none` if every reranker failed.
 - Print overlap dict after the per-reranker rows.
 - If a reranker has `error`, print `ERROR: <message>` on that row.
+- Translate `ValueError` from unknown reranker names into a Click-friendly error (`raise click.ClickException(str(exc))`) instead of a traceback.
 </action>
 <verify>
 <automated>cd backend && uv run pytest tests/test_cli.py -q</automated>
@@ -278,6 +305,7 @@ Output requirements:
 - `backend/src/dotmd/cli.py` contains `@rerank_group.command("compare")`.
 - CLI tests cover `--reranker`.
 - CLI tests cover `rerank compare`.
+- CLI tests cover unknown reranker names as a non-zero Click error with `Unknown reranker` in output.
 - `cd backend && uv run pytest tests/test_cli.py -q` exits 0.
 </acceptance_criteria>
 <done>
@@ -298,5 +326,7 @@ cd backend && uv run ruff check src/dotmd/api/service.py src/dotmd/api/server.py
 - FastAPI has runtime selection and comparison endpoints.
 - CLI has runtime selection and comparison commands.
 - Comparison output includes latency, score diagnostics, ordered top IDs, overlap, and per-reranker errors.
+- Unknown reranker names return HTTP 400 and CLI-friendly errors.
+- API response validation/mapping is explicit enough to catch service/API schema drift.
 - MCP search schema is not changed.
 </success_criteria>
