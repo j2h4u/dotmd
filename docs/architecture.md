@@ -119,14 +119,35 @@ The schema is two-dimensional where needed: `(chunk_strategy, embedding_model)`.
 4. Cross-encoder reranking rescores the fused candidate pool.
 5. Results return chunk IDs, snippets, fused scores, engine matches, heading paths, and all file paths attached to the content-addressed chunk.
 
+### Reranker Adapter Layer
+
+Rerankers implement `RerankerProtocol`: each adapter exposes a stable `name`, a
+provider `model_name`, `warmup()`, and `rerank()`. Built-in adapters are
+registered by short names such as `qwen3-0.6b`, `msmarco-minilm`,
+`mmarco-minilm`, and `gte-multilingual`; `RerankerFactory` resolves and caches
+the selected adapter so normal search does not construct a model per request.
+
+`DotMDService` owns all public reranker selection and comparison flows. Normal
+search stays single-reranker by default through `DOTMD_RERANKER_NAME=qwen3-0.6b`.
+Developer comparison uses `DotMDService.compare_rerankers()`, `GET
+/rerank/compare`, or `dotmd rerank compare` to run expansion, retrieval, graph
+enrichment, and RRF fusion once, then pass the same shared candidate pool to
+multiple adapters. The comparison output includes `elapsed_ms`, top chunk ID
+ordering, scores, returned counts, per-reranker errors, and overlap diagnostics.
+This makes Qwen CPU latency visible without making production serve multiple
+rerankers.
+
+No indexes are reloaded per request. Search engines and stores are initialized
+with the service and reused; reranker adapters are cached by the factory.
+
 The selected reranker provider is `Qwen/Qwen3-Reranker-0.6B` via the local
-SentenceTransformers CrossEncoder boundary. The choice came from public benchmark,
-publication-age, and deployment-fit research, not a local dotMD eval harness:
-Qwen3 0.6B is fresh enough for May 2026 default selection, multilingual,
-text-only, and lighter than the Qwen3-VL reranker family. ContextualAI rerank-v2
-and Jina v3 remain credible alternates if Qwen serving or latency fails; older
-GTE/BGE models are fallback-only because publication age disqualifies them from
-being the default despite easier integration.
+SentenceTransformers CrossEncoder boundary. The choice came from public
+benchmark, publication-age, and deployment-fit research, not a local dotMD eval
+harness: Qwen3 0.6B is fresh enough for May 2026 default selection,
+multilingual, text-only, and lighter than the Qwen3-VL reranker family.
+ContextualAI rerank-v2 and Jina v3 remain credible alternates if Qwen serving or
+latency fails; older GTE/BGE models are fallback-only because publication age
+disqualifies them from being the default despite easier integration.
 
 Reranking is non-fatal. If the provider errors, is unavailable, or an optional
 raw-score floor removes all candidates, dotMD falls back to fused semantic,

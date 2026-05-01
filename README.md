@@ -6,11 +6,13 @@ dotMD indexes markdown files and exposes hybrid retrieval through a CLI, REST AP
 
 Everything runs against local or self-hosted services. No hosted LLM API key is required for normal indexing or search.
 
-The default reranker is `Qwen/Qwen3-Reranker-0.6B` through the local
-SentenceTransformers CrossEncoder path. It was selected from public benchmark,
-publication-age, and deployment-fit research rather than a dotMD-specific local
-benchmark harness: by May 2026 it is fresh enough for default selection, text-only,
-0.6B, multilingual, and operationally simpler than the heavier Qwen3-VL rerankers.
+The production default is one selected reranker, not multi-reranker serving:
+`DOTMD_RERANKER_NAME=qwen3-0.6b` maps to
+`Qwen/Qwen3-Reranker-0.6B` through the local SentenceTransformers CrossEncoder
+path. It was selected from public benchmark, publication-age, and deployment-fit
+research rather than a dotMD-specific local benchmark harness: by May 2026 it is
+fresh enough for default selection, text-only, 0.6B, multilingual, and
+operationally simpler than the heavier Qwen3-VL rerankers.
 ContextualAI rerank-v2 and Jina v3 remain alternates if Qwen integration or
 latency fails; older GTE/BGE rerankers are fallback-only despite easier serving.
 
@@ -109,7 +111,18 @@ uv run dotmd search "query" --mode graph      # graph retrieval
 uv run dotmd search "query" --no-rerank       # skip cross-encoder reranking
 uv run dotmd search "query" --no-expand       # skip query expansion
 uv run dotmd search "query" --top 5           # limit results
+uv run dotmd search "пример запроса" --reranker msmarco-minilm
+uv run dotmd rerank compare "пример запроса" --rerankers qwen3-0.6b,msmarco-minilm,mmarco-minilm,gte-multilingual
 ```
+
+`dotmd rerank compare` is a developer diagnostic command. It runs query
+expansion, retrieval, graph enrichment, and fusion once, then sends the same
+ordered candidate IDs to each selected reranker. The output reports per-reranker
+`elapsed_ms`, returned ordering, scores, and top-ID overlap so Qwen CPU latency
+can be compared against alternates without changing production behavior. It does
+not make production search serve multiple rerankers and does not require a
+production restart when run locally or inside the container against the current
+code/config.
 
 ### REST API
 
@@ -181,6 +194,8 @@ Configuration comes from `DOTMD_` environment variables, explicit `Settings(...)
 | `DOTMD_FALKORDB_URL` | `redis://localhost:6379` | FalkorDB Redis URL |
 | `DOTMD_EXTRACT_DEPTH` | `ner` | `structural` or `ner` |
 | `DOTMD_BASE_URL` | unset | Public HTTPS base URL for OAuth-enabled MCP deployments |
+| `DOTMD_RERANKER_NAME` | `qwen3-0.6b` | Stable reranker name selected for normal production search |
+| `DOTMD_RERANKER_COMPARE_NAMES` | `qwen3-0.6b,msmarco-minilm,mmarco-minilm,gte-multilingual` | Default developer comparison set |
 | `DOTMD_RERANKER_BACKEND` | `cross_encoder` | Reranker provider boundary; currently local CrossEncoder |
 | `DOTMD_RERANKER_MODEL` | `Qwen/Qwen3-Reranker-0.6B` | Selected multilingual reranker model |
 | `DOTMD_RERANKER_RELEVANCE_FLOOR` | unset | Optional raw-score floor; unset keeps all reranked candidates |
@@ -202,7 +217,7 @@ backend/src/dotmd/
 Search pipeline:
 
 ```text
-query -> expand -> semantic + FTS5 + graph-direct -> RRF fusion -> cross-encoder rerank
+query -> expand -> semantic + FTS5 + graph-direct -> RRF fusion -> shared candidate pool -> cross-encoder rerank
 ```
 
 If the reranker is unavailable, errors, or returns no surviving candidates after
