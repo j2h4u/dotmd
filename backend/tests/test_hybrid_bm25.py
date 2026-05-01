@@ -189,10 +189,13 @@ class TestKeywordSurvivalThroughReranking:
         service._pipeline.metadata_store.get_chunks = MagicMock(
             side_effect=lambda ids: [chunks[cid] for cid in ids if cid in chunks]
         )
+        service._pipeline.log_search = MagicMock()
 
         results = service.search("test query", top_k=10, mode="hybrid", rerank=True)
 
         assert results
+        service._pipeline.log_search.assert_called_once()
+        assert service._pipeline.log_search.call_args.kwargs["reranked"] is False
 
 
 class TestDiagnosticLogging:

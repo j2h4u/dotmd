@@ -121,6 +121,38 @@ class TestRerankerScoring:
         assert results == [("chunk-2", 2.0), ("chunk-1", 0.5)]
 
     @patch("sentence_transformers.CrossEncoder", autospec=True)
+    def test_length_penalty_lowers_short_chunk_with_negative_scores(
+        self,
+        MockCE: MagicMock,
+    ) -> None:
+        """Length penalty lowers short chunks even when raw scores are negative."""
+        mock_model = MagicMock()
+        mock_model.predict.return_value = np.array([-5.0, -5.0])
+        MockCE.return_value = mock_model
+
+        store = MagicMock()
+        store.get_chunks.return_value = [
+            MagicMock(chunk_id="short", text="tiny"),
+            MagicMock(chunk_id="long", text="Long text " * 30),
+        ]
+
+        reranker = Reranker(
+            model_name="test-model",
+            length_penalty=True,
+            min_length=100,
+        )
+
+        results = reranker.rerank(
+            "test query",
+            ["short", "long"],
+            store,
+            top_k=10,
+        )
+
+        assert results[0][0] == "long"
+        assert results[1][0] == "short"
+
+    @patch("sentence_transformers.CrossEncoder", autospec=True)
     def test_top_k_truncation_works(self, MockCE: MagicMock) -> None:
         """top_k limits output even when more candidates pass relevance floor."""
         mock_model = MagicMock()

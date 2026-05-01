@@ -143,9 +143,10 @@ class Reranker:
             for score, (_cid, text) in zip(scores, id_text_pairs, strict=False):
                 text_length = len(text)
                 if text_length < self._min_length:
-                    # Penalty factor: 0.8 at length=0, 1.0 at min_length
-                    penalty_factor = 0.8 + 0.2 * (text_length / self._min_length)
-                    score = score * penalty_factor
+                    # Subtract so the penalty lowers rank for both positive and
+                    # negative score scales.
+                    penalty = 0.2 * (1.0 - (text_length / self._min_length))
+                    score = score - penalty
                 adjusted_scores.append(score)
             scores = adjusted_scores
 

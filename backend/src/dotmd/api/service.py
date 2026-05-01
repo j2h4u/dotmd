@@ -329,6 +329,7 @@ class DotMDService:
                 engine_results["graph"] = graph_hits
 
         # -- Optional reranking -----------------------------------------------
+        reranked_applied = False
         if rerank and fused:
             rerank_candidates = fused[:pool_size]
             chunk_ids = [cid for cid, _ in rerank_candidates]
@@ -346,6 +347,7 @@ class DotMDService:
                 reranked = []
             # Blend reranker scores with fusion scores via min-max normalization
             if reranked:
+                reranked_applied = True
                 re_scores = [s for _, s in reranked]
                 re_min, re_max = min(re_scores), max(re_scores)
                 re_range = re_max - re_min if re_max > re_min else 1.0
@@ -398,7 +400,6 @@ class DotMDService:
 
         # Log search for observability and future auto-calibration (Phase 999.12)
         try:
-            _reranked = rerank and bool(self._reranker)
             self._pipeline.log_search(
                 query=original_query,
                 weights_used=self._settings.parsed_embedding_weights,
@@ -411,7 +412,7 @@ class DotMDService:
                     for r in results[:top_k]
                 ],
                 mode=mode if isinstance(mode, str) else str(mode),
-                reranked=_reranked,
+                reranked=reranked_applied,
             )
         except Exception:
             logger.warning("search log failed — non-fatal", exc_info=True)
