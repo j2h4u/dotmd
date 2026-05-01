@@ -341,8 +341,7 @@ class DotMDService:
                 reranked_ids = {cid for cid, _ in blended}
                 for cid, fused_score in fused:
                     if cid not in reranked_ids:
-                        norm_fused = (fused_score - fused_min) / fused_range
-                        blended.append((cid, 0.4 * norm_fused))
+                        blended.append((cid, fused_score))
 
                 blended.sort(key=lambda x: x[1], reverse=True)
                 fused = blended
