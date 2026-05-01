@@ -87,9 +87,9 @@ class GraphSearchEngine:
         seed_set = set(seed_chunk_ids)
 
         for seed_id in seed_chunk_ids:
-            # max_hops=2 walks: Section→Entity (hop 1) → Section (hop 2)
-            # This is how entity-mediated chunk discovery works.
-            neighbors = self._graph_store.get_neighbors(seed_id, max_hops=2)
+            # Entity/tag-mediated chunk discovery:
+            # Section -> shared Entity/Tag -> Section.
+            neighbors = self._graph_store.get_related_sections(seed_id)
             for node_id, _rel, weight in neighbors:
                 if node_id != seed_id:
                     aggregated_scores[node_id] += weight

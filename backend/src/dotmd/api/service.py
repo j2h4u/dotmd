@@ -313,9 +313,16 @@ class DotMDService:
         # -- Stage 3: Graph enrichment (post-fusion, not a peer) ---------------
         if mode in (SearchMode.GRAPH, SearchMode.HYBRID) and fused:
             seed_ids = [cid for cid, _ in fused[:pool_size]]
-            graph_hits = self._graph_engine.search(
-                search_query, top_k=pool_size, seed_chunk_ids=seed_ids,
-            )
+            try:
+                graph_hits = self._graph_engine.search(
+                    search_query, top_k=pool_size, seed_chunk_ids=seed_ids,
+                )
+            except Exception:
+                logger.warning(
+                    "graph enrichment failed; continuing with primary fused results",
+                    exc_info=True,
+                )
+                graph_hits = []
             if graph_hits:
                 # Graph-discovered chunks get appended below primary results.
                 # Score: fraction of the lowest fused score so they never

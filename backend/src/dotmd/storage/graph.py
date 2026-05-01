@@ -11,6 +11,7 @@ import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any, cast
 
 import real_ladybug as lb  # type: ignore[import-untyped]
 
@@ -259,6 +260,36 @@ class LadybugDBGraphStore:
                 if nid == node_id:
                     continue
                 neighbors.append((str(nid), "", 1.0))
+
+        return neighbors
+
+    def get_related_sections(self, chunk_id: str) -> list[tuple[str, str, float]]:
+        """Return sections related by shared Entity/Tag mentions."""
+        neighbors: list[tuple[str, str, float]] = []
+
+        with self._connection() as conn:
+            for query in (
+                "MATCH (:Section {id: $id})-[r1:SECTION_ENTITY]->(mid:Entity)"
+                "<-[r2:SECTION_ENTITY]-(s:Section) "
+                "WHERE r1.rel_type IN ['MENTIONS', 'HAS_TAG'] "
+                "AND r2.rel_type IN ['MENTIONS', 'HAS_TAG'] "
+                "RETURN DISTINCT s.id, r2.rel_type, r2.weight",
+                "MATCH (:Section {id: $id})-[r1:SECTION_TAG]->(mid:Tag)"
+                "<-[r2:SECTION_TAG]-(s:Section) "
+                "WHERE r1.rel_type IN ['MENTIONS', 'HAS_TAG'] "
+                "AND r2.rel_type IN ['MENTIONS', 'HAS_TAG'] "
+                "RETURN DISTINCT s.id, r2.rel_type, r2.weight",
+            ):
+                result = conn.execute(query, parameters={"id": chunk_id})
+                df = result.get_as_df()  # type: ignore[reportAttributeAccessIssue]
+                for _, row in df.iterrows():
+                    nid = str(row.iloc[0])
+                    if nid == chunk_id:
+                        continue
+                    relation = str(row.iloc[1])
+                    raw_weight = row.iloc[2]
+                    weight = float(cast(Any, raw_weight)) if raw_weight is not None else 1.0
+                    neighbors.append((nid, relation, weight))
 
         return neighbors
 

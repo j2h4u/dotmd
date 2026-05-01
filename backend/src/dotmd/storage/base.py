@@ -244,6 +244,22 @@ class GraphStoreProtocol(Protocol):
         """
         ...
 
+    def get_related_sections(
+        self,
+        chunk_id: str,
+    ) -> list[tuple[str, str, float]]:
+        """Return Section chunks related through shared entities or tags.
+
+        This is a search-enrichment operation, not a generic graph traversal.
+        Backends should keep the query bounded to Section → Entity/Tag → Section
+        style paths so high-degree File or structural edges cannot dominate
+        retrieval.
+        """
+        return [
+            (node_id, rel, weight)
+            for node_id, rel, weight in self.get_neighbors(chunk_id, max_hops=2)
+        ]
+
     def get_all_entity_names(self) -> list[str]:
         """Return all entity names in the graph."""
         return []

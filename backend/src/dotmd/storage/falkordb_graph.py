@@ -272,7 +272,7 @@ class FalkorDBGraphStore:
             A list of ``(node_id, relation_type, weight)`` tuples.
         """
         result = self._graph.ro_query(
-            f"MATCH (a {{id: $id}})-[*1..{int(max_hops)}]-(b) "
+            f"MATCH (a:Node {{id: $id}})-[*1..{int(max_hops)}]-(b:Node) "
             "RETURN DISTINCT b.id, labels(b)[0]",
             params={"id": node_id},
         )
@@ -280,8 +280,33 @@ class FalkorDBGraphStore:
         for row in result.result_set:
             nid = str(row[0])
             if nid != node_id:
-                neighbors.append((nid, "", 1.0))
+                relation = str(row[1]) if len(row) > 1 else ""
+                neighbors.append((nid, relation, 1.0))
         return neighbors
+
+    def get_related_sections(self, chunk_id: str) -> list[tuple[str, str, float]]:
+        """Return sections related by shared Entity/Tag mentions.
+
+        This method intentionally avoids generic variable-length traversal. The
+        production graph contains broad File and hub entity edges, so search
+        enrichment must use a bounded Section → Entity/Tag → Section query.
+        """
+        result = self._graph.ro_query(
+            "MATCH (:Section {id: $id})-[r1:REL]->(mid:Node)<-[r2:REL]-(s:Section) "
+            "WHERE (mid:Entity OR mid:Tag) "
+            "AND r1.rel_type IN ['MENTIONS', 'HAS_TAG'] "
+            "AND r2.rel_type IN ['MENTIONS', 'HAS_TAG'] "
+            "RETURN DISTINCT s.id, r2.rel_type, coalesce(r2.weight, 1.0)",
+            params={"id": chunk_id},
+        )
+        related: list[tuple[str, str, float]] = []
+        for row in result.result_set:
+            nid = str(row[0])
+            if nid != chunk_id:
+                relation = str(row[1]) if len(row) > 1 else ""
+                weight = float(row[2]) if len(row) > 2 and row[2] is not None else 1.0
+                related.append((nid, relation, weight))
+        return related
 
     # -- housekeeping -------------------------------------------------------
 
