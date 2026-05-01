@@ -7,6 +7,7 @@ storage, extraction, and fusion details from calling code.
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -41,6 +42,25 @@ class RerankCandidatePool(TypedDict):
     keyword_hits: list[tuple[str, float]]
     graph_direct_hits: list[tuple[str, float]]
     pool_size: int
+
+
+class RerankerRunComparison(TypedDict):
+    name: str
+    model_name: str
+    elapsed_ms: float
+    returned_count: int
+    top_chunk_ids: list[str]
+    scores: list[float]
+    error: str | None
+
+
+class RerankerComparison(TypedDict):
+    query: str
+    search_query: str
+    shared_pool_size: int
+    rerankers: list[RerankerRunComparison]
+    overlap_reference: str | None
+    overlap: dict[str, int]
 
 
 class DotMDService:
@@ -390,6 +410,90 @@ class DotMDService:
             logger.warning("search log failed — non-fatal", exc_info=True)
 
         return results
+
+    def compare_rerankers(
+        self,
+        query: str,
+        reranker_names: list[str] | None = None,
+        top_k: int = 10,
+        mode: SearchMode | str = SearchMode.HYBRID,
+        expand: bool = True,
+    ) -> RerankerComparison:
+        """Compare configured rerankers over one shared candidate pool.
+
+        This is a developer diagnostic path. It intentionally returns raw
+        reranker ordering and scores instead of building user search results.
+        """
+        search_query = query
+        if expand:
+            expanded = self._query_expander.expand(query)
+            search_query = expanded.expanded_text or query
+
+        pool_size = self._settings.rerank_pool_size
+        pool = self._collect_candidate_pool(
+            search_query=search_query,
+            original_query=query,
+            mode=mode,
+            pool_size=pool_size,
+        )
+        chunk_ids = [cid for cid, _score in pool["fused"][:pool_size]]
+        names = reranker_names or self._settings.parsed_reranker_compare_names
+
+        runs: list[RerankerRunComparison] = []
+        for name in names:
+            reranker = self._reranker_factory.get(name)
+            started = time.perf_counter()
+            try:
+                reranked = reranker.rerank(
+                    search_query,
+                    chunk_ids,
+                    self._pipeline.metadata_store,
+                    top_k=top_k,
+                )
+                elapsed_ms = (time.perf_counter() - started) * 1000.0
+                runs.append(
+                    {
+                        "name": name,
+                        "model_name": reranker.model_name,
+                        "elapsed_ms": elapsed_ms,
+                        "returned_count": len(reranked),
+                        "top_chunk_ids": [cid for cid, _score in reranked],
+                        "scores": [float(score) for _cid, score in reranked],
+                        "error": None,
+                    }
+                )
+            except Exception as exc:
+                elapsed_ms = (time.perf_counter() - started) * 1000.0
+                runs.append(
+                    {
+                        "name": name,
+                        "model_name": reranker.model_name,
+                        "elapsed_ms": elapsed_ms,
+                        "returned_count": 0,
+                        "top_chunk_ids": [],
+                        "scores": [],
+                        "error": str(exc),
+                    }
+                )
+
+        successful = [run for run in runs if run["error"] is None]
+        overlap_reference = successful[0]["name"] if successful else None
+        overlap: dict[str, int] = {}
+        if successful:
+            reference_ids = set(successful[0]["top_chunk_ids"])
+            overlap = {
+                run["name"]: len(reference_ids & set(run["top_chunk_ids"]))
+                for run in successful
+            }
+
+        return {
+            "query": query,
+            "search_query": search_query,
+            "shared_pool_size": len(chunk_ids),
+            "rerankers": runs,
+            "overlap_reference": overlap_reference,
+            "overlap": overlap,
+        }
 
     def _collect_candidate_pool(
         self,
