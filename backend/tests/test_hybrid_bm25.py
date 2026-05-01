@@ -257,6 +257,130 @@ class TestKeywordSurvivalThroughReranking:
         assert service._pipeline.log_search.call_args.kwargs["reranked"] is False
 
 
+class TestRerankerFactorySearchWiring:
+    """Normal search resolves rerankers through the service factory."""
+
+    def test_runtime_reranker_name_calls_factory(self, tmp_path: Path) -> None:
+        """Explicit reranker_name is passed to the cached factory."""
+        from dotmd.core.models import Chunk
+
+        service = _make_service(tmp_path)
+        service._semantic_engine = MagicMock()
+        service._semantic_engine.search.return_value = [("s1", 0.9)]
+        service._keyword_engine = MagicMock()
+        service._keyword_engine.search.return_value = []
+        service._graph_engine = MagicMock()
+        service._graph_engine.search.return_value = []
+        service._graph_direct_engine = MagicMock()
+        service._graph_direct_engine.search.return_value = []
+        service._query_expander = MagicMock()
+        service._query_expander.expand.return_value = MagicMock(expanded_text="test query")
+
+        reranker = MagicMock()
+        reranker.rerank.return_value = [("s1", 1.0)]
+        service._reranker_factory = MagicMock()
+        service._reranker_factory.get.return_value = reranker
+
+        chunk = Chunk(
+            chunk_id="s1",
+            file_paths=[Path("/test/s1.md")],
+            heading_hierarchy=[],
+            text="Some text for s1",
+            chunk_index=0,
+        )
+        service._pipeline.metadata_store.get_chunks = MagicMock(return_value=[chunk])
+        service._pipeline.log_search = MagicMock()
+
+        results = service.search(
+            "test query",
+            top_k=10,
+            mode="hybrid",
+            rerank=True,
+            reranker_name="msmarco-minilm",
+        )
+
+        assert [result.chunk_id for result in results] == ["s1"]
+        service._reranker_factory.get.assert_called_once_with("msmarco-minilm")
+
+    def test_default_reranker_name_calls_factory_with_none(self, tmp_path: Path) -> None:
+        """Default search asks the factory for its configured default."""
+        from dotmd.core.models import Chunk
+
+        service = _make_service(tmp_path)
+        service._semantic_engine = MagicMock()
+        service._semantic_engine.search.return_value = [("s1", 0.9)]
+        service._keyword_engine = MagicMock()
+        service._keyword_engine.search.return_value = []
+        service._graph_engine = MagicMock()
+        service._graph_engine.search.return_value = []
+        service._graph_direct_engine = MagicMock()
+        service._graph_direct_engine.search.return_value = []
+        service._query_expander = MagicMock()
+        service._query_expander.expand.return_value = MagicMock(expanded_text="test query")
+
+        reranker = MagicMock()
+        reranker.rerank.return_value = [("s1", 1.0)]
+        service._reranker_factory = MagicMock()
+        service._reranker_factory.get.return_value = reranker
+
+        chunk = Chunk(
+            chunk_id="s1",
+            file_paths=[Path("/test/s1.md")],
+            heading_hierarchy=[],
+            text="Some text for s1",
+            chunk_index=0,
+        )
+        service._pipeline.metadata_store.get_chunks = MagicMock(return_value=[chunk])
+        service._pipeline.log_search = MagicMock()
+
+        service.search("test query", top_k=10, mode="hybrid", rerank=True)
+
+        service._reranker_factory.get.assert_called_once_with(None)
+
+    def test_rerank_false_skips_factory_and_uses_graph_enriched_pool(self, tmp_path: Path) -> None:
+        """Skipping rerank still returns the post-graph-enrichment fused order."""
+        from dotmd.core.models import Chunk
+
+        service = _make_service(tmp_path)
+        service._semantic_engine = MagicMock()
+        service._semantic_engine.search.return_value = [("s1", 0.9)]
+        service._keyword_engine = MagicMock()
+        service._keyword_engine.search.return_value = []
+        service._graph_direct_engine = MagicMock()
+        service._graph_direct_engine.search.return_value = []
+        service._graph_engine = MagicMock()
+        service._graph_engine.search.return_value = [("gx1", 0.6)]
+        service._query_expander = MagicMock()
+        service._query_expander.expand.return_value = MagicMock(expanded_text="test query")
+        service._reranker_factory = MagicMock()
+
+        chunks = {
+            cid: Chunk(
+                chunk_id=cid,
+                file_paths=[Path(f"/test/{cid}.md")],
+                heading_hierarchy=[],
+                text=f"Some text for {cid}",
+                chunk_index=i,
+            )
+            for i, cid in enumerate(["s1", "gx1"])
+        }
+        service._pipeline.metadata_store.get_chunks = MagicMock(
+            side_effect=lambda ids: [chunks[cid] for cid in ids if cid in chunks]
+        )
+        service._pipeline.log_search = MagicMock()
+
+        results = service.search(
+            "test query",
+            top_k=10,
+            mode="hybrid",
+            rerank=False,
+            reranker_name="msmarco-minilm",
+        )
+
+        assert [result.chunk_id for result in results] == ["s1", "gx1"]
+        service._reranker_factory.get.assert_not_called()
+
+
 class TestDiagnosticLogging:
     """Diagnostic logging reports keyword-only survival count."""
 
