@@ -50,7 +50,6 @@ class Settings(BaseSettings):
 
     # Reranker
     reranker_backend: Literal["cross_encoder"] = "cross_encoder"
-    reranker_url: str | None = None
     reranker_model: str = "Qwen/Qwen3-Reranker-0.6B"
     reranker_name: str = "qwen3-0.6b"
     reranker_compare_names: str = "qwen3-0.6b,msmarco-minilm,mmarco-minilm,gte-multilingual"

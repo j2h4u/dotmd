@@ -108,11 +108,6 @@ class DotMDService:
         self._query_expander = QueryExpander(
             acronym_dict=acronym_dict,
         )
-        if self._settings.reranker_url:
-            logger.info(
-                "DOTMD_RERANKER_URL is configured but %s uses the local CrossEncoder backend",
-                self._settings.reranker_backend,
-            )
         self._reranker_factory = RerankerFactory(self._settings)
 
         # Background trickle indexer
