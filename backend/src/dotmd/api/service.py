@@ -31,6 +31,18 @@ class ReadPayload(TypedDict):
     chunks: list[dict[str, Any]]  # each: {index: int, heading_hierarchy: list[str], text: str}
 
 
+class RerankCandidatePool(TypedDict):
+    search_query: str
+    original_query: str
+    # Fused candidates after graph enrichment has appended candidates.
+    fused: list[tuple[str, float]]
+    engine_results: dict[str, list[tuple[str, float]]]
+    semantic_hits: list[tuple[str, float]]
+    keyword_hits: list[tuple[str, float]]
+    graph_direct_hits: list[tuple[str, float]]
+    pool_size: int
+
+
 class DotMDService:
     """High-level service facade for indexing and searching markdown files.
 
@@ -276,64 +288,18 @@ class DotMDService:
         top_k, mode, rerank, pool_size:
             Same as :meth:`search`.
         """
-        # -- Stage 1: Primary retrieval ----------------------------------------
-        semantic_hits: list[tuple[str, float]] = []
-        keyword_hits: list[tuple[str, float]] = []
-        graph_direct_hits: list[tuple[str, float]] = []
-
-        if mode in (SearchMode.SEMANTIC, SearchMode.HYBRID, SearchMode.GRAPH):
-            semantic_hits = self._semantic_engine.search(search_query, top_k=pool_size)
-
-        if mode in (SearchMode.KEYWORD, SearchMode.HYBRID, SearchMode.GRAPH):
-            keyword_hits = self._keyword_engine.search(search_query, top_k=pool_size)
-
-        # Graph-direct: entity matching (pre-fusion peer, not seed-based)
-        if mode in (SearchMode.GRAPH, SearchMode.HYBRID):
-            graph_direct_hits = self._graph_direct_engine.search(
-                original_query, top_k=pool_size,
-            )
-
-        if not semantic_hits and not keyword_hits and not graph_direct_hits:
-            return []
-
-        # -- Stage 2: RRF fusion (all primary engines) -------------------------
-        engine_results: dict[str, list[tuple[str, float]]] = {}
-        if semantic_hits:
-            engine_results["semantic"] = semantic_hits
-        if keyword_hits:
-            engine_results["keyword"] = keyword_hits
-        if graph_direct_hits:
-            engine_results["graph_direct"] = graph_direct_hits
-
-        fused = fuse_results(
-            engine_results,
-            k=self._settings.fusion_k,
+        pool = self._collect_candidate_pool(
+            search_query=search_query,
+            original_query=original_query,
+            mode=mode,
+            pool_size=pool_size,
         )
-
-        # -- Stage 3: Graph enrichment (post-fusion, not a peer) ---------------
-        if mode in (SearchMode.GRAPH, SearchMode.HYBRID) and fused:
-            seed_ids = [cid for cid, _ in fused[:pool_size]]
-            try:
-                graph_hits = self._graph_engine.search(
-                    search_query, top_k=pool_size, seed_chunk_ids=seed_ids,
-                )
-            except Exception:
-                logger.warning(
-                    "graph enrichment failed; continuing with primary fused results",
-                    exc_info=True,
-                )
-                graph_hits = []
-            if graph_hits:
-                # Graph-discovered chunks get appended below primary results.
-                # Score: fraction of the lowest fused score so they never
-                # outrank direct hits.
-                fused_floor = fused[-1][1] if fused else 0.0
-                fused_ids = {cid for cid, _ in fused}
-                for cid, _gscore in graph_hits:
-                    if cid not in fused_ids:
-                        fused.append((cid, fused_floor * 0.5))
-                        fused_ids.add(cid)
-                engine_results["graph"] = graph_hits
+        fused = pool["fused"]
+        if not fused:
+            return []
+        engine_results = pool["engine_results"]
+        semantic_hits = pool["semantic_hits"]
+        keyword_hits = pool["keyword_hits"]
 
         # -- Optional reranking -----------------------------------------------
         reranked_applied = False
@@ -425,6 +391,94 @@ class DotMDService:
             logger.warning("search log failed — non-fatal", exc_info=True)
 
         return results
+
+    def _collect_candidate_pool(
+        self,
+        *,
+        search_query: str,
+        original_query: str,
+        mode: SearchMode | str,
+        pool_size: int,
+    ) -> RerankCandidatePool:
+        """Collect fused candidates after graph enrichment for reuse by rerankers."""
+        # -- Stage 1: Primary retrieval ----------------------------------------
+        semantic_hits: list[tuple[str, float]] = []
+        keyword_hits: list[tuple[str, float]] = []
+        graph_direct_hits: list[tuple[str, float]] = []
+
+        if mode in (SearchMode.SEMANTIC, SearchMode.HYBRID, SearchMode.GRAPH):
+            semantic_hits = self._semantic_engine.search(search_query, top_k=pool_size)
+
+        if mode in (SearchMode.KEYWORD, SearchMode.HYBRID, SearchMode.GRAPH):
+            keyword_hits = self._keyword_engine.search(search_query, top_k=pool_size)
+
+        # Graph-direct: entity matching (pre-fusion peer, not seed-based)
+        if mode in (SearchMode.GRAPH, SearchMode.HYBRID):
+            graph_direct_hits = self._graph_direct_engine.search(
+                original_query, top_k=pool_size,
+            )
+
+        if not semantic_hits and not keyword_hits and not graph_direct_hits:
+            return {
+                "search_query": search_query,
+                "original_query": original_query,
+                "fused": [],
+                "engine_results": {},
+                "semantic_hits": semantic_hits,
+                "keyword_hits": keyword_hits,
+                "graph_direct_hits": graph_direct_hits,
+                "pool_size": pool_size,
+            }
+
+        # -- Stage 2: RRF fusion (all primary engines) -------------------------
+        engine_results: dict[str, list[tuple[str, float]]] = {}
+        if semantic_hits:
+            engine_results["semantic"] = semantic_hits
+        if keyword_hits:
+            engine_results["keyword"] = keyword_hits
+        if graph_direct_hits:
+            engine_results["graph_direct"] = graph_direct_hits
+
+        fused = fuse_results(
+            engine_results,
+            k=self._settings.fusion_k,
+        )
+
+        # -- Stage 3: Graph enrichment (post-fusion, not a peer) ---------------
+        if mode in (SearchMode.GRAPH, SearchMode.HYBRID) and fused:
+            seed_ids = [cid for cid, _ in fused[:pool_size]]
+            try:
+                graph_hits = self._graph_engine.search(
+                    search_query, top_k=pool_size, seed_chunk_ids=seed_ids,
+                )
+            except Exception:
+                logger.warning(
+                    "graph enrichment failed; continuing with primary fused results",
+                    exc_info=True,
+                )
+                graph_hits = []
+            if graph_hits:
+                # Graph-discovered chunks get appended below primary results.
+                # Score: fraction of the lowest fused score so they never
+                # outrank direct hits.
+                fused_floor = fused[-1][1] if fused else 0.0
+                fused_ids = {cid for cid, _ in fused}
+                for cid, _gscore in graph_hits:
+                    if cid not in fused_ids:
+                        fused.append((cid, fused_floor * 0.5))
+                        fused_ids.add(cid)
+                engine_results["graph"] = graph_hits
+
+        return {
+            "search_query": search_query,
+            "original_query": original_query,
+            "fused": fused,
+            "engine_results": engine_results,
+            "semantic_hits": semantic_hits,
+            "keyword_hits": keyword_hits,
+            "graph_direct_hits": graph_direct_hits,
+            "pool_size": pool_size,
+        }
 
     def read(self, file_path: str, start: int = 0, end: int | None = None) -> ReadPayload:
         """Return frontmatter and optionally a chunk range for a known file.
