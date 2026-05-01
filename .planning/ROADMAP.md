@@ -151,6 +151,25 @@ Plans:
 
 ---
 
+### Phase 19: Reranker Adapter Layer and Multi-Model Comparison
+
+**Goal:** Refactor reranking into a provider/adapter layer so dotMD can switch rerankers by name and run developer-only comparisons across multiple candidate rerankers using one shared retrieval candidate pool.
+**Depends on:** Phase 18
+**Requirements:** RERANK-ADAPTER-01, RERANK-SELECT-04, RERANK-COMPARE-01, RERANK-LATENCY-01
+**Plans:** 0 plans
+
+Phase boundary:
+- Keep production search behavior single-reranker by default; do not make multi-reranker production serving mandatory.
+- Add a clean `RerankerProtocol`/registry/factory boundary so new rerankers can be added without changing `DotMDService` internals.
+- Support runtime selection for dev/CLI/API calls, e.g. choosing Qwen vs MiniLM vs the top Phase 18 alternates by name.
+- Add a comparison path that runs retrieval/fusion once, then applies multiple rerankers to the same candidate pool and reports latency, ordering, score diagnostics, and overlap.
+- Treat Qwen CPU latency as a first-class concern; compare against the top 3-4 Phase 18 candidate models before settling on a production default.
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 19 to break down)
+
+---
+
 ## Backlog
 
 ### Phase 999.2: Pipeline parallelism — overlap GLiNER and TEI across files (BACKLOG)
@@ -508,5 +527,6 @@ Plans:
 - [x] 16-05-search-api-clean-break-PLAN.md — Wave 3 SearchResult.file_paths: list[Path] across models/fusion/CLI/MCP
 
 ---
+
 *Roadmap created: 2026-03-26*
-*Last updated: 2026-04-30*
+*Last updated: 2026-05-01*

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: milestone
 status: ready_to_plan
-last_updated: "2026-05-01T08:58:30.801Z"
+last_updated: "2026-05-01T10:15:00.000Z"
 last_activity: 2026-05-01
 progress:
-  total_phases: 22
+  total_phases: 23
   completed_phases: 6
   total_plans: 16
   completed_plans: 16
-  percent: 27
+  percent: 26
 ---
 
 # GSD State
@@ -20,18 +20,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 18 — multilingual-reranker
+**Current focus:** Phase 19 — reranker-adapter-layer-and-multi-model-comparison
 
 ## Current Milestone
 
 **v1.4 — Search Quality & Architecture**
 
-Phase: 999.12
+Phase: 19
 Plan: Not started
 Status: Ready to plan
 Last activity: 2026-05-01
 
-Progress: [██████████] 100%
+Progress: [███░░░░░░░] 26%
 
 ## Performance Metrics
 
@@ -60,6 +60,7 @@ Progress: [██████████] 100%
 ### Roadmap Evolution
 
 - Phase 15 added: Content-addressed caching (embedding cache, extraction cache, content-based chunk_id)
+- Phase 19 added: Reranker adapter layer and multi-model comparison
 
 ### Decisions
 
@@ -76,8 +77,7 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-Phase 18 is ready to execute with `Qwen/Qwen3-Reranker-0.6B` as the selected model.
-Do not build local reranker quality benchmarks; use the external benchmark research captured in `18-RESEARCH.md`.
+Phase 19 is ready to plan. Split it into adapter/factory refactor first, then developer comparison of the top 3-4 Phase 18 reranker candidates using one shared retrieval pool. Qwen CPU latency is a key concern from live smoke (`DOTMD_RERANK_POOL_SIZE=3` took ~20.8s for one batch).
 
 ### Blockers/Concerns
 
