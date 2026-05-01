@@ -548,5 +548,24 @@ Plans:
 
 ---
 
+### Phase 21: Reranker Quality Benchmark
+
+**Goal:** Compare the three latency-surviving rerankers on relevance quality against the live dotMD document index and decide which model is worth using as the production default.
+**Requirements**: RERANK-QUALITY-01, RERANK-QUALITY-02, RERANK-QUALITY-03
+**Depends on:** Phase 20
+**Plans:** 1 plan
+
+Phase boundary:
+- Use the current production `dotmd` container and live `/dotmd-index/index.db`; do not reindex or build a synthetic corpus.
+- Compare only `msmarco-minilm`, `mmarco-minilm`, and `mxbai-xsmall-v1`.
+- Treat `msmarco-minilm` as a negative historical control, not as a serious Russian-language candidate.
+- Use one shared retrieval/fusion candidate pool per query before reranking so model comparisons are apples-to-apples.
+- Measure ranking quality first; keep hot `rerank_ms` as an operational guardrail.
+
+Plans:
+- [ ] 21-01-quality-benchmark-PLAN.md — Build and run live-index reranker quality benchmark
+
+---
+
 *Roadmap created: 2026-03-26*
-*Last updated: 2026-05-01*
+*Last updated: 2026-05-02*

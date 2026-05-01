@@ -1,0 +1,101 @@
+# Phase 21: Reranker Quality Benchmark Context
+
+**Created:** 2026-05-02
+**Workflow:** follow-up phase after Phase 20 latency gate
+**Depends on:** Phase 20
+
+## Phase Goal
+
+Compare the three latency-surviving rerankers on relevance quality against the
+live dotMD document index and decide which model is worth using as the
+production default.
+
+## Why This Phase Exists
+
+Phase 20 proved that many multilingual rerankers are operationally unusable on
+the current CPU-only host. It left three models worth checking for quality:
+
+- `msmarco-minilm`
+- `mmarco-minilm`
+- `mxbai-xsmall-v1`
+
+Latency alone is not enough. The old `msmarco-minilm` model was fast but worked
+badly for Russian notes: it did not understand Russian well enough to rank real
+dotMD results usefully. Phase 21 must measure ranking quality on the real corpus
+before promoting any default.
+
+## Locked Decisions
+
+1. **Use the live index.**
+   The benchmark must run against the current `dotmd` container and current
+   `/dotmd-index/index.db`. Do not reindex and do not create a synthetic corpus.
+
+2. **Compare only the latency survivors.**
+   The canonical Phase 21 model set is exactly:
+   `msmarco-minilm`, `mmarco-minilm`, `mxbai-xsmall-v1`.
+
+3. **Treat `msmarco-minilm` as a negative historical control.**
+   It remains in the benchmark because it is useful as a lower bound. It is not
+   a serious Russian-language candidate.
+
+4. **Use one shared candidate pool per query.**
+   For every query, run retrieval/fusion once, then pass the same ordered
+   `chunk_ids` to each reranker. Quality comparison must isolate reranker
+   ordering quality, not retrieval differences.
+
+5. **Human labels define quality.**
+   Raw cross-encoder scores are not comparable across models. The benchmark
+   must compare ranked chunk IDs against human-readable relevance labels.
+
+6. **Quality is primary; latency remains a guardrail.**
+   Summary ranking should lead with Hit@K/MRR/nDCG. Hot `rerank_ms` must still
+   be recorded so a high-quality but newly slow result is visible.
+
+## Evaluation Shape
+
+Minimum canonical query set:
+
+- 30 Russian or mixed Russian/English queries drawn from real dotMD use.
+- Include at least these categories:
+  - setup/how-to questions (`MCP`, `ChatGPT`, `Claude`, OAuth, Tailscale)
+  - architecture questions (`sqlite-vec`, FTS5, graph, chunk cache)
+  - decision/history questions (`почему решили`, `что выбрали`, `какая модель`)
+  - known weak cases for the old English-only reranker
+  - short ambiguous Russian queries
+
+Label format:
+
+- One JSONL row per query.
+- Each row has `query`, `relevant`, and optional `maybe`.
+- `relevant` and `maybe` contain chunk IDs or stable file path references.
+- The runner resolves labels to chunk IDs before scoring.
+
+Metrics:
+
+- `Hit@1`
+- `Hit@3`
+- `Hit@5`
+- `MRR@10`
+- `nDCG@10`, with `relevant=2`, `maybe=1`, `irrelevant=0`
+- Per-query top result file path/snippet for failure review
+- Hot `rerank_ms` as an operational guardrail
+
+## Canonical References
+
+- `.planning/phases/20-reranker-latency-benchmark/20-BENCHMARKS.md` —
+  latency shortlist, rejected model rationale, source links.
+- `.planning/phases/20-reranker-latency-benchmark/results/2026-05-01-rerank-latency-summary.md` —
+  canonical hot latency summary.
+- `backend/src/dotmd/api/service.py` — `compare_rerankers()` and shared
+  candidate pool behavior.
+- `backend/src/dotmd/search/reranker.py` — current built-in registry.
+- `backend/devtools/reranker_latency_bench.py` — established devtool style for
+  repeatable reranker benchmarks.
+
+## Out Of Scope
+
+- Reintroducing CPU-unusable models.
+- Changing embedding model, chunking, FTS5, graph retrieval, or RRF weights.
+- Building a remote reranker backend.
+- Reindexing production data.
+- Treating public English benchmark scores as proof of Russian quality.

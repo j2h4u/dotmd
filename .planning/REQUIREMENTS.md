@@ -25,6 +25,9 @@
 
 - [x] **SCORE-01**: Cross-encoder relevance threshold calibrated on real corpus queries
 - [ ] **SCORE-02**: Semantic score floor recalibrated after embedding model swap
+- [ ] **RERANK-QUALITY-01**: Reranker quality benchmark uses the live dotMD index and a human-labeled Russian query set
+- [ ] **RERANK-QUALITY-02**: Quality comparison reranks one shared retrieval candidate pool per query across all candidate models
+- [ ] **RERANK-QUALITY-03**: Benchmark summary reports Hit@1/3/5, MRR@10, nDCG@10, per-query failures, and hot rerank latency
 
 ## Future Requirements
 
@@ -60,12 +63,15 @@
 | CHUNK-02 | Phase 12 | Pending |
 | SCORE-01 | Phase 12 | Complete |
 | SCORE-02 | Phase 12 | Pending |
+| RERANK-QUALITY-01 | Phase 21 | Pending |
+| RERANK-QUALITY-02 | Phase 21 | Pending |
+| RERANK-QUALITY-03 | Phase 21 | Pending |
 
 **Coverage:**
-- v1.4 requirements: 9 total
-- Mapped to phases: 9
+- v1.4 requirements: 12 total
+- Mapped to phases: 12
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-30*
-*Last updated: 2026-03-30 after roadmap creation*
+*Last updated: 2026-05-02 after Phase 21 reranker quality requirements*
