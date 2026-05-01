@@ -10,6 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from fastapi.testclient import TestClient
+
 
 def _get_service(tmp_path: Path):  # type: ignore[no-untyped-def]
     from dotmd.api.service import DotMDService
@@ -222,3 +224,103 @@ class TestCompareRerankers:
         ]
         assert comparison["overlap_reference"] is None
         assert comparison["overlap"] == {}
+
+
+class TestSearchApiRerankerSurfaces:
+    """FastAPI exposes reranker selection and comparison diagnostics."""
+
+    def test_search_endpoint_accepts_reranker_name(self) -> None:
+        from dotmd.api import server
+
+        service = MagicMock()
+        service.search.return_value = []
+        server._service = service
+        client = TestClient(server.app)
+
+        response = client.get("/search?q=test&reranker=msmarco-minilm")
+
+        assert response.status_code == 200
+        service.search.assert_called_once()
+        assert service.search.call_args.kwargs["reranker_name"] == "msmarco-minilm"
+
+    def test_compare_endpoint_returns_typed_payload(self) -> None:
+        from dotmd.api import server
+
+        service = MagicMock()
+        service.compare_rerankers.return_value = {
+            "query": "test",
+            "search_query": "expanded test",
+            "shared_pool_size": 2,
+            "rerankers": [
+                {
+                    "name": "qwen3-0.6b",
+                    "model_name": "Qwen",
+                    "elapsed_ms": 12.3,
+                    "returned_count": 2,
+                    "top_chunk_ids": ["c1", "c2"],
+                    "scores": [0.9, 0.8],
+                    "error": None,
+                },
+                {
+                    "name": "msmarco-minilm",
+                    "model_name": "MiniLM",
+                    "elapsed_ms": 4.5,
+                    "returned_count": 1,
+                    "top_chunk_ids": ["c2"],
+                    "scores": [0.7],
+                    "error": None,
+                },
+            ],
+            "overlap_reference": "qwen3-0.6b",
+            "overlap": {"qwen3-0.6b": 2, "msmarco-minilm": 1},
+        }
+        server._service = service
+        client = TestClient(server.app)
+
+        response = client.get(
+            "/rerank/compare?q=test&rerankers=qwen3-0.6b,msmarco-minilm"
+        )
+
+        assert response.status_code == 200
+        assert response.json()["shared_pool_size"] == 2
+        assert response.json()["rerankers"][0]["elapsed_ms"] == 12.3
+        service.compare_rerankers.assert_called_once_with(
+            query="test",
+            reranker_names=["qwen3-0.6b", "msmarco-minilm"],
+            top_k=10,
+            mode="hybrid",
+            expand=True,
+        )
+
+    def test_compare_endpoint_unknown_reranker_returns_400(self) -> None:
+        from dotmd.api import server
+
+        service = MagicMock()
+        service.compare_rerankers.side_effect = ValueError(
+            "Unknown reranker 'missing'; available: qwen3-0.6b"
+        )
+        server._service = service
+        client = TestClient(server.app)
+
+        response = client.get("/rerank/compare?q=test&rerankers=missing")
+
+        assert response.status_code == 400
+        assert "Unknown reranker" in response.json()["detail"]
+
+    def test_compare_endpoint_surfaces_schema_drift(self) -> None:
+        from dotmd.api import server
+
+        service = MagicMock()
+        service.compare_rerankers.return_value = {
+            "query": "test",
+            "search_query": "test",
+            "shared_pool_size": 0,
+            "rerankers": [],
+            "overlap_reference": None,
+        }
+        server._service = service
+        client = TestClient(server.app, raise_server_exceptions=False)
+
+        response = client.get("/rerank/compare?q=test")
+
+        assert response.status_code == 500
