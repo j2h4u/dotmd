@@ -137,6 +137,8 @@ v1.3 shipped and archived. Production packaging complete: parameterized docker-c
 
 Phase 999.12 complete (2026-04-27): Dual-encoder unified embedding shipped. Metadata-only changes (tag updates, title renames) now require 1 TEI call per document instead of N calls per chunk. VecComponentStore stores raw e_text/e_meta BLOBs; meta_tracker (title+tags checksum) triggers fast path when only metadata changes. search_log table added. 189 tests pass.
 
+Phase 19 complete (2026-05-01): Reranking now has a provider protocol, stable-name registry, and cached factory. Production search remains single-reranker by default (`qwen3-0.6b`) while service, FastAPI, and CLI can select rerankers by name. Developer comparison runs multiple rerankers over one shared retrieval/fusion candidate pool and reports latency, errors, ordered IDs, scores, and overlap for Qwen-vs-alternate decisions.
+
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
@@ -155,4 +157,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-27 after Phase 999.12 complete*
+*Last updated: 2026-05-01 after Phase 19 complete*
