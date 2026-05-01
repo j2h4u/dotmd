@@ -290,7 +290,7 @@ class TestRerankerFactory:
 
         settings = Settings(embedding_url="http://test:8088")
 
-        with pytest.raises(ValueError, match="Unknown reranker.*qwen3-0.6b"):
+        with pytest.raises(ValueError, match=r"Unknown reranker.*qwen3-0\.6b"):
             create_reranker("does-not-exist", settings)
 
     def test_factory_caches_instances_by_name(self) -> None:

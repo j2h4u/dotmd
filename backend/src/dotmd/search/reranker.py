@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
+    from dotmd.core.config import Settings
     from dotmd.storage.base import MetadataStoreProtocol
 
 logger = logging.getLogger(__name__)
@@ -82,7 +83,7 @@ def available_rerankers() -> list[str]:
     return sorted(BUILTIN_RERANKERS)
 
 
-class Reranker:
+class CrossEncoderReranker:
     """Cross-encoder reranker with lazy model loading and length penalty.
 
     The underlying ``CrossEncoder`` is instantiated on the first call to
@@ -109,10 +110,14 @@ class Reranker:
     def __init__(
         self,
         model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
+        *,
+        name: str | None = None,
         length_penalty: bool = True,
         min_length: int = 100,
         relevance_floor: float | None = None,
     ) -> None:
+        self.name = name or model_name
+        self.model_name = model_name
         self._model_name = model_name
         self._model: Any | None = None
         self._length_penalty = length_penalty
@@ -137,6 +142,10 @@ class Reranker:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def warmup(self) -> None:
+        """Load the cross-encoder provider without scoring candidates."""
+        self._load_model()
 
     def rerank(
         self,
@@ -235,3 +244,49 @@ class Reranker:
                 self._relevance_floor,
             )
         return scored[:top_k]
+
+
+def create_reranker(name: str, settings: Settings) -> RerankerProtocol:
+    """Create a reranker adapter by stable registry name."""
+    try:
+        spec = BUILTIN_RERANKERS[name]
+    except KeyError:
+        available = ", ".join(available_rerankers())
+        raise ValueError(
+            f"Unknown reranker {name!r}; available: {available}"
+        ) from None
+
+    if spec.backend != "cross_encoder":
+        raise ValueError(
+            f"Unsupported reranker backend {spec.backend!r} for {name!r}"
+        )
+
+    model_name = spec.model_name
+    if name == "qwen3-0.6b" and settings.reranker_name == "qwen3-0.6b":
+        model_name = settings.reranker_model
+
+    return CrossEncoderReranker(
+        model_name=model_name,
+        name=spec.name,
+        length_penalty=settings.reranker_length_penalty,
+        min_length=settings.reranker_min_length,
+        relevance_floor=settings.reranker_relevance_floor,
+    )
+
+
+class RerankerFactory:
+    """Cache reranker adapters by stable registry name."""
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+        self._instances: dict[str, RerankerProtocol] = {}
+
+    def get(self, name: str | None = None) -> RerankerProtocol:
+        """Return a cached reranker, using the configured default when omitted."""
+        resolved = name or self._settings.reranker_name
+        if resolved not in self._instances:
+            self._instances[resolved] = create_reranker(resolved, self._settings)
+        return self._instances[resolved]
+
+
+Reranker = CrossEncoderReranker
