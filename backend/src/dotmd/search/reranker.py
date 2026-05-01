@@ -8,12 +8,78 @@ results sorted by descending relevance.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from dotmd.storage.base import MetadataStoreProtocol
 
 logger = logging.getLogger(__name__)
+
+
+class RerankerProtocol(Protocol):
+    """Protocol implemented by reranker adapters."""
+
+    name: str
+    model_name: str
+
+    def warmup(self) -> None:
+        """Load or prepare the underlying reranker provider."""
+        ...
+
+    def rerank(
+        self,
+        query: str,
+        chunk_ids: list[str],
+        metadata_store: MetadataStoreProtocol,
+        top_k: int = 5,
+    ) -> list[tuple[str, float]]:
+        """Return reranked ``(chunk_id, score)`` pairs."""
+        ...
+
+
+@dataclass(frozen=True)
+class RerankerSpec:
+    """Registry metadata for a built-in reranker adapter."""
+
+    name: str
+    model_name: str
+    backend: str = "cross_encoder"
+    description: str = ""
+
+
+BUILTIN_RERANKERS: dict[str, RerankerSpec] = {
+    "qwen3-0.6b": RerankerSpec(
+        name="qwen3-0.6b",
+        model_name="Qwen/Qwen3-Reranker-0.6B",
+        description="Qwen3 0.6B reranker selected as the Phase 18 default.",
+    ),
+    "msmarco-minilm": RerankerSpec(
+        name="msmarco-minilm",
+        model_name="cross-encoder/ms-marco-MiniLM-L-6-v2",
+        description="Legacy English MiniLM baseline.",
+    ),
+    "mmarco-minilm": RerankerSpec(
+        name="mmarco-minilm",
+        model_name="cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
+        description="Multilingual MiniLM baseline.",
+    ),
+    "gte-multilingual": RerankerSpec(
+        name="gte-multilingual",
+        model_name="Alibaba-NLP/gte-multilingual-reranker-base",
+        description="GTE multilingual reranker candidate.",
+    ),
+    "bge-v2-m3": RerankerSpec(
+        name="bge-v2-m3",
+        model_name="BAAI/bge-reranker-v2-m3",
+        description="BGE multilingual reranker candidate.",
+    ),
+}
+
+
+def available_rerankers() -> list[str]:
+    """Return stable names for built-in rerankers."""
+    return sorted(BUILTIN_RERANKERS)
 
 
 class Reranker:
