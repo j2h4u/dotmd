@@ -136,5 +136,70 @@ operationally slow but not as a completed canonical row.
 
 ## Canonical Runs
 
-No canonical runs yet. Start after the split timing fields from commit
-`1ed6aa6` are present in the running container.
+### 2026-05-01 Canonical Protocol v1
+
+Pre-run checklist:
+
+- commit hash: `ed5808b`
+- container name or runtime identifier: `dotmd` container, healthy, current
+  CPU-only runtime
+- benchmark runner command:
+
+```bash
+docker exec dotmd python /app/devtools/reranker_latency_bench.py \
+  --output /tmp/dotmd-phase20-results/2026-05-01-rerank-latency.jsonl \
+  --summary /tmp/dotmd-phase20-results/2026-05-01-rerank-latency-summary.md \
+  --mode hybrid \
+  --top-n 3 \
+  --pool-size 20 \
+  --cold-passes 1 \
+  --hot-passes 3 \
+  --model-wall-timeout-s 900 \
+  --hot-query-timeout-s 120 \
+  --commit ed5808b
+```
+
+- query set version: `QUERY_SET_V1`
+- model list: `msmarco-minilm`, `mmarco-minilm`, `mxbai-xsmall-v1`,
+  `mxbai-base-v1`, `jina-v2-multilingual`, `gte-multilingual`, `bge-v2-m3`,
+  `qwen3-0.6b`, `gte-modernbert-base`
+- `shared_pool_size`: 20
+- `top_n`: 3
+- `mode`: `hybrid`
+- expansion setting: enabled
+- timeout settings: `model_wall_timeout_s=900`, `hot_query_timeout_s=120`
+- raw output path:
+  `.planning/phases/20-reranker-latency-benchmark/results/2026-05-01-rerank-latency.jsonl`
+- summary path:
+  `.planning/phases/20-reranker-latency-benchmark/results/2026-05-01-rerank-latency-summary.md`
+- raw row count: 180
+
+Runner note: `backend/devtools` is not bind-mounted into the container, so the
+committed runner was copied to `/app/devtools/reranker_latency_bench.py` before
+execution. The measured code paths were the container's mounted `/app/src`
+runtime.
+
+Operational note: FTS5 logged parse errors for hyphenated benchmark query terms
+such as `content-addressed` and `sqlite-vec`; these did not become benchmark
+row errors because the search pipeline continued with the remaining retrieval
+engines.
+
+| Model | Band | Hot samples | p50 rerank | p95 rerank | max rerank | cold load max | Errors | Timeouts |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| `msmarco-minilm` | fast | 30 | 4s | 4s | 4s | 10s | 0 | 0 |
+| `mmarco-minilm` | fast | 30 | 8s | 8s | 9s | 9s | 0 | 0 |
+| `mxbai-xsmall-v1` | acceptable | 30 | 12s | 12s | 12s | 8s | 0 | 0 |
+| `mxbai-base-v1` | unusable | 20 | 27s | 28s | 28s | 8s | 1 | 1 |
+| `gte-multilingual` | unusable | 1 | 3m18s | 3m18s | 3m18s | 12s | 0 | 1 |
+| `bge-v2-m3` | unusable | 0 | n/a | n/a | n/a | 8s | 1 | 1 |
+| `gte-modernbert-base` | unusable | 0 | n/a | n/a | n/a | 14s | 1 | 1 |
+| `jina-v2-multilingual` | unusable | 0 | n/a | n/a | n/a | n/a | 1 | 1 |
+| `qwen3-0.6b` | unusable | 0 | n/a | n/a | n/a | 16s | 1 | 1 |
+
+Shortlist for later quality comparison, based only on latency:
+
+- `msmarco-minilm`
+- `mmarco-minilm`
+- `mxbai-xsmall-v1`
+
+Quality remains out of scope for Phase 20.
