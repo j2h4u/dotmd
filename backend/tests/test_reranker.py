@@ -307,6 +307,18 @@ class TestRerankerRegistry:
             == "cross-encoder/ms-marco-MiniLM-L-6-v2"
         )
 
+    def test_only_gte_multilingual_trusts_remote_code(self) -> None:
+        """Remote-code trust is allowlisted per model, not globally enabled."""
+        from dotmd.search.reranker import BUILTIN_RERANKERS
+
+        trusted = [
+            name
+            for name, spec in BUILTIN_RERANKERS.items()
+            if spec.trust_remote_code
+        ]
+
+        assert trusted == ["gte-multilingual"]
+
 
 class TestRerankerFactory:
     """Reranker factory resolves stable names to cached adapter instances."""
@@ -322,6 +334,20 @@ class TestRerankerFactory:
 
         assert reranker.name == "qwen3-0.6b"
         assert reranker.model_name == "Qwen/Qwen3-Reranker-0.6B"
+        assert reranker._trust_remote_code is False
+
+    def test_create_reranker_allows_remote_code_only_for_gte(self) -> None:
+        """The Alibaba GTE adapter opts in to HF remote code explicitly."""
+        from dotmd.core.config import Settings
+        from dotmd.search.reranker import create_reranker
+
+        settings = Settings(embedding_url="http://test:8088")
+
+        reranker = create_reranker("gte-multilingual", settings)
+
+        assert reranker.name == "gte-multilingual"
+        assert reranker.model_name == "Alibaba-NLP/gte-multilingual-reranker-base"
+        assert reranker._trust_remote_code is True
 
     def test_create_reranker_rejects_unknown_name(self) -> None:
         """Unknown reranker names fail loudly with available names."""
@@ -357,7 +383,28 @@ class TestRerankerFactory:
         reranker = CrossEncoderReranker(model_name="test-model", name="test")
         reranker.warmup()
 
-        MockCE.assert_called_once_with("test-model")
+        MockCE.assert_called_once_with("test-model", trust_remote_code=False)
+        mock_model.predict.assert_not_called()
+
+    @patch("sentence_transformers.CrossEncoder", autospec=True)
+    def test_cross_encoder_reranker_warmup_can_trust_remote_code(
+        self,
+        MockCE: MagicMock,
+    ) -> None:
+        """Model-specific adapters can opt in to HF remote code at load time."""
+        from dotmd.search.reranker import CrossEncoderReranker
+
+        mock_model = MagicMock()
+        MockCE.return_value = mock_model
+
+        reranker = CrossEncoderReranker(
+            model_name="test-model",
+            name="test",
+            trust_remote_code=True,
+        )
+        reranker.warmup()
+
+        MockCE.assert_called_once_with("test-model", trust_remote_code=True)
         mock_model.predict.assert_not_called()
 
     def test_create_reranker_passes_settings_to_adapter(self) -> None:

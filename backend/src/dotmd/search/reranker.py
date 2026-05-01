@@ -48,6 +48,7 @@ class RerankerSpec:
     name: str
     model_name: str
     backend: str = "cross_encoder"
+    trust_remote_code: bool = False
     description: str = ""
 
 
@@ -70,6 +71,7 @@ BUILTIN_RERANKERS: dict[str, RerankerSpec] = {
     "gte-multilingual": RerankerSpec(
         name="gte-multilingual",
         model_name="Alibaba-NLP/gte-multilingual-reranker-base",
+        trust_remote_code=True,
         description="GTE multilingual reranker candidate.",
     ),
     "bge-v2-m3": RerankerSpec(
@@ -117,6 +119,7 @@ class CrossEncoderReranker:
         length_penalty: bool = True,
         min_length: int = 100,
         relevance_floor: float | None = None,
+        trust_remote_code: bool = False,
     ) -> None:
         self.name = name or model_name
         self.model_name = model_name
@@ -127,6 +130,7 @@ class CrossEncoderReranker:
         # None means no raw-score filtering. Qwen3 scores are useful for
         # ordering, but a universal default floor is not portable across models.
         self._relevance_floor = relevance_floor
+        self._trust_remote_code = trust_remote_code
 
     # ------------------------------------------------------------------
     # Internals
@@ -138,7 +142,10 @@ class CrossEncoderReranker:
             from sentence_transformers import CrossEncoder  # type: ignore[import-untyped]
 
             logger.info("Loading cross-encoder model: %s", self._model_name)
-            self._model = CrossEncoder(self._model_name)
+            self._model = CrossEncoder(
+                self._model_name,
+                trust_remote_code=self._trust_remote_code,
+            )
         return self._model
 
     # ------------------------------------------------------------------
@@ -281,6 +288,7 @@ def create_reranker(name: str, settings: Settings) -> RerankerProtocol:
         length_penalty=settings.reranker_length_penalty,
         min_length=settings.reranker_min_length,
         relevance_floor=settings.reranker_relevance_floor,
+        trust_remote_code=spec.trust_remote_code,
     )
 
 

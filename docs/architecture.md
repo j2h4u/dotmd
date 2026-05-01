@@ -126,6 +126,9 @@ provider `model_name`, `warmup()`, and `rerank()`. Built-in adapters are
 registered by short names such as `qwen3-0.6b`, `msmarco-minilm`,
 `mmarco-minilm`, `gte-multilingual`, and `bge-v2-m3`; `RerankerFactory` resolves and caches
 the selected adapter so normal search does not construct a model per request.
+Models that require Hugging Face custom code opt in through the registry entry
+only; `gte-multilingual` sets `trust_remote_code=True`, while other built-ins
+keep remote code disabled.
 
 `DotMDService` owns all public reranker selection and comparison flows. Normal
 search stays single-reranker by default through `DOTMD_RERANKER_NAME=qwen3-0.6b`.
