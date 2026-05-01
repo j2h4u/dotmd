@@ -110,8 +110,17 @@ def index(ctx: click.Context, directory: Path, extract_depth: str, entity_types:
 )
 @click.option("--no-rerank", is_flag=True, help="Skip cross-encoder reranking.")
 @click.option("--no-expand", is_flag=True, help="Skip query expansion.")
+@click.option("--reranker", default=None, help="Reranker name to use.")
 @click.pass_context
-def search(ctx: click.Context, query: str, top: int, mode: str, no_rerank: bool, no_expand: bool) -> None:
+def search(
+    ctx: click.Context,
+    query: str,
+    top: int,
+    mode: str,
+    no_rerank: bool,
+    no_expand: bool,
+    reranker: str | None,
+) -> None:
     """Search the indexed knowledgebase."""
     service = _get_service_from_ctx(ctx)
     results = service.search(
@@ -120,6 +129,7 @@ def search(ctx: click.Context, query: str, top: int, mode: str, no_rerank: bool,
         mode=mode,
         rerank=not no_rerank,
         expand=not no_expand,
+        reranker_name=reranker,
     )
 
     if not results:
@@ -144,6 +154,66 @@ def search(ctx: click.Context, query: str, top: int, mode: str, no_rerank: bool,
             click.echo(f"      {r.heading_path}")
         click.echo(f"      Score: {r.fused_score:.4f}  Engines: {', '.join(r.matched_engines)}")
         click.echo(f"      {r.snippet}")
+
+
+@main.group("rerank")
+def rerank_group() -> None:
+    """Developer reranker diagnostics."""
+
+
+@rerank_group.command("compare")
+@click.argument("query")
+@click.option("--rerankers", default=None, help="Comma-separated reranker names.")
+@click.option("--top", "-n", default=10, help="Number of candidates to report.")
+@click.option(
+    "--mode",
+    type=click.Choice([m.value for m in SearchMode]),
+    default="hybrid",
+)
+@click.option("--no-expand", is_flag=True, help="Skip query expansion.")
+@click.pass_context
+def compare(
+    ctx: click.Context,
+    query: str,
+    rerankers: str | None,
+    top: int,
+    mode: str,
+    no_expand: bool,
+) -> None:
+    """Compare reranker diagnostics over one shared candidate pool."""
+    service = _get_service_from_ctx(ctx)
+    names = (
+        [name.strip() for name in rerankers.split(",") if name.strip()]
+        if rerankers
+        else None
+    )
+    try:
+        comparison = service.compare_rerankers(
+            query=query,
+            reranker_names=names,
+            top_k=top,
+            mode=mode,
+            expand=not no_expand,
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(f"Shared pool: {comparison['shared_pool_size']} candidates")
+    for run in comparison["rerankers"]:
+        top_ids = ", ".join(run["top_chunk_ids"]) or "none"
+        scores = ", ".join(f"{score:.4f}" for score in run["scores"]) or "none"
+        row = (
+            f"{run['name']} model={run['model_name']} "
+            f"elapsed_ms={run['elapsed_ms']:.1f} "
+            f"returned_count={run['returned_count']} "
+            f"top_chunk_ids={top_ids} scores={scores}"
+        )
+        if run["error"]:
+            row += f" ERROR: {run['error']}"
+        click.echo(row)
+    reference = comparison["overlap_reference"] or "none"
+    click.echo(f"Overlap reference: {reference}")
+    click.echo(f"Overlap: {comparison['overlap']}")
 
 
 @main.command()
