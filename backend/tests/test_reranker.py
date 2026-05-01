@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from dotmd.search.reranker import Reranker
+from dotmd.search.reranker import Reranker, available_rerankers
 
 
 def _make_reranker() -> Reranker:
@@ -237,3 +237,32 @@ class TestRerankerScoring:
             "qwen3-0.6b",
             "msmarco-minilm",
         ]
+
+
+class TestRerankerRegistry:
+    """Built-in reranker registry exposes stable short names."""
+
+    def test_available_rerankers_includes_builtin_names(self) -> None:
+        """Available reranker names include all built-in registry entries."""
+        assert available_rerankers() == [
+            "bge-v2-m3",
+            "gte-multilingual",
+            "mmarco-minilm",
+            "msmarco-minilm",
+            "qwen3-0.6b",
+        ]
+
+    def test_qwen3_spec_maps_to_model_name(self) -> None:
+        """The Qwen short name maps to the Phase 18 selected model."""
+        from dotmd.search.reranker import BUILTIN_RERANKERS
+
+        assert BUILTIN_RERANKERS["qwen3-0.6b"].model_name == "Qwen/Qwen3-Reranker-0.6B"
+
+    def test_msmarco_minilm_spec_maps_to_model_name(self) -> None:
+        """The legacy MiniLM short name maps to the existing baseline model."""
+        from dotmd.search.reranker import BUILTIN_RERANKERS
+
+        assert (
+            BUILTIN_RERANKERS["msmarco-minilm"].model_name
+            == "cross-encoder/ms-marco-MiniLM-L-6-v2"
+        )
