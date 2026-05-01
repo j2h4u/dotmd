@@ -20,7 +20,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 19 — reranker-adapter-layer-and-multi-model-comparison
+**Current focus:** Phase 999.12 — dual-encoder-unified-embedding-decoupled-metadata-vectors-ba
 
 ## Current Milestone
 
@@ -78,7 +78,7 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-Phase 19 is ready to plan. Split it into adapter/factory refactor first, then developer comparison of the top 3-4 Phase 18 reranker candidates using one shared retrieval pool. Qwen CPU latency is a key concern from live smoke (`DOTMD_RERANK_POOL_SIZE=3` took ~20.8s for one batch).
+Phase 19 complete. Reranker adapter/factory refactor, shared retrieval pool, developer comparison surfaces, latency diagnostics, and docs are implemented and verified. Qwen CPU latency remains visible through comparison `elapsed_ms`.
 
 ### Blockers/Concerns
 
