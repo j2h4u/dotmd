@@ -113,7 +113,12 @@ class TestCompareRerankers:
         assert first.rerank.call_args.args[1] == ["c1", "c2", "c3"]
         assert second.rerank.call_args.args[1] == ["c1", "c2", "c3"]
         assert comparison["shared_pool_size"] == 3
-        assert all(run["elapsed_ms"] >= 0 for run in comparison["rerankers"])
+        assert all(
+            isinstance(run["elapsed_ms"], float) and run["elapsed_ms"] >= 0.0
+            for run in comparison["rerankers"]
+        )
+        for run in comparison["rerankers"]:
+            assert run["returned_count"] == len(run["top_chunk_ids"]) == len(run["scores"])
 
     def test_compare_isolates_per_reranker_errors(self, tmp_path: Path) -> None:
         service = _get_service(tmp_path)
@@ -145,8 +150,86 @@ class TestCompareRerankers:
         comparison = service.compare_rerankers("q", ["qwen3-0.6b", "msmarco-minilm"])
 
         assert comparison["rerankers"][0]["error"] == "boom"
+        assert comparison["rerankers"][0]["returned_count"] == 0
+        assert comparison["rerankers"][0]["top_chunk_ids"] == []
+        assert comparison["rerankers"][0]["scores"] == []
         assert comparison["rerankers"][1]["error"] is None
         assert comparison["rerankers"][1]["top_chunk_ids"] == ["c2"]
+        assert comparison["rerankers"][1]["returned_count"] == 1
+        assert len(comparison["rerankers"][1]["scores"]) == 1
+
+    def test_compare_default_names_include_configured_qwen(
+        self, tmp_path: Path
+    ) -> None:
+        service = _get_service(tmp_path)
+        service._settings.reranker_compare_names = "qwen3-0.6b,msmarco-minilm"
+        service._query_expander = MagicMock()
+        service._query_expander.expand.return_value = MagicMock(expanded_text="expanded q")
+        service._collect_candidate_pool = MagicMock(
+            return_value={
+                "search_query": "expanded q",
+                "original_query": "q",
+                "fused": [("c1", 0.3), ("c2", 0.2)],
+                "engine_results": {},
+                "semantic_hits": [],
+                "keyword_hits": [],
+                "graph_direct_hits": [],
+                "pool_size": 2,
+            }
+        )
+        qwen = MagicMock()
+        qwen.name = "qwen3-0.6b"
+        qwen.model_name = "Qwen"
+        qwen.rerank.return_value = [("c2", 0.9), ("c1", 0.8)]
+        minilm = MagicMock()
+        minilm.name = "msmarco-minilm"
+        minilm.model_name = "MiniLM"
+        minilm.rerank.return_value = [("c1", 0.7)]
+        service._reranker_factory = MagicMock()
+        service._reranker_factory.get.side_effect = [qwen, minilm]
+
+        comparison = service.compare_rerankers("q")
+
+        assert comparison["rerankers"][0]["name"] == "qwen3-0.6b"
+        assert comparison["rerankers"][0]["top_chunk_ids"] == ["c2", "c1"]
+        assert comparison["rerankers"][0]["scores"] == [0.9, 0.8]
+
+    def test_compare_three_rerankers_reuses_retrieval_engines_once(
+        self, tmp_path: Path
+    ) -> None:
+        service = _get_service(tmp_path)
+        service._query_expander = MagicMock()
+        service._query_expander.expand.return_value = MagicMock(expanded_text="expanded q")
+        service._semantic_engine.search = MagicMock(return_value=[("c1", 0.9)])
+        service._keyword_engine.search = MagicMock(return_value=[("c2", 0.8)])
+        service._graph_direct_engine.search = MagicMock(return_value=[("c3", 0.7)])
+        service._graph_engine.search = MagicMock(return_value=[])
+
+        rerankers = []
+        for name, chunk_id in [
+            ("qwen3-0.6b", "c1"),
+            ("msmarco-minilm", "c2"),
+            ("mmarco-minilm", "c3"),
+        ]:
+            reranker = MagicMock()
+            reranker.name = name
+            reranker.model_name = name
+            reranker.rerank.return_value = [(chunk_id, 0.9)]
+            rerankers.append(reranker)
+        service._reranker_factory = MagicMock()
+        service._reranker_factory.get.side_effect = rerankers
+
+        comparison = service.compare_rerankers(
+            "q",
+            ["qwen3-0.6b", "msmarco-minilm", "mmarco-minilm"],
+            top_k=2,
+        )
+
+        service._semantic_engine.search.assert_called_once()
+        service._keyword_engine.search.assert_called_once()
+        service._graph_direct_engine.search.assert_called_once()
+        service._graph_engine.search.assert_called_once()
+        assert [run["returned_count"] for run in comparison["rerankers"]] == [1, 1, 1]
 
     def test_compare_overlap_uses_first_successful_reranker(self, tmp_path: Path) -> None:
         service = _get_service(tmp_path)
