@@ -14,7 +14,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from dotmd.api.service import DotMDService
@@ -86,6 +86,25 @@ class SearchResponse(BaseModel):
     count: int
 
 
+class RerankerRunComparisonResponse(BaseModel):
+    name: str
+    model_name: str
+    elapsed_ms: float
+    returned_count: int
+    top_chunk_ids: list[str]
+    scores: list[float]
+    error: str | None = None
+
+
+class RerankerComparisonResponse(BaseModel):
+    query: str
+    search_query: str
+    shared_pool_size: int
+    rerankers: list[RerankerRunComparisonResponse]
+    overlap_reference: str | None = None
+    overlap: dict[str, int]
+
+
 class GraphNode(BaseModel):
     id: str
     label: str
@@ -119,6 +138,7 @@ async def search(
     mode: SearchMode = Query(SearchMode.HYBRID),
     rerank: bool = Query(True),
     expand: bool = Query(True),
+    reranker: str | None = Query(None, description="Reranker name to use"),
 ) -> SearchResponse:
     """Search the indexed knowledgebase."""
     results = _get_service().search(
@@ -127,8 +147,36 @@ async def search(
         mode=mode,
         rerank=rerank,
         expand=expand,
+        reranker_name=reranker,
     )
     return SearchResponse(query=q, results=results, count=len(results))
+
+
+@app.get("/rerank/compare", response_model=RerankerComparisonResponse)
+async def compare_rerankers(
+    q: str = Query(..., description="Search query"),
+    rerankers: str | None = Query(None, description="Comma-separated reranker names"),
+    top_k: int = Query(10, ge=1, le=100),
+    mode: SearchMode = Query(SearchMode.HYBRID),
+    expand: bool = Query(True),
+) -> RerankerComparisonResponse:
+    """Compare developer-selected rerankers over one shared candidate pool."""
+    names = (
+        [name.strip() for name in rerankers.split(",") if name.strip()]
+        if rerankers
+        else None
+    )
+    try:
+        comparison = _get_service().compare_rerankers(
+            query=q,
+            reranker_names=names,
+            top_k=top_k,
+            mode=mode.value,
+            expand=expand,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RerankerComparisonResponse.model_validate(comparison)
 
 
 @app.get("/status", response_model=IndexStats)
