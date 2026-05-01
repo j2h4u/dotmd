@@ -21,7 +21,7 @@ tech-stack:
 
 key-files:
   created:
-    - .planning/phases/19-reranker-adapter-layer-and-multi-model-comparison/19-04-SUMMARY.md
+    - .planning/phases/19-reranker-adapter-layer-and-multi-model-comparison/19-04-latency-docs-verification-SUMMARY.md
   modified:
     - backend/tests/api/test_service_search.py
     - README.md
@@ -78,7 +78,7 @@ Each task was committed atomically:
 - `README.md` - Added stable reranker default, runtime reranker CLI example, developer comparison command, and `elapsed_ms` diagnostics explanation.
 - `docs/architecture.md` - Added reranker adapter section covering `RerankerProtocol`, registry, factory/cache, shared candidate pool, `DotMDService`, and no per-request index reloads.
 - `.env.example` - Added `DOTMD_RERANKER_NAME` and `DOTMD_RERANKER_COMPARE_NAMES` defaults.
-- `.planning/phases/19-reranker-adapter-layer-and-multi-model-comparison/19-04-SUMMARY.md` - Execution summary and verification record.
+- `.planning/phases/19-reranker-adapter-layer-and-multi-model-comparison/19-04-latency-docs-verification-SUMMARY.md` - Execution summary and verification record.
 
 ## Decisions Made
 

@@ -11,7 +11,7 @@ files_modified:
   - README.md
   - docs/architecture.md
   - .env.example
-  - .planning/phases/19-reranker-adapter-layer-and-multi-model-comparison/19-04-SUMMARY.md
+  - .planning/phases/19-reranker-adapter-layer-and-multi-model-comparison/19-04-latency-docs-verification-SUMMARY.md
 autonomous: true
 requirements:
   - RERANK-COMPARE-01
@@ -32,7 +32,7 @@ must_haves:
     - path: "docs/architecture.md"
       provides: "adapter/factory architecture description"
       contains: "RerankerProtocol"
-    - path: ".planning/phases/19-reranker-adapter-layer-and-multi-model-comparison/19-04-SUMMARY.md"
+    - path: ".planning/phases/19-reranker-adapter-layer-and-multi-model-comparison/19-04-latency-docs-verification-SUMMARY.md"
       provides: "execution summary and smoke status"
       contains: "Qwen CPU latency"
   key_links:
@@ -169,7 +169,7 @@ Docs explain the adapter layer, runtime selection, and developer comparison comm
 - `.planning/phases/19-reranker-adapter-layer-and-multi-model-comparison/19-04-latency-docs-verification-PLAN.md`
 </read_first>
 <files>
-- `.planning/phases/19-reranker-adapter-layer-and-multi-model-comparison/19-04-SUMMARY.md`
+- `.planning/phases/19-reranker-adapter-layer-and-multi-model-comparison/19-04-latency-docs-verification-SUMMARY.md`
 </files>
 <action>
 Run focused verification:
@@ -185,7 +185,7 @@ Optional live CPU smoke only if the operator explicitly wants a real model run a
 dotmd rerank compare "русский тестовый запрос" --rerankers qwen3-0.6b,msmarco-minilm --top 3
 ```
 
-Write `19-04-SUMMARY.md` with:
+Write `19-04-latency-docs-verification-SUMMARY.md` with:
 - what adapter/factory/comparison features shipped;
 - commands run and pass/fail status;
 - whether live Qwen CPU smoke was run or skipped;
@@ -193,13 +193,13 @@ Write `19-04-SUMMARY.md` with:
 - explicit note that production remains single-reranker by default.
 </action>
 <verify>
-<automated>test -f .planning/phases/19-reranker-adapter-layer-and-multi-model-comparison/19-04-SUMMARY.md</automated>
+<automated>test -f .planning/phases/19-reranker-adapter-layer-and-multi-model-comparison/19-04-latency-docs-verification-SUMMARY.md</automated>
 </verify>
 <acceptance_criteria>
-- `19-04-SUMMARY.md` contains `Qwen CPU latency`.
-- `19-04-SUMMARY.md` contains `production remains single-reranker`.
-- `19-04-SUMMARY.md` contains `Commands run`.
-- `19-04-SUMMARY.md` states `live CPU smoke was run` or `live CPU smoke was skipped`.
+- `19-04-latency-docs-verification-SUMMARY.md` contains `Qwen CPU latency`.
+- `19-04-latency-docs-verification-SUMMARY.md` contains `production remains single-reranker`.
+- `19-04-latency-docs-verification-SUMMARY.md` contains `Commands run`.
+- `19-04-latency-docs-verification-SUMMARY.md` states `live CPU smoke was run` or `live CPU smoke was skipped`.
 - Focused pytest command exits 0 or any failure is documented with exact failing test.
 - Focused ruff command exits 0 or any failure is documented with exact failing file.
 </acceptance_criteria>
