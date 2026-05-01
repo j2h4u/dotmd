@@ -62,6 +62,7 @@ Progress: [███░░░░░░░] 26%
 
 - Phase 15 added: Content-addressed caching (embedding cache, extraction cache, content-based chunk_id)
 - Phase 19 added: Reranker adapter layer and multi-model comparison
+- Phase 20 added: Reranker Latency Benchmark
 
 ### Decisions
 

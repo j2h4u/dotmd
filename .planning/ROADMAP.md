@@ -536,6 +536,16 @@ Plans:
 - [x] 16-04-purge-and-change-detection-PLAN.md — Wave 3 decrement-cascade _purge_file + M2M orphan sweep
 - [x] 16-05-search-api-clean-break-PLAN.md — Wave 3 SearchResult.file_paths: list[Path] across models/fusion/CLI/MCP
 
+### Phase 20: Reranker Latency Benchmark
+
+**Goal:** Establish a reproducible latency benchmark protocol for rerankers and select the models worth comparing for quality.
+**Requirements**: RERANK-LATENCY-02, RERANK-BENCH-01
+**Depends on:** Phase 19
+**Plans:** 1 plan
+
+Plans:
+- [ ] 20-01-latency-benchmark-protocol-PLAN.md — Define protocol, capture benchmark ledger, and run canonical latency shortlist
+
 ---
 
 *Roadmap created: 2026-03-26*
