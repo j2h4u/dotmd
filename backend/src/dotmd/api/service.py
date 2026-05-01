@@ -18,7 +18,7 @@ from dotmd.search.fusion import build_search_results, fuse_results
 from dotmd.search.graph_direct import GraphDirectEngine
 from dotmd.search.graph_search import GraphSearchEngine
 from dotmd.search.query import QueryExpander
-from dotmd.search.reranker import Reranker
+from dotmd.search.reranker import RerankerFactory
 from dotmd.search.semantic import SemanticSearchEngine
 
 logger = logging.getLogger(__name__)
@@ -88,19 +88,12 @@ class DotMDService:
         self._query_expander = QueryExpander(
             acronym_dict=acronym_dict,
         )
-        if self._settings.reranker_backend != "cross_encoder":
-            raise ValueError(f"Unsupported reranker backend: {self._settings.reranker_backend!r}")
         if self._settings.reranker_url:
             logger.info(
                 "DOTMD_RERANKER_URL is configured but %s uses the local CrossEncoder backend",
                 self._settings.reranker_backend,
             )
-        self._reranker = Reranker(
-            model_name=self._settings.reranker_model,
-            length_penalty=self._settings.reranker_length_penalty,
-            min_length=self._settings.reranker_min_length,
-            relevance_floor=self._settings.reranker_relevance_floor,
-        )
+        self._reranker_factory = RerankerFactory(self._settings)
 
         # Background trickle indexer
         self._trickle_indexer = TrickleIndexer(self._settings, self._pipeline)
@@ -117,7 +110,7 @@ class DotMDService:
         """Eagerly load ML models so first query is fast."""
         logger.info("Warming up models...")
         self._semantic_engine.warmup()
-        self._reranker._load_model()
+        self._reranker_factory.get().warmup()
         self._keyword_engine.load_index()
         self._graph_direct_engine.load_catalog()
         self._check_embedding_model()
@@ -210,6 +203,7 @@ class DotMDService:
         mode: SearchMode | str = SearchMode.HYBRID,
         rerank: bool = True,
         expand: bool = True,
+        reranker_name: str | None = None,
     ) -> list[SearchResult]:
         """Search the index and return ranked results.
 
@@ -228,6 +222,9 @@ class DotMDService:
         expand:
             If ``True`` the query is expanded via :class:`QueryExpander`
             before being sent to the search engines.
+        reranker_name:
+            Optional stable reranker name to use for this request. When
+            omitted, the configured default is used.
 
         Returns
         -------
@@ -259,6 +256,7 @@ class DotMDService:
                 top_k=top_k,
                 mode=mode,
                 rerank=rerank,
+                reranker_name=reranker_name,
                 pool_size=pool_size,
             )
         except Exception:
@@ -272,6 +270,7 @@ class DotMDService:
         top_k: int,
         mode: SearchMode | str,
         rerank: bool,
+        reranker_name: str | None,
         pool_size: int,
     ) -> list[SearchResult]:
         """Core retrieval + fusion + reranking pipeline.
@@ -285,7 +284,7 @@ class DotMDService:
             Possibly-expanded query string for engine calls.
         original_query:
             The original (unexpanded) query used for snippet extraction.
-        top_k, mode, rerank, pool_size:
+        top_k, mode, rerank, reranker_name, pool_size:
             Same as :meth:`search`.
         """
         pool = self._collect_candidate_pool(
@@ -307,7 +306,8 @@ class DotMDService:
             rerank_candidates = fused[:pool_size]
             chunk_ids = [cid for cid, _ in rerank_candidates]
             fused_scores = dict(fused)  # ALL fused, not just pool_size
-            reranked = self._reranker.rerank(
+            reranker = self._reranker_factory.get(reranker_name)
+            reranked = reranker.rerank(
                 search_query,
                 chunk_ids,
                 self._pipeline.metadata_store,

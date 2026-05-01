@@ -60,8 +60,10 @@ class TestMergeBackBeyondPoolSize:
             # Return all chunk_ids it receives with sequential scores
             return [(cid, 10.0 - i * 0.5) for i, cid in enumerate(chunk_ids)]
 
-        service._reranker = MagicMock()
-        service._reranker.rerank.side_effect = mock_rerank
+        reranker = MagicMock()
+        reranker.rerank.side_effect = mock_rerank
+        service._reranker_factory = MagicMock()
+        service._reranker_factory.get.return_value = reranker
 
         # Mock metadata store for build_search_results
         mock_chunk = MagicMock()
@@ -95,7 +97,7 @@ class TestMergeBackBeyondPoolSize:
         )
 
         # The reranker should have been called with exactly pool_size (20) candidates
-        call_args = service._reranker.rerank.call_args
+        call_args = reranker.rerank.call_args
         assert len(call_args[0][1]) == 20  # chunk_ids arg
 
 
@@ -187,8 +189,10 @@ class TestKeywordSurvivalThroughReranking:
             results.sort(key=lambda x: x[1], reverse=True)
             return results
 
-        service._reranker = MagicMock()
-        service._reranker.rerank.side_effect = mock_rerank
+        reranker = MagicMock()
+        reranker.rerank.side_effect = mock_rerank
+        service._reranker_factory = MagicMock()
+        service._reranker_factory.get.return_value = reranker
 
         # Capture fused list
         import dotmd.api.service as svc_module
@@ -232,8 +236,10 @@ class TestKeywordSurvivalThroughReranking:
         service._query_expander = MagicMock()
         service._query_expander.expand.return_value = MagicMock(expanded_text="test query")
 
-        service._reranker = MagicMock()
-        service._reranker.rerank.return_value = []
+        reranker = MagicMock()
+        reranker.rerank.return_value = []
+        service._reranker_factory = MagicMock()
+        service._reranker_factory.get.return_value = reranker
 
         chunks = {
             cid: Chunk(
@@ -405,8 +411,10 @@ class TestDiagnosticLogging:
         def mock_rerank(query, chunk_ids, store, top_k=5):
             return [(cid, 1.0 - i * 0.1) for i, cid in enumerate(chunk_ids)]
 
-        service._reranker = MagicMock()
-        service._reranker.rerank.side_effect = mock_rerank
+        reranker = MagicMock()
+        reranker.rerank.side_effect = mock_rerank
+        service._reranker_factory = MagicMock()
+        service._reranker_factory.get.return_value = reranker
 
         mock_chunk = MagicMock()
         mock_chunk.heading_hierarchy = []
