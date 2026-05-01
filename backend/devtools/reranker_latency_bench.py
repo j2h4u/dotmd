@@ -67,6 +67,7 @@ class BenchmarkConfig:
     hot_passes: int = 3
     model_wall_timeout_s: int = 900
     hot_query_timeout_s: int = 120
+    commit: str | None = None
 
 
 def parse_rerankers(raw: str | None) -> list[str]:
@@ -345,7 +346,7 @@ def write_summary_markdown(summaries: list[JsonRow], path: Path, *, config: Benc
 
 
 def run_benchmark(config: BenchmarkConfig) -> list[JsonRow]:
-    commit = get_commit()
+    commit = config.commit or get_commit()
     config.output.parent.mkdir(parents=True, exist_ok=True)
     config.output.write_text("", encoding="utf-8")
 
@@ -402,6 +403,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hot-passes", type=int, default=3)
     parser.add_argument("--model-wall-timeout-s", type=int, default=900)
     parser.add_argument("--hot-query-timeout-s", type=int, default=120)
+    parser.add_argument("--commit", default=None, help="Commit hash to record; defaults to git HEAD.")
     return parser
 
 
@@ -417,6 +419,7 @@ def config_from_args(args: argparse.Namespace) -> BenchmarkConfig:
         hot_passes=args.hot_passes,
         model_wall_timeout_s=args.model_wall_timeout_s,
         hot_query_timeout_s=args.hot_query_timeout_s,
+        commit=args.commit,
     )
 
 
