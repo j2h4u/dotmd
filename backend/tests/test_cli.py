@@ -60,6 +60,10 @@ def test_rerank_compare_command_outputs_diagnostics(tmp_path: Path) -> None:
                 "model_name": "Qwen",
                 "elapsed_ms": 12.34,
                 "elapsed": "12s",
+                "load_ms": 2.34,
+                "load": "2s",
+                "rerank_ms": 10.0,
+                "rerank": "10s",
                 "returned_count": 2,
                 "top_chunk_ids": ["c1", "c2"],
                 "scores": [0.9, 0.8],
@@ -70,6 +74,10 @@ def test_rerank_compare_command_outputs_diagnostics(tmp_path: Path) -> None:
                 "model_name": "MiniLM",
                 "elapsed_ms": 4.56,
                 "elapsed": "5s",
+                "load_ms": 1.0,
+                "load": "1s",
+                "rerank_ms": 3.56,
+                "rerank": "4s",
                 "returned_count": 1,
                 "top_chunk_ids": ["c2"],
                 "scores": [0.7],
@@ -109,6 +117,8 @@ def test_rerank_compare_command_outputs_diagnostics(tmp_path: Path) -> None:
     assert "msmarco-minilm" in result.output
     assert "elapsed_ms=12.3" in result.output
     assert "elapsed=12s" in result.output
+    assert "load_ms=2.3" in result.output
+    assert "rerank_ms=10.0" in result.output
     assert "Overlap reference: qwen3-0.6b" in result.output
 
 

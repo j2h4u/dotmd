@@ -91,6 +91,10 @@ class RerankerRunComparisonResponse(BaseModel):
     model_name: str
     elapsed_ms: float
     elapsed: str
+    load_ms: float
+    load: str
+    rerank_ms: float
+    rerank: str
     returned_count: int
     top_chunk_ids: list[str]
     scores: list[float]

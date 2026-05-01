@@ -49,6 +49,10 @@ class RerankerRunComparison(TypedDict):
     model_name: str
     elapsed_ms: float
     elapsed: str
+    load_ms: float
+    load: str
+    rerank_ms: float
+    rerank: str
     returned_count: int
     top_chunk_ids: list[str]
     scores: list[float]
@@ -462,8 +466,16 @@ class DotMDService:
         runs: list[RerankerRunComparison] = []
         for name in names:
             reranker = self._reranker_factory.get(name)
-            started = time.perf_counter()
+            started_total = time.perf_counter()
+            load_ms = 0.0
+            rerank_ms = 0.0
+            load_finished = False
             try:
+                reranker.warmup()
+                load_finished_at = time.perf_counter()
+                load_ms = (load_finished_at - started_total) * 1000.0
+                load_finished = True
+
                 reranked = reranker.rerank(
                     search_query,
                     chunk_ids,
@@ -471,13 +483,19 @@ class DotMDService:
                     top_k=top_k,
                     raise_on_provider_error=True,
                 )
-                elapsed_ms = (time.perf_counter() - started) * 1000.0
+                finished_at = time.perf_counter()
+                rerank_ms = (finished_at - load_finished_at) * 1000.0
+                elapsed_ms = (finished_at - started_total) * 1000.0
                 runs.append(
                     {
                         "name": name,
                         "model_name": reranker.model_name,
                         "elapsed_ms": elapsed_ms,
                         "elapsed": format_elapsed_ms(elapsed_ms),
+                        "load_ms": load_ms,
+                        "load": format_elapsed_ms(load_ms),
+                        "rerank_ms": rerank_ms,
+                        "rerank": format_elapsed_ms(rerank_ms),
                         "returned_count": len(reranked),
                         "top_chunk_ids": [cid for cid, _score in reranked],
                         "scores": [float(score) for _cid, score in reranked],
@@ -485,13 +503,21 @@ class DotMDService:
                     }
                 )
             except Exception as exc:
-                elapsed_ms = (time.perf_counter() - started) * 1000.0
+                elapsed_ms = (time.perf_counter() - started_total) * 1000.0
+                if load_finished:
+                    rerank_ms = max(0.0, elapsed_ms - load_ms)
+                else:
+                    load_ms = elapsed_ms
                 runs.append(
                     {
                         "name": name,
                         "model_name": reranker.model_name,
                         "elapsed_ms": elapsed_ms,
                         "elapsed": format_elapsed_ms(elapsed_ms),
+                        "load_ms": load_ms,
+                        "load": format_elapsed_ms(load_ms),
+                        "rerank_ms": rerank_ms,
+                        "rerank": format_elapsed_ms(rerank_ms),
                         "returned_count": 0,
                         "top_chunk_ids": [],
                         "scores": [],
@@ -499,7 +525,7 @@ class DotMDService:
                     }
                 )
 
-        runs.sort(key=lambda run: (run["error"] is not None, run["elapsed_ms"]))
+        runs.sort(key=lambda run: (run["error"] is not None, run["rerank_ms"]))
         successful = [run for run in runs if run["error"] is None]
         overlap_reference = successful[0]["name"] if successful else None
         overlap: dict[str, int] = {}

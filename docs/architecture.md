@@ -124,11 +124,13 @@ The schema is two-dimensional where needed: `(chunk_strategy, embedding_model)`.
 Rerankers implement `RerankerProtocol`: each adapter exposes a stable `name`, a
 provider `model_name`, `warmup()`, and `rerank()`. Built-in adapters are
 registered by short names such as `qwen3-0.6b`, `msmarco-minilm`,
-`mmarco-minilm`, `gte-multilingual`, and `bge-v2-m3`; `RerankerFactory` resolves and caches
+`mmarco-minilm`, `gte-multilingual`, `bge-v2-m3`, `jina-v2-multilingual`,
+`mxbai-xsmall-v1`, `mxbai-base-v1`, and `gte-modernbert-base`;
+`RerankerFactory` resolves and caches
 the selected adapter so normal search does not construct a model per request.
 Models that require Hugging Face custom code opt in through the registry entry
-only; `gte-multilingual` sets `trust_remote_code=True`, while other built-ins
-keep remote code disabled.
+only; `gte-multilingual` and `jina-v2-multilingual` set
+`trust_remote_code=True`, while other built-ins keep remote code disabled.
 
 `DotMDService` owns all public reranker selection and comparison flows. Normal
 search stays single-reranker by default through `DOTMD_RERANKER_NAME=qwen3-0.6b`.
@@ -136,9 +138,9 @@ Developer comparison uses `DotMDService.compare_rerankers()`, `GET
 /rerank/compare`, or `dotmd rerank compare` to run expansion, retrieval, graph
 enrichment, and RRF fusion once, then pass the same shared candidate pool to
 multiple adapters. The comparison output includes `elapsed_ms`, human-readable
-`elapsed`, top chunk ID ordering, scores, returned counts, per-reranker errors,
-and overlap diagnostics, sorted fastest successful reranker first with failures
-last.
+`elapsed`, cold `load_ms`, hot `rerank_ms`, top chunk ID ordering, scores,
+returned counts, per-reranker errors, and overlap diagnostics, sorted by fastest
+successful hot rerank time with failures last.
 This makes Qwen CPU latency visible without making production serve multiple
 rerankers.
 

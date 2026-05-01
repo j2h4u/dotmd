@@ -79,6 +79,27 @@ BUILTIN_RERANKERS: dict[str, RerankerSpec] = {
         model_name="BAAI/bge-reranker-v2-m3",
         description="BGE multilingual reranker candidate.",
     ),
+    "jina-v2-multilingual": RerankerSpec(
+        name="jina-v2-multilingual",
+        model_name="jinaai/jina-reranker-v2-base-multilingual",
+        trust_remote_code=True,
+        description="Jina v2 multilingual CrossEncoder latency candidate.",
+    ),
+    "mxbai-xsmall-v1": RerankerSpec(
+        name="mxbai-xsmall-v1",
+        model_name="mixedbread-ai/mxbai-rerank-xsmall-v1",
+        description="Mixedbread xsmall reranker speed baseline.",
+    ),
+    "mxbai-base-v1": RerankerSpec(
+        name="mxbai-base-v1",
+        model_name="mixedbread-ai/mxbai-rerank-base-v1",
+        description="Mixedbread base v1 CrossEncoder speed baseline.",
+    ),
+    "gte-modernbert-base": RerankerSpec(
+        name="gte-modernbert-base",
+        model_name="Alibaba-NLP/gte-reranker-modernbert-base",
+        description="Small ModernBERT reranker speed baseline.",
+    ),
 }
 
 

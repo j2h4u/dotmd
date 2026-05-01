@@ -126,7 +126,15 @@ class TestCompareRerankers:
             isinstance(run["elapsed_ms"], float) and run["elapsed_ms"] >= 0.0
             for run in comparison["rerankers"]
         )
-        assert all(run["elapsed"] for run in comparison["rerankers"])
+        assert all(
+            isinstance(run["load_ms"], float) and run["load_ms"] >= 0.0
+            for run in comparison["rerankers"]
+        )
+        assert all(
+            isinstance(run["rerank_ms"], float) and run["rerank_ms"] >= 0.0
+            for run in comparison["rerankers"]
+        )
+        assert all(run["elapsed"] and run["load"] and run["rerank"] for run in comparison["rerankers"])
         for run in comparison["rerankers"]:
             assert run["returned_count"] == len(run["top_chunk_ids"]) == len(run["scores"])
 
@@ -205,7 +213,7 @@ class TestCompareRerankers:
 
         with patch(
             "dotmd.api.service.time.perf_counter",
-            side_effect=[0.0, 2.0, 2.0, 2.5],
+            side_effect=[0.0, 0.1, 2.1, 10.0, 10.1, 10.6],
         ):
             comparison = service.compare_rerankers(
                 "q",
@@ -325,7 +333,7 @@ class TestCompareRerankers:
 
         with patch(
             "dotmd.api.service.time.perf_counter",
-            side_effect=[0.0, 1.0, 1.0, 1.5, 1.5, 3.0],
+            side_effect=[0.0, 0.1, 1.0, 1.0, 1.1, 1.6, 1.6, 1.7, 3.2],
         ):
             comparison = service.compare_rerankers(
                 "q",
@@ -442,6 +450,10 @@ class TestSearchApiRerankerSurfaces:
                     "model_name": "Qwen",
                     "elapsed_ms": 12.3,
                     "elapsed": "12s",
+                    "load_ms": 2.3,
+                    "load": "2s",
+                    "rerank_ms": 10.0,
+                    "rerank": "10s",
                     "returned_count": 2,
                     "top_chunk_ids": ["c1", "c2"],
                     "scores": [0.9, 0.8],
@@ -452,6 +464,10 @@ class TestSearchApiRerankerSurfaces:
                     "model_name": "MiniLM",
                     "elapsed_ms": 4.5,
                     "elapsed": "5s",
+                    "load_ms": 1.0,
+                    "load": "1s",
+                    "rerank_ms": 3.5,
+                    "rerank": "4s",
                     "returned_count": 1,
                     "top_chunk_ids": ["c2"],
                     "scores": [0.7],
@@ -472,6 +488,8 @@ class TestSearchApiRerankerSurfaces:
         assert response.json()["shared_pool_size"] == 2
         assert response.json()["rerankers"][0]["elapsed_ms"] == 12.3
         assert response.json()["rerankers"][0]["elapsed"] == "12s"
+        assert response.json()["rerankers"][0]["load_ms"] == 2.3
+        assert response.json()["rerankers"][0]["rerank_ms"] == 10.0
         service.compare_rerankers.assert_called_once_with(
             query="test",
             reranker_names=["qwen3-0.6b", "msmarco-minilm"],

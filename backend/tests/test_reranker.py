@@ -286,9 +286,13 @@ class TestRerankerRegistry:
         """Available reranker names include all built-in registry entries."""
         assert available_rerankers() == [
             "bge-v2-m3",
+            "gte-modernbert-base",
             "gte-multilingual",
+            "jina-v2-multilingual",
             "mmarco-minilm",
             "msmarco-minilm",
+            "mxbai-base-v1",
+            "mxbai-xsmall-v1",
             "qwen3-0.6b",
         ]
 
@@ -307,7 +311,7 @@ class TestRerankerRegistry:
             == "cross-encoder/ms-marco-MiniLM-L-6-v2"
         )
 
-    def test_only_gte_multilingual_trusts_remote_code(self) -> None:
+    def test_remote_code_trust_is_allowlisted(self) -> None:
         """Remote-code trust is allowlisted per model, not globally enabled."""
         from dotmd.search.reranker import BUILTIN_RERANKERS
 
@@ -317,7 +321,7 @@ class TestRerankerRegistry:
             if spec.trust_remote_code
         ]
 
-        assert trusted == ["gte-multilingual"]
+        assert trusted == ["gte-multilingual", "jina-v2-multilingual"]
 
 
 class TestRerankerFactory:
