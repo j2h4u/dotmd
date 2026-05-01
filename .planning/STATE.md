@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.4
-milestone_name: Search Quality & Architecture
-status: planned
-last_updated: "2026-05-01T08:49:10.509Z"
+milestone_name: milestone
+status: executing
+last_updated: "2026-05-01T08:58:30.801Z"
 last_activity: 2026-05-01
 progress:
   total_phases: 22
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 16
-  completed_plans: 15
-  percent: 94
+  completed_plans: 16
+  percent: 100
 ---
 
 # GSD State
@@ -20,7 +20,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 18 — Multilingual Reranker. Backlog item 999.20 is in age-aware research revision before execution.
+**Current focus:** Phase 18 — multilingual-reranker
 
 ## Current Milestone
 
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 Phase: 18
 Plan: none active
-Status: Ready to execute
+Status: Executing Phase 18
 Last activity: 2026-05-01
 
-Progress: [█████████░] 94% with Phase 18 planned and ready to execute
+Progress: [██████████] 100%
 
 ## Performance Metrics
 

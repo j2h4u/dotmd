@@ -113,7 +113,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 | 15. Content-addressed caching | 3/3 | Complete | 2026-04-24 |
 | 16. Content-dedup schema | 6/6 | Complete   | 2026-04-25 |
 | 17. MCP OAuth 2.0 — Claude Desktop connector | 3/3 | Complete   | 2026-04-30 |
-| 18. Multilingual Reranker | 0/1 | Planned | — |
+| 18. Multilingual Reranker | 1/1 | Complete   | 2026-05-01 |
 
 ### Phase 17: MCP OAuth 2.0 — Claude Desktop remote connector support
 
@@ -138,7 +138,7 @@ Plans:
 **Goal:** Replace or rework the English-oriented reranker so Russian and multilingual queries are not degraded by noisy cross-encoder scores.
 **Backlog source:** 999.20
 **Requirements:** RERANK-SELECT-01, RERANK-SELECT-02, RERANK-SELECT-03, SCORE-01
-**Plans:** 1 plan pending
+**Plans:** 1/1 plans complete
 
 Phase boundary:
 - Choose a reranker strategy from public multilingual/Russian benchmark evidence available by May 2026.
@@ -147,7 +147,7 @@ Phase boundary:
 - Fix score-floor/empty-rerank behavior so fused search results are not erased.
 
 Plans:
-- [ ] 18-01-PLAN.md — Implement Qwen3 0.6B multilingual reranker
+- [x] 18-01-PLAN.md — Implement Qwen3 0.6B multilingual reranker
 
 ---
 

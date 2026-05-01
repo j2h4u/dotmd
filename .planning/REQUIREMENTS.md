@@ -23,7 +23,7 @@
 
 ### Scoring Pipeline
 
-- [ ] **SCORE-01**: Cross-encoder relevance threshold calibrated on real corpus queries
+- [x] **SCORE-01**: Cross-encoder relevance threshold calibrated on real corpus queries
 - [ ] **SCORE-02**: Semantic score floor recalibrated after embedding model swap
 
 ## Future Requirements
@@ -58,7 +58,7 @@
 | EMBED-03 | Phase 11 | Complete |
 | CHUNK-01 | Phase 12 | Pending |
 | CHUNK-02 | Phase 12 | Pending |
-| SCORE-01 | Phase 12 | Pending |
+| SCORE-01 | Phase 12 | Complete |
 | SCORE-02 | Phase 12 | Pending |
 
 **Coverage:**
