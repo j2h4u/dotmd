@@ -156,7 +156,7 @@ Plans:
 **Goal:** Refactor reranking into a provider/adapter layer so dotMD can switch rerankers by name and run developer-only comparisons across multiple candidate rerankers using one shared retrieval candidate pool.
 **Depends on:** Phase 18
 **Requirements:** RERANK-ADAPTER-01, RERANK-SELECT-04, RERANK-COMPARE-01, RERANK-LATENCY-01
-**Plans:** 0 plans
+**Plans:** 4 plans ready
 
 Phase boundary:
 - Keep production search behavior single-reranker by default; do not make multi-reranker production serving mandatory.
@@ -166,7 +166,17 @@ Phase boundary:
 - Treat Qwen CPU latency as a first-class concern; compare against the top 3-4 Phase 18 candidate models before settling on a production default.
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 19 to break down)
+**Wave 1**
+- [ ] 19-01-reranker-protocol-registry-PLAN.md — Add RerankerProtocol, registry, factory, and name-based config
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 19-02-shared-candidate-pool-PLAN.md — Extract shared candidate pool and preserve single-reranker search
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 19-03-developer-comparison-surfaces-PLAN.md — Add service, API, and CLI comparison over one shared pool
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 19-04-latency-docs-verification-PLAN.md — Pin latency diagnostics, docs, and focused verification
 
 ---
 
