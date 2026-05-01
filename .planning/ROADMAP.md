@@ -544,7 +544,7 @@ Plans:
 **Plans:** 1 plan
 
 Plans:
-- [ ] 20-01-latency-benchmark-protocol-PLAN.md — Define protocol, capture benchmark ledger, and run canonical latency shortlist
+- [x] 20-01-latency-benchmark-protocol-PLAN.md — Define protocol, capture benchmark ledger, and run canonical latency shortlist
 
 ---
 

@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
-status: ready_to_execute
-last_updated: "2026-05-01T16:52:17.580Z"
+status: completed
+last_updated: "2026-05-01T18:45:00.000Z"
 last_activity: 2026-05-01
 progress:
   total_phases: 24
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 21
-  completed_plans: 20
-  percent: 95
+  completed_plans: 21
+  percent: 100
 ---
 
 # GSD State
@@ -20,7 +20,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 20 — reranker-latency-benchmark
+**Current focus:** Phase 20 — reranker-latency-benchmark complete
 
 ## Current Milestone
 
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 Phase: 20
 Plan: 20-01-latency-benchmark-protocol
-Status: Ready to execute
+Status: Completed
 Last activity: 2026-05-01
 
-Progress: [███░░░░░░░] 26%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -80,6 +80,12 @@ Recent decisions affecting current work:
 ### Pending Todos
 
 Phase 19 complete. Reranker adapter/factory refactor, shared retrieval pool, developer comparison surfaces, latency diagnostics, and docs are implemented and verified. Qwen CPU latency remains visible through comparison `elapsed_ms`.
+
+Phase 20 complete. Canonical reranker latency benchmark results are recorded in
+`20-BENCHMARKS.md` and `results/2026-05-01-rerank-latency-summary.md`.
+Latency-only shortlist for later quality testing: `msmarco-minilm`,
+`mmarco-minilm`, `mxbai-xsmall-v1`. Relevance quality was not evaluated and
+`DOTMD_RERANKER_NAME` was not changed.
 
 ### Blockers/Concerns
 
