@@ -41,13 +41,3 @@ def test_get_related_sections_uses_bounded_section_entity_section_query() -> Non
     assert graph.params == {"id": "chunk-1"}
     assert neighbors == [("chunk-2", "MENTIONS", 0.7)]
 
-
-def test_get_neighbors_remains_generic_graph_traversal() -> None:
-    store = FalkorDBGraphStore.__new__(FalkorDBGraphStore)
-    graph = _FakeGraph([["Python", "Entity"]])
-    store.__dict__["_graph"] = graph
-
-    neighbors = store.get_neighbors("chunk-1", max_hops=1)
-
-    assert "MATCH (a:Node {id: $id})-[*1..1]-(b:Node)" in graph.query_text
-    assert neighbors == [("Python", "Entity", 1.0)]

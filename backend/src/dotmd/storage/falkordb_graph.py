@@ -252,38 +252,6 @@ class FalkorDBGraphStore:
 
     # -- queries ------------------------------------------------------------
 
-    def get_neighbors(
-        self,
-        node_id: str,
-        max_hops: int = 2,
-    ) -> list[tuple[str, str, float]]:
-        """Retrieve neighbours reachable within *max_hops*.
-
-        Parameters
-        ----------
-        node_id:
-            Starting node identifier.
-        max_hops:
-            Maximum traversal depth.
-
-        Returns
-        -------
-        list[tuple[str, str, float]]
-            A list of ``(node_id, relation_type, weight)`` tuples.
-        """
-        result = self._graph.ro_query(
-            f"MATCH (a:Node {{id: $id}})-[*1..{int(max_hops)}]-(b:Node) "
-            "RETURN DISTINCT b.id, labels(b)[0]",
-            params={"id": node_id},
-        )
-        neighbors: list[tuple[str, str, float]] = []
-        for row in result.result_set:
-            nid = str(row[0])
-            if nid != node_id:
-                relation = str(row[1]) if len(row) > 1 else ""
-                neighbors.append((nid, relation, 1.0))
-        return neighbors
-
     def get_related_sections(self, chunk_id: str) -> list[tuple[str, str, float]]:
         """Return sections related by shared Entity/Tag mentions.
 

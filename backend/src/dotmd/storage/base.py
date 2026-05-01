@@ -223,27 +223,6 @@ class GraphStoreProtocol(Protocol):
         """
         ...
 
-    def get_neighbors(
-        self,
-        node_id: str,
-        max_hops: int = 2,
-    ) -> list[tuple[str, str, float]]:
-        """Retrieve neighbours reachable within *max_hops*.
-
-        Parameters
-        ----------
-        node_id:
-            Starting node identifier.
-        max_hops:
-            Maximum traversal depth.
-
-        Returns
-        -------
-        list[tuple[str, str, float]]
-            A list of ``(node_id, relation_type, weight)`` tuples.
-        """
-        ...
-
     def get_related_sections(
         self,
         chunk_id: str,
@@ -255,10 +234,7 @@ class GraphStoreProtocol(Protocol):
         style paths so high-degree File or structural edges cannot dominate
         retrieval.
         """
-        return [
-            (node_id, rel, weight)
-            for node_id, rel, weight in self.get_neighbors(chunk_id, max_hops=2)
-        ]
+        ...
 
     def get_all_entity_names(self) -> list[str]:
         """Return all entity names in the graph."""

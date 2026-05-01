@@ -234,35 +234,6 @@ class LadybugDBGraphStore:
 
     # -- queries ------------------------------------------------------------
 
-    def get_neighbors(
-        self,
-        node_id: str,
-        max_hops: int = 2,
-    ) -> list[tuple[str, str, float]]:
-        # LadybugDB supports variable-length relationships with [r* SHORTEST 1..N]
-        # but for simplicity we query all rel tables with multi-hop.
-        neighbors: list[tuple[str, str, float]] = []
-
-        with self._connection() as conn:
-            src_label = self._find_node_label(node_id, conn)
-            if src_label is None:
-                return neighbors
-
-            result = conn.execute(
-                f"MATCH (a:{src_label} {{id: $id}})-[r* 1..{int(max_hops)}]-(b) "
-                "RETURN DISTINCT b.id, label(b)",
-                parameters={"id": node_id},
-            )
-
-            df = result.get_as_df()
-            for _, row in df.iterrows():
-                nid = row.iloc[0]
-                if nid == node_id:
-                    continue
-                neighbors.append((str(nid), "", 1.0))
-
-        return neighbors
-
     def get_related_sections(self, chunk_id: str) -> list[tuple[str, str, float]]:
         """Return sections related by shared Entity/Tag mentions."""
         neighbors: list[tuple[str, str, float]] = []
