@@ -175,6 +175,45 @@ class TestRerankerScoring:
         results = reranker.rerank("test query", [], mock_store, top_k=10)
         assert results == []
 
+    @patch("sentence_transformers.CrossEncoder", autospec=True)
+    def test_provider_failure_can_raise_for_diagnostics(
+        self,
+        MockCE: MagicMock,
+    ) -> None:
+        """Diagnostic comparison can distinguish provider failure from empty output."""
+        mock_model = MagicMock()
+        mock_model.predict.side_effect = RuntimeError("provider failed")
+        MockCE.return_value = mock_model
+
+        reranker = _make_reranker()
+        mock_store = _make_mock_store(1)
+
+        with pytest.raises(RuntimeError, match="provider failed"):
+            reranker.rerank(
+                "test query",
+                ["chunk-0"],
+                mock_store,
+                top_k=1,
+                raise_on_provider_error=True,
+            )
+
+    @patch("sentence_transformers.CrossEncoder", autospec=True)
+    def test_provider_failure_still_falls_back_for_normal_search(
+        self,
+        MockCE: MagicMock,
+    ) -> None:
+        """Normal search keeps the existing fused-ranking fallback behavior."""
+        mock_model = MagicMock()
+        mock_model.predict.side_effect = RuntimeError("provider failed")
+        MockCE.return_value = mock_model
+
+        reranker = _make_reranker()
+        mock_store = _make_mock_store(1)
+
+        results = reranker.rerank("test query", ["chunk-0"], mock_store, top_k=1)
+
+        assert results == []
+
     def test_init_rejects_score_threshold_parameter(self) -> None:
         """Reranker.__init__() does NOT accept score_threshold parameter."""
         with pytest.raises(TypeError):

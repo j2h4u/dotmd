@@ -28,6 +28,27 @@ def test_search_accepts_reranker_option(tmp_path: Path) -> None:
     assert search.call_args.kwargs["reranker_name"] == "msmarco-minilm"
 
 
+def test_search_unknown_reranker_is_click_error(tmp_path: Path) -> None:
+    with patch(
+        "dotmd.api.service.DotMDService.search",
+        side_effect=ValueError("Unknown reranker 'missing'; available: qwen3-0.6b"),
+    ):
+        result = CliRunner().invoke(
+            main,
+            [
+                "--index-dir",
+                str(tmp_path),
+                "search",
+                "test query",
+                "--reranker",
+                "missing",
+            ],
+        )
+
+    assert result.exit_code != 0
+    assert "Unknown reranker" in result.output
+
+
 def test_rerank_compare_command_outputs_diagnostics(tmp_path: Path) -> None:
     comparison = {
         "query": "test query",

@@ -123,14 +123,17 @@ def search(
 ) -> None:
     """Search the indexed knowledgebase."""
     service = _get_service_from_ctx(ctx)
-    results = service.search(
-        query=query,
-        top_k=top,
-        mode=mode,
-        rerank=not no_rerank,
-        expand=not no_expand,
-        reranker_name=reranker,
-    )
+    try:
+        results = service.search(
+            query=query,
+            top_k=top,
+            mode=mode,
+            rerank=not no_rerank,
+            expand=not no_expand,
+            reranker_name=reranker,
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
 
     if not results:
         click.echo("No results found.")

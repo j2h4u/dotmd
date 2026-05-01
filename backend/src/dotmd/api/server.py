@@ -141,14 +141,17 @@ async def search(
     reranker: str | None = Query(None, description="Reranker name to use"),
 ) -> SearchResponse:
     """Search the indexed knowledgebase."""
-    results = _get_service().search(
-        query=q,
-        top_k=top_k,
-        mode=mode,
-        rerank=rerank,
-        expand=expand,
-        reranker_name=reranker,
-    )
+    try:
+        results = _get_service().search(
+            query=q,
+            top_k=top_k,
+            mode=mode,
+            rerank=rerank,
+            expand=expand,
+            reranker_name=reranker,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return SearchResponse(query=q, results=results, count=len(results))
 
 

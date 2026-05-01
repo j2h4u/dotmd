@@ -130,7 +130,13 @@ class DotMDService:
         """Eagerly load ML models so first query is fast."""
         logger.info("Warming up models...")
         self._semantic_engine.warmup()
-        self._reranker_factory.get().warmup()
+        try:
+            self._reranker_factory.get().warmup()
+        except Exception:
+            logger.warning(
+                "reranker warmup failed; search will fall back to fused ranking",
+                exc_info=True,
+            )
         self._keyword_engine.load_index()
         self._graph_direct_engine.load_catalog()
         self._check_embedding_model()
@@ -449,6 +455,7 @@ class DotMDService:
                     chunk_ids,
                     self._pipeline.metadata_store,
                     top_k=top_k,
+                    raise_on_provider_error=True,
                 )
                 elapsed_ms = (time.perf_counter() - started) * 1000.0
                 runs.append(

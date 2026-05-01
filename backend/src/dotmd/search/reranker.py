@@ -34,6 +34,8 @@ class RerankerProtocol(Protocol):
         chunk_ids: list[str],
         metadata_store: MetadataStoreProtocol,
         top_k: int = 5,
+        *,
+        raise_on_provider_error: bool = False,
     ) -> list[tuple[str, float]]:
         """Return reranked ``(chunk_id, score)`` pairs."""
         ...
@@ -153,6 +155,8 @@ class CrossEncoderReranker:
         chunk_ids: list[str],
         metadata_store: MetadataStoreProtocol,
         top_k: int = 5,
+        *,
+        raise_on_provider_error: bool = False,
     ) -> list[tuple[str, float]]:
         """Rerank *chunk_ids* against *query* using a cross-encoder.
 
@@ -171,6 +175,10 @@ class CrossEncoderReranker:
             look up chunk text.
         top_k:
             Maximum number of results to return.
+        raise_on_provider_error:
+            When true, propagate model load/scoring failures instead of
+            falling back to an empty rerank result. Diagnostic comparison uses
+            this to distinguish real provider failures from valid empty output.
 
         Returns
         -------
@@ -205,6 +213,8 @@ class CrossEncoderReranker:
                 else list(raw_scores)
             )
         except Exception:
+            if raise_on_provider_error:
+                raise
             logger.warning(
                 "Reranker provider failed for model %s; returning no reranked candidates",
                 self._model_name,

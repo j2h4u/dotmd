@@ -150,6 +150,9 @@ class TestCompareRerankers:
         comparison = service.compare_rerankers("q", ["qwen3-0.6b", "msmarco-minilm"])
 
         assert comparison["rerankers"][0]["error"] == "boom"
+        assert (
+            failing.rerank.call_args.kwargs["raise_on_provider_error"] is True
+        )
         assert comparison["rerankers"][0]["returned_count"] == 0
         assert comparison["rerankers"][0]["top_chunk_ids"] == []
         assert comparison["rerankers"][0]["scores"] == []
@@ -309,6 +312,29 @@ class TestCompareRerankers:
         assert comparison["overlap"] == {}
 
 
+class TestServiceWarmup:
+    """Service warmup preserves search availability when reranking is unavailable."""
+
+    def test_warmup_logs_and_continues_when_reranker_fails(self, tmp_path: Path) -> None:
+        service = _get_service(tmp_path)
+        service._semantic_engine.warmup = MagicMock()
+        service._keyword_engine.load_index = MagicMock()
+        service._graph_direct_engine.load_catalog = MagicMock()
+        service._check_embedding_model = MagicMock()
+        failing_reranker = MagicMock()
+        failing_reranker.warmup.side_effect = RuntimeError("model unavailable")
+        service._reranker_factory = MagicMock()
+        service._reranker_factory.get.return_value = failing_reranker
+
+        service.warmup()
+
+        service._semantic_engine.warmup.assert_called_once()
+        failing_reranker.warmup.assert_called_once()
+        service._keyword_engine.load_index.assert_called_once()
+        service._graph_direct_engine.load_catalog.assert_called_once()
+        service._check_embedding_model.assert_called_once()
+
+
 class TestSearchApiRerankerSurfaces:
     """FastAPI exposes reranker selection and comparison diagnostics."""
 
@@ -325,6 +351,21 @@ class TestSearchApiRerankerSurfaces:
         assert response.status_code == 200
         service.search.assert_called_once()
         assert service.search.call_args.kwargs["reranker_name"] == "msmarco-minilm"
+
+    def test_search_endpoint_unknown_reranker_returns_400(self) -> None:
+        from dotmd.api import server
+
+        service = MagicMock()
+        service.search.side_effect = ValueError(
+            "Unknown reranker 'missing'; available: qwen3-0.6b"
+        )
+        server._service = service
+        client = TestClient(server.app)
+
+        response = client.get("/search?q=test&reranker=missing")
+
+        assert response.status_code == 400
+        assert "Unknown reranker" in response.json()["detail"]
 
     def test_compare_endpoint_returns_typed_payload(self) -> None:
         from dotmd.api import server
