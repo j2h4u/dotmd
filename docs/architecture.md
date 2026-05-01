@@ -123,17 +123,16 @@ The schema is two-dimensional where needed: `(chunk_strategy, embedding_model)`.
 
 Rerankers implement `RerankerProtocol`: each adapter exposes a stable `name`, a
 provider `model_name`, `warmup()`, and `rerank()`. Built-in adapters are
-registered by short names such as `qwen3-0.6b`, `msmarco-minilm`,
-`mmarco-minilm`, `gte-multilingual`, `bge-v2-m3`, `jina-v2-multilingual`,
-`mxbai-xsmall-v1`, `mxbai-base-v1`, and `gte-modernbert-base`;
+registered by short names: `msmarco-minilm`, `mmarco-minilm`, and
+`mxbai-xsmall-v1`;
 `RerankerFactory` resolves and caches
 the selected adapter so normal search does not construct a model per request.
-Models that require Hugging Face custom code opt in through the registry entry
-only; `gte-multilingual` and `jina-v2-multilingual` set
-`trust_remote_code=True`, while other built-ins keep remote code disabled.
+The current built-in registry does not require Hugging Face custom code; all
+remaining adapters keep `trust_remote_code=False`.
 
 `DotMDService` owns all public reranker selection and comparison flows. Normal
-search stays single-reranker by default through `DOTMD_RERANKER_NAME=qwen3-0.6b`.
+search stays single-reranker by default through
+`DOTMD_RERANKER_NAME=mmarco-minilm`.
 Developer comparison uses `DotMDService.compare_rerankers()`, `GET
 /rerank/compare`, or `dotmd rerank compare` to run expansion, retrieval, graph
 enrichment, and RRF fusion once, then pass the same shared candidate pool to
@@ -141,20 +140,19 @@ multiple adapters. The comparison output includes `elapsed_ms`, human-readable
 `elapsed`, cold `load_ms`, hot `rerank_ms`, top chunk ID ordering, scores,
 returned counts, per-reranker errors, and overlap diagnostics, sorted by fastest
 successful hot rerank time with failures last.
-This makes Qwen CPU latency visible without making production serve multiple
+This keeps CPU latency visible without making production serve multiple
 rerankers.
 
 No indexes are reloaded per request. Search engines and stores are initialized
 with the service and reused; reranker adapters are cached by the factory.
 
-The selected reranker provider is `Qwen/Qwen3-Reranker-0.6B` via the local
-SentenceTransformers CrossEncoder boundary. The choice came from public
-benchmark, publication-age, and deployment-fit research, not a local dotMD eval
-harness: Qwen3 0.6B is fresh enough for May 2026 default selection,
-multilingual, text-only, and lighter than the Qwen3-VL reranker family.
-ContextualAI rerank-v2 and Jina v3 remain credible alternates if Qwen serving or
-latency fails; older GTE/BGE models are fallback-only because publication age
-disqualifies them from being the default despite easier integration.
+The selected reranker provider is
+`cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` via the local
+SentenceTransformers CrossEncoder boundary. Phase 20 found heavier multilingual
+candidates operationally unusable on the current CPU runtime, so the built-in
+registry is narrowed to the three latency survivors. `msmarco-minilm` remains
+only as a negative historical control because it ranked Russian notes poorly in
+real dotMD use.
 
 Reranking is non-fatal. If the provider errors, is unavailable, or an optional
 raw-score floor removes all candidates, dotMD falls back to fused semantic,

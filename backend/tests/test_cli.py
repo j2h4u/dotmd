@@ -31,7 +31,7 @@ def test_search_accepts_reranker_option(tmp_path: Path) -> None:
 def test_search_unknown_reranker_is_click_error(tmp_path: Path) -> None:
     with patch(
         "dotmd.api.service.DotMDService.search",
-        side_effect=ValueError("Unknown reranker 'missing'; available: qwen3-0.6b"),
+        side_effect=ValueError("Unknown reranker 'missing'; available: mmarco-minilm"),
     ):
         result = CliRunner().invoke(
             main,
@@ -56,8 +56,8 @@ def test_rerank_compare_command_outputs_diagnostics(tmp_path: Path) -> None:
         "shared_pool_size": 2,
         "rerankers": [
             {
-                "name": "qwen3-0.6b",
-                "model_name": "Qwen",
+                "name": "mmarco-minilm",
+                "model_name": "MMARCO",
                 "elapsed_ms": 12.34,
                 "elapsed": "12s",
                 "load_ms": 2.34,
@@ -84,8 +84,8 @@ def test_rerank_compare_command_outputs_diagnostics(tmp_path: Path) -> None:
                 "error": None,
             },
         ],
-        "overlap_reference": "qwen3-0.6b",
-        "overlap": {"qwen3-0.6b": 2, "msmarco-minilm": 1},
+        "overlap_reference": "mmarco-minilm",
+        "overlap": {"mmarco-minilm": 2, "msmarco-minilm": 1},
     }
     with patch(
         "dotmd.api.service.DotMDService.compare_rerankers",
@@ -100,32 +100,32 @@ def test_rerank_compare_command_outputs_diagnostics(tmp_path: Path) -> None:
                 "compare",
                 "test query",
                 "--rerankers",
-                "qwen3-0.6b,msmarco-minilm",
+                "mmarco-minilm,msmarco-minilm",
             ],
         )
 
     assert result.exit_code == 0, result.output
     compare.assert_called_once_with(
         query="test query",
-        reranker_names=["qwen3-0.6b", "msmarco-minilm"],
+        reranker_names=["mmarco-minilm", "msmarco-minilm"],
         top_k=10,
         mode="hybrid",
         expand=True,
     )
     assert "Shared pool: 2 candidates" in result.output
-    assert "qwen3-0.6b" in result.output
+    assert "mmarco-minilm" in result.output
     assert "msmarco-minilm" in result.output
     assert "elapsed_ms=12.3" in result.output
     assert "elapsed=12s" in result.output
     assert "load_ms=2.3" in result.output
     assert "rerank_ms=10.0" in result.output
-    assert "Overlap reference: qwen3-0.6b" in result.output
+    assert "Overlap reference: mmarco-minilm" in result.output
 
 
 def test_rerank_compare_unknown_reranker_is_click_error(tmp_path: Path) -> None:
     with patch(
         "dotmd.api.service.DotMDService.compare_rerankers",
-        side_effect=ValueError("Unknown reranker 'missing'; available: qwen3-0.6b"),
+        side_effect=ValueError("Unknown reranker 'missing'; available: mmarco-minilm"),
     ):
         result = CliRunner().invoke(
             main,

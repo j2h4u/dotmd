@@ -139,6 +139,11 @@ Phase 999.12 complete (2026-04-27): Dual-encoder unified embedding shipped. Meta
 
 Phase 19 complete (2026-05-01): Reranking now has a provider protocol, stable-name registry, and cached factory. Production search remains single-reranker by default (`qwen3-0.6b`) while service, FastAPI, and CLI can select rerankers by name. Developer comparison runs multiple rerankers over one shared retrieval/fusion candidate pool and reports latency, errors, ordered IDs, scores, and overlap for Qwen-vs-alternate decisions.
 
+Post-Phase 20 cleanup (2026-05-02): CPU-unusable latency candidates were removed
+from the built-in reranker registry. The active comparison set is
+`msmarco-minilm`, `mmarco-minilm`, and `mxbai-xsmall-v1`; default search now
+uses `mmarco-minilm` pending the Phase 21 quality benchmark.
+
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.

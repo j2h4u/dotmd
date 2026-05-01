@@ -53,52 +53,20 @@ class RerankerSpec:
 
 
 BUILTIN_RERANKERS: dict[str, RerankerSpec] = {
-    "qwen3-0.6b": RerankerSpec(
-        name="qwen3-0.6b",
-        model_name="Qwen/Qwen3-Reranker-0.6B",
-        description="Qwen3 0.6B reranker selected as the Phase 18 default.",
-    ),
     "msmarco-minilm": RerankerSpec(
         name="msmarco-minilm",
         model_name="cross-encoder/ms-marco-MiniLM-L-6-v2",
-        description="Legacy English MiniLM baseline.",
+        description="Negative historical control; fast but poor for Russian dotMD use.",
     ),
     "mmarco-minilm": RerankerSpec(
         name="mmarco-minilm",
         model_name="cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
         description="Multilingual MiniLM baseline.",
     ),
-    "gte-multilingual": RerankerSpec(
-        name="gte-multilingual",
-        model_name="Alibaba-NLP/gte-multilingual-reranker-base",
-        trust_remote_code=True,
-        description="GTE multilingual reranker candidate.",
-    ),
-    "bge-v2-m3": RerankerSpec(
-        name="bge-v2-m3",
-        model_name="BAAI/bge-reranker-v2-m3",
-        description="BGE multilingual reranker candidate.",
-    ),
-    "jina-v2-multilingual": RerankerSpec(
-        name="jina-v2-multilingual",
-        model_name="jinaai/jina-reranker-v2-base-multilingual",
-        trust_remote_code=True,
-        description="Jina v2 multilingual CrossEncoder latency candidate.",
-    ),
     "mxbai-xsmall-v1": RerankerSpec(
         name="mxbai-xsmall-v1",
         model_name="mixedbread-ai/mxbai-rerank-xsmall-v1",
         description="Mixedbread xsmall reranker speed baseline.",
-    ),
-    "mxbai-base-v1": RerankerSpec(
-        name="mxbai-base-v1",
-        model_name="mixedbread-ai/mxbai-rerank-base-v1",
-        description="Mixedbread base v1 CrossEncoder speed baseline.",
-    ),
-    "gte-modernbert-base": RerankerSpec(
-        name="gte-modernbert-base",
-        model_name="Alibaba-NLP/gte-reranker-modernbert-base",
-        description="Small ModernBERT reranker speed baseline.",
     ),
 }
 
@@ -299,12 +267,8 @@ def create_reranker(name: str, settings: Settings) -> RerankerProtocol:
             f"Unsupported reranker backend {spec.backend!r} for {name!r}"
         )
 
-    model_name = spec.model_name
-    if name == "qwen3-0.6b" and settings.reranker_name == "qwen3-0.6b":
-        model_name = settings.reranker_model
-
     return CrossEncoderReranker(
-        model_name=model_name,
+        model_name=spec.model_name,
         name=spec.name,
         length_penalty=settings.reranker_length_penalty,
         min_length=settings.reranker_min_length,

@@ -38,12 +38,6 @@ DEFAULT_RERANKERS = [
     "msmarco-minilm",
     "mmarco-minilm",
     "mxbai-xsmall-v1",
-    "mxbai-base-v1",
-    "jina-v2-multilingual",
-    "gte-multilingual",
-    "bge-v2-m3",
-    "qwen3-0.6b",
-    "gte-modernbert-base",
 ]
 
 FAST_P95_MS = 10_000.0

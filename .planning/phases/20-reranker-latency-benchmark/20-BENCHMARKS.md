@@ -196,10 +196,63 @@ engines.
 | `jina-v2-multilingual` | unusable | 0 | n/a | n/a | n/a | n/a | 1 | 1 |
 | `qwen3-0.6b` | unusable | 0 | n/a | n/a | n/a | 16s | 1 | 1 |
 
-Shortlist for later quality comparison, based only on latency:
+Latency survivors, based only on Phase 20 CPU timing:
 
 - `msmarco-minilm`
 - `mmarco-minilm`
 - `mxbai-xsmall-v1`
 
-Quality remains out of scope for Phase 20.
+Quality remains out of scope for Phase 20. `msmarco-minilm` is retained as a
+negative historical control, not as a serious Russian-language candidate.
+
+## Shortlist Model Evidence
+
+This section explains what the latency shortlist means before a later quality
+phase. The local benchmark above measured only CPU latency on the current
+`dotmd` runtime. The external notes below come from public model cards and
+dataset cards found with Exa on 2026-05-02.
+
+Important context:
+
+- Historical dotMD baseline before Phase 18 was `msmarco-minilm`, backed by
+  `cross-encoder/ms-marco-MiniLM-L-6-v2`. In real dotMD use it behaved poorly:
+  it did not understand Russian well enough to rank Russian notes usefully.
+  Phase 18 replaced the default with `qwen3-0.6b` for multilingual quality
+  reasons, but Phase 20 found Qwen operationally unusable on the current
+  CPU-only host.
+- dotMD's real corpus is predominantly Russian. English-only public benchmark
+  strength is useful only as a baseline signal, not as proof of quality for our
+  production workload.
+- The next phase should compare relevance quality across the latency survivors,
+  but `msmarco-minilm` should be treated as a negative historical control. A
+  candidate that cannot beat it on Russian queries is not worth keeping.
+
+| Local alias | Provider model | Phase 20 local latency | Public benchmark / model-card evidence | Multilingual / Russian evidence | Interpretation |
+|---|---|---:|---|---|---|
+| `msmarco-minilm` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | fast, p95 hot rerank ~= 4s | Hugging Face reports TREC DL 2019 NDCG@10 `74.30`, MS MARCO dev MRR@10 `39.01`, and `1800` docs/sec on V100 for this L6 model. L12 is only marginally higher (`74.31` / `39.02`) but slower. | Model card and tags are English/MS MARCO. No Russian training signal found. Local user experience confirms it ranked Russian poorly. | Negative historical control only: very fast, but not a viable Russian-language reranker. |
+| `mmarco-minilm` | `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` | fast, p95 hot rerank ~= 8s | No directly comparable TREC/MS MARCO ranking table found on the model card. It is a multilingual MiniLMv2 cross-encoder trained on mMARCO. | mMARCO is machine-translated MS MARCO. Its dataset card includes Russian among 14 languages; the model card tags include `ru` and `multilingual`. | Best language-fit survivor for dotMD. It is older and translation-trained, but it is the only latency survivor with explicit Russian/multilingual training evidence. |
+| `mxbai-xsmall-v1` | `mixedbread-ai/mxbai-rerank-xsmall-v1` | acceptable, p95 hot rerank ~= 12s | Mixedbread reports BEIR aggregate NDCG@10 `43.9` and Accuracy@3 `70.0`; it beats Lucene (`38.0` / `66.4`) and BGE reranker base (`41.6` / `66.9`) in their table, but trails their base/large rerankers. | Hugging Face and Mixedbread docs identify the xsmall v1 model as English, with recommended sequence length 512. The docs mention multilingual for other Mixedbread products, not for this xsmall v1 reranker. | Good small modern reranker and plausible speed/quality tradeoff, but Russian support is unproven. Needs local quality testing before promotion. |
+
+### Rejected Models After Latency Gate
+
+| Local alias | Reason rejected for current CPU runtime | External quality note |
+|---|---|---|
+| `qwen3-0.6b` | DNF after `model_wall_timeout_s=900`; one completed cold row spent about 14m in reranking. | Phase 18 selected it from public multilingual evidence, but local CPU latency makes it unusable without a different serving path. |
+| `bge-v2-m3` | DNF after `model_wall_timeout_s=900`; cold rows were tens of seconds to minutes. | Phase 18 research found strong Russian-specific evidence for BGE reranking, but current latency excludes it from local CPU production. |
+| `gte-multilingual` | First hot row exceeded `hot_query_timeout_s=120` at about 3m18s. | Public multilingual evidence is strong, but not enough to pass current latency gate. |
+| `jina-v2-multilingual` | DNF before producing a measured row. | Multilingual candidate, but current local CrossEncoder path is operationally too slow. |
+| `gte-modernbert-base` | DNF after `model_wall_timeout_s=900`; cold rows were tens of seconds to minutes. | Interesting smaller ModernBERT candidate, but current latency excludes it. |
+| `mxbai-base-v1` | DNF after `model_wall_timeout_s=900`; partial hot p95 was about 28s but it did not complete canonical samples. | Better public BEIR score than xsmall, but too slow for the full canonical local pass. |
+
+### Source Links
+
+- `cross-encoder/ms-marco-MiniLM-L6-v2` model card:
+  https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2
+- `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` model card:
+  https://huggingface.co/cross-encoder/mmarco-mMiniLMv2-L12-H384-v1
+- `unicamp-dl/mmarco` dataset card:
+  https://huggingface.co/datasets/unicamp-dl/mmarco
+- `mixedbread-ai/mxbai-rerank-xsmall-v1` model card:
+  https://huggingface.co/mixedbread-ai/mxbai-rerank-xsmall-v1
+- Mixedbread xsmall v1 docs:
+  https://www.mixedbread.com/docs/reranking/mxbai-rerank-xsmall-v1

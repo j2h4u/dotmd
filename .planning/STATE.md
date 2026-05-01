@@ -85,7 +85,8 @@ Phase 20 complete. Canonical reranker latency benchmark results are recorded in
 `20-BENCHMARKS.md` and `results/2026-05-01-rerank-latency-summary.md`.
 Latency-only shortlist for later quality testing: `msmarco-minilm`,
 `mmarco-minilm`, `mxbai-xsmall-v1`. Relevance quality was not evaluated and
-`DOTMD_RERANKER_NAME` was not changed.
+`DOTMD_RERANKER_NAME` was changed to `mmarco-minilm` during post-Phase 20
+cleanup after CPU-unusable candidates were removed from the built-in registry.
 
 ### Blockers/Concerns
 

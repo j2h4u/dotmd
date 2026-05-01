@@ -232,23 +232,23 @@ class TestRerankerScoring:
         with pytest.raises(AttributeError):
             _ = settings.rerank_score_threshold
 
-    def test_settings_default_qwen3_reranker(self) -> None:
-        """Settings defaults to the selected Phase 18 reranker."""
+    def test_settings_default_shortlisted_reranker(self) -> None:
+        """Settings defaults to the latency-surviving multilingual reranker."""
         from dotmd.core.config import Settings
 
         settings = Settings(embedding_url="http://test:8088")
 
         assert settings.reranker_backend == "cross_encoder"
-        assert settings.reranker_model == "Qwen/Qwen3-Reranker-0.6B"
+        assert settings.reranker_model == "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
         assert settings.reranker_relevance_floor is None
 
     def test_settings_default_reranker_name(self) -> None:
-        """Settings defaults to the stable Qwen reranker name."""
+        """Settings defaults to the stable multilingual MiniLM reranker name."""
         from dotmd.core.config import Settings
 
         settings = Settings(embedding_url="http://test:8088")
 
-        assert settings.reranker_name == "qwen3-0.6b"
+        assert settings.reranker_name == "mmarco-minilm"
 
     def test_settings_default_parsed_reranker_compare_names(self) -> None:
         """Settings exposes default comparison names as a parsed list."""
@@ -257,11 +257,9 @@ class TestRerankerScoring:
         settings = Settings(embedding_url="http://test:8088")
 
         assert settings.parsed_reranker_compare_names == [
-            "qwen3-0.6b",
             "msmarco-minilm",
             "mmarco-minilm",
-            "gte-multilingual",
-            "bge-v2-m3",
+            "mxbai-xsmall-v1",
         ]
 
     def test_settings_parsed_reranker_compare_names_ignores_empty_entries(self) -> None:
@@ -270,11 +268,11 @@ class TestRerankerScoring:
 
         settings = Settings(
             embedding_url="http://test:8088",
-            reranker_compare_names="qwen3-0.6b, ,msmarco-minilm",
+            reranker_compare_names="mmarco-minilm, ,msmarco-minilm",
         )
 
         assert settings.parsed_reranker_compare_names == [
-            "qwen3-0.6b",
+            "mmarco-minilm",
             "msmarco-minilm",
         ]
 
@@ -285,22 +283,19 @@ class TestRerankerRegistry:
     def test_available_rerankers_includes_builtin_names(self) -> None:
         """Available reranker names include all built-in registry entries."""
         assert available_rerankers() == [
-            "bge-v2-m3",
-            "gte-modernbert-base",
-            "gte-multilingual",
-            "jina-v2-multilingual",
             "mmarco-minilm",
             "msmarco-minilm",
-            "mxbai-base-v1",
             "mxbai-xsmall-v1",
-            "qwen3-0.6b",
         ]
 
-    def test_qwen3_spec_maps_to_model_name(self) -> None:
-        """The Qwen short name maps to the Phase 18 selected model."""
+    def test_mmarco_minilm_spec_maps_to_model_name(self) -> None:
+        """The multilingual MiniLM short name maps to the selected model."""
         from dotmd.search.reranker import BUILTIN_RERANKERS
 
-        assert BUILTIN_RERANKERS["qwen3-0.6b"].model_name == "Qwen/Qwen3-Reranker-0.6B"
+        assert (
+            BUILTIN_RERANKERS["mmarco-minilm"].model_name
+            == "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
+        )
 
     def test_msmarco_minilm_spec_maps_to_model_name(self) -> None:
         """The legacy MiniLM short name maps to the existing baseline model."""
@@ -321,37 +316,24 @@ class TestRerankerRegistry:
             if spec.trust_remote_code
         ]
 
-        assert trusted == ["gte-multilingual", "jina-v2-multilingual"]
+        assert trusted == []
 
 
 class TestRerankerFactory:
     """Reranker factory resolves stable names to cached adapter instances."""
 
-    def test_create_reranker_resolves_qwen_name(self) -> None:
+    def test_create_reranker_resolves_mmarco_name(self) -> None:
         """create_reranker returns an adapter with stable name and model metadata."""
         from dotmd.core.config import Settings
         from dotmd.search.reranker import create_reranker
 
         settings = Settings(embedding_url="http://test:8088")
 
-        reranker = create_reranker("qwen3-0.6b", settings)
+        reranker = create_reranker("mmarco-minilm", settings)
 
-        assert reranker.name == "qwen3-0.6b"
-        assert reranker.model_name == "Qwen/Qwen3-Reranker-0.6B"
+        assert reranker.name == "mmarco-minilm"
+        assert reranker.model_name == "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
         assert reranker._trust_remote_code is False
-
-    def test_create_reranker_allows_remote_code_only_for_gte(self) -> None:
-        """The Alibaba GTE adapter opts in to HF remote code explicitly."""
-        from dotmd.core.config import Settings
-        from dotmd.search.reranker import create_reranker
-
-        settings = Settings(embedding_url="http://test:8088")
-
-        reranker = create_reranker("gte-multilingual", settings)
-
-        assert reranker.name == "gte-multilingual"
-        assert reranker.model_name == "Alibaba-NLP/gte-multilingual-reranker-base"
-        assert reranker._trust_remote_code is True
 
     def test_create_reranker_rejects_unknown_name(self) -> None:
         """Unknown reranker names fail loudly with available names."""
@@ -360,7 +342,7 @@ class TestRerankerFactory:
 
         settings = Settings(embedding_url="http://test:8088")
 
-        with pytest.raises(ValueError, match=r"Unknown reranker.*qwen3-0\.6b"):
+        with pytest.raises(ValueError, match=r"Unknown reranker.*mmarco-minilm"):
             create_reranker("does-not-exist", settings)
 
     def test_factory_caches_instances_by_name(self) -> None:
@@ -371,7 +353,7 @@ class TestRerankerFactory:
         settings = Settings(embedding_url="http://test:8088")
         factory = RerankerFactory(settings)
 
-        assert factory.get("qwen3-0.6b") is factory.get("qwen3-0.6b")
+        assert factory.get("mmarco-minilm") is factory.get("mmarco-minilm")
 
     @patch("sentence_transformers.CrossEncoder", autospec=True)
     def test_cross_encoder_reranker_warmup_loads_model_without_scoring(
@@ -423,7 +405,7 @@ class TestRerankerFactory:
             reranker_relevance_floor=0.25,
         )
 
-        reranker = create_reranker("qwen3-0.6b", settings)
+        reranker = create_reranker("mmarco-minilm", settings)
 
         assert reranker._length_penalty is False
         assert reranker._min_length == 123
