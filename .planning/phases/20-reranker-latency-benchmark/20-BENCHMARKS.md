@@ -6,14 +6,52 @@ useful operational evidence, but they are not used for canonical model ranking.
 ## Canonical Protocol v1
 
 - Runtime: current `dotmd` container.
+- Query set: `QUERY_SET_V1`, 10 queries.
 - Mode: `hybrid`.
 - Expansion: enabled.
-- Shared candidate pool: fixed per run and recorded from CLI output.
-- Returned top count: fixed per canonical batch; this is output size, not the
-  candidate scoring workload.
-- Repeats: one cold run plus at least three hot runs per model.
-- Sort/rank metric: hot `rerank_ms`.
-- Record separately: cold `load_ms`, total `elapsed_ms`, errors.
+- `shared_pool_size=20`.
+- `top_n=3`; this is output size, not the candidate scoring workload.
+- `cold_passes=1` full pass over all queries.
+- `hot_passes=3` full passes over all queries.
+- `hot_samples_per_model=30`.
+- `model_wall_timeout_s=900`.
+- `hot_query_timeout_s=120`.
+- Sort/rank metric: hot `rerank_ms`, summarized as p50/p95/max.
+- Record separately: cold `load_ms`, total `elapsed_ms`, errors, timeouts,
+  and DNF rows.
+- Latency bands:
+  - `fast: p95 rerank_ms <= 10000`
+  - `acceptable: p95 rerank_ms <= 30000`
+  - `slow: p95 rerank_ms <= 120000`
+  - `unusable: p95 rerank_ms > 120000, timeout, DNF, or provider error`
+
+Canonical model set:
+
+- `msmarco-minilm`
+- `mmarco-minilm`
+- `mxbai-xsmall-v1`
+- `mxbai-base-v1`
+- `jina-v2-multilingual`
+- `gte-multilingual`
+- `bge-v2-m3`
+- `qwen3-0.6b`
+- `gte-modernbert-base`
+
+### Canonical Pre-Run Checklist
+
+Each canonical run must record:
+
+- commit hash
+- container name or runtime identifier
+- benchmark runner command
+- query set version
+- model list
+- `shared_pool_size`
+- `top_n`
+- `mode`
+- expansion setting
+- timeout settings
+- raw output path
 
 ## Exploratory Runs Before Phase 20
 
