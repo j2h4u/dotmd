@@ -76,8 +76,10 @@ def json_body(result: HttpResult) -> dict[str, Any]:
         value = json.loads(result.body.decode("utf-8"))
     except Exception as exc:
         fail(f"response is not JSON: status={result.status} body={result.body[:200]!r}: {exc}")
+        raise
     if not isinstance(value, dict):
         fail(f"response JSON is not an object: {value!r}")
+        raise TypeError("response JSON is not an object")
     return value
 
 
@@ -226,14 +228,11 @@ def assert_authenticated_tools_list(base_url: str, token: str) -> None:
     ok("authenticated tools/list returns search, read, feedback, and schemas")
 
 
-def assert_dynamic_registration_closed(base_url: str) -> None:
-    env_value = dotmd_env("DOTMD_OAUTH_DYNAMIC_REGISTRATION")
-    if env_value != "false":
-        fail(f"DOTMD_OAUTH_DYNAMIC_REGISTRATION must be false in steady state, got {env_value!r}")
+def assert_registration_is_code_gated(base_url: str) -> None:
     body = json.dumps(
         {
             "client_name": "smoke-should-fail",
-            "redirect_uris": ["https://claude.ai/api/mcp/auth_callback"],
+            "redirect_uris": ["https://evil.example/callback"],
             "grant_types": ["authorization_code", "refresh_token"],
             "response_types": ["code"],
             "token_endpoint_auth_method": "none",
@@ -246,9 +245,9 @@ def assert_dynamic_registration_closed(base_url: str) -> None:
         body=body,
     )
     payload = json_body(result)
-    if result.status != 400 or payload.get("error") != "invalid_client_metadata":
-        fail(f"dynamic registration is not closed: status={result.status} body={result.body!r}")
-    ok("dynamic registration is closed in steady state")
+    if result.status != 400 or payload.get("error") != "invalid_redirect_uri":
+        fail(f"untrusted redirect registration was not rejected: status={result.status} body={result.body!r}")
+    ok("untrusted OAuth client registration redirects are rejected")
 
 
 def main() -> int:
@@ -258,7 +257,7 @@ def main() -> int:
     parser.add_argument(
         "--skip-registration-closed",
         action="store_true",
-        help="Skip the steady-state check that dynamic registration is disabled.",
+        help="Skip the steady-state check that untrusted OAuth client redirects are rejected.",
     )
     args = parser.parse_args()
 
@@ -272,7 +271,7 @@ def main() -> int:
     assert_public_oauth(base_url)
     assert_authenticated_tools_list(base_url, access_token_for_client(args.client_name))
     if not args.skip_registration_closed:
-        assert_dynamic_registration_closed(base_url)
+        assert_registration_is_code_gated(base_url)
     ok("remote MCP smoke passed")
     return 0
 

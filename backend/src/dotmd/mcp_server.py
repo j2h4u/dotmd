@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import logging
 import os
@@ -29,8 +30,8 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
 from dotmd.api.service import DotMDService
-from dotmd.auth import DotMDOAuthProvider
-from dotmd.core.config import Settings
+from dotmd.auth import DotMDOAuthProvider, PairingCodeError
+from dotmd.core.config import load_settings
 from dotmd.feedback import FeedbackStore
 
 logger = logging.getLogger(__name__)
@@ -294,34 +295,98 @@ async def root(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok", "service": "dotmd"})
 
 
-@mcp.custom_route("/authorize", methods=["GET"])
-async def authorize(request: Request) -> Response:
-    """Issue an authorization code and redirect back to the registered client."""
+def _pairing_form(request: Request, *, error: str | None = None) -> Response:
+    action = html.escape(str(request.url), quote=True)
+    error_html = ""
+    if error:
+        error_html = f'<p class="error">{html.escape(error)}</p>'
+    return Response(
+        f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>dotMD OAuth pairing</title>
+  <style>
+    body {{ font-family: system-ui, sans-serif; max-width: 34rem; margin: 12vh auto; padding: 0 1rem; }}
+    label {{ display: block; font-weight: 600; margin-bottom: .5rem; }}
+    input {{ box-sizing: border-box; width: 100%; font: inherit; padding: .7rem .8rem; text-transform: uppercase; }}
+    button {{ font: inherit; margin-top: 1rem; padding: .65rem 1rem; }}
+    .error {{ color: #b00020; }}
+  </style>
+</head>
+<body>
+  <h1>dotMD pairing code</h1>
+  <p>Enter the one-time code generated on the dotMD server.</p>
+  {error_html}
+  <form method="post" action="{action}">
+    <label for="pairing_code">Pairing code</label>
+    <input id="pairing_code" name="pairing_code" autocomplete="one-time-code" autofocus required>
+    <button type="submit">Continue</button>
+  </form>
+</body>
+</html>""",
+        media_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+async def _redirect_for_authorization(request: Request, *, pairing_code: str | None = None) -> Response:
     if _provider is None:
         return JSONResponse({"error": "OAuth is not configured"}, status_code=404)
 
-    try:
-        auth_request = AuthorizationRequest.model_validate(request.query_params)
-        client = await _provider.get_client(auth_request.client_id)
+    auth_request = AuthorizationRequest.model_validate(request.query_params)
+    client = await _provider.get_client(auth_request.client_id)
+    if client is None:
+        client = await _provider.get_pending_client(auth_request.client_id)
         if client is None:
             return JSONResponse({"error": "invalid_request", "error_description": "Unknown client_id"}, status_code=400)
-        redirect_uri = client.validate_redirect_uri(auth_request.redirect_uri)
-        scopes = client.validate_scope(auth_request.scope)
-        from mcp.server.auth.provider import AuthorizationParams
+        if pairing_code is None:
+            return _pairing_form(request)
+        await _provider.activate_pending_client(client, pairing_code)
+    redirect_uri = client.validate_redirect_uri(auth_request.redirect_uri)
+    scopes = client.validate_scope(auth_request.scope)
+    from mcp.server.auth.provider import AuthorizationParams
 
-        auth_params = AuthorizationParams(
-            state=auth_request.state,
-            scopes=scopes,
-            code_challenge=auth_request.code_challenge,
-            redirect_uri=redirect_uri,
-            redirect_uri_provided_explicitly=auth_request.redirect_uri is not None,
-            resource=auth_request.resource,
-        )
-        return RedirectResponse(
-            url=await _provider.authorize(client, auth_params),
-            status_code=302,
+    auth_params = AuthorizationParams(
+        state=auth_request.state,
+        scopes=scopes,
+        code_challenge=auth_request.code_challenge,
+        redirect_uri=redirect_uri,
+        redirect_uri_provided_explicitly=auth_request.redirect_uri is not None,
+        resource=auth_request.resource,
+    )
+    return RedirectResponse(
+        url=await _provider.authorize(client, auth_params),
+        status_code=302,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@mcp.custom_route("/authorize", methods=["GET"])
+async def authorize(request: Request) -> Response:
+    """Authorize an OAuth client, prompting for a one-time code if needed."""
+    try:
+        return await _redirect_for_authorization(request)
+    except Exception as exc:
+        logger.exception("OAuth authorize failed")
+        return JSONResponse(
+            {"error": "invalid_request", "error_description": str(exc)},
+            status_code=400,
             headers={"Cache-Control": "no-store"},
         )
+
+
+@mcp.custom_route("/authorize", methods=["POST"])
+async def authorize_pairing_code(request: Request) -> Response:
+    """Activate a pending OAuth client with a one-time pairing code."""
+    try:
+        form = await request.form()
+        pairing_code = str(form.get("pairing_code", ""))
+        return await _redirect_for_authorization(request, pairing_code=pairing_code)
+    except PairingCodeError as exc:
+        logger.warning("OAuth pairing failed: %s", exc)
+        return _pairing_form(request, error=str(exc))
     except Exception as exc:
         logger.exception("OAuth authorize failed")
         return JSONResponse(
@@ -401,7 +466,7 @@ def _init_for_stdio() -> None:
     ``initialize`` handshake completes.  Models load lazily on first use.
     """
     global _service, _feedback
-    settings = Settings()
+    settings = load_settings()
     _service = DotMDService(settings)
     _feedback = FeedbackStore(settings.index_dir / "feedback.db")
 
@@ -426,7 +491,7 @@ def create_app() -> Starlette:
     async def _server_lifespan(app: Starlette) -> AsyncIterator[None]:
         global _service, _feedback
 
-        settings = Settings()
+        settings = load_settings()
         svc = DotMDService(settings)
         # warmup() is CPU/disk-bound; run in thread to keep event loop free
         await asyncio.to_thread(svc.warmup)
@@ -469,6 +534,11 @@ def create_app() -> Starlette:
             "/authorize",
             authorize,
             methods=["GET"],
+        ),
+        Route(
+            "/authorize",
+            authorize_pairing_code,
+            methods=["POST"],
         ),
         *[
             route

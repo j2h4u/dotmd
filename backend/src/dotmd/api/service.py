@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Any, TypedDict
 
-from dotmd.core.config import Settings
+from dotmd.core.config import Settings, load_settings
 from dotmd.core.models import IndexStats, SearchMode, SearchResult
 from dotmd.ingestion.pipeline import IndexingPipeline
 from dotmd.ingestion.trickle import TrickleIndexer
@@ -101,7 +101,7 @@ class DotMDService:
     """
 
     def __init__(self, settings: Settings | None = None) -> None:
-        self._settings = settings or Settings()
+        self._settings = settings or load_settings()
 
         # Indexing pipeline (also creates storage backends and extractors).
         self._pipeline = IndexingPipeline(self._settings)

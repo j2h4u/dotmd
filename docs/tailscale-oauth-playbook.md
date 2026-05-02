@@ -113,6 +113,7 @@ GET  /.well-known/oauth-authorization-server
 GET  /.well-known/oauth-protected-resource/mcp
 POST /register
 GET  /authorize
+POST /authorize
 POST /token
 ```
 
@@ -128,23 +129,23 @@ client can register itself, receive an authorization code at its own callback,
 exchange it for a token, and then call `search`/`read` against the personal
 knowledgebase.
 
-dotMD therefore disables dynamic client registration by default and also
-allowlists redirect URIs when registration is temporarily enabled.
+dotMD therefore keeps unrestricted dynamic registration disabled. Allowlisted
+hosted clients may register, but they are stored as pending clients and cannot
+receive an authorization code until the human enters a one-time pairing code on
+the dotMD authorization page.
 
-Normal steady state:
+Create a one-time pairing code before initial connector setup or deliberate
+re-pairing:
 
-```env
-DOTMD_OAUTH_DYNAMIC_REGISTRATION=false
+```bash
+docker exec dotmd dotmd oauth code create
+# or: docker exec dotmd dotmd oauth code create --ttl 10m
 ```
 
-Initial connector setup or deliberate re-pairing:
-
-```env
-DOTMD_OAUTH_DYNAMIC_REGISTRATION=true
-```
-
-After the connector succeeds, set it back to `false` and recreate the container.
-Existing registered clients and refresh tokens continue to work.
+`--ttl` is optional and defaults to `10m`. Pending clients that do not complete
+the browser authorization flow expire automatically; the default pending-client
+TTL is `30m` and can be overridden with
+`DOTMD_OAUTH_PENDING_CLIENT_TTL_SECONDS`.
 
 Allowed redirect policy:
 
@@ -172,23 +173,15 @@ curl -i -X POST https://dotmd.tailf87223.ts.net/register \
 # HTTP/2 400
 # {"error":"invalid_redirect_uri",...}
 
-# With dynamic registration disabled, even a trusted callback must be rejected.
+# With dynamic registration disabled, a trusted callback may register only as
+# a pending client. It still cannot receive a token without a one-time code.
 curl -i -X POST https://dotmd.tailf87223.ts.net/register \
   -H 'Content-Type: application/json' \
   -d '{"client_name":"ChatGPT","redirect_uris":["https://chatgpt.com/connector/oauth/test"],"grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none"}'
 
 # Expected in steady state:
-# HTTP/2 400
-# {"error":"invalid_client_metadata","error_description":"OAuth dynamic client registration is disabled"}
-
-# Trusted callbacks should be accepted only during intentional setup with
-# DOTMD_OAUTH_DYNAMIC_REGISTRATION=true.
-curl -i -X POST https://dotmd.tailf87223.ts.net/register \
-  -H 'Content-Type: application/json' \
-  -d '{"client_name":"ChatGPT","redirect_uris":["https://chatgpt.com/connector/oauth/test"],"grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none"}'
-
-# Expected:
 # HTTP/2 201
+# Follow-up GET /authorize shows the pairing-code page until a valid code is entered.
 ```
 
 ## Required Endpoints
@@ -200,6 +193,7 @@ GET  /                                      health-style root response
 GET  /.well-known/oauth-authorization-server
 GET  /.well-known/oauth-protected-resource/mcp
 GET  /authorize
+POST /authorize
 POST /register
 POST /token
 POST /mcp
@@ -245,11 +239,15 @@ Redirect URI: https://claude.ai/api/mcp/auth_callback
 
 Setup sequence:
 
-1. Set `DOTMD_OAUTH_DYNAMIC_REGISTRATION=true`.
-2. Recreate the `dotmd` container; `docker compose restart` is not enough for env changes.
-3. Create the Claude connector with `https://dotmd.tailf87223.ts.net/mcp`.
-4. Confirm access log shows `/register 201`, `/authorize 302`, `/token 200`, then `/mcp 200`.
-5. Set `DOTMD_OAUTH_DYNAMIC_REGISTRATION=false` and recreate the container.
+1. Generate a one-time code:
+
+```bash
+docker exec dotmd dotmd oauth code create
+```
+
+2. Create or reconnect the Claude connector with `https://dotmd.tailf87223.ts.net/mcp`.
+3. When the browser opens the dotMD authorization page, enter the one-time code.
+4. Confirm access log shows `/register 201`, `/authorize 200` for the pairing page, `/authorize 302` after the code, `/token 200`, then `/mcp 200`.
 
 Expected Claude-style sequence:
 
@@ -258,7 +256,8 @@ POST /mcp -> 401
 GET  /.well-known/oauth-protected-resource/mcp -> 200
 GET  /.well-known/openid-configuration -> 404
 POST /register -> 201
-GET  /authorize -> 302
+GET  /authorize -> 200 pairing page
+POST /authorize -> 302
 POST /token -> 200
 POST /mcp -> 200
 ```
@@ -303,10 +302,10 @@ ts=$(date +%Y%m%d%H%M%S)
 docker exec dotmd sh -lc "cp /dotmd-index/oauth_state.json /dotmd-index/oauth_state.json.bak-$ts 2>/dev/null || true; rm -f /dotmd-index/oauth_state.json"
 ```
 
-Then recreate the container with registration enabled:
+Then create a one-time pairing code:
 
-```env
-DOTMD_OAUTH_DYNAMIC_REGISTRATION=true
+```bash
+docker exec dotmd dotmd oauth code create
 ```
 
 Successful ChatGPT trace from the final clean flow:
@@ -317,7 +316,8 @@ GET  /.well-known/oauth-protected-resource/mcp -> 200
 GET  /.well-known/oauth-authorization-server -> 200
 GET  /.well-known/openid-configuration -> 404
 POST /register -> 201
-GET  /authorize -> 302 with code, state, iss
+GET  /authorize -> 200 pairing page
+POST /authorize -> 302 with code, state, iss
 POST /token -> 200
 POST /mcp initialize -> 200
 POST /mcp tools/list -> 200
@@ -546,20 +546,14 @@ https://dotmd.tailf87223.ts.net/mcp
 
 Security setup sequence:
 
-1. Temporarily enable registration:
+1. Create a one-time pairing code:
 
-```env
-DOTMD_OAUTH_DYNAMIC_REGISTRATION=true
+```bash
+docker exec dotmd dotmd oauth code create
 ```
 
 2. Connect the hosted MCP client once.
-3. Disable registration:
-
-```env
-DOTMD_OAUTH_DYNAMIC_REGISTRATION=false
-```
-
-4. Recreate the MCP container.
+3. Enter the one-time code on the dotMD authorization page.
 
 Do not reuse one sidecar node for multiple path-prefixed MCPs unless the client
 is tailnet-local and does not need hosted OAuth discovery.
@@ -732,7 +726,8 @@ GET  /.well-known/oauth-protected-resource/mcp -> 200
 GET  /.well-known/oauth-authorization-server -> 200
 GET  /.well-known/openid-configuration -> 404
 POST /register -> 201
-GET  /authorize -> 302 with code, state, iss
+GET  /authorize -> 200 pairing page
+POST /authorize -> 302 with code, state, iss
 POST /token -> 200
 POST /mcp initialize -> 200
 POST /mcp tools/list -> 200
@@ -886,4 +881,4 @@ just test-mcp-remote
 
 This checks the `dotmd` healthcheck, the `tailscale-dotmd` network namespace,
 Tailscale/Funnel status, public OAuth discovery, `/mcp` auth challenge, an
-authenticated `tools/list`, and that dynamic registration is closed again.
+authenticated `tools/list`, and that untrusted dynamic registration is rejected.

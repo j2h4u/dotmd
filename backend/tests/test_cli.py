@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -142,3 +143,24 @@ def test_rerank_compare_unknown_reranker_is_click_error(tmp_path: Path) -> None:
 
     assert result.exit_code != 0
     assert "Unknown reranker" in result.output
+
+
+def test_oauth_code_create_outputs_pairing_code(tmp_path: Path) -> None:
+    result = CliRunner().invoke(
+        main,
+        [
+            "--index-dir",
+            str(tmp_path),
+            "oauth",
+            "code",
+            "create",
+            "--ttl",
+            "60s",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    code_line = next(line for line in result.output.splitlines() if re.fullmatch(r"[A-Z2-9]{4}-[A-Z2-9]{4}", line))
+    assert len(code_line) == 9
+    assert "Expires:" in result.output
+    assert (tmp_path / "oauth_state.json").exists()

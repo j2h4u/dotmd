@@ -6,6 +6,7 @@ import asyncio
 import json
 import time
 from pathlib import Path
+from typing import cast
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -13,7 +14,7 @@ from mcp.server.auth.handlers.authorize import AuthorizationParams
 from mcp.server.auth.provider import AccessToken, RefreshToken, RegistrationError
 from mcp.shared.auth import OAuthClientInformationFull
 
-from dotmd.auth import DotMDOAuthProvider
+from dotmd.auth import DotMDOAuthProvider, PairingCodeError
 
 
 def _client() -> OAuthClientInformationFull:
@@ -55,7 +56,6 @@ def _params(
 
 
 def _provider(tmp_path: Path, monkeypatch) -> DotMDOAuthProvider:
-    monkeypatch.setenv("DOTMD_OAUTH_DYNAMIC_REGISTRATION", "true")
     monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
     return DotMDOAuthProvider(tmp_path / "oauth_state.json")
 
@@ -64,7 +64,7 @@ def _query(url: str) -> dict[str, list[str]]:
     return parse_qs(urlparse(url).query)
 
 
-def test_register_and_get_client(tmp_path: Path, monkeypatch) -> None:
+def test_register_creates_pending_client(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
         provider = _provider(tmp_path, monkeypatch)
         client = _client()
@@ -72,17 +72,17 @@ def test_register_and_get_client(tmp_path: Path, monkeypatch) -> None:
         await provider.register_client(client)
 
         assert client.client_id is not None
-        assert await provider.get_client(client.client_id) == client
+        assert await provider.get_client(client.client_id) is None
+        assert await provider.get_pending_client(client.client_id) == client
         assert await provider.get_client("unknown") is None
         state = json.loads((tmp_path / "oauth_state.json").read_text(encoding="utf-8"))
-        assert client.client_id in state["clients"]
+        assert client.client_id in state["pending_clients"]
 
     asyncio.run(run())
 
 
 def test_rejects_unallowed_redirect_uri(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
-        monkeypatch.setenv("DOTMD_OAUTH_DYNAMIC_REGISTRATION", "true")
         monkeypatch.delenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", raising=False)
         provider = DotMDOAuthProvider(tmp_path / "oauth_state.json")
         with pytest.raises(RegistrationError) as exc_info:
@@ -95,7 +95,6 @@ def test_rejects_unallowed_redirect_uri(tmp_path: Path, monkeypatch) -> None:
 
 def test_register_allows_chatgpt_connector_redirect_prefix(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
-        monkeypatch.setenv("DOTMD_OAUTH_DYNAMIC_REGISTRATION", "true")
         monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
         monkeypatch.setenv(
             "DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES",
@@ -107,8 +106,8 @@ def test_register_allows_chatgpt_connector_redirect_prefix(tmp_path: Path, monke
         await provider.register_client(client)
 
         assert client.client_id is not None
-        assert await provider.get_client(client.client_id) == client
-        stored = await provider.get_client(client.client_id)
+        assert await provider.get_client(client.client_id) is None
+        stored = await provider.get_pending_client(client.client_id)
         assert stored is not None
         assert stored.token_endpoint_auth_method == "none"
         assert stored.client_secret is None
@@ -118,7 +117,6 @@ def test_register_allows_chatgpt_connector_redirect_prefix(tmp_path: Path, monke
 
 def test_authorize_allows_registered_chatgpt_connector_redirect_prefix(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
-        monkeypatch.setenv("DOTMD_OAUTH_DYNAMIC_REGISTRATION", "true")
         monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
         monkeypatch.setenv(
             "DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES",
@@ -139,7 +137,6 @@ def test_authorize_allows_registered_chatgpt_connector_redirect_prefix(tmp_path:
 
 def test_register_rejects_chatgpt_lookalike_redirect_prefix(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
-        monkeypatch.setenv("DOTMD_OAUTH_DYNAMIC_REGISTRATION", "true")
         monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
         monkeypatch.setenv(
             "DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES",
@@ -156,15 +153,92 @@ def test_register_rejects_chatgpt_lookalike_redirect_prefix(tmp_path: Path, monk
     asyncio.run(run())
 
 
-def test_rejects_dynamic_registration_by_default(tmp_path: Path, monkeypatch) -> None:
+def test_register_creates_pending_client_by_default(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
-        monkeypatch.delenv("DOTMD_OAUTH_DYNAMIC_REGISTRATION", raising=False)
         monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
         provider = DotMDOAuthProvider(tmp_path / "oauth_state.json")
-        with pytest.raises(RegistrationError) as exc_info:
-            await provider.register_client(_client())
-        assert exc_info.value.error == "invalid_client_metadata"
-        assert exc_info.value.error_description == "OAuth dynamic client registration is disabled"
+        client = _client()
+
+        await provider.register_client(client)
+
+        assert client.client_id is not None
+        assert await provider.get_client(client.client_id) is None
+        assert await provider.get_pending_client(client.client_id) == client
+
+    asyncio.run(run())
+
+
+def test_pairing_code_activates_pending_client_once(tmp_path: Path, monkeypatch) -> None:
+    async def run() -> None:
+        monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
+        provider = DotMDOAuthProvider(tmp_path / "oauth_state.json")
+        client = _client()
+        await provider.register_client(client)
+
+        code, expires_at = await provider.create_pairing_code(ttl_seconds=60)
+        assert "-" in code
+        assert expires_at > time.time()
+        await provider.activate_pending_client(client, code.lower().replace("-", " "))
+
+        assert client.client_id is not None
+        assert await provider.get_pending_client(client.client_id) is None
+        assert await provider.get_client(client.client_id) == client
+        second_client = _client_with_redirect("https://client.example/callback")
+        second_client.client_id = "client-2"
+        await provider.register_client(second_client)
+        with pytest.raises(PairingCodeError):
+            await provider.activate_pending_client(second_client, code)
+
+    asyncio.run(run())
+
+
+def test_pairing_code_created_by_second_provider_activates_running_provider(tmp_path: Path, monkeypatch) -> None:
+    async def run() -> None:
+        monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
+        state_path = tmp_path / "oauth_state.json"
+        server_provider = DotMDOAuthProvider(state_path)
+        cli_provider = DotMDOAuthProvider(state_path)
+        client = _client()
+        await server_provider.register_client(client)
+
+        code, _ = await cli_provider.create_pairing_code(ttl_seconds=60)
+        await server_provider.activate_pending_client(client, code)
+
+        assert client.client_id is not None
+        assert await server_provider.get_client(client.client_id) == client
+
+    asyncio.run(run())
+
+
+def test_pairing_code_expires(tmp_path: Path, monkeypatch) -> None:
+    async def run() -> None:
+        monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
+        provider = DotMDOAuthProvider(tmp_path / "oauth_state.json")
+        client = _client()
+        await provider.register_client(client)
+        code, _ = await provider.create_pairing_code(ttl_seconds=1)
+        pairing_record = cast(dict[str, object], provider._state["pairing_codes"][code.replace("-", "")])
+        pairing_record["expires_at"] = time.time() - 1
+        await provider._flush()
+
+        with pytest.raises(PairingCodeError):
+            await provider.activate_pending_client(client, code)
+
+    asyncio.run(run())
+
+
+def test_pending_client_expires_without_completed_pairing(tmp_path: Path, monkeypatch) -> None:
+    async def run() -> None:
+        monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
+        provider = DotMDOAuthProvider(tmp_path / "oauth_state.json")
+        client = _client()
+        await provider.register_client(client)
+        assert client.client_id is not None
+        pending_record = cast(dict[str, object], provider._state["pending_clients"][client.client_id])
+        pending_record["expires_at"] = time.time() - 1
+        await provider._flush()
+
+        assert await provider.get_pending_client(client.client_id) is None
 
     asyncio.run(run())
 
@@ -318,11 +392,12 @@ def test_revoke_token_removes_token_without_error(tmp_path: Path, monkeypatch) -
 def test_json_persistence(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
         state_path = tmp_path / "oauth_state.json"
-        monkeypatch.setenv("DOTMD_OAUTH_DYNAMIC_REGISTRATION", "true")
         monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
         provider = DotMDOAuthProvider(state_path)
         client = _client()
         await provider.register_client(client)
+        code, _ = await provider.create_pairing_code(ttl_seconds=60)
+        await provider.activate_pending_client(client, code)
         redirect = await provider.authorize(client, _params())
         code = _query(redirect)["code"][0]
         auth_code = await provider.load_authorization_code(client, code)

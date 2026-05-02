@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 import click
 
 from dotmd.api.service import DotMDService
-from dotmd.core.config import Settings
+from dotmd.auth import DotMDOAuthProvider
+from dotmd.core.config import load_settings
 from dotmd.core.exceptions import IndexingLockError
 from dotmd.core.models import SearchMode, TrickleStatus
 from dotmd.feedback import FeedbackStore
@@ -39,7 +41,7 @@ def main(ctx: click.Context, verbose: bool, index_dir: Path | None) -> None:
 
 
 def _get_service(**overrides: object) -> DotMDService:
-    settings = Settings(**overrides)  # type: ignore[arg-type]
+    settings = load_settings(**overrides)
     return DotMDService(settings=settings)
 
 
@@ -237,7 +239,7 @@ def status(ctx: click.Context, verbose: bool) -> None:
     click.echo(f"Entities: {stats.total_entities}")
     click.echo(f"Edges:    {stats.total_edges}")
     # Graph backend info
-    settings = Settings()
+    settings = load_settings()
     if settings.graph_backend == "falkordb":
         click.echo(f"Graph:    falkordb @ {settings.falkordb_url}/dotmd")
     else:
@@ -481,7 +483,7 @@ def mcp(transport: str, host: str, port: int) -> None:
 
         setup_logging()
         _init_for_stdio()
-        mcp_app.run(transport=transport)
+        mcp_app.run(transport="stdio")
 
 
 @main.command("mcp-config")
@@ -508,8 +510,58 @@ def mcp_config() -> None:
 def _get_feedback_store(ctx: click.Context) -> FeedbackStore:
     index_dir = (ctx.obj or {}).get("index_dir")
     if index_dir is None:
-        index_dir = Settings().index_dir
+        index_dir = load_settings().index_dir
     return FeedbackStore(Path(index_dir) / "feedback.db")
+
+
+def _parse_duration(value: str) -> int:
+    text = value.strip().lower()
+    if not text:
+        raise click.BadParameter("duration must not be empty")
+    unit = text[-1]
+    number_text = text[:-1] if unit.isalpha() else text
+    multiplier = {"s": 1, "m": 60, "h": 3600, "d": 86400}.get(unit, 1)
+    try:
+        number = float(number_text)
+    except ValueError as exc:
+        raise click.BadParameter("duration must be a number with optional s/m/h/d suffix") from exc
+    seconds = int(number * multiplier)
+    if seconds <= 0:
+        raise click.BadParameter("duration must be positive")
+    return seconds
+
+
+# ---------------------------------------------------------------------------
+# OAuth command group
+# ---------------------------------------------------------------------------
+
+
+@main.group()
+def oauth() -> None:
+    """Manage OAuth pairing for hosted MCP clients."""
+
+
+@oauth.group("code")
+def oauth_code() -> None:
+    """Manage one-time OAuth pairing codes."""
+
+
+@oauth_code.command("create")
+@click.option("--ttl", default="10m", help="Code lifetime, e.g. 60s, 10m, 2h. Default: 10m.")
+@click.pass_context
+def oauth_code_create(ctx: click.Context, ttl: str) -> None:
+    """Create a one-time code for pairing a hosted MCP client."""
+    import asyncio
+
+    index_dir = (ctx.obj or {}).get("index_dir")
+    if index_dir is None:
+        index_dir = Path.home() / ".dotmd"
+    provider = DotMDOAuthProvider(Path(index_dir) / "oauth_state.json")
+    ttl_seconds = _parse_duration(ttl)
+    code, expires_at = asyncio.run(provider.create_pairing_code(ttl_seconds=ttl_seconds))
+    expires = time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(expires_at))
+    click.echo(code)
+    click.echo(f"Expires: {expires}")
 
 
 @main.group()

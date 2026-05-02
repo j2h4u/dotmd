@@ -2,7 +2,7 @@
 
 import warnings
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, TomlConfigSettingsSource
@@ -215,7 +215,8 @@ class Settings(BaseSettings):
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         """Set priority: init > env > dotenv > file_secret > TOML > defaults."""
-        toml_path = Path(cls.model_config.get("toml_file", ""))
+        toml_file = cast(str, cls.model_config.get("toml_file", ""))
+        toml_path = Path(toml_file)
         sources: list[PydanticBaseSettingsSource] = [
             init_settings,
             env_settings,
@@ -249,7 +250,8 @@ class Settings(BaseSettings):
     @property
     def config_path(self) -> Path:
         """Path to the TOML config file."""
-        return Path(self.model_config.get("toml_file", str(self.index_dir / "config.toml")))
+        toml_file = cast(str, self.model_config.get("toml_file", str(self.index_dir / "config.toml")))
+        return Path(toml_file)
 
     @property
     def needs_embedding_prefix(self) -> bool:
@@ -308,3 +310,13 @@ class Settings(BaseSettings):
     @property
     def acronyms_path(self) -> Path:
         return self.index_dir / "acronyms.json"
+
+
+def load_settings(**overrides: object) -> Settings:
+    """Construct Settings while preserving BaseSettings env/config loading.
+
+    `embedding_url` is intentionally provided by environment/config in
+    production. Pyright treats it as a required constructor argument because it
+    cannot model pydantic-settings sources.
+    """
+    return Settings(**overrides)  # type: ignore[call-arg]
