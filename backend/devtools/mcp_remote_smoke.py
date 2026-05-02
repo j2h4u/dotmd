@@ -229,8 +229,8 @@ def assert_authenticated_tools_list(base_url: str, token: str) -> None:
     ok("authenticated tools/list returns search, read, feedback, and schemas")
 
 
-def assert_feedback_alias_call(base_url: str, token: str) -> None:
-    marker = f"__remote_smoke_feedback_alias__{int(time.time())}"
+def assert_feedback_call(base_url: str, token: str) -> None:
+    marker = f"__remote_smoke_feedback__{int(time.time())}"
     body = json.dumps(
         {
             "jsonrpc": "2.0",
@@ -239,7 +239,7 @@ def assert_feedback_alias_call(base_url: str, token: str) -> None:
             "params": {
                 "name": "feedback",
                 "arguments": {
-                    "feedback": marker,
+                    "message": marker,
                     "severity": "question",
                     "context": "remote MCP smoke",
                 },
@@ -259,7 +259,7 @@ def assert_feedback_alias_call(base_url: str, token: str) -> None:
     )
     payload = json_body(result)
     if result.status != 200 or payload.get("result", {}).get("isError"):
-        fail(f"feedback alias call failed: status={result.status} body={result.body!r}")
+        fail(f"feedback call failed: status={result.status} body={result.body!r}")
     cleanup = """
 import sqlite3
 from pathlib import Path
@@ -272,7 +272,7 @@ finally:
     conn.close()
 """.replace("MESSAGE", repr(marker))
     run(["docker", "exec", "-i", "dotmd", "python", "-c", cleanup])
-    ok("feedback tool accepts feedback alias and records successfully")
+    ok("feedback tool records successfully")
 
 
 def assert_registration_is_code_gated(base_url: str) -> None:
@@ -318,7 +318,7 @@ def main() -> int:
     assert_public_oauth(base_url)
     token = access_token_for_client(args.client_name)
     assert_authenticated_tools_list(base_url, token)
-    assert_feedback_alias_call(base_url, token)
+    assert_feedback_call(base_url, token)
     if not args.skip_registration_closed:
         assert_registration_is_code_gated(base_url)
     ok("remote MCP smoke passed")
