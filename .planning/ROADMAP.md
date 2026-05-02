@@ -117,7 +117,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 | 19. Reranker Adapter Layer and Multi-Model Comparison | 4/4 | Complete | 2026-05-01 |
 | 20. Reranker Latency Benchmark | 1/1 | Complete | 2026-05-01 |
 | 21. Reranker Quality Benchmark | 1/1 | Complete | 2026-05-02 |
-| 22. Improve Search Snippet Boundaries | 0/0 | Planned | — |
+| 22. Improve Search Snippet Boundaries | 1/1 | Planned | — |
 
 ### Phase 17: MCP OAuth 2.0 — Claude Desktop remote connector support
 
@@ -552,18 +552,17 @@ Plans:
 **Feedback source:** feedback id=6, id=10, and fresh open feedback id=19
 **Requirements:** SNIPPET-BOUNDARY-01, SNIPPET-CONTEXT-01, SNIPPET-VERIFY-01
 **Depends on:** Phase 21
-**Plans:** 0 plans
+**Plans:** 1 plan
 
-Planning input:
-- Fresh Claude.ai web recommendation: first fix mid-sentence truncation inside
-  the current chunk using deterministic sentence/paragraph/speaker-turn
-  boundaries.
-- The same recommendation argues against automatic neighboring chunks because
-  cross-chunk context is already covered by `read(file_path, start, end)`.
-- Treat this as strong planning input, not a final implementation decision.
+Phase boundary:
+- Expand snippets only inside the current chunk.
+- Use deterministic sentence, paragraph, and chunk boundaries.
+- Do not add neighboring chunks, `context_window`, speaker-turn anchors, ML,
+  summarization, or semantic expansion.
+- Enforce a hard cap for long sentences, recommended as `2 * snippet_length`.
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 22 to break down)
+- [ ] 22-01-snippet-boundary-extraction-PLAN.md — Implement and verify bounded sentence-boundary snippets
 
 ---
 

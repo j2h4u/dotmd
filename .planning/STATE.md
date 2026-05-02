@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
-status: planning
-last_updated: "2026-05-02T12:55:49.203Z"
+status: executing
+last_updated: "2026-05-02T13:07:42.559Z"
 last_activity: 2026-05-02
 progress:
   total_phases: 25
   completed_phases: 8
-  total_plans: 22
-  completed_plans: 22
+  total_plans: 23
+  completed_plans: 23
   percent: 100
 ---
 
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 **v1.4 — Search Quality & Architecture**
 
 Phase: 22
-Plan: TBD
-Status: Phase 22 promoted; planning pending
+Plan: 22-01-snippet-boundary-extraction
+Status: Ready to execute
 Last activity: 2026-05-02
 
 Progress: [██████████] 100%
