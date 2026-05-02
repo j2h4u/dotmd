@@ -16,17 +16,15 @@ from devtools.reranker_latency_bench import (
 def test_query_set_and_defaults_are_canonical() -> None:
     assert len(QUERY_SET_V1) == 10
     assert DEFAULT_RERANKERS == [
-        "msmarco-minilm",
         "mmarco-minilm",
-        "mxbai-xsmall-v1",
     ]
 
 
 def test_parse_rerankers_defaults_and_trims_names() -> None:
     assert parse_rerankers(None) == DEFAULT_RERANKERS
-    assert parse_rerankers(" msmarco-minilm, mmarco-minilm ,,") == [
-        "msmarco-minilm",
+    assert parse_rerankers(" mmarco-minilm, experimental ,,") == [
         "mmarco-minilm",
+        "experimental",
     ]
 
 

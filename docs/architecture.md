@@ -123,9 +123,9 @@ The schema is two-dimensional where needed: `(chunk_strategy, embedding_model)`.
 
 Rerankers implement `RerankerProtocol`: each adapter exposes a stable `name`, a
 provider `model_name`, `warmup()`, and `rerank()`. Built-in adapters are
-registered by short names: `msmarco-minilm`, `mmarco-minilm`, and
-`mxbai-xsmall-v1`;
-`RerankerFactory` resolves and caches
+registered by short name. The current production registry contains only
+`mmarco-minilm`; historical benchmark candidates are documented outside the
+production registry. `RerankerFactory` resolves and caches
 the selected adapter so normal search does not construct a model per request.
 The current built-in registry does not require Hugging Face custom code; all
 remaining adapters keep `trust_remote_code=False`.
@@ -148,11 +148,11 @@ with the service and reused; reranker adapters are cached by the factory.
 
 The selected reranker provider is
 `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` via the local
-SentenceTransformers CrossEncoder boundary. Phase 20 found heavier multilingual
-candidates operationally unusable on the current CPU runtime, so the built-in
-registry is narrowed to the three latency survivors. `msmarco-minilm` remains
-only as a negative historical control because it ranked Russian notes poorly in
-real dotMD use.
+SentenceTransformers CrossEncoder boundary. Phase 20/21 established the staged
+benchmark process: latency first, then quality on live Russian/mixed dotMD
+queries. `msmarco-minilm` and `mxbai-xsmall-v1` are archived as historical
+benchmark evidence, not production candidates. The methodology and current
+results live in `docs/reranker-benchmark-methodology.md`.
 
 Reranking is non-fatal. If the provider errors, is unavailable, or an optional
 raw-score floor removes all candidates, dotMD falls back to fused semantic,

@@ -9,11 +9,11 @@ Everything runs against local or self-hosted services. No hosted LLM API key is 
 The production default is one selected reranker, not multi-reranker serving:
 `DOTMD_RERANKER_NAME=mmarco-minilm` maps to
 `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` through the local
-SentenceTransformers CrossEncoder path. Phase 20 removed CPU-unusable latency
-candidates from the built-in registry; the remaining local comparison set is
-`msmarco-minilm`, `mmarco-minilm`, and `mxbai-xsmall-v1`. `msmarco-minilm` is
-kept only as a negative historical control because it ranked Russian notes
-poorly in real dotMD use.
+SentenceTransformers CrossEncoder path. Phase 20/21 established the staged
+reranker benchmark process: first eliminate slow models by latency, then compare
+quality on live Russian/mixed dotMD queries. The current production registry
+keeps only `mmarco-minilm`; rejected historical candidates remain documented in
+[`docs/reranker-benchmark-methodology.md`](docs/reranker-benchmark-methodology.md).
 
 ## Features
 
@@ -110,8 +110,8 @@ uv run dotmd search "query" --mode graph      # graph retrieval
 uv run dotmd search "query" --no-rerank       # skip cross-encoder reranking
 uv run dotmd search "query" --no-expand       # skip query expansion
 uv run dotmd search "query" --top 5           # limit results
-uv run dotmd search "пример запроса" --reranker msmarco-minilm
-uv run dotmd rerank compare "пример запроса" --rerankers msmarco-minilm,mmarco-minilm,mxbai-xsmall-v1
+uv run dotmd search "пример запроса" --reranker mmarco-minilm
+uv run dotmd rerank compare "пример запроса" --rerankers mmarco-minilm
 ```
 
 `dotmd rerank compare` is a developer diagnostic command. It runs query
@@ -123,7 +123,9 @@ rerank time with failures last, so CPU latency can be compared against
 alternates without changing production behavior. It does not make production
 search serve multiple rerankers and does not require a production restart when
 run locally or inside the
-container against the current code/config.
+container against the current code/config. Future candidates should be added
+temporarily and evaluated with the staged benchmark methodology before they are
+kept in the registry.
 
 ### REST API
 
@@ -196,7 +198,7 @@ Configuration comes from `DOTMD_` environment variables, explicit `Settings(...)
 | `DOTMD_EXTRACT_DEPTH` | `ner` | `structural` or `ner` |
 | `DOTMD_BASE_URL` | unset | Public HTTPS base URL for OAuth-enabled MCP deployments |
 | `DOTMD_RERANKER_NAME` | `mmarco-minilm` | Stable reranker name selected for normal production search |
-| `DOTMD_RERANKER_COMPARE_NAMES` | `msmarco-minilm,mmarco-minilm,mxbai-xsmall-v1` | Default developer comparison set |
+| `DOTMD_RERANKER_COMPARE_NAMES` | `mmarco-minilm` | Default developer comparison set; add temporary candidates only for benchmark runs |
 | `DOTMD_RERANKER_BACKEND` | `cross_encoder` | Reranker provider boundary; currently local CrossEncoder |
 | `DOTMD_RERANKER_MODEL` | `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` | Selected multilingual reranker model |
 | `DOTMD_RERANKER_RELEVANCE_FLOOR` | unset | Optional raw-score floor; unset keeps all reranked candidates |

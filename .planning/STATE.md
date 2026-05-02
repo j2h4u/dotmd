@@ -84,17 +84,22 @@ Phase 19 complete. Reranker adapter/factory refactor, shared retrieval pool, dev
 
 Phase 20 complete. Canonical reranker latency benchmark results are recorded in
 `20-BENCHMARKS.md` and `results/2026-05-01-rerank-latency-summary.md`.
-Latency-only shortlist for later quality testing: `msmarco-minilm`,
-`mmarco-minilm`, `mxbai-xsmall-v1`. Relevance quality was not evaluated and
-`DOTMD_RERANKER_NAME` was changed to `mmarco-minilm` during post-Phase 20
-cleanup after CPU-unusable candidates were removed from the built-in registry.
+Historical latency shortlist before Phase 21 quality testing: `msmarco-minilm`,
+`mmarco-minilm`, `mxbai-xsmall-v1`. Relevance quality was not evaluated in
+Phase 20 and `DOTMD_RERANKER_NAME` was changed to `mmarco-minilm` during
+post-Phase 20 cleanup after CPU-unusable candidates were removed from the
+built-in registry.
 
 Phase 21 complete. Canonical live-index quality benchmark results are recorded
 in `21-BENCHMARKS.md` and
 `results/2026-05-02-rerank-quality-summary.md`. `mmarco-minilm` beat the
-negative historical control on `nDCG@10` and remains the recommended default.
-`mxbai-xsmall-v1` is competitive on `Hit@3`/`MRR@10` but slower on CPU. The run
-also exposed 9 retrieval-gap pool_miss queries for future retrieval work.
+negative historical control on `nDCG@10` and remains the only production
+reranker. `mxbai-xsmall-v1` was competitive on `Hit@3`/`MRR@10` but slower on
+CPU and was removed from production candidates. The run also exposed 9
+retrieval-gap pool_miss queries for future retrieval work.
+Post-Phase 21 cleanup made `mmarco-minilm` the only production built-in
+reranker and moved the full staged benchmark methodology to
+`docs/reranker-benchmark-methodology.md`.
 
 ### Blockers/Concerns
 

@@ -21,9 +21,7 @@ from dotmd.core.config import Settings
 
 PHASE = "21"
 DEFAULT_RERANKERS = [
-    "msmarco-minilm",
     "mmarco-minilm",
-    "mxbai-xsmall-v1",
 ]
 
 JsonRow = dict[str, Any]
@@ -358,7 +356,7 @@ def write_summary_markdown(
         f"- mode: `{config.mode}`",
         "- expansion: enabled",
         f"- `chunk_strategy={chunk_strategy}`",
-        "- negative historical control: `msmarco-minilm`",
+        "- negative historical control: provided by explicit candidate set, if any",
         "",
         "Rows are sorted by `nDCG@10` descending, then `MRR@10`, `Hit@3`, and lower p95 hot `rerank_ms`.",
         "Pool-miss queries are retrieval gaps and are excluded from per-model quality averages.",

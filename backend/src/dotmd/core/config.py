@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     reranker_backend: Literal["cross_encoder"] = "cross_encoder"
     reranker_model: str = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
     reranker_name: str = "mmarco-minilm"
-    reranker_compare_names: str = "msmarco-minilm,mmarco-minilm,mxbai-xsmall-v1"
+    reranker_compare_names: str = "mmarco-minilm"
     reranker_relevance_floor: float | None = None
     reranker_length_penalty: bool = True  # penalize very short chunks
     reranker_min_length: int = 50  # chars below which penalty applies

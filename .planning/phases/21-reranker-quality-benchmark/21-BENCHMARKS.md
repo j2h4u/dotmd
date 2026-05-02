@@ -156,3 +156,7 @@ current CPU path. `mxbai-xsmall-v1` is competitive and stronger on `Hit@3` /
 `MRR@10`, but its p95 hot rerank was about 12s and its `nDCG@10` was lower.
 Continue model search only if the next requirement prioritizes `Hit@3` over
 `nDCG@10` or if a faster multilingual reranker is added.
+
+Post-run production decision: keep only `mmarco-minilm` in the built-in
+production registry. `msmarco-minilm` and `mxbai-xsmall-v1` are archived as
+historical benchmark evidence and removed from production candidates/cache.

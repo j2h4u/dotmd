@@ -37,7 +37,9 @@ canonical run while staying under 10s p95 hot rerank on the current CPU path.
 `nDCG@10`.
 
 No default config change is needed because the current default is already
-`DOTMD_RERANKER_NAME=mmarco-minilm`.
+`DOTMD_RERANKER_NAME=mmarco-minilm`. Post-run cleanup made `mmarco-minilm` the
+only built-in production reranker; `msmarco-minilm` and `mxbai-xsmall-v1` are
+kept only as historical benchmark evidence.
 
 ## Commands Run
 

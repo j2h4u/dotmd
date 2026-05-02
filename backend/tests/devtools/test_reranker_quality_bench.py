@@ -103,9 +103,7 @@ class FakeService:
 
 def test_defaults_are_canonical() -> None:
     assert DEFAULT_RERANKERS == [
-        "msmarco-minilm",
         "mmarco-minilm",
-        "mxbai-xsmall-v1",
     ]
 
 

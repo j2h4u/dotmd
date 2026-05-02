@@ -35,9 +35,7 @@ QUERY_SET_V1 = [
     "embedding model swap TEI batch size tuning",
 ]
 DEFAULT_RERANKERS = [
-    "msmarco-minilm",
     "mmarco-minilm",
-    "mxbai-xsmall-v1",
 ]
 
 FAST_P95_MS = 10_000.0

@@ -53,20 +53,10 @@ class RerankerSpec:
 
 
 BUILTIN_RERANKERS: dict[str, RerankerSpec] = {
-    "msmarco-minilm": RerankerSpec(
-        name="msmarco-minilm",
-        model_name="cross-encoder/ms-marco-MiniLM-L-6-v2",
-        description="Negative historical control; fast but poor for Russian dotMD use.",
-    ),
     "mmarco-minilm": RerankerSpec(
         name="mmarco-minilm",
         model_name="cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
-        description="Multilingual MiniLM baseline.",
-    ),
-    "mxbai-xsmall-v1": RerankerSpec(
-        name="mxbai-xsmall-v1",
-        model_name="mixedbread-ai/mxbai-rerank-xsmall-v1",
-        description="Mixedbread xsmall reranker speed baseline.",
+        description="Production multilingual MiniLM reranker selected by Phase 21.",
     ),
 }
 

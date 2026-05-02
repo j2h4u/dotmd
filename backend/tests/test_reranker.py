@@ -257,9 +257,7 @@ class TestRerankerScoring:
         settings = Settings(embedding_url="http://test:8088")
 
         assert settings.parsed_reranker_compare_names == [
-            "msmarco-minilm",
             "mmarco-minilm",
-            "mxbai-xsmall-v1",
         ]
 
     def test_settings_parsed_reranker_compare_names_ignores_empty_entries(self) -> None:
@@ -268,12 +266,12 @@ class TestRerankerScoring:
 
         settings = Settings(
             embedding_url="http://test:8088",
-            reranker_compare_names="mmarco-minilm, ,msmarco-minilm",
+            reranker_compare_names="mmarco-minilm, ,candidate",
         )
 
         assert settings.parsed_reranker_compare_names == [
             "mmarco-minilm",
-            "msmarco-minilm",
+            "candidate",
         ]
 
 
@@ -284,8 +282,6 @@ class TestRerankerRegistry:
         """Available reranker names include all built-in registry entries."""
         assert available_rerankers() == [
             "mmarco-minilm",
-            "msmarco-minilm",
-            "mxbai-xsmall-v1",
         ]
 
     def test_mmarco_minilm_spec_maps_to_model_name(self) -> None:
@@ -295,15 +291,6 @@ class TestRerankerRegistry:
         assert (
             BUILTIN_RERANKERS["mmarco-minilm"].model_name
             == "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
-        )
-
-    def test_msmarco_minilm_spec_maps_to_model_name(self) -> None:
-        """The legacy MiniLM short name maps to the existing baseline model."""
-        from dotmd.search.reranker import BUILTIN_RERANKERS
-
-        assert (
-            BUILTIN_RERANKERS["msmarco-minilm"].model_name
-            == "cross-encoder/ms-marco-MiniLM-L-6-v2"
         )
 
     def test_remote_code_trust_is_allowlisted(self) -> None:
