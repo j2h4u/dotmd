@@ -28,6 +28,9 @@
 - [ ] **RERANK-QUALITY-01**: Reranker quality benchmark uses the live dotMD index and a human-labeled Russian query set
 - [ ] **RERANK-QUALITY-02**: Quality comparison reranks one shared retrieval candidate pool per query across all candidate models
 - [ ] **RERANK-QUALITY-03**: Benchmark summary reports Hit@1/3/5, MRR@10, nDCG@10, per-query failures, and hot rerank latency
+- [ ] **SNIPPET-BOUNDARY-01**: Search snippets should avoid starting or ending mid-sentence when the surrounding chunk text provides nearby sentence, paragraph, or speaker-turn boundaries
+- [ ] **SNIPPET-CONTEXT-01**: Search snippets should provide enough local context around the matched/relevant span for agents to decide whether to call `read`
+- [ ] **SNIPPET-VERIFY-01**: Snippet behavior must be covered by focused tests and verified through the MCP `search` surface
 
 ## Future Requirements
 
@@ -66,10 +69,13 @@
 | RERANK-QUALITY-01 | Phase 21 | Complete |
 | RERANK-QUALITY-02 | Phase 21 | Complete |
 | RERANK-QUALITY-03 | Phase 21 | Complete |
+| SNIPPET-BOUNDARY-01 | Phase 22 | Planned |
+| SNIPPET-CONTEXT-01 | Phase 22 | Planned |
+| SNIPPET-VERIFY-01 | Phase 22 | Planned |
 
 **Coverage:**
-- v1.4 requirements: 12 total
-- Mapped to phases: 12
+- v1.4 requirements: 15 total
+- Mapped to phases: 15
 - Unmapped: 0
 
 ---

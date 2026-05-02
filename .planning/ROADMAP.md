@@ -114,6 +114,10 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 | 16. Content-dedup schema | 6/6 | Complete   | 2026-04-25 |
 | 17. MCP OAuth 2.0 — Claude Desktop connector | 3/3 | Complete   | 2026-04-30 |
 | 18. Multilingual Reranker | 1/1 | Complete    | 2026-05-01 |
+| 19. Reranker Adapter Layer and Multi-Model Comparison | 4/4 | Complete | 2026-05-01 |
+| 20. Reranker Latency Benchmark | 1/1 | Complete | 2026-05-01 |
+| 21. Reranker Quality Benchmark | 1/1 | Complete | 2026-05-02 |
+| 22. Improve Search Snippet Boundaries | 0/0 | Planned | — |
 
 ### Phase 17: MCP OAuth 2.0 — Claude Desktop remote connector support
 
@@ -477,30 +481,6 @@ Plans:
 
 ---
 
-### Phase 999.21: Улучшить границы сниппетов в Search — контекст вокруг матча (BACKLOG)
-
-**Goal:** Сниппеты в результатах Search обрезаются на середине предложения. Агент видит цитату, но не может понять, что она значит — продолжение может кардинально менять смысл. Пример из реальной сессии: "они пообещали $200" — продолжается ли это "...уже три месяца" или "...если я сделаю адаптер"? Огромная разница. Сейчас агент либо делает дополнительный `read` для верификации, либо использует цитату как есть с риском ошибки.
-
-**Контекст и источник:** Зафиксировано в feedback id=6 (апрель 2026), подтверждено в id=10 тем же автором после редизайна API. Автор понизил приоритет — "с `read` стало much less painful" — но не закрыл вопрос. Сниппеты теперь используются как "pointer на файл", а не как "что было сказано", поэтому проблема менее острая. Тем не менее: лишний `read`-вызов ради верификации одной цитаты — это waste, и в длинных сессиях накапливается.
-
-**Варианты решения (не выбрано, требует проработки):**
-- `context_window` параметр в `search` — агент запрашивает ±N чанков вокруг матча явно
-- По умолчанию включать ±1 чанк в каждый результат (дешёво, решает ~80% случаев по оценке автора)
-- Расширять сниппет до границы предложения (требует NLP или простой heuristic на `.`, `?`, `!`)
-- Возвращать полный чанк вместо подстроки (самый простой вариант, чуть больше токенов)
-
-**Неизвестно:**
-- Насколько текущие сниппеты коррелируют с границами чанков vs внутренними подстроками
-- Стоимость добавления ±1 чанка по токенам в типичной сессии
-
-**Requirements:** TBD
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (promote with /gsd-review-backlog when ready)
-
----
-
 ### Future ideas:
 - Semantic chunking (split by topic similarity, not just structure)
 - Doc-level chunks (whole-document embeddings for broad queries)
@@ -564,6 +544,18 @@ Phase boundary:
 
 Plans:
 - [x] 21-01-quality-benchmark-PLAN.md — Build and run live-index reranker quality benchmark
+
+### Phase 22: Improve Search Snippet Boundaries
+
+**Goal:** Improve `search` snippets so agents can judge whether a hit is worth opening with `read` without guessing around mid-sentence truncation.
+**Backlog source:** 999.21
+**Feedback source:** feedback id=6, id=10, and fresh open feedback id=19
+**Requirements:** SNIPPET-BOUNDARY-01, SNIPPET-CONTEXT-01, SNIPPET-VERIFY-01
+**Depends on:** Phase 21
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 22 to break down)
 
 ---
 

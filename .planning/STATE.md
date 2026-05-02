@@ -20,15 +20,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 21 — reranker-quality-benchmark complete
+**Current focus:** Phase 22 — improve-search-snippet-boundaries promoted from backlog
 
 ## Current Milestone
 
 **v1.4 — Search Quality & Architecture**
 
-Phase: 21
-Plan: 21-01-quality-benchmark
-Status: Phase 21 complete
+Phase: 22
+Plan: TBD
+Status: Phase 22 promoted; planning pending
 Last activity: 2026-05-02
 
 Progress: [██████████] 100%
@@ -100,6 +100,12 @@ retrieval-gap pool_miss queries for future retrieval work.
 Post-Phase 21 cleanup made `mmarco-minilm` the only production built-in
 reranker and moved the full staged benchmark methodology to
 `docs/reranker-benchmark-methodology.md`.
+
+Phase 22 promoted from backlog item `999.21`. It targets mid-sentence search
+snippet truncation and should use feedback id=6, id=10, and fresh open feedback
+id=19 as source context. Planning should decide whether to improve default
+snippet boundaries only, add optional context controls, or include match
+marking.
 
 ### Blockers/Concerns
 
