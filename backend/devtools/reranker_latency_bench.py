@@ -12,7 +12,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -166,7 +166,12 @@ def run_model_sequence(
 ) -> None:
     """Run one model sequence in one process and append raw JSONL rows."""
     factory = service_factory or DotMDService
-    service = factory(Settings(rerank_pool_size=config.pool_size))
+    service = factory(
+        Settings(
+            embedding_url="http://localhost:8088",
+            rerank_pool_size=config.pool_size,
+        )
+    )
     timeout_ms = config.hot_query_timeout_s * 1000.0
 
     for pass_kind, pass_count in (("cold", config.cold_passes), ("hot", config.hot_passes)):
@@ -180,7 +185,7 @@ def run_model_sequence(
                         mode=config.mode,
                         expand=True,
                     )
-                    result = comparison["rerankers"][0]
+                    result = cast(dict[str, Any], comparison["rerankers"][0])
                     timed_out = (
                         pass_kind == "hot"
                         and result.get("rerank_ms") is not None

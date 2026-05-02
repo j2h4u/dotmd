@@ -11,7 +11,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, cast
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -25,6 +25,24 @@ DEFAULT_RERANKERS = [
 ]
 
 JsonRow = dict[str, Any]
+
+
+class BenchmarkService(Protocol):
+    """Minimal service surface used by the reranker quality benchmark."""
+
+    _settings: Any
+    _pipeline: Any
+
+    def compare_rerankers(
+        self,
+        query: str,
+        reranker_names: list[str],
+        top_k: int,
+        mode: str,
+        expand: bool,
+    ) -> Any:
+        """Compare rerankers for one query."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -110,7 +128,7 @@ def load_labels(path: Path) -> list[LabelCase]:
     return labels
 
 
-def find_chunks_for_file_contains(service: DotMDService, file_path: str, contains: str) -> list[str]:
+def find_chunks_for_file_contains(service: BenchmarkService, file_path: str, contains: str) -> list[str]:
     """Resolve a file_path + substring label to chunk ids in the active chunk strategy."""
     strategy = service._settings.chunk_strategy
     metadata_store = service._pipeline.metadata_store
@@ -128,7 +146,7 @@ def find_chunks_for_file_contains(service: DotMDService, file_path: str, contain
     return matched_ids
 
 
-def _resolve_label_object(label: dict[str, str], service: DotMDService) -> list[str]:
+def _resolve_label_object(label: dict[str, str], service: BenchmarkService) -> list[str]:
     if "chunk_id" in label:
         return [str(label["chunk_id"])]
     if "file_path" in label and "contains" in label:
@@ -149,7 +167,7 @@ def _resolve_label_object(label: dict[str, str], service: DotMDService) -> list[
     raise ValueError(f"unsupported label object: {label}")
 
 
-def resolve_labels(label_case: LabelCase, service: DotMDService) -> ResolvedLabels:
+def resolve_labels(label_case: LabelCase, service: BenchmarkService) -> ResolvedLabels:
     relevant: set[str] = set()
     maybe: set[str] = set()
     for label in label_case.relevant:
@@ -262,7 +280,7 @@ def make_result_row(
     }
 
 
-def hydrate_file_paths(service: DotMDService, chunk_strategy: str, chunk_ids: list[str]) -> list[list[str]]:
+def hydrate_file_paths(service: BenchmarkService, chunk_strategy: str, chunk_ids: list[str]) -> list[list[str]]:
     paths_by_id = service._pipeline.metadata_store.get_file_paths_for_chunk_ids(
         chunk_strategy, chunk_ids
     )
@@ -389,8 +407,17 @@ def write_summary_markdown(
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def run_benchmark(config: BenchmarkConfig, service: DotMDService | None = None) -> list[JsonRow]:
-    service = service or DotMDService(Settings(rerank_pool_size=config.pool_size))
+def run_benchmark(config: BenchmarkConfig, service: BenchmarkService | None = None) -> list[JsonRow]:
+    if service is None:
+        service = cast(
+            BenchmarkService,
+            DotMDService(
+                Settings(
+                    embedding_url="http://localhost:8088",
+                    rerank_pool_size=config.pool_size,
+                )
+            ),
+        )
     commit = config.commit or get_commit()
     chunk_strategy = service._settings.chunk_strategy
     labels = load_labels(config.labels)
@@ -418,15 +445,18 @@ def run_benchmark(config: BenchmarkConfig, service: DotMDService | None = None) 
                 }
             )
         for model in config.rerankers:
-            run = runs_by_name.get(
-                model,
-                {
-                    "name": model,
-                    "model_name": model,
-                    "top_chunk_ids": [],
-                    "rerank_ms": None,
-                    "error": "model missing from compare_rerankers output",
-                },
+            run = cast(
+                dict[str, Any],
+                runs_by_name.get(
+                    model,
+                    {
+                        "name": model,
+                        "model_name": model,
+                        "top_chunk_ids": [],
+                        "rerank_ms": None,
+                        "error": "model missing from compare_rerankers output",
+                    },
+                ),
             )
             top_chunk_ids = list(run.get("top_chunk_ids") or [])
             row = make_result_row(

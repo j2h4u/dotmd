@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from dotmd.search.reranker import Reranker, available_rerankers
+from dotmd.search.reranker import CrossEncoderReranker, Reranker, available_rerankers
 
 
 def _make_reranker() -> Reranker:
@@ -217,11 +217,13 @@ class TestRerankerScoring:
     def test_init_rejects_score_threshold_parameter(self) -> None:
         """Reranker.__init__() does NOT accept score_threshold parameter."""
         with pytest.raises(TypeError):
-            Reranker(
-                model_name="test-model",
-                length_penalty=False,
-                min_length=100,
-                score_threshold=-8.0,
+            Reranker(  # type: ignore[call-arg]
+                **{
+                    "model_name": "test-model",
+                    "length_penalty": False,
+                    "min_length": 100,
+                    "score_threshold": -8.0,
+                }
             )
 
     def test_settings_has_no_rerank_score_threshold(self) -> None:
@@ -229,8 +231,9 @@ class TestRerankerScoring:
         from dotmd.core.config import Settings
 
         settings = Settings(embedding_url="http://test:8088")
+        legacy_attr = "rerank_score_threshold"
         with pytest.raises(AttributeError):
-            _ = settings.rerank_score_threshold
+            getattr(settings, legacy_attr)
 
     def test_settings_default_shortlisted_reranker(self) -> None:
         """Settings defaults to the latency-surviving multilingual reranker."""
@@ -317,6 +320,7 @@ class TestRerankerFactory:
         settings = Settings(embedding_url="http://test:8088")
 
         reranker = create_reranker("mmarco-minilm", settings)
+        assert isinstance(reranker, CrossEncoderReranker)
 
         assert reranker.name == "mmarco-minilm"
         assert reranker.model_name == "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
@@ -393,6 +397,7 @@ class TestRerankerFactory:
         )
 
         reranker = create_reranker("mmarco-minilm", settings)
+        assert isinstance(reranker, CrossEncoderReranker)
 
         assert reranker._length_penalty is False
         assert reranker._min_length == 123
