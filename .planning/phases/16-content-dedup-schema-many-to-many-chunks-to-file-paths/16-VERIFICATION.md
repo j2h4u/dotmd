@@ -1,27 +1,46 @@
 ---
 phase: 16-content-dedup-schema-many-to-many-chunks-to-file-paths
 verified: 2026-04-25T00:00:00Z
-status: human_needed
-score: 11/12 must-haves verified
+status: passed
+score: 12/12 must-haves resolved
 overrides_applied: 0
-human_verification:
-  - test: "Run `dotmd search` against a real post-migration KB and confirm multi-holder results render with `+N more` suffix in sorted-lex order."
-    expected: "CLI prints `[0] /path/a.md  (+1 more: /path/b.md)` for a shared chunk."
-    why_human: "Requires a live post-migration DB with real collision-group content; cannot construct realistically in a unit test without running the full stack."
-  - test: "Run `dotmd migrate run --dry-run` against the production `~/.dotmd/index.db` (pre-migration) and verify the divergence preview shows 0 groups (as predicted by CONTEXT.md Decision #10)."
-    expected: "Dry-run output: `payload_divergence_groups=0 would_abort_without_flag=false`. Exit 0."
-    why_human: "Requires production DB access."
-  - test: "Run `dotmd migrate run` against production DB; verify `dotmd status` afterwards reports correct distinct-path counts from chunk_file_paths_* tables."
-    expected: "Status shows per-strategy path counts; `needs_migration_v16` = False."
-    why_human: "Irreversible production operation requiring operator decision and backup verification."
+human_verification: []
+human_verification_resolved:
+  date: 2026-05-02T20:06:52+05:00
+  outcome: "closed stale UAT debt after production migration completed and migration flow was retired"
+  evidence:
+    - "Phase 16 shipped to production on 2026-04-25; ROADMAP records 486 collisions collapsed, 0 divergence, no override."
+    - "`dotmd migrate` CLI/module/tests were removed on 2026-04-30 after soak."
+    - "Live `dotmd status` on 2026-05-02 reads the post-v16 index successfully."
 ---
 
 # Phase 16: Content-dedup schema Verification Report
 
 **Phase Goal:** Support content-addressed chunk_ids with multiple file_paths pointing to the same chunk. Unblocks Phase 15's migration_v15 (collision-blocked) and delivers real storage + search-quality wins.
 **Verified:** 2026-04-25
-**Status:** human_needed
-**Re-verification:** No — initial verification
+**Status:** passed
+**Re-verification:** Yes — stale human UAT debt closed on 2026-05-02
+
+## Re-verification Update: 2026-05-02
+
+The original `human_needed` items were valid during Phase 16 execution because the
+production migration was irreversible and operator-controlled. They are no longer
+actionable UAT gates:
+
+- Production migration already ran successfully. ROADMAP Phase 999.7 records:
+  `dotmd migrate run` succeeded on 2026-04-25 with 486 collisions collapsed,
+  0 divergence, and no override.
+- The one-time migration surface has intentionally been removed after soak:
+  current `dotmd --help` has no `migrate` command.
+- Current live runtime is post-v16: `docker exec dotmd dotmd status` reports
+  826 files, 19575 chunks, 44255 entities, 286367 edges, FalkorDB backend.
+- Current tests cover the retained product behavior:
+  `backend/tests/cli/test_search_output.py` for multi-holder `+N more`
+  rendering, `backend/tests/cli/test_status_output.py` for M2M path counts, and
+  storage/pipeline tests for `chunk_file_paths_*` behavior.
+
+Result: the three human-only UAT items were moved to `16-HUMAN-UAT.md` as
+skipped-with-reason, not pending. No human-needed verification remains.
 
 ## Goal Achievement
 

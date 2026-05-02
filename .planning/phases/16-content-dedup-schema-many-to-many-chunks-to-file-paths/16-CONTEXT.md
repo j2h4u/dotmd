@@ -144,15 +144,25 @@ Already keyed on `blake3(raw_text + model_sig)` — dedup happens naturally. MEN
 
 **CLI rendering — LOCKED (Phase 16 P5):** Multi-holder lines print as `[i] path_0  (+N-1 more: path_1, …)` in sorted-lex order from file_paths. Single holder prints as `[i] path`.
 
-## Open questions (for /gsd:discuss-phase 16)
+## Resolved questions
 
-1. **Canonical file_path for search results** — MIN lexicographic / shortest / closest to data_dir / newest mtime? (pillar of UX)
-2. **API contract** — breaking change (`file_paths: list[str]` replaces `file_path: str`) or additive (`file_path` stays + new `also_at: list[str]`)?
-3. **chunk_index placement** — leave in chunks_* as array or move to M2M? (M2M is cleaner but needs JOIN for every chunk render)
-4. **Vec collision during migration** — two old chunks → same new chunk_id, vectors may differ by TEI non-determinism. Keep canonical, discard others? Average? Recompute?
-5. **FalkorDB File-node semantics** — how File nodes relate to Sections when Section has N Files. Edge duplication vs graph reshape.
-6. **Transaction strategy** — one big transaction (safest, longest lock) vs per-strategy checkpoints with resume marker (like `migration_v15_state`)?
-7. **Test coverage** — at minimum: modify-one, delete-one, merge-into-existing. Additional: concurrent trickle + cleanup, empty knowledgebase migration.
+These were the original `/gsd:discuss-phase 16` questions. They are retained as
+historical context, but they are no longer open.
+
+1. **Canonical file_path for search results** — resolved by Decisions #1 and #2:
+   expose all `file_paths` in sorted order; no canonical holder.
+2. **API contract** — resolved by Decision #2: clean break,
+   `file_path: str` replaced by `file_paths: list[str]`.
+3. **chunk_index placement** — resolved by Decision #3: stored only on
+   `chunk_file_paths_*`.
+4. **Vec collision during migration** — resolved by Decision #4 and later
+   tightened by Decision #10: canonical keep, fail-closed on payload divergence.
+5. **FalkorDB File-node semantics** — resolved by Decision #5: no graph changes
+   in Phase 16.
+6. **Transaction strategy** — resolved by Decision #6: per-strategy checkpoints
+   plus advisory lock, no chained VACUUM.
+7. **Test coverage** — resolved by Decision #7 and implemented in the Phase 16
+   test suite.
 
 ## Expected plan breakdown (~6 plans after /gsd:plan-phase) — updated post-panel
 

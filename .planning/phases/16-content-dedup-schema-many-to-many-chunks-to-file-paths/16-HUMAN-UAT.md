@@ -1,15 +1,18 @@
 ---
-status: partial
+status: complete
 phase: 16-content-dedup-schema
 source: [16-VERIFICATION.md]
 started: 2026-04-25T00:00:00Z
-updated: 2026-04-25T00:00:00Z
+updated: 2026-05-02T20:06:52+05:00
 ---
 
 ## Current Test
 
-3 human-only verification items from verifier (see 16-VERIFICATION.md frontmatter).
-Production migration is an operator-controlled, irreversible step — defer until ready.
+[testing complete]
+
+The original human-only items were closed on 2026-05-02 as stale verification
+debt. Phase 16 has already shipped to production; the one-time `dotmd migrate`
+flow was removed after soak, and the current live schema/runtime are post-v16.
 
 ## Items
 
@@ -23,7 +26,11 @@ sorted-lex order.
 Unit-testable in isolation but the rendering invariant under realistic content needs
 a quick eyeball.
 
-**Status:** pending
+**Status:** skipped
+
+**Reason:** Stale as an operator UAT gate. The migration has already run in
+production, the live CLI renders post-v16 search results from `file_paths`, and
+the multi-holder formatting is covered by `backend/tests/cli/test_search_output.py`.
 
 ### UAT-2: Production dry-run
 
@@ -38,7 +45,11 @@ a quick eyeball.
 
 **Why human:** Requires production DB access; non-destructive but still operator-gated.
 
-**Status:** pending
+**Status:** skipped
+
+**Reason:** Stale. The one-time production migration has already completed, and
+the `dotmd migrate` CLI was intentionally removed after soak in Phase 999.7.
+Current `dotmd --help` has no `migrate` command.
 
 ### UAT-3: Production migration + status
 
@@ -53,11 +64,35 @@ Confirm all strategies marked complete; `dotmd search` still works on the migrat
 **Why human:** Irreversible production operation. Backup first; no automated rollback
 beyond the migration_v16 backup it takes itself.
 
-**Status:** pending
+**Status:** skipped
+
+**Reason:** Stale. ROADMAP records the production v16 migration as completed on
+2026-04-25 with 486 collisions collapsed, 0 divergence, and no override. Current
+live `dotmd status` reads the post-v16 database successfully.
+
+## Summary
+
+total: 3
+passed: 0
+issues: 0
+pending: 0
+skipped: 3
 
 ## Gaps
 
 (None yet — gaps land here when UAT items fail or surface follow-up issues.)
+
+## Closure Evidence
+
+- `docker exec dotmd dotmd --help` on 2026-05-02: no `migrate` command remains.
+- `docker exec dotmd dotmd status` on 2026-05-02: live index reports 826 files,
+  19575 chunks, 44255 entities, 286367 edges, FalkorDB backend.
+- `.planning/ROADMAP.md` Phase 999.7: Phase 16 shipped to production on
+  2026-04-25; `dotmd migrate run` succeeded with 486 collisions collapsed,
+  0 divergence, no override; migration_v16 code/CLI/tests removed on 2026-04-30.
+- Current tests retain the live M2M guarantees:
+  `backend/tests/cli/test_search_output.py`,
+  `backend/tests/cli/test_status_output.py`, and M2M storage/pipeline tests.
 
 ## Notes
 
