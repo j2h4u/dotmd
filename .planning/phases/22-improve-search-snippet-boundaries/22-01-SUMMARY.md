@@ -6,6 +6,7 @@ completed_at: "2026-05-02T18:29:40+05:00"
 commits:
   - "68dc9b9"
   - "29c325a"
+  - "7f318fe"
 requirements:
   - SNIPPET-BOUNDARY-01
   - SNIPPET-CONTEXT-01
@@ -55,16 +56,11 @@ requirements:
   returned successfully and the visible snippet was coherent after MCP
   frontmatter/timestamp cleanup.
 
-## Project-Level Gate Note
+## Project-Level Gate
 
-- `just check` was run. Ruff passed, but the repository-wide pyright ratchet
-  failed on pre-existing/non-phase files:
-  `devtools/reranker_latency_bench.py`, `devtools/reranker_quality_bench.py`,
-  `tests/devtools/test_reranker_quality_bench.py`, and
-  `tests/test_reranker.py`.
-- The ratchet total improved from baseline (`107` errors vs baseline `115`), but
-  those unrelated files still register as regressions. Phase 22 touched files
-  pass direct pyright.
+- `just check` — passed after follow-up cleanup.
+- Pyright ratchet improved to `94` errors against baseline `115`.
+- Full backend pytest passed: `250 passed, 39 skipped`.
 
 ## Live Snippet Observation
 

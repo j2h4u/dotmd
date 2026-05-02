@@ -49,12 +49,12 @@ existing MCP schema and bounded output contract.
 - `cd backend && uv run ruff check src/dotmd/search/fusion.py tests/test_fusion.py` — passed.
 - `cd backend && uv run pyright src/dotmd/search/fusion.py tests/test_fusion.py` — passed.
 - `just test-mcp-remote` — passed after final container recreate.
+- `just check` — passed; pyright ratchet improved to `94` errors against baseline
+  `115`, and full backend pytest passed with `250 passed, 39 skipped`.
 - `gsd-sdk query verify.schema-drift 22` — no drift detected.
 
 ## Residual Risk
 
 - Naive punctuation boundaries can still split abbreviations, initials, versions,
   and decimals. This is accepted by Phase 22 scope and documented in the plan.
-- Repository-wide `just check` still reports pyright ratchet regressions in
-  reranker benchmark/test files outside Phase 22. The Phase 22 touched files pass
-  direct pyright.
+- No known automated gate remains failing.
