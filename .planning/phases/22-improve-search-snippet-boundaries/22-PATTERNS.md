@@ -47,7 +47,7 @@ Pattern to preserve:
 
 - `backend/src/dotmd/search/fusion.py`
 - `backend/tests/test_fusion.py`
-- `.planning/phases/22-improve-search-snippet-boundaries/22-01-SUMMARY.md`
+- `.planning/phases/22-improve-search-snippet-boundaries/22-01-snippet-boundary-extraction-SUMMARY.md`
 
 ## Verification Commands
 

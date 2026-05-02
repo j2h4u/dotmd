@@ -1,6 +1,7 @@
 ---
 phase: 14-frontmatter-driven-indexing
 plan: 01
+status: complete
 subsystem: ingestion, search
 tags: [frontmatter, fts5, graph, embeddings, metadata]
 dependency_graph:

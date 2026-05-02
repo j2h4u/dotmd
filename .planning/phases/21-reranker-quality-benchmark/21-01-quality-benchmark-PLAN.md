@@ -12,7 +12,7 @@ files_modified:
   - .planning/phases/21-reranker-quality-benchmark/21-BENCHMARKS.md
   - .planning/phases/21-reranker-quality-benchmark/results/2026-05-02-rerank-quality.jsonl
   - .planning/phases/21-reranker-quality-benchmark/results/2026-05-02-rerank-quality-summary.md
-  - .planning/phases/21-reranker-quality-benchmark/21-01-SUMMARY.md
+  - .planning/phases/21-reranker-quality-benchmark/21-01-quality-benchmark-SUMMARY.md
 autonomous: false
 requirements:
   - RERANK-QUALITY-01
@@ -373,11 +373,11 @@ Canonical Phase 21 quality benchmark is recorded against the live dotMD index.
 - `docs/architecture.md`
 </read_first>
 <files>
-- `.planning/phases/21-reranker-quality-benchmark/21-01-SUMMARY.md`
+- `.planning/phases/21-reranker-quality-benchmark/21-01-quality-benchmark-SUMMARY.md`
 - `.planning/STATE.md`
 </files>
 <action>
-Create `21-01-SUMMARY.md` with:
+Create `21-01-quality-benchmark-SUMMARY.md` with:
 
 - final quality table for all three models
 - pool-miss/retrieval-gap count and whether those rows were excluded from
@@ -397,14 +397,14 @@ commit. If changing the default, also update `.env.example`, `README.md`,
 `docs/architecture.md`, and `backend/tests/test_reranker.py`.
 </action>
 <verify>
-<automated>test -s .planning/phases/21-reranker-quality-benchmark/21-01-SUMMARY.md</automated>
-<automated>rg --no-heading "negative historical control|Recommendation|Commands Run|Phase 21" .planning/phases/21-reranker-quality-benchmark/21-01-SUMMARY.md .planning/STATE.md</automated>
+<automated>test -s .planning/phases/21-reranker-quality-benchmark/21-01-quality-benchmark-SUMMARY.md</automated>
+<automated>rg --no-heading "negative historical control|Recommendation|Commands Run|Phase 21" .planning/phases/21-reranker-quality-benchmark/21-01-quality-benchmark-SUMMARY.md .planning/STATE.md</automated>
 <automated>cd backend && uv run pytest tests/devtools/test_reranker_quality_bench.py tests/test_reranker.py tests/api/test_service_search.py tests/test_cli.py -q</automated>
 <automated>cd backend && uv run ruff check src devtools tests</automated>
 </verify>
 <acceptance_criteria>
-- `21-01-SUMMARY.md` contains `negative historical control`.
-- `21-01-SUMMARY.md` contains `Recommendation`.
+- `21-01-quality-benchmark-SUMMARY.md` contains `negative historical control`.
+- `21-01-quality-benchmark-SUMMARY.md` contains `Recommendation`.
 - `.planning/STATE.md` contains `Phase 21`.
 - Focused pytest command exits 0.
 - Ruff command exits 0.
@@ -422,7 +422,7 @@ Run:
 2. `cd backend && uv run ruff check src devtools tests`
 3. `test -s .planning/phases/21-reranker-quality-benchmark/results/2026-05-02-rerank-quality.jsonl`
 4. `test -s .planning/phases/21-reranker-quality-benchmark/results/2026-05-02-rerank-quality-summary.md`
-5. `rg --no-heading "Status: APPROVED|Hit@1|MRR@10|nDCG@10|Recommendation|pool_miss|chunk strategy" .planning/phases/21-reranker-quality-benchmark/21-LABELS-REVIEW.md .planning/phases/21-reranker-quality-benchmark/21-BENCHMARKS.md .planning/phases/21-reranker-quality-benchmark/21-01-SUMMARY.md`
+5. `rg --no-heading "Status: APPROVED|Hit@1|MRR@10|nDCG@10|Recommendation|pool_miss|chunk strategy" .planning/phases/21-reranker-quality-benchmark/21-LABELS-REVIEW.md .planning/phases/21-reranker-quality-benchmark/21-BENCHMARKS.md .planning/phases/21-reranker-quality-benchmark/21-01-quality-benchmark-SUMMARY.md`
 </verification>
 
 <success_criteria>

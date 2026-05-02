@@ -7,7 +7,7 @@ depends_on: []
 files_modified:
   - backend/src/dotmd/search/fusion.py
   - backend/tests/test_fusion.py
-  - .planning/phases/22-improve-search-snippet-boundaries/22-01-SUMMARY.md
+  - .planning/phases/22-improve-search-snippet-boundaries/22-01-snippet-boundary-extraction-SUMMARY.md
 autonomous: true
 requirements:
   - SNIPPET-BOUNDARY-01
@@ -224,7 +224,7 @@ Snippet extraction expands to sentence/paragraph boundaries inside the current c
 </read_first>
 <files>
 - `backend/tests/test_fusion.py`
-- `.planning/phases/22-improve-search-snippet-boundaries/22-01-SUMMARY.md`
+- `.planning/phases/22-improve-search-snippet-boundaries/22-01-snippet-boundary-extraction-SUMMARY.md`
 </files>
 <action>
 Verify that the implementation is visible through the normal result path.
@@ -255,7 +255,7 @@ For live verification after implementation:
    snippet and record whether the visible snippet starts at a sentence/paragraph
    boundary.
 
-Write `.planning/phases/22-improve-search-snippet-boundaries/22-01-SUMMARY.md`
+Write `.planning/phases/22-improve-search-snippet-boundaries/22-01-snippet-boundary-extraction-SUMMARY.md`
 with:
 
 - files changed
@@ -272,13 +272,13 @@ with:
 <manual>Live search snippet inspected and summary records the observed snippet behavior.</manual>
 </verify>
 <acceptance_criteria>
-- `22-01-SUMMARY.md` exists.
-- `22-01-SUMMARY.md` contains `just test-mcp-remote`.
-- `22-01-SUMMARY.md` contains `No MCP schema changes`.
-- `22-01-SUMMARY.md` records that live `tools/list` search schema was checked.
-- `22-01-SUMMARY.md` records whether MCP-visible snippet formatting after cleanup remained coherent.
-- `22-01-SUMMARY.md` contains `feedback id=19`.
-- `22-01-SUMMARY.md` records whether live search snippet inspection passed.
+- `22-01-snippet-boundary-extraction-SUMMARY.md` exists.
+- `22-01-snippet-boundary-extraction-SUMMARY.md` contains `just test-mcp-remote`.
+- `22-01-snippet-boundary-extraction-SUMMARY.md` contains `No MCP schema changes`.
+- `22-01-snippet-boundary-extraction-SUMMARY.md` records that live `tools/list` search schema was checked.
+- `22-01-snippet-boundary-extraction-SUMMARY.md` records whether MCP-visible snippet formatting after cleanup remained coherent.
+- `22-01-snippet-boundary-extraction-SUMMARY.md` contains `feedback id=19`.
+- `22-01-snippet-boundary-extraction-SUMMARY.md` records whether live search snippet inspection passed.
 </acceptance_criteria>
 <done>
 Phase 22 implementation is verified locally and through the live MCP surface.

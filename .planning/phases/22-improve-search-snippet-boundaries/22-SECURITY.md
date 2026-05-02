@@ -52,7 +52,7 @@ Per-phase security contract: threat register, accepted risks, and audit trail.
   `_find_left_boundary()`, `_find_right_boundary()`, and bounded fallback.
 - `backend/tests/test_fusion.py` covers hard cap, blank-line boundary, boundary
   off-by-one, normal result construction, and MCP-visible cleanup formatting.
-- `22-01-SUMMARY.md` records passing targeted pytest, ruff, pyright, final
+- `22-01-snippet-boundary-extraction-SUMMARY.md` records passing targeted pytest, ruff, pyright, final
   container recreate, live `just test-mcp-remote`, live `tools/list`, and live
   MCP `search`.
 - `22-VERIFICATION.md` records all 11 must-haves as passed.

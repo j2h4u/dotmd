@@ -8,7 +8,7 @@ files_modified:
   - backend/devtools/reranker_latency_bench.py
   - backend/tests/devtools/test_reranker_latency_bench.py
   - .planning/phases/20-reranker-latency-benchmark/20-BENCHMARKS.md
-  - .planning/phases/20-reranker-latency-benchmark/20-01-SUMMARY.md
+  - .planning/phases/20-reranker-latency-benchmark/20-01-latency-benchmark-protocol-SUMMARY.md
 autonomous: true
 requirements:
   - RERANK-LATENCY-02
@@ -30,7 +30,7 @@ must_haves:
     - path: "backend/devtools/reranker_latency_bench.py"
       provides: "repeatable latency runner"
       contains: "QUERY_SET_V1"
-    - path: ".planning/phases/20-reranker-latency-benchmark/20-01-SUMMARY.md"
+    - path: ".planning/phases/20-reranker-latency-benchmark/20-01-latency-benchmark-protocol-SUMMARY.md"
       provides: "latency shortlist summary"
       contains: "hot rerank_ms"
   key_links:
@@ -310,10 +310,10 @@ Canonical latency run is captured in raw results and phase ledger.
 - `.planning/phases/20-reranker-latency-benchmark/20-REVIEWS.md`
 </read_first>
 <files>
-- `.planning/phases/20-reranker-latency-benchmark/20-01-SUMMARY.md`
+- `.planning/phases/20-reranker-latency-benchmark/20-01-latency-benchmark-protocol-SUMMARY.md`
 </files>
 <action>
-Write `20-01-SUMMARY.md` with:
+Write `20-01-latency-benchmark-protocol-SUMMARY.md` with:
 
 - phase and plan frontmatter;
 - commands run and pass/fail status;
@@ -333,18 +333,18 @@ Mention that p95 is an operational percentile from 30 hot samples per measured
 model, not a statistically strong long-term SLO.
 </action>
 <verify>
-<automated>test -f .planning/phases/20-reranker-latency-benchmark/20-01-SUMMARY.md</automated>
-<automated>rg --no-heading "hot rerank_ms|load_ms|p50|p95|quality testing|DOTMD_RERANKER_NAME" .planning/phases/20-reranker-latency-benchmark/20-01-SUMMARY.md</automated>
+<automated>test -f .planning/phases/20-reranker-latency-benchmark/20-01-latency-benchmark-protocol-SUMMARY.md</automated>
+<automated>rg --no-heading "hot rerank_ms|load_ms|p50|p95|quality testing|DOTMD_RERANKER_NAME" .planning/phases/20-reranker-latency-benchmark/20-01-latency-benchmark-protocol-SUMMARY.md</automated>
 <automated>cd backend && uv run pytest tests/devtools/test_reranker_latency_bench.py tests/test_reranker.py tests/api/test_service_search.py tests/test_cli.py -q</automated>
 <automated>cd backend && uv run ruff check src devtools tests</automated>
 </verify>
 <acceptance_criteria>
-- `20-01-SUMMARY.md` contains `hot rerank_ms`.
-- `20-01-SUMMARY.md` contains `load_ms`.
-- `20-01-SUMMARY.md` contains `p50`.
-- `20-01-SUMMARY.md` contains `p95`.
-- `20-01-SUMMARY.md` contains `DOTMD_RERANKER_NAME`.
-- `20-01-SUMMARY.md` states that relevance quality was not evaluated.
+- `20-01-latency-benchmark-protocol-SUMMARY.md` contains `hot rerank_ms`.
+- `20-01-latency-benchmark-protocol-SUMMARY.md` contains `load_ms`.
+- `20-01-latency-benchmark-protocol-SUMMARY.md` contains `p50`.
+- `20-01-latency-benchmark-protocol-SUMMARY.md` contains `p95`.
+- `20-01-latency-benchmark-protocol-SUMMARY.md` contains `DOTMD_RERANKER_NAME`.
+- `20-01-latency-benchmark-protocol-SUMMARY.md` states that relevance quality was not evaluated.
 - Focused pytest command exits 0 or exact failures are documented in the summary.
 - Ruff command exits 0 or exact failures are documented in the summary.
 </acceptance_criteria>
@@ -361,7 +361,7 @@ cd backend && uv run pytest tests/devtools/test_reranker_latency_bench.py tests/
 cd backend && uv run ruff check src devtools tests
 test -s .planning/phases/20-reranker-latency-benchmark/results/2026-05-01-rerank-latency.jsonl
 test -s .planning/phases/20-reranker-latency-benchmark/results/2026-05-01-rerank-latency-summary.md
-rg --no-heading "hot rerank_ms|load_ms|p50|p95|quality testing|DOTMD_RERANKER_NAME" .planning/phases/20-reranker-latency-benchmark/20-01-SUMMARY.md
+rg --no-heading "hot rerank_ms|load_ms|p50|p95|quality testing|DOTMD_RERANKER_NAME" .planning/phases/20-reranker-latency-benchmark/20-01-latency-benchmark-protocol-SUMMARY.md
 ```
 </verification>
 

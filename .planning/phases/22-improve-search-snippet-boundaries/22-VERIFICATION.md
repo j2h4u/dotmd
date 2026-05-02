@@ -25,7 +25,7 @@ existing MCP schema and bounded output contract.
 |---|---|---|
 | SNIPPET-BOUNDARY-01 | Passed | Unit tests cover sentence-start expansion, happy-path sentence expansion, blank-line boundaries, boundary-aligned off-by-one behavior, short chunks, and long-sentence hard cap. |
 | SNIPPET-CONTEXT-01 | Passed | `_extract_best_snippet()` preserves the existing relevance-window scoring, finds the query token inside the chosen window, and expands the visible snippet around that local context. |
-| SNIPPET-VERIFY-01 | Passed | Targeted pytest, ruff, pyright, live `just test-mcp-remote`, live `tools/list`, and live MCP `search` were run and recorded in `22-01-SUMMARY.md`. |
+| SNIPPET-VERIFY-01 | Passed | Targeted pytest, ruff, pyright, live `just test-mcp-remote`, live `tools/list`, and live MCP `search` were run and recorded in `22-01-snippet-boundary-extraction-SUMMARY.md`. |
 
 ## Must-Haves
 

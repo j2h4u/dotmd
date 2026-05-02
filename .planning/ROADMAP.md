@@ -186,7 +186,7 @@ Plans:
 
 ## Backlog
 
-### Phase 999.2: Pipeline parallelism — overlap GLiNER and TEI across files (BACKLOG)
+### Backlog 999.2: Pipeline parallelism — overlap GLiNER and TEI across files
 
 **Goal:** Eliminate idle time between GLiNER extraction and TEI embedding by running lightweight phases (purge, chunk, save, fts5, graph, fingerprints) concurrently with the heavy phases.
 
@@ -197,7 +197,7 @@ Plans:
 **Plans:**
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
-### Phase 999.3: Automatic orphan cleanup — chunks/vec/FTS rows without live file_path (DONE 2026-04-25)
+### Backlog 999.3: Automatic orphan cleanup — chunks/vec/FTS rows without live file_path (DONE 2026-04-25)
 
 **Goal:** Detect and purge orphan rows (chunks without fingerprints, chunks without vectors, chunks for deleted files) on a periodic or startup basis. Historically `_purge_file()` only ran when re-chunking, so orphans accumulated for months across hash-algorithm migrations.
 
@@ -213,7 +213,7 @@ Plans:
 - ✅ Phase 16 M2M rewrite (2026-04-25): `purge_orphaned_files` now scans `chunk_file_paths_*` M2M tables; `_purge_file` cascade is authoritative — criteria (a) and (b) impossible by construction after Phase 16
 - ✅ 4937-row ghost class from MD5→blake2b migration: eliminated by Phase 16 migration (486 collisions collapsed, schema rebuilt clean)
 
-### Phase 999.5: Ignore patterns for data discovery (DONE 2026-04-24)
+### Backlog 999.5: Ignore patterns for data discovery (DONE 2026-04-24)
 
 Resolved: `indexing_exclude` already existed; extended default list in `config.py` with
 `.pytest_cache`, `.ruff_cache`, `.mypy_cache`, `.tox`, `.nox`, `.venv`, `venv`, `dist`,
@@ -238,7 +238,7 @@ _Below is the original backlog description, kept for history:_
 **Plans:**
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
-### Phase 999.6: Config separation — user-facing settings vs internal constants (BACKLOG)
+### Backlog 999.6: Config separation — user-facing settings vs internal constants
 
 **Goal:** Split `core/config.py` into two layers: user-facing configuration (paths,
 models, URLs, strategy — must be explicit in config.toml, no defaults, fails on
@@ -268,7 +268,7 @@ anti-pattern for a production service — they let misconfiguration ship.
 **Plans:**
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
-### Phase 999.7: Remove migration_v16 dead code after soak (DONE 2026-04-30)
+### Backlog 999.7: Remove migration_v16 dead code after soak (DONE 2026-04-30)
 
 **Goal:** Delete the migration_v16 scaffolding once Phase 16 has soaked in production without rollback need.
 
@@ -290,7 +290,7 @@ anti-pattern for a production service — they let misconfiguration ship.
 
 **Plans:** Complete.
 
-### Phase 999.8: Per-holder heading hierarchy — promote `heading_hierarchy` + `level` to M2M (BACKLOG)
+### Backlog 999.8: Per-holder heading hierarchy — promote `heading_hierarchy` + `level` to M2M
 
 **Goal:** If future feature surfaces per-holder heading context (breadcrumb per search hit, heading-filtered search), move `heading_hierarchy` and `level` from `chunks_*` into `chunk_file_paths_*` so each holder carries its own context.
 
@@ -299,7 +299,7 @@ anti-pattern for a production service — they let misconfiguration ship.
 **Plans:**
 - [ ] TBD (promote when a consumer emerges)
 
-### Phase 999.9: MCP tool — graph entity inspection (BACKLOG)
+### Backlog 999.9: MCP tool — graph entity inspection
 
 **Goal:** Expose graph traversal through MCP so agents can explore entity context, not just retrieve flat snippets.
 
@@ -315,7 +315,7 @@ anti-pattern for a production service — they let misconfiguration ship.
 
 ---
 
-### Phase 999.10: MCP tool — document metadata / frontmatter (DONE 2026-04-26)
+### Backlog 999.10: MCP tool — document metadata / frontmatter (DONE 2026-04-26)
 
 **Goal:** Let agents retrieve structured metadata (frontmatter, speaker, tags, date) for a specific file by path, as a follow-up to a search result.
 
@@ -325,7 +325,7 @@ anti-pattern for a production service — they let misconfiguration ship.
 
 ---
 
-### Phase 999.11: MCP list_resources — indexed file registry (BACKLOG)
+### Backlog 999.11: MCP list_resources — indexed file registry
 
 **Goal:** Implement MCP `list_resources` so clients can enumerate indexed files by URI and read their metadata or content snippets.
 
@@ -338,7 +338,7 @@ anti-pattern for a production service — they let misconfiguration ship.
 
 ---
 
-### Phase 999.12: Dual-encoder unified embedding — decoupled metadata vectors (BACKLOG)
+### Backlog 999.12: Dual-encoder unified embedding — decoupled metadata vectors (DONE 2026-04-27)
 
 **Goal:** Decouple metadata (title, tags) from chunk embeddings so that metadata-only changes (tag updates, title renames) require 1 TEI call per document instead of N TEI calls per chunk.
 
@@ -366,12 +366,16 @@ Paper reports unified embeddings match or beat prefix approach in retrieval qual
 
 **Reference:** [Utilizing Metadata for Better RAG (ECIR 2026)](https://arxiv.org/abs/2601.11863)
 
+**Artifact status:** completed artifacts are archived under
+`.planning/notes/completed-backlog/999.12-dual-encoder-unified-embedding-decoupled-metadata-vectors-ba/`
+so `.planning/phases/` only contains active milestone phase directories.
+
 **Plans:**
-- [ ] TBD (promote with /gsd-review-backlog when ready)
+- [x] Completed as a backlog implementation run (3/3 plans)
 
 ---
 
-### Phase 999.13: Вернуть stateful MCP режим + notifications/tools/list_changed (BACKLOG)
+### Backlog 999.13: Вернуть stateful MCP режим + notifications/tools/list_changed
 
 **Goal:** Перейти обратно с `stateless_http=True` на stateful режим, чтобы сервер мог слать `notifications/tools/list_changed` агентам при изменении инструментов.
 
@@ -396,7 +400,7 @@ FastMCP поддерживает `Context.session.send_tool_list_changed()`. В 
 
 ---
 
-### Phase 999.14: Migrate vector store from sqlite-vec to pgvector — shared Postgres service (BACKLOG)
+### Backlog 999.14: Migrate vector store from sqlite-vec to pgvector — shared Postgres service
 
 **Goal:** Replace sqlite-vec with pgvector for native UPDATE semantics on vector components (e_text, e_meta, e_fused). Enables clean N-vector component updates without DELETE+INSERT choreography.
 
@@ -418,7 +422,7 @@ FastMCP поддерживает `Context.session.send_tool_list_changed()`. В 
 
 ---
 
-### Phase 999.15: Автокалибровка весов фьюзинга через кросс-энкодер (BACKLOG)
+### Backlog 999.15: Автокалибровка весов фьюзинга через кросс-энкодер
 
 **Goal:** Автоматически подбирать веса `DOTMD_EMBEDDING_WEIGHTS` без ручной разметки, используя кросс-энкодер как оракул качества.
 
@@ -433,7 +437,7 @@ FastMCP поддерживает `Context.session.send_tool_list_changed()`. В 
 
 ---
 
-### Phase 999.16: Автокалибровка весов через межмодульное согласие (BACKLOG)
+### Backlog 999.16: Автокалибровка весов через межмодульное согласие
 
 **Goal:** Использовать согласие между semantic + FTS5 + graph как несупервизированный сигнал качества для калибровки весов фьюзинга.
 
@@ -446,7 +450,7 @@ FastMCP поддерживает `Context.session.send_tool_list_changed()`. В 
 **Plans:**
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
-### Phase 999.17: Fix shared-chunk e_fused — per-file fused vector for multi-file chunks (BACKLOG)
+### Backlog 999.17: Fix shared-chunk e_fused — per-file fused vector for multi-file chunks
 
 **Goal:** Устранить edge case: один e_fused на chunk_id при shared chunks. Текущее состояние — фьюзинг использует e_meta первого файла навсегда.
 **Context:** Аудит 2026-04-29: 299/18515 (1.61%) чанков shared. Большинство — один файл в двух местах (skills cache + source repo) или voicenotes одной сессии → e_meta практически идентична, семантическое воздействие минимально. Но архитектурно некорректно.
@@ -459,7 +463,7 @@ Plans:
 
 ---
 
-### Phase 999.18: Extend devtools MCP client to support HTTP/streamable-http transport (BACKLOG)
+### Backlog 999.18: Extend devtools MCP client to support HTTP/streamable-http transport
 
 **Goal:** Extend `backend/devtools/mcp_client/` to support HTTP transport alongside existing stdio. Accept a URL, connect via `streamablehttp_client`, run MCP initialize + tool calls — same interface as current stdio client.
 **Requirements:** TBD
@@ -470,7 +474,7 @@ Plans:
 
 ---
 
-### Phase 999.19: Обновить transformers с 4.57.6 до 5.x (BACKLOG)
+### Backlog 999.19: Обновить transformers с 4.57.6 до 5.x
 
 **Goal:** Перевести в отдельной ветке на transformers 5.x (текущая 5.7.0), проверить совместимость с GLiNER и sentence-transformers, убедиться что CPU-only wheels работают. Потенциально устраняет warning про sentencepiece fast tokenizer.
 **Requirements:** TBD

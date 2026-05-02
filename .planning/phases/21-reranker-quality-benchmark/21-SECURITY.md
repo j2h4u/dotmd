@@ -49,7 +49,7 @@ created: 2026-05-02
 | T-21-01 | `backend/src/dotmd/api/service.py` returns `candidate_pool_chunk_ids` and `shared_pool_size`; `backend/devtools/reranker_quality_bench.py` calls `compare_rerankers()` once per query and restores configured model order for output rows. |
 | T-21-02 | `resolve_labels()` and `_resolve_label_object()` raise on unsupported labels or non-unique `file_path + contains` resolution. |
 | T-21-03 | `21-BENCHMARKS.md` and `results/2026-05-02-rerank-quality-summary.md` record `msmarco-minilm` as the negative historical control and show local metrics from 30 Russian/mixed queries. |
-| T-21-04 | `21-01-SUMMARY.md` command list contains no reindex command; canonical run used `docker exec dotmd python /tmp/reranker_quality_bench.py ...`. |
+| T-21-04 | `21-01-quality-benchmark-SUMMARY.md` command list contains no reindex command; canonical run used `docker exec dotmd python /tmp/reranker_quality_bench.py ...`. |
 | T-21-05 | `21-BENCHMARKS.md` states raw cross-encoder scores are diagnostics only; `summarize_rows()` sorts by rank metrics and p95 rerank time, not raw model scores. |
 | T-21-06 | `make_result_row()` records `rerank_ms` and `rerank`; canonical summary includes p50 and p95 hot rerank columns. |
 | T-21-07 | `21-LABELS-REVIEW.md` contains `Status: APPROVED`, `Reviewed by`, and `Query count: 30`; `21-BENCHMARKS.md` records this approval in the canonical run. |

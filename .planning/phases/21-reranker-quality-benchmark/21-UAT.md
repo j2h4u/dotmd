@@ -2,7 +2,7 @@
 status: complete
 phase: 21-reranker-quality-benchmark
 source:
-  - .planning/phases/21-reranker-quality-benchmark/21-01-SUMMARY.md
+  - .planning/phases/21-reranker-quality-benchmark/21-01-quality-benchmark-SUMMARY.md
   - .planning/phases/21-reranker-quality-benchmark/21-01-quality-benchmark-SUMMARY.md
 started: 2026-05-02T09:59:46Z
 updated: 2026-05-02T10:04:30Z
