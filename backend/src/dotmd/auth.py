@@ -30,29 +30,27 @@ _DEFAULT_PENDING_CLIENT_TTL_SECONDS = 1800
 _PAIRING_MAX_FAILED_ATTEMPTS = 5
 _PAIRING_MIN_ATTEMPT_INTERVAL_SECONDS = 1.0
 _PAIRING_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
-_DEFAULT_ALLOWED_REDIRECT_URIS = ("https://claude.ai/api/mcp/auth_callback",)
-_DEFAULT_ALLOWED_REDIRECT_URI_PREFIXES = ("https://chatgpt.com/connector/oauth/",)
 
 
 def _allowed_redirect_uris() -> set[str]:
-    raw = os.environ.get("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS")
-    if raw is None:
-        return set(_DEFAULT_ALLOWED_REDIRECT_URIS)
+    raw = os.environ.get("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "")
     return {uri.strip().rstrip("/") for uri in raw.split(",") if uri.strip()}
 
 
 def _allowed_redirect_uri_prefixes() -> tuple[str, ...]:
-    raw = os.environ.get("DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES")
-    if raw is None:
-        return _DEFAULT_ALLOWED_REDIRECT_URI_PREFIXES
+    raw = os.environ.get("DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES", "")
     return tuple(uri.strip() for uri in raw.split(",") if uri.strip())
 
 
 def _redirect_uri_allowed(uri: str) -> bool:
-    normalized = _normalize_uri(uri)
-    if normalized in _allowed_redirect_uris():
+    allowed_uris = _allowed_redirect_uris()
+    allowed_prefixes = _allowed_redirect_uri_prefixes()
+    if not allowed_uris and not allowed_prefixes:
         return True
-    return any(normalized.startswith(prefix) for prefix in _allowed_redirect_uri_prefixes())
+    normalized = _normalize_uri(uri)
+    if normalized in allowed_uris:
+        return True
+    return any(normalized.startswith(prefix) for prefix in allowed_prefixes)
 
 
 def _uses_redirect_uri_prefix(client_info: OAuthClientInformationFull, prefix: str) -> bool:

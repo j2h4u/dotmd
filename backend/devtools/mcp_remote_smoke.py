@@ -16,6 +16,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlencode
 
 
 @dataclass(frozen=True)
@@ -275,11 +276,28 @@ finally:
     ok("feedback tool records successfully")
 
 
+def cleanup_pending_oauth_client(client_id: str) -> None:
+    cleanup = """
+import json
+import os
+from pathlib import Path
+
+path = Path("/dotmd-index/oauth_state.json")
+state = json.loads(path.read_text(encoding="utf-8"))
+state.get("pending_clients", {}).pop(CLIENT_ID, None)
+tmp = path.with_suffix(".tmp")
+tmp.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
+os.replace(tmp, path)
+""".replace("CLIENT_ID", repr(client_id))
+    run(["docker", "exec", "-i", "dotmd", "python", "-c", cleanup])
+
+
 def assert_registration_is_code_gated(base_url: str) -> None:
+    redirect_uri = "https://evil.example/callback"
     body = json.dumps(
         {
-            "client_name": "smoke-should-fail",
-            "redirect_uris": ["https://evil.example/callback"],
+            "client_name": "smoke-code-gate",
+            "redirect_uris": [redirect_uri],
             "grant_types": ["authorization_code", "refresh_token"],
             "response_types": ["code"],
             "token_endpoint_auth_method": "none",
@@ -292,9 +310,37 @@ def assert_registration_is_code_gated(base_url: str) -> None:
         body=body,
     )
     payload = json_body(result)
-    if result.status != 400 or payload.get("error") != "invalid_redirect_uri":
-        fail(f"untrusted redirect registration was not rejected: status={result.status} body={result.body!r}")
-    ok("untrusted OAuth client registration redirects are rejected")
+    allowlist_configured = bool(dotmd_env("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS")) or bool(
+        dotmd_env("DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES")
+    )
+    if allowlist_configured:
+        if result.status != 400 or payload.get("error") != "invalid_redirect_uri":
+            fail(f"untrusted redirect registration was not rejected: status={result.status} body={result.body!r}")
+        ok("configured OAuth redirect allowlist rejects untrusted callbacks")
+        return
+    if result.status != 201:
+        fail(f"registration should be accepted when redirect allowlist is empty: status={result.status} body={result.body!r}")
+    client_id = payload.get("client_id")
+    if not isinstance(client_id, str) or not client_id:
+        fail(f"registration response did not include client_id: {payload!r}")
+    assert isinstance(client_id, str)
+    authorize_query = urlencode(
+        {
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "scope": "dotmd",
+            "state": "smoke-code-gate",
+            "code_challenge": "challenge",
+            "code_challenge_method": "S256",
+            "resource": f"{base_url}/mcp",
+        }
+    )
+    authorize = http_request("GET", f"{base_url}/authorize?{authorize_query}")
+    if authorize.status != 200 or b"Pairing code" not in authorize.body:
+        fail(f"registered client was not held behind pairing code: status={authorize.status} body={authorize.body[:300]!r}")
+    cleanup_pending_oauth_client(client_id)
+    ok("empty OAuth redirect allowlist accepts registration but keeps clients code-gated")
 
 
 def main() -> int:
@@ -304,7 +350,7 @@ def main() -> int:
     parser.add_argument(
         "--skip-registration-closed",
         action="store_true",
-        help="Skip the steady-state check that untrusted OAuth client redirects are rejected.",
+        help="Skip the steady-state OAuth registration/code-gate check.",
     )
     args = parser.parse_args()
 

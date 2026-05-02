@@ -153,34 +153,41 @@ attempts per pending client: retries must be at least 1 second apart, and 5
 invalid codes remove the pending client so the browser flow must be started
 again.
 
-Allowed redirect policy:
+Redirect allowlist policy:
 
-```text
-Claude/Anthropic exact callback: https://claude.ai/api/mcp/auth_callback
-ChatGPT callback prefix:        https://chatgpt.com/connector/oauth/
-```
+The one-time pairing code is the primary gate. By default, production keeps the
+redirect allowlist empty so Claude, ChatGPT, and user-provided agents can
+register their own callback URLs without an operator editing env vars.
+
+If these variables are empty, any redirect URI may register, but the client is
+still stored as pending and cannot receive an authorization code until a valid
+one-time pairing code is entered.
+
+Set these variables only when you intentionally want to restrict OAuth clients
+to known hosted callbacks.
 
 Production env:
 
 ```env
-DOTMD_OAUTH_ALLOWED_REDIRECT_URIS=https://claude.ai/api/mcp/auth_callback
-DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES=https://chatgpt.com/connector/oauth/
+DOTMD_OAUTH_ALLOWED_REDIRECT_URIS=
+DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES=
 ```
 
 Security checks:
 
 ```bash
-# Attacker callback must be rejected.
+# With an empty redirect allowlist, arbitrary callbacks may register, but only
+# as pending clients.
 curl -i -X POST https://dotmd.tailf87223.ts.net/register \
   -H 'Content-Type: application/json' \
   -d '{"client_name":"evil","redirect_uris":["https://evil.example/callback"],"grant_types":["authorization_code","refresh_token"]}'
 
 # Expected:
-# HTTP/2 400
-# {"error":"invalid_redirect_uri",...}
+# HTTP/2 201
+# Follow-up GET /authorize shows the pairing-code page until a valid code is entered.
 
-# With dynamic registration disabled, a trusted callback may register only as
-# a pending client. It still cannot receive a token without a one-time code.
+# Trusted hosted clients follow the same path: registration creates a pending
+# client, not an active client.
 curl -i -X POST https://dotmd.tailf87223.ts.net/register \
   -H 'Content-Type: application/json' \
   -d '{"client_name":"ChatGPT","redirect_uris":["https://chatgpt.com/connector/oauth/test"],"grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none"}'
@@ -232,8 +239,7 @@ The OIDC probe is harmless; ChatGPT tries it and proceeds with OAuth metadata.
 ## Connector Setup: Claude/Anthropic
 
 Anthropic's hosted connector flow was straightforward in this deployment. Once
-Funnel, OAuth metadata, and the Claude callback allowlist were correct, it
-connected on the first real attempt.
+Funnel and OAuth metadata were correct, it connected on the first real attempt.
 
 Use:
 
