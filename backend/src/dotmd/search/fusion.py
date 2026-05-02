@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast
 
 from dotmd.core.models import SearchResult
 
@@ -21,6 +21,18 @@ if TYPE_CHECKING:
     from dotmd.storage.base import MetadataStoreProtocol
 
 logger = logging.getLogger(__name__)
+
+
+class _FilePathsBatchStore(Protocol):
+    """Optional metadata-store extension for batch file-path hydration."""
+
+    def get_file_paths_for_chunk_ids(
+        self,
+        strategy: str,
+        chunk_ids: list[str],
+    ) -> dict[str, list[str]]:
+        """Return file paths for chunk IDs under the given chunk strategy."""
+        ...
 
 
 def _extract_best_snippet(text: str, query: str, length: int = 300) -> str:
@@ -62,13 +74,92 @@ def _extract_best_snippet(text: str, query: str, length: int = 300) -> str:
         if end >= len(text):
             break
 
+    focus_start = _find_query_focus_start(text, best_start, length, query_tokens)
+    return _expand_snippet_to_boundaries(text, best_start, focus_start, length)
+
+
+def _find_query_focus_start(
+    text: str,
+    best_start: int,
+    length: int,
+    query_tokens: set[str],
+) -> int:
+    """Find the first query token inside the selected relevance window."""
+    window_end = min(len(text), best_start + length)
+    for match in re.finditer(r"\w+", text[best_start:window_end].lower()):
+        if match.group(0) in query_tokens:
+            return best_start + match.start()
+    return best_start
+
+
+def _expand_snippet_to_boundaries(
+    text: str,
+    best_start: int,
+    focus_start: int,
+    length: int,
+) -> str:
+    """Expand the selected relevance window to simple sentence boundaries."""
+    hard_cap = length * 2
+    window_end = min(len(text), best_start + length)
+    left = _find_left_boundary(text, focus_start)
+    right = _find_right_boundary(text, window_end)
+    body = text[left:right].strip()
+
+    if len(body) > hard_cap:
+        return _bounded_window_snippet(text, best_start, length)
+
+    prefix = "..." if left > 0 else ""
+    suffix = "..." if right < len(text) else ""
+    return prefix + body + suffix
+
+
+def _find_left_boundary(text: str, start: int) -> int:
+    """Return the nearest simple boundary at or before *start*."""
+    if start <= 0:
+        return 0
+
+    candidates = [0]
+    paragraph = text.rfind("\n\n", 0, start + 1)
+    if paragraph != -1:
+        candidates.append(_skip_boundary_space(text, paragraph + 2))
+
+    for match in re.finditer(r"[.?!]", text[:start]):
+        candidates.append(_skip_boundary_space(text, match.end()))
+
+    return max(candidate for candidate in candidates if candidate <= start)
+
+
+def _find_right_boundary(text: str, end: int) -> int:
+    """Return the nearest simple boundary at or after *end*."""
+    if end >= len(text):
+        return len(text)
+
+    candidates = [len(text)]
+    paragraph = text.find("\n\n", end)
+    if paragraph != -1:
+        candidates.append(paragraph)
+
+    match = re.search(r"[.?!]", text[end:])
+    if match is not None:
+        candidates.append(end + match.end())
+
+    return min(candidates)
+
+
+def _skip_boundary_space(text: str, index: int) -> int:
+    """Move from a boundary marker to the next non-whitespace sentence char."""
+    while index < len(text) and text[index].isspace():
+        index += 1
+    return index
+
+
+def _bounded_window_snippet(text: str, best_start: int, length: int) -> str:
+    """Bounded fallback around the already selected relevance window."""
     snippet_text = text[best_start : best_start + length]
 
-    # Add ellipsis indicators
     prefix = "..." if best_start > 0 else ""
     suffix = "..." if best_start + length < len(text) else ""
 
-    # Word-aware truncation at the end
     if suffix:
         last_space = snippet_text.rfind(" ")
         if last_space > len(snippet_text) * 0.8:
@@ -188,7 +279,8 @@ def build_search_results(
     strategy = getattr(metadata_store, "_table", "").removeprefix("chunks_")
     file_paths_map: dict[str, list[Path]] = {}
     if strategy and hasattr(metadata_store, "get_file_paths_for_chunk_ids"):
-        raw_map = metadata_store.get_file_paths_for_chunk_ids(strategy, top_ids)
+        batch_store = cast(_FilePathsBatchStore, metadata_store)
+        raw_map = batch_store.get_file_paths_for_chunk_ids(strategy, top_ids)
         file_paths_map = {
             cid: [Path(fp) for fp in fps]
             for cid, fps in raw_map.items()

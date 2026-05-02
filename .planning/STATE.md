@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
 status: executing
-last_updated: "2026-05-02T13:07:42.559Z"
+last_updated: "2026-05-02T13:23:55.956Z"
 last_activity: 2026-05-02
 progress:
   total_phases: 25
@@ -20,7 +20,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 22 — improve-search-snippet-boundaries promoted from backlog
+**Current focus:** Phase 22 — improve-search-snippet-boundaries
 
 ## Current Milestone
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 Phase: 22
 Plan: 22-01-snippet-boundary-extraction
-Status: Ready to execute
+Status: Executing Phase 22
 Last activity: 2026-05-02
 
 Progress: [██████████] 100%
