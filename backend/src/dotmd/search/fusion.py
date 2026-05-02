@@ -86,8 +86,8 @@ def _find_query_focus_start(
 ) -> int:
     """Find the first query token inside the selected relevance window."""
     window_end = min(len(text), best_start + length)
-    for match in re.finditer(r"\w+", text[best_start:window_end].lower()):
-        if match.group(0) in query_tokens:
+    for match in re.finditer(r"\w+", text[best_start:window_end]):
+        if match.group(0).lower() in query_tokens:
             return best_start + match.start()
     return best_start
 
