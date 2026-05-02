@@ -63,6 +63,7 @@ class RerankerComparison(TypedDict):
     query: str
     search_query: str
     shared_pool_size: int
+    candidate_pool_chunk_ids: list[str]
     rerankers: list[RerankerRunComparison]
     overlap_reference: str | None
     overlap: dict[str, int]
@@ -540,6 +541,7 @@ class DotMDService:
             "query": query,
             "search_query": search_query,
             "shared_pool_size": len(chunk_ids),
+            "candidate_pool_chunk_ids": chunk_ids,
             "rerankers": runs,
             "overlap_reference": overlap_reference,
             "overlap": overlap,

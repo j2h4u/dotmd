@@ -78,8 +78,10 @@ class FakeService:
         expand: bool,
     ) -> dict:
         self.calls.append((query, reranker_names, top_k, mode, expand))
+        pool_ids = ["miss"] if query == "miss query" else ["miss", "rel", "maybe"]
         return {
-            "shared_pool_size": 3,
+            "shared_pool_size": len(pool_ids),
+            "candidate_pool_chunk_ids": pool_ids,
             "rerankers": [
                 {
                     "name": "fast",
@@ -91,7 +93,7 @@ class FakeService:
                 {
                     "name": "slow",
                     "model_name": "slow-model",
-                    "top_chunk_ids": ["maybe", "rel", "miss"],
+                    "top_chunk_ids": ["miss", "other"],
                     "rerank_ms": 30.0,
                     "error": None,
                 },
@@ -189,7 +191,9 @@ def test_run_benchmark_restores_model_order_and_marks_pool_miss(tmp_path: Path) 
     ]
     assert [row["model"] for row in rows[:2]] == ["slow", "fast"]
     assert [row["pool_miss"] for row in rows] == [False, False, True, True]
-    assert summaries[0]["model"] == "slow"
+    assert rows[1]["candidate_pool_chunk_ids"] == ["miss", "rel", "maybe"]
+    assert rows[1]["pool_miss"] is False
+    assert summaries[0]["model"] == "fast"
     assert "Retrieval Gaps" in summary.read_text(encoding="utf-8")
     assert "chunk_strategy=strategy-v1" in summary.read_text(encoding="utf-8")
 

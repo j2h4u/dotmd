@@ -230,9 +230,10 @@ def make_result_row(
     commit: str,
     chunk_strategy: str,
     shared_pool_size: int,
+    candidate_pool_ids: list[str],
 ) -> JsonRow:
     top_chunk_ids = list(run.get("top_chunk_ids") or [])
-    pool_miss = not bool(set(top_chunk_ids) & resolved.all_ids)
+    pool_miss = not bool(set(candidate_pool_ids) & resolved.all_ids)
     error = run.get("error")
     return {
         "phase": PHASE,
@@ -245,6 +246,7 @@ def make_result_row(
         "mode": config.mode,
         "expand": True,
         "shared_pool_size": shared_pool_size,
+        "candidate_pool_chunk_ids": candidate_pool_ids,
         "top_n": config.top_n,
         "chunk_strategy": chunk_strategy,
         "top_chunk_ids": top_chunk_ids,
@@ -408,6 +410,15 @@ def run_benchmark(config: BenchmarkConfig, service: DotMDService | None = None) 
             expand=True,
         )
         runs_by_name = {run["name"]: run for run in comparison["rerankers"]}
+        candidate_pool_ids = list(comparison.get("candidate_pool_chunk_ids") or [])
+        if not candidate_pool_ids:
+            candidate_pool_ids = sorted(
+                {
+                    chunk_id
+                    for run in comparison["rerankers"]
+                    for chunk_id in list(run.get("top_chunk_ids") or [])
+                }
+            )
         for model in config.rerankers:
             run = runs_by_name.get(
                 model,
@@ -429,6 +440,7 @@ def run_benchmark(config: BenchmarkConfig, service: DotMDService | None = None) 
                 commit=commit,
                 chunk_strategy=chunk_strategy,
                 shared_pool_size=int(comparison.get("shared_pool_size") or 0),
+                candidate_pool_ids=candidate_pool_ids,
             )
             rows.append(row)
             append_jsonl(config.output, [row])
