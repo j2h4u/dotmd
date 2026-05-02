@@ -96,3 +96,63 @@ Fill this section after Task 4.
 | `msmarco-minilm` | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
 | `mmarco-minilm` | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
 | `mxbai-xsmall-v1` | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+
+## Canonical Run 2026-05-02
+
+- commit: `e7beafc`
+- runtime/container: live `dotmd` container
+- runner path: copied to `/tmp/reranker_quality_bench.py` because `/app/devtools` did not contain the new runner and `/app/.planning` was not mounted
+- raw output path: `.planning/phases/21-reranker-quality-benchmark/results/2026-05-02-rerank-quality.jsonl`
+- summary path: `.planning/phases/21-reranker-quality-benchmark/results/2026-05-02-rerank-quality-summary.md`
+- query count: 30
+- label resolution count: 30 queries / 90 model rows
+- label approval: `.planning/phases/21-reranker-quality-benchmark/21-LABELS-REVIEW.md`, `Status: APPROVED`, `Query count: 30`
+- chunk strategy: `contextual_512_50`
+- `shared_pool_size=20`
+- `top_n=10`
+- mode: `hybrid`
+- expansion: enabled
+- errors: 0
+
+Command:
+
+```bash
+docker exec dotmd python /tmp/reranker_quality_bench.py \
+  --labels /tmp/21-LABELS.jsonl \
+  --output /tmp/2026-05-02-rerank-quality.jsonl \
+  --summary /tmp/2026-05-02-rerank-quality-summary.md \
+  --rerankers msmarco-minilm,mmarco-minilm,mxbai-xsmall-v1 \
+  --mode hybrid \
+  --top-n 10 \
+  --pool-size 20 \
+  --commit e7beafc
+```
+
+Observed FTS5 parser warnings for queries containing punctuation or hyphenated
+tokens: `oauth_state.json`, `sqlite-vec`, and `content-addressed`. They were
+non-fatal; semantic and graph retrieval continued.
+
+| Model | Valid queries | Pool misses | Errors | Hit@1 | Hit@3 | Hit@5 | MRR@10 | nDCG@10 | p50 hot rerank | p95 hot rerank |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `mmarco-minilm` | 21 | 9 | 0 | 0.524 | 0.714 | 0.857 | 0.659 | 0.606 | 8s | 8s |
+| `mxbai-xsmall-v1` | 21 | 9 | 0 | 0.524 | 0.810 | 0.857 | 0.676 | 0.593 | 12s | 12s |
+| `msmarco-minilm` | 21 | 9 | 0 | 0.476 | 0.714 | 0.762 | 0.597 | 0.493 | 4s | 4s |
+
+`msmarco-minilm` remains the negative historical control: it is fastest, but it
+lost clearly on `nDCG@10`, `MRR@10`, `Hit@1`, and `Hit@5`.
+
+pool_miss query ids: `rq-007`, `rq-011`, `rq-013`, `rq-014`, `rq-015`,
+`rq-016`, `rq-017`, `rq-018`, `rq-020`.
+
+pool_miss queries are retrieval gaps; they are excluded from per-model quality
+averages and reported separately
+
+Per-query failure examples: none. All model rows completed without provider
+errors.
+
+Recommendation: keep `mmarco-minilm` as the default reranker for now. It has the
+best `nDCG@10` in the canonical run and stays under 10s p95 hot rerank on the
+current CPU path. `mxbai-xsmall-v1` is competitive and stronger on `Hit@3` /
+`MRR@10`, but its p95 hot rerank was about 12s and its `nDCG@10` was lower.
+Continue model search only if the next requirement prioritizes `Hit@3` over
+`nDCG@10` or if a faster multilingual reranker is added.
