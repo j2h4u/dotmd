@@ -32,24 +32,16 @@ _PAIRING_MIN_ATTEMPT_INTERVAL_SECONDS = 1.0
 _PAIRING_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 
 
-def _allowed_redirect_uris() -> set[str]:
-    raw = os.environ.get("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "")
-    return {uri.strip().rstrip("/") for uri in raw.split(",") if uri.strip()}
-
-
 def _allowed_redirect_uri_prefixes() -> tuple[str, ...]:
     raw = os.environ.get("DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES", "")
     return tuple(uri.strip() for uri in raw.split(",") if uri.strip())
 
 
 def _redirect_uri_allowed(uri: str) -> bool:
-    allowed_uris = _allowed_redirect_uris()
     allowed_prefixes = _allowed_redirect_uri_prefixes()
-    if not allowed_uris and not allowed_prefixes:
+    if not allowed_prefixes:
         return True
     normalized = _normalize_uri(uri)
-    if normalized in allowed_uris:
-        return True
     return any(normalized.startswith(prefix) for prefix in allowed_prefixes)
 
 

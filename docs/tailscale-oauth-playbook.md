@@ -169,11 +169,9 @@ to known hosted callbacks.
 Production env:
 
 ```env
-DOTMD_OAUTH_ALLOWED_REDIRECT_URIS=
 DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES=
 # Real hosted-client examples, disabled by default because pairing code is the primary gate:
-# DOTMD_OAUTH_ALLOWED_REDIRECT_URIS=https://claude.ai/api/mcp/auth_callback
-# DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES=https://chatgpt.com/connector/oauth/
+# DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES=https://claude.ai/api/mcp/auth_callback,https://chatgpt.com/connector/oauth/
 ```
 
 Security checks:

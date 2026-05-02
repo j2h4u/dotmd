@@ -310,9 +310,7 @@ def assert_registration_is_code_gated(base_url: str) -> None:
         body=body,
     )
     payload = json_body(result)
-    allowlist_configured = bool(dotmd_env("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS")) or bool(
-        dotmd_env("DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES")
-    )
+    allowlist_configured = bool(dotmd_env("DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES"))
     if allowlist_configured:
         if result.status != 400 or payload.get("error") != "invalid_redirect_uri":
             fail(f"untrusted redirect registration was not rejected: status={result.status} body={result.body!r}")

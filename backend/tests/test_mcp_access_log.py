@@ -81,7 +81,6 @@ def test_oauth_protected_resource_metadata_includes_scopes(monkeypatch) -> None:
 
 def test_authorize_pending_client_requires_pairing_code(tmp_path, monkeypatch) -> None:
     async def setup() -> DotMDOAuthProvider:
-        monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
         provider = DotMDOAuthProvider(tmp_path / "oauth_state.json")
         from mcp.shared.auth import OAuthClientInformationFull
 
@@ -125,7 +124,6 @@ def test_authorize_pending_client_requires_pairing_code(tmp_path, monkeypatch) -
 
 def test_authorize_pairing_code_activates_client_and_redirects(tmp_path, monkeypatch) -> None:
     async def setup() -> tuple[DotMDOAuthProvider, str]:
-        monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
         provider = DotMDOAuthProvider(tmp_path / "oauth_state.json")
         from mcp.shared.auth import OAuthClientInformationFull
 
@@ -156,7 +154,9 @@ def test_authorize_pairing_code_activates_client_and_redirects(tmp_path, monkeyp
         }
     )
 
-    response = TestClient(app).post(f"/authorize?{query}", data={"pairing_code": code}, follow_redirects=False)
+    response = TestClient(app).post(
+        f"/authorize?{query}", data={"pairing_code": code}, follow_redirects=False
+    )
 
     assert response.status_code == 302
     assert response.headers["location"].startswith("https://client.example/callback?")
