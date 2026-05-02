@@ -1,7 +1,7 @@
 # Phase 21 Label Review
 
 Status: APPROVED
-Reviewed by: delegated agent per user override
+Reviewed by: human-delegated agent per user override
 Reviewed at: 2026-05-02T12:41:17+05:00
 Query count: 30
 
