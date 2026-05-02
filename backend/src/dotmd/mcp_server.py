@@ -685,9 +685,13 @@ async def read_document(
 )
 async def feedback(
     message: Annotated[
-        str,
-        Field(description="What was observed; ideally include what you expected instead.", min_length=1, max_length=10000),
-    ],
+        str | None,
+        Field(description="What was observed; ideally include what you expected instead.", max_length=10000, json_schema_extra=_collapse_null),
+    ] = None,
+    feedback: Annotated[
+        str | None,
+        Field(description="Alias for message. Use this when submitting feedback text.", max_length=10000, json_schema_extra=_collapse_null),
+    ] = None,
     severity: Annotated[
         Literal["bug", "suggestion", "question"] | None,
         Field(description="bug — wrong output or violated contract; suggestion — new capability or UX improvement; question — unclear how something works.", json_schema_extra=_collapse_null),
@@ -716,13 +720,14 @@ async def feedback(
     Fire and forget — there is no follow-up, no tracking ID, and no read access
     for agents. The maintainer reviews the queue asynchronously.
     """
-    if not message.strip():
+    text = (message if message is not None else feedback) or ""
+    if not text.strip():
         return "Feedback not recorded — message was empty."
     try:
         fb = _get_feedback()
         await asyncio.to_thread(
             fb.submit,
-            message=message.strip(),
+            message=text.strip(),
             severity=severity,
             context=context,
             model=model,

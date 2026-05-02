@@ -11,6 +11,7 @@ import argparse
 import json
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -228,6 +229,52 @@ def assert_authenticated_tools_list(base_url: str, token: str) -> None:
     ok("authenticated tools/list returns search, read, feedback, and schemas")
 
 
+def assert_feedback_alias_call(base_url: str, token: str) -> None:
+    marker = f"__remote_smoke_feedback_alias__{int(time.time())}"
+    body = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": "feedback",
+                "arguments": {
+                    "feedback": marker,
+                    "severity": "question",
+                    "context": "remote MCP smoke",
+                },
+            },
+        }
+    ).encode("utf-8")
+    result = http_request(
+        "POST",
+        f"{base_url}/mcp",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "MCP-Protocol-Version": "2025-06-18",
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json",
+        },
+        body=body,
+    )
+    payload = json_body(result)
+    if result.status != 200 or payload.get("result", {}).get("isError"):
+        fail(f"feedback alias call failed: status={result.status} body={result.body!r}")
+    cleanup = """
+import sqlite3
+from pathlib import Path
+
+conn = sqlite3.connect(str(Path("/dotmd-index/feedback.db")))
+try:
+    conn.execute("DELETE FROM feedback WHERE message = ?", (MESSAGE,))
+    conn.commit()
+finally:
+    conn.close()
+""".replace("MESSAGE", repr(marker))
+    run(["docker", "exec", "-i", "dotmd", "python", "-c", cleanup])
+    ok("feedback tool accepts feedback alias and records successfully")
+
+
 def assert_registration_is_code_gated(base_url: str) -> None:
     body = json.dumps(
         {
@@ -269,7 +316,9 @@ def main() -> int:
     assert_tailscale_sidecar_network()
     assert_tailscale_ready()
     assert_public_oauth(base_url)
-    assert_authenticated_tools_list(base_url, access_token_for_client(args.client_name))
+    token = access_token_for_client(args.client_name)
+    assert_authenticated_tools_list(base_url, token)
+    assert_feedback_alias_call(base_url, token)
     if not args.skip_registration_closed:
         assert_registration_is_code_gated(base_url)
     ok("remote MCP smoke passed")

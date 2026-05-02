@@ -219,8 +219,9 @@ class TestFeedbackSmoke:
     def test_message_is_required_string(self, mcp_call: Callable):
         props = self._props(mcp_call)
         assert props["message"]["type"] == "string"
-        assert props["message"].get("minLength") == 1
         assert props["message"].get("maxLength") == 10000
+        assert props["feedback"]["type"] == "string"
+        assert props["feedback"].get("maxLength") == 10000
 
     def test_optional_params_have_no_anyOf_null(self, mcp_call: Callable):
         """severity/context/model/harness must NOT carry anyOf:[T, null].
@@ -228,7 +229,7 @@ class TestFeedbackSmoke:
         Regression anchor for the _collapse_null hook in mcp_server.py.
         """
         props = self._props(mcp_call)
-        for field in ("severity", "context", "model", "harness"):
+        for field in ("message", "feedback", "severity", "context", "model", "harness"):
             schema = props[field]
             assert "anyOf" not in schema, (
                 f"feedback.{field} has anyOf — _collapse_null is broken.\n"
@@ -260,12 +261,51 @@ class TestFeedbackSmoke:
             f"expected 'not recorded' marker, got: {_tool_result_text(data)!r}"
         )
 
+    def test_feedback_alias_records(self, mcp_call: Callable):
+        """Claude sometimes uses a feedback field because the tool is named feedback."""
+        import sqlite3
+        import uuid
+
+        from dotmd.core.config import load_settings
+
+        marker = f"__e2e_feedback_alias__{uuid.uuid4().hex[:12]}"
+        message = f"{marker} (delete me — alias path)"
+
+        data = mcp_call("tools/call", {
+            "name": "feedback",
+            "arguments": {
+                "feedback": message,
+                "severity": "bug",
+            },
+        })
+        assert not _is_tool_error(data), f"feedback alias errored: {_tool_result_text(data)}"
+        assert "recorded" in _tool_result_text(data).lower()
+
+        feedback_db = load_settings().index_dir / "feedback.db"
+        try:
+            conn = sqlite3.connect(str(feedback_db))
+            try:
+                row = conn.execute(
+                    "SELECT severity FROM feedback WHERE message = ?",
+                    (message,),
+                ).fetchone()
+                assert row == ("bug",)
+            finally:
+                conn.close()
+        finally:
+            conn = sqlite3.connect(str(feedback_db))
+            try:
+                conn.execute("DELETE FROM feedback WHERE message LIKE ?", (f"{marker}%",))
+                conn.commit()
+            finally:
+                conn.close()
+
     def test_happy_path_records_and_cleans_up(self, mcp_call: Callable):
         """Submit a marker-tagged feedback row, verify it persists, then remove it."""
         import sqlite3
         import uuid
 
-        from dotmd.core.config import Settings
+        from dotmd.core.config import load_settings
 
         marker = f"__e2e_smoke__{uuid.uuid4().hex[:12]}"
         message = f"{marker} (delete me — emitted by tests/e2e/test_mcp_smoke.py)"
@@ -283,7 +323,7 @@ class TestFeedbackSmoke:
         assert not _is_tool_error(data), f"feedback errored: {_tool_result_text(data)}"
         assert "recorded" in _tool_result_text(data).lower()
 
-        feedback_db = Settings().index_dir / "feedback.db"
+        feedback_db = load_settings().index_dir / "feedback.db"
         try:
             conn = sqlite3.connect(str(feedback_db))
             try:
