@@ -563,7 +563,7 @@ Phase boundary:
 - Measure ranking quality first; keep hot `rerank_ms` as an operational guardrail.
 
 Plans:
-- [ ] 21-01-quality-benchmark-PLAN.md — Build and run live-index reranker quality benchmark
+- [x] 21-01-quality-benchmark-PLAN.md — Build and run live-index reranker quality benchmark
 
 ---
 

@@ -63,9 +63,9 @@
 | CHUNK-02 | Phase 12 | Pending |
 | SCORE-01 | Phase 12 | Complete |
 | SCORE-02 | Phase 12 | Pending |
-| RERANK-QUALITY-01 | Phase 21 | Pending |
-| RERANK-QUALITY-02 | Phase 21 | Pending |
-| RERANK-QUALITY-03 | Phase 21 | Pending |
+| RERANK-QUALITY-01 | Phase 21 | Complete |
+| RERANK-QUALITY-02 | Phase 21 | Complete |
+| RERANK-QUALITY-03 | Phase 21 | Complete |
 
 **Coverage:**
 - v1.4 requirements: 12 total

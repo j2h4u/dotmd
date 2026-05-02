@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
-status: executing
-last_updated: "2026-05-02T06:56:40.380Z"
+status: ready
+last_updated: "2026-05-02T08:15:16Z"
 last_activity: 2026-05-02
 progress:
   total_phases: 25
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 22
-  completed_plans: 21
-  percent: 95
+  completed_plans: 22
+  percent: 100
 ---
 
 # GSD State
@@ -20,15 +20,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 21 — reranker-quality-benchmark
+**Current focus:** Phase 21 — reranker-quality-benchmark complete
 
 ## Current Milestone
 
 **v1.4 — Search Quality & Architecture**
 
-Phase: 20
-Plan: 20-01-latency-benchmark-protocol
-Status: Executing Phase 21
+Phase: 21
+Plan: 21-01-quality-benchmark
+Status: Phase 21 complete
 Last activity: 2026-05-02
 
 Progress: [██████████] 100%
@@ -63,6 +63,7 @@ Progress: [██████████] 100%
 - Phase 15 added: Content-addressed caching (embedding cache, extraction cache, content-based chunk_id)
 - Phase 19 added: Reranker adapter layer and multi-model comparison
 - Phase 20 added: Reranker Latency Benchmark
+- Phase 21 added: Reranker Quality Benchmark
 
 ### Decisions
 
@@ -87,6 +88,13 @@ Latency-only shortlist for later quality testing: `msmarco-minilm`,
 `mmarco-minilm`, `mxbai-xsmall-v1`. Relevance quality was not evaluated and
 `DOTMD_RERANKER_NAME` was changed to `mmarco-minilm` during post-Phase 20
 cleanup after CPU-unusable candidates were removed from the built-in registry.
+
+Phase 21 complete. Canonical live-index quality benchmark results are recorded
+in `21-BENCHMARKS.md` and
+`results/2026-05-02-rerank-quality-summary.md`. `mmarco-minilm` beat the
+negative historical control on `nDCG@10` and remains the recommended default.
+`mxbai-xsmall-v1` is competitive on `Hit@3`/`MRR@10` but slower on CPU. The run
+also exposed 9 retrieval-gap pool_miss queries for future retrieval work.
 
 ### Blockers/Concerns
 
