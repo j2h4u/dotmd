@@ -1,80 +1,166 @@
-# Phase 22 Context — Improve Search Snippet Boundaries
+# Phase 22: Improve Search Snippet Boundaries - Context
 
-## Promotion
+**Gathered:** 2026-05-02
+**Status:** Ready for planning
 
-Promoted from backlog item `999.21` on 2026-05-02 via `$gsd-review-backlog 999.21`.
-
-## Goal
+<domain>
+## Phase Boundary
 
 Improve `search` snippets so agents can judge whether a hit is worth opening
 with `read` without guessing around mid-sentence truncation.
 
-The goal is not to make snippets replace `read`. `search` should remain the
-discovery tool, while `read(file_path, start, end)` remains the linear
-consumption tool. Snippets should provide enough local context to reduce
-false-positive `read` calls and prevent misleading partial quotes.
+This phase changes snippet extraction only. It does not change retrieval,
+reranking, chunking, indexing, or the `read(file_path, start, end)` tool.
 
-## Feedback Sources
+</domain>
 
-- `feedback id=6` reported that search snippets often truncate mid-sentence,
-  making it ambiguous whether a quoted phrase continues with material that
-  changes the meaning.
-- `feedback id=10` confirmed that `read` solved the main long-document workflow,
-  but snippet truncation remained a low-priority friction point.
-- `feedback id=19` refreshed the request after live use: expand snippets with a
-  small amount of surrounding context, trim on sentence or paragraph boundaries
-  where possible, and optionally mark the matched/relevant span. No ML or
-  summarization is requested.
-- Fresh Claude.ai web refinement on 2026-05-02 recommends narrowing the scope:
-  fix only mid-sentence truncation inside the current chunk. It argues against
-  automatic neighboring-chunk context because that is already covered by
-  `read(file_path, start, end)`. Treat this as planning input from a strong
-  model, not as a final decision.
+<decisions>
+## Implementation Decisions
 
-## Backlog Context
+### Snippet Scope
 
-Original `999.21` concern:
+- **D-01:** Keep snippet expansion inside the current chunk only.
+- **D-02:** Do not include neighboring chunks automatically. Chunks overlap,
+  and cross-chunk context is already available through
+  `read(file_path, start, end)`.
+- **D-03:** Do not add a `context_window` or neighbor-context parameter to the
+  MCP `search` tool in this phase.
 
-- Current snippets can start or end in the middle of a sentence.
-- Agents use snippets as evidence pointers and triage signals.
-- A truncated quote can change meaning depending on the missing continuation.
-- Extra `read` calls are possible but wasteful when only local disambiguation is
-  needed.
+### Boundary Heuristic
 
-Previously listed solution options, with the 2026-05-02 recommendation noted:
+- **D-04:** Implement the minimal deterministic fix: expand the selected
+  snippet window left and right to sentence boundaries inside the current
+  chunk.
+- **D-05:** Sentence boundaries should use simple text boundaries such as `.`,
+  `?`, `!`, blank line, and chunk boundary.
+- **D-06:** Do not implement transcript-specific speaker-turn anchors. The
+  transcript format is not a stable contract, so `**Speaker N:**` or similar
+  markers should not drive snippet behavior.
+- **D-07:** Do not use ML, summarization, semantic expansion, or language-specific
+  NLP for this phase.
 
-- Add a `context_window` parameter to `search`.
-- Include adjacent chunks by default or optionally — latest feedback recommends
-  against this because `read` already handles cross-chunk context.
-- Expand snippets to sentence boundaries using simple punctuation and paragraph
-  heuristics — latest feedback recommends this as the cheap first fix.
-- Return the full chunk instead of a substring.
+### Size Limits
 
-## Fresh Recommendation
+- **D-08:** Use a compromise for long sentences: expand to sentence boundaries,
+  but enforce a hard cap so a very long sentence cannot make search output
+  unbounded.
+- **D-09:** Recommended hard cap for planning: `2 * snippet_length`, unless
+  implementation details reveal a better local constant.
+- **D-10:** If the boundary-expanded snippet exceeds the hard cap, fall back to
+  bounded word-aware trimming rather than returning a huge fragment.
 
-The strongest current recommendation is to implement a cheap deterministic fix
-inside the current chunk:
+### Match Marking
 
-- When forming the snippet window, expand left and right to a sentence boundary
-  (`.`, `?`, `!`, blank line) or chunk boundary.
-- For transcripts, prefer structural speaker-turn anchors such as
-  `**Speaker N:**` or the end of the previous speaker turn when they are nearby.
-- Avoid neighboring chunks by default; use `read` for cross-chunk context.
-- Avoid ML, summarization, or semantic context expansion.
+- **D-11:** Match marking/highlighting is not required for Phase 22 unless the
+  planner finds it essentially free and non-disruptive. The primary goal is
+  sentence-boundary snippet quality.
 
-## Initial Phase Boundary
+### the agent's Discretion
 
-- Keep the existing `search`/`read` split.
-- Prefer deterministic text-boundary heuristics over ML.
-- Preserve bounded snippet size so search results do not become full-document
-  reads.
-- Add tests around snippet extraction behavior before changing live MCP output.
-- Verify through the MCP search surface, not only unit tests.
+- Choose the exact helper function decomposition and test fixture shape.
+- Choose whether the hard-cap fallback preserves ellipses exactly as today or
+  adjusts them to better communicate boundary trimming, as long as output stays
+  bounded and tests document the behavior.
 
-## Open Questions For Planning
+</decisions>
 
-- Should Phase 22 adopt the fresh recommendation exactly, or keep any optional
-  cross-chunk/context parameter?
-- Should match marking be part of Phase 22 or deferred?
-- Should the default snippet behavior improve without adding any new MCP tool
-  parameter?
+<canonical_refs>
+## Canonical References
+
+**Downstream agents MUST read these before planning or implementing.**
+
+### Phase Artifacts
+
+- `.planning/ROADMAP.md` — Phase 22 goal, requirements, dependency, and planning input.
+- `.planning/REQUIREMENTS.md` — `SNIPPET-BOUNDARY-01`,
+  `SNIPPET-CONTEXT-01`, and `SNIPPET-VERIFY-01`.
+- `.planning/STATE.md` — current phase focus and recent context.
+
+### Feedback Sources
+
+- Feedback `id=6` — original report that snippets truncate mid-sentence and
+  can make quotes ambiguous.
+- Feedback `id=10` — confirms `read` solved the long-document workflow but
+  snippet truncation remained a lower-priority friction.
+- Feedback `id=19` — fresh open request for context expansion, boundary-aware
+  trimming, and optional match marking.
+- 2026-05-02 Claude.ai web refinement from user message — strong model
+  recommendation to fix only mid-sentence truncation within the current chunk
+  and avoid neighboring chunks.
+
+### Code
+
+- `backend/src/dotmd/search/fusion.py` — `_extract_best_snippet()` currently
+  selects and truncates snippets.
+- `backend/src/dotmd/mcp_server.py` — `_format_result()` strips frontmatter and
+  timestamps before returning MCP search hits.
+- `backend/src/dotmd/core/config.py` — `snippet_length` setting.
+
+</canonical_refs>
+
+<code_context>
+## Existing Code Insights
+
+### Reusable Assets
+
+- `_extract_best_snippet(text, query, length)` in `backend/src/dotmd/search/fusion.py`
+  is the main implementation point.
+- `_truncate(text, length)` in the same module is the current word-aware
+  fallback and can be reused or refactored.
+
+### Established Patterns
+
+- Search result construction happens in `build_search_results()` after fusion
+  and reranking. Snippet changes should not affect scoring, ordering, or engine
+  matching.
+- MCP result formatting is a separate layer: `_format_result()` removes
+  frontmatter and timestamps from `r.snippet`. Sentence-boundary behavior should
+  be implemented before this presentation cleanup unless tests show otherwise.
+- Existing project style favors small private helpers, type hints, and focused
+  pure-function unit tests for text-processing logic.
+
+### Integration Points
+
+- `DotMDService.search()` passes `settings.snippet_length` into
+  `build_search_results()`.
+- MCP `search` returns `SearchHit.snippet`; verification should exercise this
+  live tool surface, not only `_extract_best_snippet()` directly.
+
+</code_context>
+
+<specifics>
+## Specific Ideas
+
+- Minimal behavior: current best window stays the center of relevance, then the
+  visible text expands to sentence boundaries around that window.
+- Blank lines count as useful boundaries because many markdown/transcript chunks
+  are paragraph-separated.
+- The phase should not rely on transcript speaker markers because transcript
+  formats vary.
+
+</specifics>
+
+<deferred>
+## Deferred Ideas
+
+- Automatic neighboring-chunk context in `search` is deferred. Use
+  `read(file_path, start, end)` for cross-chunk context.
+- A new MCP `context_window` parameter is deferred.
+- Match highlighting may be revisited later if sentence-boundary snippets are
+  not enough for triage.
+
+### Reviewed Todos
+
+- `2026-03-27-smoke-tests.md` matched broadly on search/testing. It is not
+  folded into Phase 22 because this phase already has a specific verification
+  requirement and does not need the older generic smoke-test todo.
+- Other matched todos (`pplx-embed-context`, trickle indexer, soft-delete,
+  fork scouting, graph migration) are unrelated keyword matches and remain
+  pending.
+
+</deferred>
+
+---
+
+*Phase: 22-improve-search-snippet-boundaries*
+*Context gathered: 2026-05-02*

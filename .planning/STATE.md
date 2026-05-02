@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
-status: ready
-last_updated: "2026-05-02T08:15:16Z"
+status: planning
+last_updated: "2026-05-02T12:55:49.203Z"
 last_activity: 2026-05-02
 progress:
   total_phases: 25
