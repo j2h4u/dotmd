@@ -20,6 +20,10 @@ test-smoke:
 test-e2e:
     cd {{backend}} && env -u DOTMD_BASE_URL uv run pytest -p no:cacheprovider tests/e2e --tb=short -q
 
+# Run production MCP/Funnel connectivity smoke against live containers.
+test-mcp-remote *args:
+    cd {{backend}} && uv run python devtools/mcp_remote_smoke.py {{args}}
+
 # Run Ruff lint checks.
 lint:
     cd {{backend}} && uv run ruff check src tests devtools

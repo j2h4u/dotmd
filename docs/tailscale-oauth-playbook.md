@@ -20,7 +20,7 @@ For one MCP server, use one public Tailscale Funnel root proxy:
 
 ```text
 https://dotmd.tailf87223.ts.net/
-└── proxy http://127.0.0.1:8080
+└── proxy http://dotmd:8080
 ```
 
 Use the root-based MCP URL:
@@ -388,7 +388,7 @@ Wait for health:
 
 ```bash
 for i in $(seq 1 60); do
-  if curl -fsS http://127.0.0.1:8080/health >/dev/null; then
+  if curl -fsS http://127.0.0.1:18082/health >/dev/null; then
     echo healthy
     break
   fi
@@ -398,27 +398,42 @@ done
 
 ## Tailscale Funnel Configuration
 
-Reset any old path-based routes:
+dotMD runs its public Tailscale endpoint as a compose-managed sidecar:
 
-```bash
-printf 'y\n' | tailscale funnel reset
-printf 'y\n' | tailscale serve reset
+```text
+dotmd             app container, listens on http://dotmd:8080
+tailscale-dotmd   Tailscale sidecar, attached to Docker network mcp
 ```
 
-Start a single root Funnel:
+Start or refresh the sidecar from the deployment compose directory:
 
 ```bash
-tailscale funnel --bg --yes http://127.0.0.1:8080
+cd /opt/docker/dotmd
+docker compose up -d tailscale-dotmd
 ```
 
-Expected status:
+Reset old path-based routes from inside the sidecar only when changing the
+Funnel shape:
+
+```bash
+docker exec tailscale-dotmd tailscale --socket=/tmp/tailscaled.sock funnel reset
+docker exec tailscale-dotmd tailscale --socket=/tmp/tailscaled.sock serve reset
+```
+
+Start a single root Funnel from the sidecar to the app container:
+
+```bash
+docker exec tailscale-dotmd tailscale --socket=/tmp/tailscaled.sock funnel --bg --yes http://dotmd:8080
+```
+
+Expected sidecar status:
 
 ```text
 # Funnel on:
 #     - https://dotmd.tailf87223.ts.net
 
 https://dotmd.tailf87223.ts.net (Funnel on)
-|-- / proxy http://127.0.0.1:8080
+|-- / proxy http://dotmd:8080
 ```
 
 Do not configure separate handlers like:
@@ -459,24 +474,62 @@ dotmd Tailscale sidecar
 Repeat the pattern per MCP server. Do not share OAuth state between MCP servers.
 Each server needs its own `DOTMD_BASE_URL`/issuer and its own token store.
 
-Example sidecar command shape:
+Example compose service shape:
 
-```bash
-docker run -d \
-  --name tailscale-dotmd \
-  --hostname dotmd \
-  --network mcp \
-  -e TS_AUTHKEY="$TS_AUTHKEY_DOTMD" \
-  -e TS_STATE_DIR=/var/lib/tailscale \
-  -v tailscale-dotmd-state:/var/lib/tailscale \
-  tailscale/tailscale:stable
+```yaml
+services:
+  tailscale-dotmd:
+    image: tailscale/tailscale:stable
+    container_name: tailscale-dotmd
+    command:
+      - tailscaled
+      - --socket=/tmp/tailscaled.sock
+      - --statedir=/var/lib/tailscale
+      - --tun=userspace-networking
+    volumes:
+      - tailscale-dotmd-state:/var/lib/tailscale
+    networks:
+      - mcp
+    depends_on:
+      dotmd:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  tailscale-dotmd-state:
+    external: true
+    name: tailscale-dotmd-state
 ```
 
 Then, inside the sidecar, configure Funnel:
 
 ```bash
-docker exec tailscale-dotmd tailscale funnel --bg --yes http://dotmd:8080
-docker exec tailscale-dotmd tailscale funnel status
+docker exec tailscale-dotmd tailscale --socket=/tmp/tailscaled.sock funnel --bg --yes http://dotmd:8080
+docker exec tailscale-dotmd tailscale --socket=/tmp/tailscaled.sock serve status
+```
+
+### Sidecar Network Anti-Pattern
+
+Do not run the sidecar with Docker network mode `container:dotmd`:
+
+```text
+--network container:dotmd
+```
+
+Docker resolves that to the concrete `dotmd` container ID. If `dotmd` is
+force-recreated, the sidecar can remain attached to the old network namespace
+and lose its default route while still appearing to run.
+
+The current live deployment avoids that by keeping `tailscale-dotmd` as a
+compose service attached to the shared `mcp` network. The sidecar resolves the
+app by Docker DNS name `dotmd`, so app container recreates do not strand the
+sidecar in a stale namespace.
+
+After changing compose, Tailscale, OAuth, or MCP routing, run the live
+connectivity gate:
+
+```bash
+just test-mcp-remote
 ```
 
 Set the MCP server env to the sidecar hostname:
@@ -712,9 +765,10 @@ Likely causes:
 Fix:
 
 ```bash
-printf 'y\n' | tailscale funnel reset
-printf 'y\n' | tailscale serve reset
-tailscale funnel --bg --yes http://127.0.0.1:8080
+docker exec tailscale-dotmd tailscale --socket=/tmp/tailscaled.sock funnel reset
+docker exec tailscale-dotmd tailscale --socket=/tmp/tailscaled.sock serve reset
+docker exec tailscale-dotmd tailscale --socket=/tmp/tailscaled.sock funnel --bg --yes http://dotmd:8080
+just test-mcp-remote
 ```
 
 Then use:
@@ -783,19 +837,19 @@ After a debugging session:
 docker ps --format 'table {{.ID}}\t{{.Image}}\t{{.Names}}\t{{.Status}}' | rg 'cloudflare|cloudflared|dotmd'
 ```
 
-Only `dotmd` should remain.
+Only the compose-managed `dotmd` and `tailscale-dotmd` containers should remain.
 
 2. Ensure Funnel is simple:
 
 ```bash
-tailscale funnel status
+docker exec tailscale-dotmd tailscale --socket=/tmp/tailscaled.sock serve status
 ```
 
 Expected:
 
 ```text
 https://dotmd.tailf87223.ts.net (Funnel on)
-|-- / proxy http://127.0.0.1:8080
+|-- / proxy http://dotmd:8080
 ```
 
 3. Ensure production env is root-based:
@@ -823,3 +877,13 @@ in:
 ```
 
 5. Recreate the container after env changes.
+
+6. Run the production MCP/Funnel smoke gate:
+
+```bash
+just test-mcp-remote
+```
+
+This checks the `dotmd` healthcheck, the `tailscale-dotmd` network namespace,
+Tailscale/Funnel status, public OAuth discovery, `/mcp` auth challenge, an
+authenticated `tools/list`, and that dynamic registration is closed again.
