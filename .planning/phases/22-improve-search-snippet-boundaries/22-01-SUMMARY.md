@@ -3,7 +3,9 @@ phase: "22"
 plan: "01-snippet-boundary-extraction"
 status: complete
 completed_at: "2026-05-02T18:29:40+05:00"
-commit: "68dc9b9"
+commits:
+  - "68dc9b9"
+  - "29c325a"
 requirements:
   - SNIPPET-BOUNDARY-01
   - SNIPPET-CONTEXT-01
@@ -17,6 +19,9 @@ requirements:
 - Updated `backend/src/dotmd/search/fusion.py` so `_extract_best_snippet()` keeps
   the existing best-window scoring, then expands the chosen query hit to simple
   sentence, paragraph, or chunk boundaries.
+- Review follow-up: query-token focus offsets are computed against the original
+  text rather than a lowercased copy, so Unicode lowercasing cannot skew snippet
+  boundary offsets.
 - Added a hard cap of `2 * snippet_length`; over-cap boundary expansion falls
   back to the existing bounded word-aware window behavior.
 - Added focused regression coverage in `backend/tests/test_fusion.py` for:
@@ -40,9 +45,10 @@ requirements:
 - `cd backend && uv run pytest tests/test_fusion.py -q` — passed, 19 tests.
 - `cd backend && uv run ruff check src/dotmd/search/fusion.py tests/test_fusion.py` — passed.
 - `cd backend && uv run pyright src/dotmd/search/fusion.py tests/test_fusion.py` — passed.
-- `cd /opt/docker/dotmd && docker compose up -d --force-recreate dotmd` — completed.
-- `docker inspect -f '{{.State.Health.Status}}' dotmd` — healthy.
-- `just test-mcp-remote` — passed.
+- `cd /opt/docker/dotmd && docker compose up -d --force-recreate dotmd` — completed twice:
+  once after implementation and again after the review follow-up.
+- `docker inspect -f '{{.State.Health.Status}}' dotmd` — healthy after final recreate.
+- `just test-mcp-remote` — passed after final recreate.
 - Live `tools/list` search schema checked: properties are `query` and `top_k`;
   `context_window` is absent.
 - Live MCP `tools/call` search checked with query `проект`, `top_k=3`; search
