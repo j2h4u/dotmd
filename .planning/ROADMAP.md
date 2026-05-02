@@ -553,7 +553,7 @@ Plans:
 **Goal:** Compare the three latency-surviving rerankers on relevance quality against the live dotMD document index and decide which model is worth using as the production default.
 **Requirements**: RERANK-QUALITY-01, RERANK-QUALITY-02, RERANK-QUALITY-03
 **Depends on:** Phase 20
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 Phase boundary:
 - Use the current production `dotmd` container and live `/dotmd-index/index.db`; do not reindex or build a synthetic corpus.
