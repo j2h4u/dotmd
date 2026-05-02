@@ -554,12 +554,13 @@ Plans:
 **Depends on:** Phase 21
 **Plans:** 0 plans
 
-Phase boundary:
-- Fix mid-sentence truncation inside the current chunk using deterministic
-  sentence/paragraph/speaker-turn boundaries.
-- Do not include neighboring chunks automatically; cross-chunk context remains
-  the job of `read(file_path, start, end)`.
-- Do not add ML or summarization.
+Planning input:
+- Fresh Claude.ai web recommendation: first fix mid-sentence truncation inside
+  the current chunk using deterministic sentence/paragraph/speaker-turn
+  boundaries.
+- The same recommendation argues against automatic neighboring chunks because
+  cross-chunk context is already covered by `read(file_path, start, end)`.
+- Treat this as strong planning input, not a final implementation decision.
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 22 to break down)

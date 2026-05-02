@@ -25,10 +25,11 @@ false-positive `read` calls and prevent misleading partial quotes.
   small amount of surrounding context, trim on sentence or paragraph boundaries
   where possible, and optionally mark the matched/relevant span. No ML or
   summarization is requested.
-- Fresh Claude.ai web refinement on 2026-05-02 narrowed the scope further:
-  fix only mid-sentence truncation inside the current chunk. Do not add
-  automatic neighboring-chunk context; that is already covered by
-  `read(file_path, start, end)`.
+- Fresh Claude.ai web refinement on 2026-05-02 recommends narrowing the scope:
+  fix only mid-sentence truncation inside the current chunk. It argues against
+  automatic neighboring-chunk context because that is already covered by
+  `read(file_path, start, end)`. Treat this as planning input from a strong
+  model, not as a final decision.
 
 ## Backlog Context
 
@@ -40,32 +41,30 @@ Original `999.21` concern:
 - Extra `read` calls are possible but wasteful when only local disambiguation is
   needed.
 
-Previously listed solution options before the 2026-05-02 refinement:
+Previously listed solution options, with the 2026-05-02 recommendation noted:
 
-- Add a `context_window` parameter to `search` — now out of scope unless
-  planning finds a strong reason.
-- Include adjacent chunks by default or optionally — explicitly withdrawn by
-  the latest feedback because `read` already handles cross-chunk context.
+- Add a `context_window` parameter to `search`.
+- Include adjacent chunks by default or optionally — latest feedback recommends
+  against this because `read` already handles cross-chunk context.
 - Expand snippets to sentence boundaries using simple punctuation and paragraph
-  heuristics — current preferred direction.
-- Return the full chunk instead of a substring — likely too broad for search
-  output unless tests show sentence boundaries are insufficient.
+  heuristics — latest feedback recommends this as the cheap first fix.
+- Return the full chunk instead of a substring.
 
-## Current Scope Decision
+## Fresh Recommendation
 
-Implement a cheap deterministic fix inside the current chunk:
+The strongest current recommendation is to implement a cheap deterministic fix
+inside the current chunk:
 
 - When forming the snippet window, expand left and right to a sentence boundary
   (`.`, `?`, `!`, blank line) or chunk boundary.
 - For transcripts, prefer structural speaker-turn anchors such as
   `**Speaker N:**` or the end of the previous speaker turn when they are nearby.
-- Do not include neighboring chunks automatically in Phase 22.
-- Do not add ML, summarization, or semantic context expansion.
+- Avoid neighboring chunks by default; use `read` for cross-chunk context.
+- Avoid ML, summarization, or semantic context expansion.
 
 ## Initial Phase Boundary
 
 - Keep the existing `search`/`read` split.
-- Keep snippets within the current chunk.
 - Prefer deterministic text-boundary heuristics over ML.
 - Preserve bounded snippet size so search results do not become full-document
   reads.
@@ -74,6 +73,8 @@ Implement a cheap deterministic fix inside the current chunk:
 
 ## Open Questions For Planning
 
+- Should Phase 22 adopt the fresh recommendation exactly, or keep any optional
+  cross-chunk/context parameter?
 - Should match marking be part of Phase 22 or deferred?
 - Should the default snippet behavior improve without adding any new MCP tool
   parameter?
