@@ -47,6 +47,11 @@ must_haves:
 Update search snippet extraction so snippets avoid mid-sentence starts and
 ends when nearby boundaries exist inside the current chunk, while keeping the
 search/read split, MCP schema, and bounded output contract unchanged.
+
+This revision incorporates cross-AI review feedback from `22-REVIEWS.md`:
+happy-path expansion coverage, boundary-aligned off-by-one coverage, explicit
+documentation of naive punctuation limitations, MCP-visible formatting checks,
+and unchanged `tools/list` schema verification.
 </objective>
 
 <threat_model>
@@ -61,6 +66,8 @@ search/read split, MCP schema, and bounded output contract unchanged.
 | Transcript-specific parsing creates brittle behavior | MEDIUM | Do not implement speaker-turn anchors such as `**Speaker N:**`; use punctuation/blank-line/chunk boundaries only. |
 | Boundary heuristics hide the query match | MEDIUM | Preserve the existing best-window scoring first, then expand around that selected window. |
 | MCP visible snippet differs from unit-tested snippet due to cleanup | MEDIUM | Verify through MCP/search surface after unit tests because `_format_result()` strips frontmatter/timestamps. |
+| Naive `.` boundary handling misreads abbreviations, initials, versions, or decimals | MEDIUM | Accept this limitation under D-05/D-07; document it and do not add language-specific NLP or abbreviation parsing in Phase 22. |
+| Boundary expansion has off-by-one behavior at an existing sentence start | MEDIUM | Add a focused test/criterion proving an already-boundary-aligned window does not pull in previous-sentence punctuation or misleading leading ellipses. |
 </threat_model>
 
 <constants>
@@ -71,6 +78,9 @@ Phase 22 constants:
 - sentence boundary chars: `.`, `?`, `!`
 - paragraph boundary: blank line (`\n\n`)
 - absolute boundaries: chunk start and chunk end
+- known limitation: punctuation boundaries are intentionally naive and may
+  split abbreviations, initials, versions, and decimals; Phase 22 does not add
+  language-specific abbreviation handling
 - forbidden scope: neighboring chunks, `context_window`, speaker-turn anchors,
   ML/NLP/summarization
 </constants>
@@ -101,24 +111,38 @@ Add tests whose names start with `test_extract_best_snippet_` and cover these ex
 1. A match inside a longer paragraph returns a snippet that starts at the
    beginning of the containing sentence, not at the matched word. Use text with
    at least three sentences and a query term in the middle sentence.
-2. A match before a blank line returns a snippet that does not cross the blank
+2. A happy-path boundary expansion returns an exact expected sentence-boundary
+   snippet that is longer than `length` but no longer than `2 * length + 6`.
+   This pins the behavior where boundary expansion succeeds without hard-cap
+   fallback.
+3. A best window that already begins at a sentence boundary does not pull in the
+   previous sentence's terminator and does not add a misleading leading
+   ellipsis.
+4. A match before a blank line returns a snippet that does not cross the blank
    line when the containing sentence can satisfy the query context.
-3. A long single sentence over the hard cap returns a string whose length is no
+5. A long single sentence over the hard cap returns a string whose length is no
    greater than `2 * length + 6` to allow leading/trailing ellipses.
-4. Empty-token query still returns a bounded fallback no longer than
+6. Empty-token query still returns a bounded fallback no longer than
    `length + 3`.
-5. A text shorter than `length` returns the original text exactly.
+7. A text shorter than `length` returns the original text exactly.
+
+Do not add abbreviation-, initials-, version-, decimal-, or language-specific
+boundary tests that require special parsing. Naive punctuation boundaries are a
+known Phase 22 limitation, not a requirement to solve.
 
 The initial test run should fail before Task 2 because current snippet
 extraction starts at the best word window and can cut sentence boundaries.
 </action>
 <verify>
 <automated>cd backend && uv run pytest tests/test_fusion.py -q</automated>
+<automated>cd backend && uv run ruff check tests/test_fusion.py</automated>
 </verify>
 <acceptance_criteria>
 - `backend/tests/test_fusion.py` contains `from dotmd.search.fusion import _extract_best_snippet`.
-- `backend/tests/test_fusion.py` contains at least five functions whose names start with `test_extract_best_snippet_`.
+- `backend/tests/test_fusion.py` contains at least seven functions whose names start with `test_extract_best_snippet_`.
 - One test asserts a returned snippet starts with a full sentence start instead of the matched word.
+- One test pins an exact happy-path snippet that is longer than `length` and no longer than `2 * length + 6`.
+- One test covers the already-at-sentence-boundary/off-by-one case.
 - One test asserts `len(snippet) <= 2 * length + 6` for a long single sentence.
 </acceptance_criteria>
 <done>
@@ -145,6 +169,8 @@ Implement private helpers with these responsibilities:
 
 - Find the nearest left boundary before `best_start` using chunk start, blank
   line, or the character after `.`, `?`, or `!`.
+- Treat `best_start` that is already at a boundary as boundary-aligned; do not
+  walk left into the previous sentence just to find another terminator.
 - Find the nearest right boundary after `best_start + length` using chunk end,
   blank line, or the character after `.`, `?`, or `!`.
 - Strip leading/trailing whitespace from the selected snippet text.
@@ -154,10 +180,15 @@ Implement private helpers with these responsibilities:
 
 Do not use transcript speaker markers. Do not read neighboring chunks. Do not
 change `build_search_results()` signature. Do not add MCP `search` parameters.
+Do not add abbreviation dictionaries, language-specific sentence parsing, or NLP;
+false boundaries around abbreviations, initials, versions, and decimals are
+accepted for Phase 22.
 
 If the boundary-expanded snippet body exceeds `hard_cap`, use bounded
 word-aware trimming from the current best window. The complete returned string,
-including ellipses, must stay within `2 * length + 6`.
+including ellipses, must stay within `2 * length + 6`. Preserve the existing
+`_truncate()` trailing-ellipsis behavior in this hard-cap fallback unless the
+focused tests prove the old behavior violates the new bound.
 
 Run and fix the tests added in Task 1 until they pass.
 </action>
@@ -169,7 +200,9 @@ Run and fix the tests added in Task 1 until they pass.
 <acceptance_criteria>
 - `backend/src/dotmd/search/fusion.py` contains no references to `Speaker N`.
 - `backend/src/dotmd/search/fusion.py` contains no new parameter named `context_window`.
+- `backend/src/dotmd/search/fusion.py` contains no abbreviation dictionary or language-specific sentence parser.
 - `_extract_best_snippet()` still accepts exactly `text: str`, `query: str`, and `length: int = 300`.
+- Already-boundary-aligned snippets do not gain a misleading leading `...`.
 - `cd backend && uv run pytest tests/test_fusion.py -q` exits 0.
 - `cd backend && uv run ruff check src/dotmd/search/fusion.py tests/test_fusion.py` exits 0.
 - `cd backend && uv run pyright src/dotmd/search/fusion.py tests/test_fusion.py` exits 0.
@@ -200,6 +233,10 @@ First, ensure `build_search_results()` still calls `_extract_best_snippet(chunk.
 
 If unit coverage does not already prove `build_search_results()` returns the new boundary-aware snippet, add one focused test using a fake metadata store and a chunk with multi-sentence text. The test must assert the `SearchResult.snippet` starts at the sentence boundary and contains the query term.
 
+Also verify the MCP-visible formatting path. `_format_result()` strips
+frontmatter and timestamps after snippet extraction, so the execution summary
+must record whether the visible snippet remains coherent after that cleanup.
+
 Then run:
 
 - `cd backend && uv run pytest tests/test_fusion.py -q`
@@ -212,7 +249,9 @@ For live verification after implementation:
    `cd /opt/docker/dotmd && docker compose up -d --force-recreate dotmd`
 2. Wait until `docker inspect -f '{{.State.Health.Status}}' dotmd` returns `healthy`.
 3. Run `just test-mcp-remote`.
-4. Run one live MCP or CLI search against a query that returns a transcript
+4. Confirm the live MCP `tools/list` schema for `search` is unchanged: no
+   `context_window` or neighbor-context parameter exists.
+5. Run one live MCP or CLI search against a query that returns a transcript
    snippet and record whether the visible snippet starts at a sentence/paragraph
    boundary.
 
@@ -223,6 +262,8 @@ with:
 - tests run and pass/fail status
 - live verification result
 - note that no MCP schema changes were made
+- note that MCP-visible formatting after frontmatter/timestamp stripping was inspected
+- note that `snippet_hard_cap_multiplier = 2` is a Phase 22 constant that can be tuned in a later phase if live snippets feel too short or too long
 - note that feedback id=19 remains open until implementation is verified and reviewed
 </action>
 <verify>
@@ -234,6 +275,8 @@ with:
 - `22-01-SUMMARY.md` exists.
 - `22-01-SUMMARY.md` contains `just test-mcp-remote`.
 - `22-01-SUMMARY.md` contains `No MCP schema changes`.
+- `22-01-SUMMARY.md` records that live `tools/list` search schema was checked.
+- `22-01-SUMMARY.md` records whether MCP-visible snippet formatting after cleanup remained coherent.
 - `22-01-SUMMARY.md` contains `feedback id=19`.
 - `22-01-SUMMARY.md` records whether live search snippet inspection passed.
 </acceptance_criteria>
