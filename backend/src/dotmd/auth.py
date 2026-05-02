@@ -27,6 +27,8 @@ _ACCESS_TOKEN_LIFETIME_SECONDS = 86400 * 30
 _AUTH_CODE_LIFETIME_SECONDS = 300
 _DEFAULT_PAIRING_CODE_TTL_SECONDS = 600
 _DEFAULT_PENDING_CLIENT_TTL_SECONDS = 1800
+_PAIRING_MAX_FAILED_ATTEMPTS = 5
+_PAIRING_MIN_ATTEMPT_INTERVAL_SECONDS = 1.0
 _PAIRING_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 _DEFAULT_ALLOWED_REDIRECT_URIS = ("https://claude.ai/api/mcp/auth_callback",)
 _DEFAULT_ALLOWED_REDIRECT_URI_PREFIXES = ("https://chatgpt.com/connector/oauth/",)
@@ -103,6 +105,8 @@ def _pending_client_record(client_info: OAuthClientInformationFull) -> dict[str,
         "client": client_info.model_dump(mode="json"),
         "created_at": now,
         "expires_at": now + _pending_client_ttl_seconds(),
+        "failed_attempts": 0,
+        "last_attempt_at": 0,
     }
 
 
@@ -219,6 +223,26 @@ class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
             raise PairingCodeError("OAuth pairing code is invalid or expired")
         logger.info("OAuth: pairing code consumed client_id=%s", client_id)
 
+    def _enforce_pairing_attempt_interval_locked(self, pending: dict[str, object], client_id: str) -> None:
+        now = time.time()
+        raw_last_attempt_at = pending.get("last_attempt_at", 0)
+        last_attempt_at = float(raw_last_attempt_at) if isinstance(raw_last_attempt_at, int | float | str) else 0.0
+        if now - last_attempt_at < _PAIRING_MIN_ATTEMPT_INTERVAL_SECONDS:
+            logger.warning("OAuth: pairing attempt rate-limited client_id=%s", client_id)
+            raise PairingCodeError("Too many pairing attempts. Wait a moment and try again.")
+
+    def _record_failed_pairing_attempt_locked(self, pending: dict[str, object], client_id: str) -> bool:
+        now = time.time()
+        raw_failed_attempts = pending.get("failed_attempts", 0)
+        failed_attempts = int(raw_failed_attempts) + 1 if isinstance(raw_failed_attempts, int | float | str) else 1
+        pending["failed_attempts"] = failed_attempts
+        pending["last_attempt_at"] = now
+        if failed_attempts >= _PAIRING_MAX_FAILED_ATTEMPTS:
+            self._state["pending_clients"].pop(client_id, None)
+            logger.warning("OAuth: pending client removed after too many pairing attempts client_id=%s", client_id)
+            return True
+        return False
+
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         if not client_info.client_id:
             raise ValueError("OAuth client registration requires client_id")
@@ -257,8 +281,18 @@ class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
             pending = self._state["pending_clients"].get(client_id)
             if pending is None:
                 raise PairingCodeError("OAuth client pairing request expired")
-            self._consume_pairing_code_locked(pairing_code, client_id)
-            client_data = pending.get("client", pending) if isinstance(pending, dict) else pending
+            if not isinstance(pending, dict):
+                raise PairingCodeError("OAuth client pairing request is invalid")
+            self._enforce_pairing_attempt_interval_locked(pending, client_id)
+            try:
+                self._consume_pairing_code_locked(pairing_code, client_id)
+            except PairingCodeError:
+                blocked = self._record_failed_pairing_attempt_locked(pending, client_id)
+                await self._flush()
+                if blocked:
+                    raise PairingCodeError("Too many invalid pairing attempts. Start pairing again.") from None
+                raise
+            client_data = pending.get("client", pending)
             self._state["clients"][client_id] = client_data
             self._state["pending_clients"].pop(client_id, None)
             await self._flush()

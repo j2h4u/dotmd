@@ -227,6 +227,41 @@ def test_pairing_code_expires(tmp_path: Path, monkeypatch) -> None:
     asyncio.run(run())
 
 
+def test_pairing_code_rejects_too_fast_retry(tmp_path: Path, monkeypatch) -> None:
+    async def run() -> None:
+        monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
+        provider = DotMDOAuthProvider(tmp_path / "oauth_state.json")
+        client = _client()
+        await provider.register_client(client)
+
+        with pytest.raises(PairingCodeError, match="invalid or expired"):
+            await provider.activate_pending_client(client, "WRONG-CODE")
+        with pytest.raises(PairingCodeError, match="Too many pairing attempts"):
+            await provider.activate_pending_client(client, "WRONG-CODE")
+
+    asyncio.run(run())
+
+
+def test_pairing_code_removes_pending_client_after_too_many_failures(tmp_path: Path, monkeypatch) -> None:
+    async def run() -> None:
+        monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")
+        monkeypatch.setattr("dotmd.auth._PAIRING_MIN_ATTEMPT_INTERVAL_SECONDS", 0)
+        provider = DotMDOAuthProvider(tmp_path / "oauth_state.json")
+        client = _client()
+        await provider.register_client(client)
+
+        for _ in range(4):
+            with pytest.raises(PairingCodeError, match="invalid or expired"):
+                await provider.activate_pending_client(client, "WRONG-CODE")
+        with pytest.raises(PairingCodeError, match="Too many invalid pairing attempts"):
+            await provider.activate_pending_client(client, "WRONG-CODE")
+
+        assert client.client_id is not None
+        assert await provider.get_pending_client(client.client_id) is None
+
+    asyncio.run(run())
+
+
 def test_pending_client_expires_without_completed_pairing(tmp_path: Path, monkeypatch) -> None:
     async def run() -> None:
         monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URIS", "https://client.example/callback")

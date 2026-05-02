@@ -147,6 +147,12 @@ the browser authorization flow expire automatically; the default pending-client
 TTL is `30m` and can be overridden with
 `DOTMD_OAUTH_PENDING_CLIENT_TTL_SECONDS`.
 
+Pairing codes are 8 characters from a restricted uppercase alphabet and are
+displayed as `XXXX-XXXX`. The authorization page also throttles pairing
+attempts per pending client: retries must be at least 1 second apart, and 5
+invalid codes remove the pending client so the browser flow must be started
+again.
+
 Allowed redirect policy:
 
 ```text
