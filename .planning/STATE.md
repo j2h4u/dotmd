@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
 status: executing
-last_updated: "2026-05-01T19:36:20.131Z"
-last_activity: 2026-05-01
+last_updated: "2026-05-02T06:56:40.380Z"
+last_activity: 2026-05-02
 progress:
   total_phases: 25
   completed_phases: 7
@@ -20,7 +20,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 20 — reranker-latency-benchmark complete
+**Current focus:** Phase 21 — reranker-quality-benchmark
 
 ## Current Milestone
 
@@ -28,8 +28,8 @@ See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 Phase: 20
 Plan: 20-01-latency-benchmark-protocol
-Status: Ready to execute
-Last activity: 2026-05-01
+Status: Executing Phase 21
+Last activity: 2026-05-02
 
 Progress: [██████████] 100%
 
