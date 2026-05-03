@@ -11,6 +11,7 @@ files_modified:
   - backend/tests/conftest.py
   - backend/tests/e2e/conftest.py
   - backend/tests/e2e/test_mcp_smoke.py
+  - backend/tests/smoke/__init__.py
   - backend/tests/smoke/conftest.py
   - backend/tests/smoke/test_api.py
   - backend/tests/smoke/test_hybrid_fusion.py
@@ -31,7 +32,7 @@ must_haves:
     - "D-01: Local tests do not require live Docker containers, external ports, TEI, or production data"
     - "D-02: Explicit live commands fail non-zero when required runtime is missing"
     - "D-03: `just test` and `just check` exclude `e2e` and live `smoke` by default"
-    - "D-04: The stale `backend/tests/smoke` suite is deleted or replaced by the current e2e contract"
+    - "D-04: The stale `backend/tests/smoke` suite is deleted; `test-smoke` is removed from the command surface"
     - "D-05: HTTP e2e cases do not start the stdio MCP subprocess"
     - "D-06: Low-signal tests are replaced with behavior checks"
     - "D-07: Embedding boundary coverage is explicit despite the global semantic-engine test patch"
@@ -69,7 +70,7 @@ behavioral checks that catch the regressions that caused this phase.
 |---|---:|---|
 | A command exits green while all live tests skipped | HIGH | Remove skip-based live command success; explicit live commands must fail when runtime is unavailable. |
 | `just check` gives false confidence by collecting live tests that skip | HIGH | Make the default `just test` local-only with marker exclusion, and keep live suites opt-in. |
-| Stale smoke tests remain as duplicate green noise | HIGH | Delete `backend/tests/smoke` or route `test-smoke` to the current e2e suite; remove stale `status`/`rerank=True` coverage. |
+| Stale smoke tests remain as duplicate green noise | HIGH | Delete `backend/tests/smoke`; remove `test-smoke` from the command surface rather than aliasing it. |
 | E2E HTTP tests accidentally validate stdio startup too | MEDIUM | Split HTTP and stdio fixtures so stdio starts only for stdio-parametrized cases. |
 | Low-signal tests preserve mock behavior instead of production behavior | MEDIUM | Replace tautologies and mock-return checks with call-contract or real-path behavior assertions. |
 | Global embedding mock hides real embedding-input regressions | MEDIUM | Add a focused test that bypasses/overrides the global patch and asserts encoded text/dimensions through a controlled boundary. |
@@ -101,9 +102,9 @@ Update `justfile` so command tiers are explicit:
 - `check` continues to run `lint typecheck test`.
 - `test-e2e *args` runs inside the `dotmd` container:
   `docker exec dotmd sh -lc 'cd /mnt/home/repos/j2h4u/dotmd/backend && python -m pytest tests/e2e/ -p no:cacheprovider --tb=short -q {{args}}'`
-- `test-smoke *args` must not run the stale `backend/tests/smoke` suite. Either:
-  - make it a compatibility alias to `just test-e2e {{args}}`, or
-  - remove it from the command surface and update docs accordingly.
+- Remove `test-smoke *args` from the command surface. Do not alias it to
+  `test-e2e`; keeping both names would preserve ambiguity about which live suite
+  is authoritative.
 
 Update `README.md` Common Commands so it states:
 
@@ -117,13 +118,16 @@ them accurate after stale smoke removal.
 </action>
 <verify>
 <automated>just --list</automated>
+<automated>! just --list | rg "test-smoke"</automated>
 <automated>just test --collect-only -q</automated>
 <automated>just check</automated>
 </verify>
 <acceptance_criteria>
 - `justfile` contains `pytest -m "not e2e and not smoke"`.
 - `justfile` contains `docker exec dotmd`.
+- `just --list` does not contain `test-smoke`.
 - `README.md` contains `just test-e2e`.
+- `README.md` contains `just test-mcp-remote`.
 - `README.md` contains `local tests`.
 - `just test --collect-only -q` does not collect `tests/e2e/test_mcp_smoke.py`.
 - `just check` exits 0.
@@ -136,6 +140,7 @@ Local and live test commands have separate, documented contracts.
 <task id="2" type="auto">
 <name>Task 2: Remove stale smoke suite and make live e2e fail honestly</name>
 <read_first>
+- `backend/tests/smoke/__init__.py`
 - `backend/tests/smoke/conftest.py`
 - `backend/tests/smoke/test_api.py`
 - `backend/tests/smoke/test_hybrid_fusion.py`
@@ -145,6 +150,7 @@ Local and live test commands have separate, documented contracts.
 - `backend/src/dotmd/mcp_server.py`
 </read_first>
 <files>
+- `backend/tests/smoke/__init__.py`
 - `backend/tests/smoke/conftest.py`
 - `backend/tests/smoke/test_api.py`
 - `backend/tests/smoke/test_hybrid_fusion.py`
@@ -154,8 +160,11 @@ Local and live test commands have separate, documented contracts.
 - `backend/tests/e2e/test_mcp_smoke.py`
 </files>
 <action>
-Delete the stale `backend/tests/smoke` suite unless Task 1 deliberately kept a
-replacement file. The stale suite must no longer contain:
+Delete the stale `backend/tests/smoke` suite completely, including
+`__init__.py`, `conftest.py`, `pytest.ini`, and all smoke test files. The suite
+must no longer exist; do not keep a replacement smoke file.
+
+The deleted suite must remove these stale patterns from the active test tree:
 
 - `tool_call("status")`
 - `rerank=True` passed to MCP `search`
@@ -165,10 +174,15 @@ replacement file. The stale suite must no longer contain:
 Update `backend/tests/e2e/conftest.py` so:
 
 - Explicit e2e runs fail on missing `http://localhost:8080/health` instead of
-  marking every e2e test skipped. Use a non-zero pytest exit path such as
+  marking every e2e test skipped. Implement this as a session-scoped autouse
+  `_require_live_server` fixture that performs one health probe and calls:
   `pytest.exit("dotMD MCP server not reachable at http://localhost:8080", returncode=1)`.
+- Remove the skip-all `pytest_collection_modifyitems` hook.
 - HTTP-parametrized tests do not depend on `_stdio_session`.
-- `_stdio_session` starts only for stdio-parametrized cases.
+- `_stdio_session` starts only for stdio-parametrized cases. Keep one `mcp_call`
+  fixture if that is the smallest change, but resolve `_stdio_session` lazily
+  with `request.getfixturevalue("_stdio_session")` only when `request.param`
+  selects `stdio`.
 - The PIN-code OAuth helper from the current working tree remains intact.
 
 Update e2e tests so targeted search/read shape tests do not silently skip if the
@@ -177,15 +191,16 @@ index should contain results. Prefer failing with a clear message for the
 canonical query instead of `pytest.skip("no results to check")`.
 </action>
 <verify>
-<automated>test ! -d backend/tests/smoke || ! rg --quiet 'tool_call\\("status"\\)|rerank=True|pytest.mark.skip' backend/tests/smoke</automated>
-<automated>rg --no-heading "pytest.exit|returncode=1" backend/tests/e2e/conftest.py</automated>
+<automated>test ! -d backend/tests/smoke</automated>
+<automated>rg --no-heading "_require_live_server|pytest.exit|returncode=1|getfixturevalue\\(\"_stdio_session\"\\)" backend/tests/e2e/conftest.py</automated>
 <automated>just test-e2e</automated>
 </verify>
 <acceptance_criteria>
-- `backend/tests/smoke` is deleted, or it contains no `tool_call("status")`.
-- `backend/tests/smoke` is deleted, or it contains no `rerank=True`.
+- `backend/tests/smoke` is deleted.
+- `backend/tests/e2e/conftest.py` contains `_require_live_server`.
 - `backend/tests/e2e/conftest.py` contains `pytest.exit`.
 - `backend/tests/e2e/conftest.py` contains `returncode=1`.
+- `backend/tests/e2e/conftest.py` contains `getfixturevalue("_stdio_session")`.
 - HTTP e2e tests can run without starting `_StdioSession`.
 - `just test-e2e` exits 0 when the running `dotmd` container is healthy.
 </acceptance_criteria>
@@ -210,7 +225,17 @@ The stale smoke surface is gone and explicit live e2e fails honestly when runtim
 - `backend/tests/mcp/test_search_tool.py`
 </files>
 <action>
-Replace the low-signal tests identified in `23-RESEARCH.md`:
+Replace only the low-signal tests identified in `23-RESEARCH.md` and the review:
+
+- `TestSearchReturnsFilePaths.test_search_returns_file_paths_list`
+- `TestSearchRespectsTopK.test_search_respects_top_k`
+- `TestGraphDirectHitAlsoHydrates`
+- MCP search contract tests that prove behavior by inspecting `_format_result`
+  internals or docstrings instead of registered tool schema / call output
+
+Do not rewrite `TestCompareRerankers`, `TestServiceWarmup`, or
+`TestSearchApiRerankerSurfaces` unless a focused adjustment is directly needed
+to keep the changed contract passing.
 
 1. In `backend/tests/api/test_service_search.py`, remove any assertion equivalent
    to `len(results) >= 0`. If `_execute_search` is mocked, assert the exact call
@@ -220,7 +245,7 @@ Replace the low-signal tests identified in `23-RESEARCH.md`:
 
 2. In `backend/tests/api/test_search_result_shape.py`, replace the graph-direct
    hydration claim that directly instantiates `SearchResult`. Exercise
-   `build_search_results` or the service search path with fake metadata so the
+   `build_search_results` directly with fake metadata and candidate IDs so the
    test proves graph-direct/fused candidate IDs hydrate to `file_paths`.
 
 3. In `backend/tests/mcp/test_search_tool.py`, stop using docstring inspection as
@@ -263,24 +288,23 @@ Known low-signal tests now assert behavior that can catch regressions.
 <action>
 Make the global semantic-engine patch boundary explicit.
 
-Preferred implementation:
-
 - Keep the global patch for fast local tests if removing it would make the local
   suite too slow.
-- Add a marker or fixture override for a focused test that bypasses the global
-  zero-vector patch and asserts the encoded text passed to
-  `SemanticSearchEngine.encode_batch` or the controlled fake TEI boundary.
-- The focused test must prove that indexing/search code sends the expected text
-  including any configured prefix/context behavior, and that embedding dimension
-  handling is not silently assumed from the global 8-dimensional stub.
-
-If a cleaner opt-in fixture is feasible without large churn, invert the global
-patch into an opt-in fixture for tests that need it. Do not perform a broad test
-rewrite if the focused boundary test provides the required safety with less
-risk.
+- Add one focused recording-wrapper test that bypasses or overrides the global
+  zero-vector patch around `SemanticSearchEngine.encode_batch`.
+- The invariant is context-prefix / encoded input content: a known title/context
+  prefix and chunk body must reach the encoding boundary in the expected order.
+- Prefer a unit-level recording wrapper over a fake HTTP server or live TEI.
+- Avoid relying on the global 8-dimensional stub. Either return a controlled
+  non-8-dimensional embedding from the recording boundary or assert the expected
+  dimension path explicitly.
+- Do not invert the global patch unless the focused recording-boundary test is
+  impossible with the current fixture layout.
 
 After code changes, update `backend/devtools/pyright-baseline.json` only if
 `just typecheck` reports an actual improvement. Do not raise the baseline.
+New or modified tests must introduce no pyright errors; fix type issues in the
+changed tests instead of baselining them.
 </action>
 <verify>
 <automated>just lint</automated>
@@ -291,7 +315,9 @@ After code changes, update `backend/devtools/pyright-baseline.json` only if
 </verify>
 <acceptance_criteria>
 - At least one test bypasses or overrides the global `encode_batch` patch.
-- That test asserts encoded input text or fake TEI request payload content.
+- That test asserts context-prefix / encoded input content at the
+  `encode_batch` boundary.
+- New and modified tests introduce no pyright errors.
 - `just lint` exits 0.
 - `just typecheck` exits 0 and does not increase the pyright baseline.
 - `just test` exits 0 without collecting live e2e/smoke tests.
@@ -315,9 +341,14 @@ just test-e2e
 just check
 ```
 
+`just test-e2e` is intentionally a live-runtime gate. It requires the `dotmd`
+container to be running and healthy; if the runtime is missing, the command
+must fail non-zero instead of reporting skipped tests.
+
 Also verify the stale smoke failure mode is gone:
 
 ```bash
+! just --list | rg "test-smoke"
 ! just test-smoke 2>&1 | rg "9 skipped"
 ```
 </verification>
