@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
-status: ready_to_plan
-last_updated: "2026-05-02T20:30:16+05:00"
-last_activity: 2026-05-02
+status: executing
+last_updated: "2026-05-03T11:29:24.859Z"
+last_activity: 2026-05-03
 progress:
-  total_phases: 25
-  completed_phases: 9
-  total_plans: 23
-  completed_plans: 23
-  percent: 36
+  total_phases: 13
+  completed_phases: 12
+  total_plans: 27
+  completed_plans: 26
+  percent: 96
 ---
 
 # GSD State
@@ -20,18 +20,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** No active phase — documentation housekeeping complete
+**Current focus:** Phase 23 — Fix dotMD test contract
 
 ## Current Milestone
 
 **v1.4 — Search Quality & Architecture**
 
-Phase: none
-Plan: none
-Status: Ready for next milestone or explicit backlog promotion
-Last activity: 2026-05-02 - Completed quick task 260502-scv: Normalize dotMD .planning docs
+Phase: 23
+Plan: 1 plan ready
+Status: Ready to execute
+Last activity: 2026-05-03
 
-Progress: [██████████] 100%
+Progress: [█████████░] 96%
 
 ## Performance Metrics
 
@@ -61,6 +61,7 @@ Progress: [██████████] 100%
 - Phase 19 added: Reranker adapter layer and multi-model comparison
 - Phase 20 added: Reranker Latency Benchmark
 - Phase 21 added: Reranker Quality Benchmark
+- Phase 23 added: Fix dotMD test contract
 - Backlog `999.x` entries are documentation backlog items, not active phases;
   they should be promoted explicitly before planning/execution.
 

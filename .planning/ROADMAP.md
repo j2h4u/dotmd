@@ -568,6 +568,22 @@ Phase boundary:
 Plans:
 - [x] 22-01-snippet-boundary-extraction-PLAN.md — Implement and verify bounded sentence-boundary snippets
 
+### Phase 23: Fix dotMD test contract
+
+**Goal:** Make dotMD's test commands and tests honest by separating local and live test tiers, removing stale smoke coverage, making explicit live commands fail on missing runtime, and replacing misleading low-signal tests with behavior checks.
+**Requirements:** TEST-CONTRACT-01, TEST-CONTRACT-02, TEST-CONTRACT-03, TEST-CONTRACT-04
+**Depends on:** Phase 22
+**Plans:** 1/1 planned
+
+Phase boundary:
+- Local test gates must not require live containers or external ports.
+- Live MCP e2e must run inside the `dotmd` container and fail if the runtime is unavailable.
+- Legacy smoke tests must be removed or replaced by the current e2e contract.
+- Runtime product behavior should not change except for real regressions exposed by tests.
+
+Plans:
+- [ ] 23-01-test-contract-cleanup-PLAN.md — Clean up test tiers, stale smoke, e2e fixtures, low-signal tests, and docs
+
 ---
 
 *Roadmap created: 2026-03-26*

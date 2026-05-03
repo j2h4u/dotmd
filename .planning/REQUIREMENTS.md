@@ -32,6 +32,13 @@
 - [x] **SNIPPET-CONTEXT-01**: Search snippets should provide enough local context around the matched/relevant span for agents to decide whether to call `read`
 - [x] **SNIPPET-VERIFY-01**: Snippet behavior must be covered by focused tests and verified through the MCP `search` surface
 
+### Test Contract
+
+- [ ] **TEST-CONTRACT-01**: Local test gates must not require live containers, external ports, TEI, or production data
+- [ ] **TEST-CONTRACT-02**: Explicit live MCP commands must run in the intended runtime and fail non-zero when prerequisites are missing
+- [ ] **TEST-CONTRACT-03**: Stale smoke tests and misleading all-skipped green paths must be removed or replaced by current e2e coverage
+- [ ] **TEST-CONTRACT-04**: Low-signal tests must be replaced with behavior checks for command tiers, MCP contracts, search result hydration, and embedding input boundaries
+
 ## Future Requirements
 
 ### Chunking Advanced
@@ -72,12 +79,16 @@
 | SNIPPET-BOUNDARY-01 | Phase 22 | Planned |
 | SNIPPET-CONTEXT-01 | Phase 22 | Planned |
 | SNIPPET-VERIFY-01 | Phase 22 | Planned |
+| TEST-CONTRACT-01 | Phase 23 | Planned |
+| TEST-CONTRACT-02 | Phase 23 | Planned |
+| TEST-CONTRACT-03 | Phase 23 | Planned |
+| TEST-CONTRACT-04 | Phase 23 | Planned |
 
 **Coverage:**
-- v1.4 requirements: 15 total
-- Mapped to phases: 15
+- v1.4 requirements: 19 total
+- Mapped to phases: 19
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-30*
-*Last updated: 2026-05-02 after Phase 21 reranker quality requirements*
+*Last updated: 2026-05-03 after Phase 23 test contract requirements*
