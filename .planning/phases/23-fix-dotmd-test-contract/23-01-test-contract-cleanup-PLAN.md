@@ -37,6 +37,7 @@ must_haves:
     - "D-06: Low-signal tests are replaced with behavior checks"
     - "D-07: Embedding boundary coverage is explicit despite the global semantic-engine test patch"
     - "D-08: Developer docs state what each test command proves"
+    - "D-09: Nearby pyright errors are reduced opportunistically when the fix is local and low-risk"
   artifacts:
     - path: "justfile"
       provides: "canonical developer test commands"
@@ -305,6 +306,11 @@ After code changes, update `backend/devtools/pyright-baseline.json` only if
 `just typecheck` reports an actual improvement. Do not raise the baseline.
 New or modified tests must introduce no pyright errors; fix type issues in the
 changed tests instead of baselining them.
+
+Opportunistically reduce additional pyright errors that are literally adjacent
+to the files changed in this phase when the fix is mechanical, local, and
+low-risk. Do not broaden the phase into unrelated typing refactors; leave
+far-away or design-heavy type debt for a separate work item.
 </action>
 <verify>
 <automated>just lint</automated>
@@ -318,6 +324,8 @@ changed tests instead of baselining them.
 - That test asserts context-prefix / encoded input content at the
   `encode_batch` boundary.
 - New and modified tests introduce no pyright errors.
+- Additional nearby pyright errors are reduced when doing so is local and does
+  not expand scope.
 - `just lint` exits 0.
 - `just typecheck` exits 0 and does not increase the pyright baseline.
 - `just test` exits 0 without collecting live e2e/smoke tests.
