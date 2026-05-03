@@ -85,8 +85,7 @@ class TestSearchSmoke:
         """Required fields always present; heading may be absent (optional)."""
         data = mcp_call("tools/call", {"name": "search", "arguments": {"query": "тест"}})
         results = _tool_result_structured(data)
-        if not results:
-            pytest.skip("no results to check fields against")
+        assert results, "search returned no results for canonical query 'тест'"
         actual_keys = frozenset(results[0].keys())
         allowed = REQUIRED_SEARCH_RESULT_FIELDS | OPTIONAL_SEARCH_RESULT_FIELDS
         assert actual_keys >= REQUIRED_SEARCH_RESULT_FIELDS, (
@@ -104,16 +103,14 @@ class TestSearchSmoke:
     def test_file_paths_is_list(self, mcp_call: Callable):
         data = mcp_call("tools/call", {"name": "search", "arguments": {"query": "тест"}})
         results = _tool_result_structured(data)
-        if not results:
-            pytest.skip("no results to check")
+        assert results, "search returned no results for canonical query 'тест'"
         assert isinstance(results[0]["file_paths"], list)
         assert all(isinstance(p, str) for p in results[0]["file_paths"])
 
     def test_score_is_float_in_range(self, mcp_call: Callable):
         data = mcp_call("tools/call", {"name": "search", "arguments": {"query": "тест"}})
         results = _tool_result_structured(data)
-        if not results:
-            pytest.skip("no results to check")
+        assert results, "search returned no results for canonical query 'тест'"
         score = results[0]["score"]
         assert isinstance(score, float), f"score must be float, got {type(score)}"
         assert 0.0 <= score <= 1.0, f"score out of range: {score}"
@@ -134,8 +131,7 @@ class TestReadSmoke:
         """read without end returns frontmatter + total_chunks, no chunk text."""
         search = mcp_call("tools/call", {"name": "search", "arguments": {"query": "встреча", "top_k": 1}})
         results = _tool_result_structured(search)
-        if not results:
-            pytest.skip("search returned no results — cannot test read")
+        assert results, "search returned no results for canonical query 'встреча'"
 
         file_path = results[0]["file_paths"][0]
         data = mcp_call("tools/call", {"name": "read", "arguments": {"file_path": file_path}})
@@ -158,8 +154,7 @@ class TestReadSmoke:
         """read with end returns chunk text in [start, end)."""
         search = mcp_call("tools/call", {"name": "search", "arguments": {"query": "встреча", "top_k": 1}})
         results = _tool_result_structured(search)
-        if not results:
-            pytest.skip("search returned no results — cannot test read")
+        assert results, "search returned no results for canonical query 'встреча'"
 
         file_path = results[0]["file_paths"][0]
         data = mcp_call("tools/call", {"name": "read", "arguments": {"file_path": file_path, "start": 0, "end": 3}})
@@ -186,8 +181,7 @@ class TestReadSmoke:
         """end - start > 50 is capped server-side."""
         search = mcp_call("tools/call", {"name": "search", "arguments": {"query": "встреча", "top_k": 1}})
         results = _tool_result_structured(search)
-        if not results:
-            pytest.skip("no results")
+        assert results, "search returned no results for canonical query 'встреча'"
 
         file_path = results[0]["file_paths"][0]
         data = mcp_call("tools/call", {"name": "read", "arguments": {"file_path": file_path, "start": 0, "end": 200}})

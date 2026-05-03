@@ -34,10 +34,10 @@
 
 ### Test Contract
 
-- [ ] **TEST-CONTRACT-01**: Local test gates must not require live containers, external ports, TEI, or production data
-- [ ] **TEST-CONTRACT-02**: Explicit live MCP commands must run in the intended runtime and fail non-zero when prerequisites are missing
-- [ ] **TEST-CONTRACT-03**: Stale smoke tests and misleading all-skipped green paths must be removed or replaced by current e2e coverage
-- [ ] **TEST-CONTRACT-04**: Low-signal tests must be replaced with behavior checks for command tiers, MCP contracts, search result hydration, and embedding input boundaries
+- [x] **TEST-CONTRACT-01**: Local test gates must not require live containers, external ports, TEI, or production data
+- [x] **TEST-CONTRACT-02**: Explicit live MCP commands must run in the intended runtime and fail non-zero when prerequisites are missing
+- [x] **TEST-CONTRACT-03**: Stale smoke tests and misleading all-skipped green paths must be removed or replaced by current e2e coverage
+- [x] **TEST-CONTRACT-04**: Low-signal tests must be replaced with behavior checks for command tiers, MCP contracts, search result hydration, and embedding input boundaries
 
 ## Future Requirements
 
@@ -79,10 +79,10 @@
 | SNIPPET-BOUNDARY-01 | Phase 22 | Planned |
 | SNIPPET-CONTEXT-01 | Phase 22 | Planned |
 | SNIPPET-VERIFY-01 | Phase 22 | Planned |
-| TEST-CONTRACT-01 | Phase 23 | Planned |
-| TEST-CONTRACT-02 | Phase 23 | Planned |
-| TEST-CONTRACT-03 | Phase 23 | Planned |
-| TEST-CONTRACT-04 | Phase 23 | Planned |
+| TEST-CONTRACT-01 | Phase 23 | Complete |
+| TEST-CONTRACT-02 | Phase 23 | Complete |
+| TEST-CONTRACT-03 | Phase 23 | Complete |
+| TEST-CONTRACT-04 | Phase 23 | Complete |
 
 **Coverage:**
 - v1.4 requirements: 19 total

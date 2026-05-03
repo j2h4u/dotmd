@@ -69,12 +69,13 @@ uv run dotmd search "how do we deploy this service?"
 
 ```bash
 just               # show available project commands
-just test          # run backend tests
-just test-smoke    # run smoke tests
+just test          # run local backend tests only; excludes live MCP e2e/smoke
+just test-e2e      # run live MCP e2e inside the running dotMD container
+just test-mcp-remote # run production/Funnel MCP connectivity smoke
 just lint          # run Ruff checks
 just fmt           # format and auto-fix with Ruff
 just typecheck     # run Pyright ratchet
-just check         # lint + typecheck ratchet + tests
+just check         # lint + typecheck ratchet + local tests
 ```
 
 ## Usage

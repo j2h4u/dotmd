@@ -10,6 +10,7 @@ Covers:
 All tests mock encode_batch — no live TEI required.
 """
 import pathlib
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -29,6 +30,7 @@ def _write_md(path: pathlib.Path, title: str, tags: list, body: str) -> None:
 def minimal_settings(tmp_path):
     """Minimal settings for pipeline construction without live TEI."""
     from dotmd.core.config import Settings
+    from dotmd.core.models import ExtractDepth
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     index_dir = tmp_path / "index"
@@ -39,7 +41,7 @@ def minimal_settings(tmp_path):
         embedding_url="http://localhost:18088",  # not real; mocked
         vector_backend="sqlite-vec",
         graph_backend="ladybugdb",
-        extract_depth="structural",
+        extract_depth=ExtractDepth.STRUCTURAL,
         embedding_weights="text=0.7,meta=0.3",
     )
 
@@ -121,6 +123,45 @@ def test_embed_chunks_returns_etext_not_efused_from_cache(minimal_settings, tmp_
         f"encode_batch must not be called when e_text is in VecComponentStore. "
         f"Got {len(call_log)} calls."
     )
+
+
+@pytest.mark.real_semantic_encode_batch
+def test_embed_chunks_sends_context_prefixed_text_to_encode_boundary(
+    minimal_settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_embed_chunks sends heading context through SemanticSearchEngine.encode_batch.
+
+    This bypasses the global zero-vector encode_batch patch and records the
+    controlled TEI boundary instead of starting a real TEI server.
+    """
+    from dotmd.core.models import Chunk
+    from dotmd.ingestion.pipeline import IndexingPipeline
+
+    pipeline = IndexingPipeline(minimal_settings)
+    recorded_batches: list[list[str]] = []
+
+    def record_tei_boundary(inputs: str | list[str]) -> list[list[float]]:
+        batch = [inputs] if isinstance(inputs, str) else list(inputs)
+        recorded_batches.append(batch)
+        return [[0.1, 0.2, 0.3] for _ in batch]
+
+    monkeypatch.setattr(pipeline._semantic_engine, "_encode_via_tei", record_tei_boundary)
+
+    chunk = Chunk(
+        chunk_id="d" * 64,
+        file_paths=[minimal_settings.data_dir / "roadmap.md"],
+        heading_hierarchy=["Product Roadmap"],
+        level=1,
+        text="Product Roadmap\n\nShip Phase 23 test contract.",
+        chunk_index=0,
+    )
+
+    embeddings, text_hashes = pipeline._embed_chunks([chunk])
+
+    assert recorded_batches == [["passage: Product Roadmap\n\nShip Phase 23 test contract."]]
+    assert embeddings == [[0.1, 0.2, 0.3]]
+    assert set(text_hashes) == {chunk.chunk_id}
 
 
 # ── Fast path detection ──────────────────────────────────────────────────────
@@ -257,7 +298,8 @@ def test_schema_version_wipe_clears_all_state(minimal_settings, tmp_path):
 
     # Corrupt schema_version to simulate old-version deploy.
     # Must be a non-None value different from SCHEMA_VERSION to trigger the wipe path.
-    config_table = pipeline._vector_store._CONFIG_TABLE
+    vector_store = cast(Any, pipeline._vector_store)
+    config_table = vector_store._CONFIG_TABLE
     pipeline._conn.execute(
         f"INSERT OR REPLACE INTO {config_table} (key, value) VALUES ('schema_version', '1')"
     )
@@ -301,15 +343,15 @@ def test_schema_version_wipe_clears_all_state(minimal_settings, tmp_path):
     # 6. vec0 fused vector table (delete_all() drops it entirely)
     vec0_exists = pipeline._conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-        (pipeline._vector_store._VEC_TABLE,),
+        (vector_store._VEC_TABLE,),
     ).fetchone()
-    assert vec0_exists is None, f"vec0 table must be dropped by wipe (still exists: {pipeline._vector_store._VEC_TABLE!r})"
+    assert vec0_exists is None, f"vec0 table must be dropped by wipe (still exists: {vector_store._VEC_TABLE!r})"
 
     # 7. vec_meta text_hash index (cleared by delete_all, not dropped)
     # Note: chunks_*, chunk_file_paths_*, and FTS5 are intentionally NOT cleared —
     # schema wipe only resets vector state so trickle can rebuild embeddings.
     vec_meta_count = pipeline._conn.execute(
-        f"SELECT COUNT(*) FROM {pipeline._vector_store._META_TABLE}"
+        f"SELECT COUNT(*) FROM {vector_store._META_TABLE}"
     ).fetchone()[0]
     assert vec_meta_count == 0, f"vec_meta must be wiped (got {vec_meta_count} rows)"
 
@@ -327,13 +369,14 @@ def test_weight_change_recomputes_fused_without_tei(minimal_settings, tmp_path):
 
     # Change weights in settings (simulate env var change on next startup)
     from dotmd.core.config import Settings
+    from dotmd.core.models import ExtractDepth
     new_settings = Settings(
         data_dir=minimal_settings.data_dir,
         index_dir=minimal_settings.index_dir,
         embedding_url=minimal_settings.embedding_url,
         vector_backend="sqlite-vec",
         graph_backend="ladybugdb",
-        extract_depth="structural",
+        extract_depth=ExtractDepth.STRUCTURAL,
         embedding_weights="text=0.6,meta=0.4",
     )
     pipeline._settings = new_settings

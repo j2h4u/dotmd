@@ -13,6 +13,7 @@ Imports are deferred so --collect-only works before P5 ships.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 
 def _import_search_result():  # type: ignore[no-untyped-def]
@@ -93,23 +94,52 @@ class TestNoFilePathAttr:
 class TestGraphDirectHitAlsoHydrates:
     """Graph-origin hits are hydrated via the same batch path as semantic hits."""
 
-    def test_graph_direct_hit_also_hydrates(self, tmp_path: Path) -> None:
+    def test_graph_direct_hit_also_hydrates(self) -> None:
         """A chunk_id from graph_direct search is hydrated with file_paths list."""
-        # This test will fail until P5 wires graph_direct results through
-        # the same batch hydration path (get_file_paths_for_chunk_ids).
-        # For now, assert that the SearchResult shape is consistent.
-        SearchResult = _import_search_result()
+        from dotmd.core.models import Chunk
+        from dotmd.search.fusion import build_search_results
+
+        graph_chunk_id = "c" * 64
         graph_path = Path("/graph/file.md")
-        result = SearchResult(
-            chunk_id="c" * 64,
-            file_paths=[graph_path],
-            heading_path="# Section",
-            snippet="graph snippet",
-            fused_score=0.7,
-            graph_direct_score=0.95,
+
+        class HydratingStore:
+            _table = "chunks_heading_512_50"
+
+            def get_chunks(self, chunk_ids: list[str]) -> list[Chunk]:
+                assert chunk_ids == [graph_chunk_id]
+                return [
+                    Chunk(
+                        chunk_id=graph_chunk_id,
+                        file_paths=[Path("/fallback/file.md")],
+                        heading_hierarchy=["Section"],
+                        level=1,
+                        text="graph snippet",
+                        chunk_index=0,
+                    )
+                ]
+
+            def get_file_paths_for_chunk_ids(
+                self,
+                strategy: str,
+                chunk_ids: list[str],
+            ) -> dict[str, list[str]]:
+                assert strategy == "heading_512_50"
+                assert chunk_ids == [graph_chunk_id]
+                return {graph_chunk_id: [str(graph_path)]}
+
+        results = build_search_results(
+            [(graph_chunk_id, 0.7)],
+            per_engine={"graph_direct": [(graph_chunk_id, 0.95)]},
+            metadata_store=cast(Any, HydratingStore()),
+            query="graph",
+            top_k=1,
         )
-        assert isinstance(result.file_paths, list)
-        assert len(result.file_paths) >= 1
+
+        assert len(results) == 1
+        result = results[0]
+        assert result.file_paths == [graph_path]
+        assert result.graph_direct_score == 0.95
+        assert result.matched_engines == ["graph_direct"]
 
 
 class TestBatchHydrationSingleQueryPerStrategy:

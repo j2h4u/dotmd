@@ -20,19 +20,30 @@ import secrets
 import threading
 from collections.abc import Callable
 from contextlib import AsyncExitStack
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 import pytest
 
+from dotmd.auth import DotMDOAuthProvider
+
+if TYPE_CHECKING:
+    from mcp import ClientSession
+
 MCP_URL = "http://localhost:8080/mcp"
 AUTH_BASE_URL = "http://localhost:8080"
+OAUTH_STATE_PATH = "/dotmd-index/oauth_state.json"
 _MCP_HEADERS = {
     "Content-Type": "application/json",
     "Accept": "application/json, text/event-stream",
 }
 _HTTP_ACCESS_TOKEN: str | None = None
+_LIVE_DOTMD_ENV = {
+    k: v for k, v in os.environ.items()
+    if k.startswith("DOTMD_")
+}
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +80,48 @@ def _is_tool_error(data: dict) -> bool:
 # HTTP transport
 # ---------------------------------------------------------------------------
 
+def _create_live_pairing_code() -> str:
+    """Create a one-time OAuth pairing code in the live server state file."""
+    provider = DotMDOAuthProvider(Path(OAUTH_STATE_PATH))
+    code, _ = asyncio.run(provider.create_pairing_code(ttl_seconds=60))
+    return code
+
+
+def _authorize_url(client_id: str, challenge: str) -> str:
+    return f"{AUTH_BASE_URL}/authorize?{urlencode({
+        'client_id': client_id,
+        'redirect_uri': 'http://localhost:8888/callback',
+        'response_type': 'code',
+        'code_challenge': challenge,
+        'code_challenge_method': 'S256',
+        'state': 'e2e',
+        'resource': os.environ['DOTMD_BASE_URL'].rstrip('/') + '/mcp',
+    })}"
+
+
+def _authorization_redirect_location(authorize_url: str) -> str:
+    """Complete the current PIN-code OAuth flow and return the redirect URL."""
+    authorize = httpx.get(authorize_url, follow_redirects=False, timeout=60.0)
+    if authorize.status_code == 302:
+        return authorize.headers["location"]
+
+    assert authorize.status_code == 200, (
+        f"unexpected /authorize status {authorize.status_code}: {authorize.text[:500]}"
+    )
+    assert "text/html" in authorize.headers.get("content-type", "")
+
+    paired = httpx.post(
+        authorize_url,
+        data={"pairing_code": _create_live_pairing_code()},
+        follow_redirects=False,
+        timeout=60.0,
+    )
+    assert paired.status_code == 302, (
+        f"pairing did not redirect; status={paired.status_code} body={paired.text[:500]}"
+    )
+    return paired.headers["location"]
+
+
 def _http_access_token() -> str | None:
     """Return a cached OAuth access token when HTTP auth is enabled."""
     global _HTTP_ACCESS_TOKEN
@@ -96,21 +149,7 @@ def _http_access_token() -> str | None:
     challenge = base64.urlsafe_b64encode(
         hashlib.sha256(verifier.encode()).digest()
     ).rstrip(b"=").decode()
-    authorize = httpx.get(
-        f"{AUTH_BASE_URL}/authorize?{urlencode({
-            'client_id': client_id,
-            'redirect_uri': 'http://localhost:8888/callback',
-            'response_type': 'code',
-            'code_challenge': challenge,
-            'code_challenge_method': 'S256',
-            'state': 'e2e',
-            'resource': os.environ["DOTMD_BASE_URL"].rstrip("/") + '/mcp',
-        })}",
-        follow_redirects=False,
-        timeout=60.0,
-    )
-    assert authorize.status_code == 302
-    location = authorize.headers["location"]
+    location = _authorization_redirect_location(_authorize_url(client_id, challenge))
     code = parse_qs(urlparse(location).query)["code"][0]
 
     token = httpx.post(
@@ -162,7 +201,7 @@ class _StdioSession:
     def __init__(self) -> None:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
-        self._session = None  # mcp.ClientSession
+        self._session: ClientSession | None = None
         self._ready: threading.Event = threading.Event()
         self._shutdown: asyncio.Event | None = None
         self._startup_error: BaseException | None = None
@@ -175,8 +214,11 @@ class _StdioSession:
         async def _run() -> None:
             try:
                 async with AsyncExitStack() as stack:
-                    dotmd_env = {k: v for k, v in os.environ.items() if k.startswith("DOTMD_")}
-                    server = StdioServerParameters(command="dotmd", args=["mcp"], env=dotmd_env)
+                    server = StdioServerParameters(
+                        command="dotmd",
+                        args=["mcp"],
+                        env=_LIVE_DOTMD_ENV,
+                    )
                     read, write = await stack.enter_async_context(
                         stdio_client(server)
                     )
@@ -194,9 +236,10 @@ class _StdioSession:
                 self._startup_error = exc
                 self._ready.set()
 
-        self._loop = asyncio.new_event_loop()
+        loop = asyncio.new_event_loop()
+        self._loop = loop
         self._thread = threading.Thread(
-            target=lambda: self._loop.run_until_complete(_run()),
+            target=lambda: loop.run_until_complete(_run()),
             daemon=True,
             name="stdio-mcp-session",
         )
@@ -207,12 +250,14 @@ class _StdioSession:
             raise self._startup_error
 
     def call(self, method: str, params: dict | None = None) -> dict:
-        assert self._session is not None, "stdio session not started"
-        assert self._loop is not None
+        session = self._session
+        loop = self._loop
+        assert session is not None, "stdio session not started"
+        assert loop is not None
 
         async def _call() -> dict:
             if method == "tools/list":
-                result = await self._session.list_tools()
+                result = await session.list_tools()
                 return {
                     "result": {
                         "tools": [
@@ -224,7 +269,7 @@ class _StdioSession:
             if method == "tools/call":
                 name = (params or {})["name"]
                 args = (params or {}).get("arguments", {})
-                result = await self._session.call_tool(name, args)
+                result = await session.call_tool(name, args)
                 return {
                     "result": {
                         "content": [
@@ -236,7 +281,7 @@ class _StdioSession:
                 }
             raise ValueError(f"unsupported method for stdio caller: {method!r}")
 
-        future = asyncio.run_coroutine_threadsafe(_call(), self._loop)
+        future = asyncio.run_coroutine_threadsafe(_call(), loop)
         return future.result(timeout=60)
 
     def stop(self) -> None:
@@ -263,19 +308,22 @@ def _stdio_session():
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(params=["http", "stdio"], ids=["http", "stdio"])
-def mcp_call(request, _stdio_session: _StdioSession) -> Callable[[str, dict | None], dict]:
+def mcp_call(request: pytest.FixtureRequest) -> Callable[[str, dict | None], dict]:
     """Callable mcp_call(method, params) — same interface for both transports."""
-    if request.param == "http":
+    transport = cast(str, request.param)
+    if transport == "http":
         return _http_call
-    return _stdio_session.call
+    session = cast(_StdioSession, request.getfixturevalue("_stdio_session"))
+    return session.call
 
 
 # ---------------------------------------------------------------------------
-# Auto-skip when server is unreachable
+# Fail fast when live server is unreachable
 # ---------------------------------------------------------------------------
 
-def pytest_collection_modifyitems(config, items):
-    """Skip all e2e tests if the MCP server is unreachable."""
+@pytest.fixture(scope="session", autouse=True)
+def _require_live_server() -> None:
+    """Fail explicit e2e runs when the live MCP server is unavailable."""
     try:
         r = httpx.get("http://localhost:8080/health", timeout=5.0)
         if r.status_code == 200:
@@ -283,7 +331,7 @@ def pytest_collection_modifyitems(config, items):
     except (httpx.ConnectError, httpx.TimeoutException):
         pass
 
-    skip = pytest.mark.skip(reason="dotMD MCP server not reachable at http://localhost:8080")
-    for item in items:
-        if "e2e" in str(item.fspath):
-            item.add_marker(skip)
+    pytest.exit(
+        "dotMD MCP server not reachable at http://localhost:8080",
+        returncode=1,
+    )

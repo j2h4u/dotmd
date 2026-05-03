@@ -33,11 +33,10 @@ class TestSearchReturnsFilePaths:
     """DotMDService.search returns SearchResult instances with file_paths list."""
 
     def test_search_returns_file_paths_list(self, tmp_path: Path) -> None:
-        """search() results all have file_paths: list attribute."""
+        """search() forwards contract args and returns results with file_paths."""
         service = _get_service(tmp_path)
 
-        # Stub the underlying search engines to return minimal results
-        from dotmd.core.models import SearchResult
+        from dotmd.core.models import SearchMode, SearchResult
         stub_result = SearchResult(
             chunk_id="a" * 64,
             file_paths=[Path(tmp_path / "test.md")],
@@ -46,10 +45,19 @@ class TestSearchReturnsFilePaths:
             fused_score=0.9,
         )
 
-        with patch.object(service, "_execute_search", return_value=[stub_result]):
-            results = service.search("test query", top_k=5)
+        with patch.object(service, "_execute_search", return_value=[stub_result]) as execute_search:
+            results = service.search("test query", top_k=5, rerank=False, expand=False)
 
-        assert len(results) >= 0  # may be empty if stub returns no results
+        execute_search.assert_called_once_with(
+            search_query="test query",
+            original_query="test query",
+            top_k=5,
+            mode=SearchMode.HYBRID,
+            rerank=False,
+            reranker_name=None,
+            pool_size=5,
+        )
+        assert results == [stub_result]
         for r in results:
             assert hasattr(r, "file_paths"), (
                 "SearchResult must have file_paths attribute (P5 Decision #2)"
@@ -63,7 +71,7 @@ class TestSearchRespectsTopK:
     """DotMDService.search respects the top_k parameter."""
 
     def test_search_respects_top_k(self, tmp_path: Path) -> None:
-        """search(top_k=3) returns at most 3 results."""
+        """search(top_k=3) forwards top_k and rerank pool_size to execution."""
         service = _get_service(tmp_path)
 
         from dotmd.core.models import SearchResult
@@ -78,12 +86,14 @@ class TestSearchRespectsTopK:
             for i in range(5)
         ]
 
-        with patch.object(service, "_execute_search", return_value=stub_results[:3]):
+        with patch.object(service, "_execute_search", return_value=stub_results) as execute_search:
             results = service.search("test query", top_k=3)
 
-        assert len(results) <= 3, (
-            f"search(top_k=3) must return at most 3 results, got {len(results)}"
-        )
+        assert results == stub_results
+        kwargs = execute_search.call_args.kwargs
+        assert kwargs["top_k"] == 3
+        assert kwargs["pool_size"] == service._settings.rerank_pool_size
+        assert kwargs["rerank"] is True
 
 
 class TestCompareRerankers:

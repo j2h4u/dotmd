@@ -573,7 +573,7 @@ Plans:
 **Goal:** Make dotMD's test commands and tests honest by separating local and live test tiers, removing stale smoke coverage, making explicit live commands fail on missing runtime, and replacing misleading low-signal tests with behavior checks.
 **Requirements:** TEST-CONTRACT-01, TEST-CONTRACT-02, TEST-CONTRACT-03, TEST-CONTRACT-04
 **Depends on:** Phase 22
-**Plans:** 1/1 planned
+**Plans:** 1/1 plans complete
 
 Phase boundary:
 - Local test gates must not require live containers or external ports.
@@ -582,7 +582,7 @@ Phase boundary:
 - Runtime product behavior should not change except for real regressions exposed by tests.
 
 Plans:
-- [ ] 23-01-test-contract-cleanup-PLAN.md — Clean up test tiers, stale smoke, e2e fixtures, low-signal tests, and docs
+- [x] 23-01-test-contract-cleanup-PLAN.md — Clean up test tiers, stale smoke, e2e fixtures, low-signal tests, and docs
 
 ---
 

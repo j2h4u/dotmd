@@ -34,13 +34,17 @@ def _dotmd_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _mock_semantic_engine() -> Generator[None, None, None]:
+def _mock_semantic_engine(request: pytest.FixtureRequest) -> Generator[None, None, None]:
     """Patch SemanticSearchEngine to avoid real HTTP/model calls in tests.
 
     Tests that exercise the actual embedding pipeline should override this
     fixture or un-patch locally. The stub returns zero-vectors (dimension 8)
     which is enough for schema/idempotency tests that only check row counts.
     """
+    if request.node.get_closest_marker("real_semantic_encode_batch"):
+        yield
+        return
+
     def _stub_encode_batch(texts: list[str]) -> list[list[float]]:
         return [[0.0] * 8 for _ in texts]
 

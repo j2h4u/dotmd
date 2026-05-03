@@ -8,17 +8,13 @@ default:
 setup:
     cd {{backend}} && uv sync --extra dev
 
-# Run backend pytest suite.
+# Run local backend pytest suite. Live MCP checks are opt-in.
 test *args:
-    cd {{backend}} && uv run pytest {{args}}
+    cd {{backend}} && uv run pytest -m "not e2e and not smoke" {{args}}
 
-# Run smoke tests.
-test-smoke:
-    cd {{backend}} && uv run pytest tests/smoke -q
-
-# Run live MCP HTTP e2e tests.
-test-e2e:
-    cd {{backend}} && env -u DOTMD_BASE_URL uv run pytest -p no:cacheprovider tests/e2e --tb=short -q
+# Run live MCP e2e tests inside the running dotMD container.
+test-e2e *args:
+    docker exec dotmd sh -lc 'cd /mnt/home/repos/j2h4u/dotmd/backend && python -m pytest tests/e2e/ -p no:cacheprovider --tb=short -q {{args}}'
 
 # Run production MCP/Funnel connectivity smoke against live containers.
 test-mcp-remote *args:

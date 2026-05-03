@@ -10,10 +10,12 @@ Imports are deferred so --collect-only works before P5 ships.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import MagicMock
 
-import pytest
+from dotmd.core.models import SearchResult
 
 
 def _import_mcp():  # type: ignore[no-untyped-def]
@@ -22,15 +24,29 @@ def _import_mcp():  # type: ignore[no-untyped-def]
     return mcp
 
 
+def _search_tool_schema() -> dict[str, Any]:
+    mcp = _import_mcp()
+    tools = asyncio.run(mcp.mcp.list_tools())
+    by_name = {tool.name: tool.model_dump(mode="json", exclude_none=True) for tool in tools}
+    return by_name["search"]
+
+
 class TestFilePathsIsJsonArray:
-    """MCP search tool emits file_paths as a JSON array of strings."""
+    """MCP search tool emits file_paths as a registered schema and call output."""
 
-    def test_file_paths_is_json_array(self, tmp_path: Path) -> None:
-        """MCP search response contains 'file_paths' as a list, not 'file_path' as string."""
+    def test_registered_output_schema_has_file_paths_array(self) -> None:
+        """tools/list schema exposes file_paths as array, not file_path."""
+        schema = _search_tool_schema()["outputSchema"]
+        hit_schema = schema["$defs"]["SearchHit"]
+        properties = hit_schema["properties"]
+
+        assert properties["file_paths"]["type"] == "array"
+        assert properties["file_paths"]["items"]["type"] == "string"
+        assert "file_path" not in properties
+
+    def test_tool_call_output_has_file_paths_array(self, tmp_path: Path) -> None:
+        """Stubbed tools/call output contains file_paths list, not file_path."""
         mcp = _import_mcp()
-
-        from dotmd.core.models import SearchResult
-
         stub_result = SearchResult(
             chunk_id="a" * 64,
             file_paths=[Path("/path/to/file.md"), Path("/other/file.md")],
@@ -38,59 +54,20 @@ class TestFilePathsIsJsonArray:
             snippet="test snippet",
             fused_score=0.9,
         )
-
-        # The MCP server formats results via _format_result or similar helper.
-        # After P5, it must emit {"file_paths": ["/path/...", "/other/..."]}
-        # and NOT {"file_path": "/path/..."}.
-
-        if hasattr(mcp, "_format_result"):
-            formatted = mcp._format_result(stub_result)
-            payload = cast(
-                dict[str, Any],
-                formatted.model_dump() if hasattr(formatted, "model_dump") else formatted,
+        service = MagicMock()
+        service.search.return_value = [stub_result]
+        previous_service = mcp._service
+        mcp._service = service
+        try:
+            _content, structured_raw = asyncio.run(
+                mcp.mcp.call_tool("search", {"query": "test", "top_k": 1})
             )
-            assert "file_paths" in payload, (
-                f"MCP result must have 'file_paths' key after P5: {payload!r}"
-            )
-            assert isinstance(payload["file_paths"], list), (
-                f"file_paths must be a list in MCP output: {payload!r}"
-            )
-            assert "file_path" not in payload, (
-                f"MCP result must NOT have singular 'file_path' key after P5: {payload!r}"
-            )
-        else:
-            # If _format_result not yet added (P5 not shipped), the test fails here
-            pytest.fail(
-                "mcp_server._format_result not found — P5 must add this helper "
-                "or the equivalent formatting logic."
-            )
+        finally:
+            mcp._service = previous_service
 
-
-class TestDocstringMentionsFilePaths:
-    """MCP search tool docstring references 'file_paths' after P5."""
-
-    def test_docstring_mentions_file_paths(self) -> None:
-        """The MCP search tool function docstring mentions 'file_paths'."""
-        mcp = _import_mcp()
-
-        # Find the search tool function (typically named 'search' or 'search_tool')
-        search_fn = getattr(mcp, "search", None) or getattr(mcp, "search_tool", None)
-
-        if search_fn is None:
-            # Try to find it via the MCP server instance
-            if hasattr(mcp, "_mcp_server"):
-                # Look for a registered tool with 'search' in its name
-                pytest.fail(
-                    "Could not find search tool function in mcp_server module. "
-                    "P5 must expose it so this test can assert on its docstring."
-                )
-            pytest.fail(
-                "mcp_server has no 'search' or 'search_tool' function — "
-                "P5 must expose the function for docstring assertion."
-            )
-
-        doc = getattr(search_fn, "__doc__", "") or ""
-        assert "file_paths" in doc, (
-            f"MCP search tool docstring must mention 'file_paths' after P5 update.\n"
-            f"Current docstring:\n{doc!r}"
-        )
+        structured = cast(dict[str, Any], structured_raw)
+        payload = structured["result"][0]
+        payload = cast(dict[str, Any], payload)
+        assert payload["file_paths"] == ["/other/file.md", "/path/to/file.md"]
+        assert "file_path" not in payload
+        service.search.assert_called_once_with("test", top_k=1)
