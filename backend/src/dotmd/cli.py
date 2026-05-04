@@ -316,7 +316,9 @@ def status(ctx: click.Context, verbose: bool) -> None:
                 progress = f" ({stats.trickle_indexed or 0}/{stats.trickle_total} files)"
             rate = ""
             if stats.trickle_chunks_per_hour:
-                rate = f" @ {stats.trickle_chunks_per_hour:.0f} chunks/hr ({stats.trickle_files_per_hour:.0f} files/hr)"
+                chunks_per_second = stats.trickle_chunks_per_hour / 3600
+                files_per_second = (stats.trickle_files_per_hour or 0.0) / 3600
+                rate = f" @ {chunks_per_second:.2f} chunks/s ({files_per_second:.2f} files/s)"
             eta = ""
             if stats.trickle_eta_minutes is not None:
                 if stats.trickle_eta_minutes < 60:

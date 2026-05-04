@@ -49,6 +49,28 @@ class TrickleState:
     _start_time: float = field(default_factory=time.monotonic, repr=False)
 
 
+def _format_duration(seconds: float) -> str:
+    """Format a short human-readable duration for progress logs."""
+    seconds = max(0, round(seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, seconds = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m{seconds:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h{minutes:02d}m{seconds:02d}s"
+
+
+def _format_rate(per_hour: float, unit: str) -> str:
+    """Render stored per-hour throughput as the more readable per-second rate."""
+    per_second = per_hour / 3600
+    if per_second >= 10:
+        return f"{per_second:.0f} {unit}/s"
+    if per_second >= 1:
+        return f"{per_second:.1f} {unit}/s"
+    return f"{per_second:.2f} {unit}/s"
+
+
 # ---------------------------------------------------------------------------
 # Watchdog -> asyncio bridge
 # ---------------------------------------------------------------------------
@@ -327,6 +349,12 @@ class TrickleIndexer:
 
         succeeded = 0
         failed = 0
+        self._state._start_time = time.monotonic()
+        self._state.indexed_count = 0
+        self._state.total_chunks_done = 0
+        self._state.files_per_hour = 0.0
+        self._state.chunks_per_hour = 0.0
+        self._state.eta_minutes = None
 
         for i, file_info in enumerate(unindexed):
             if shutdown.is_set():
@@ -351,23 +379,24 @@ class TrickleIndexer:
             self._state.last_indexed_at = datetime.now(UTC)
             self._update_eta(i + 1, len(unindexed))
 
-            # Progress log every file
+            elapsed = time.monotonic() - self._state._start_time
             if self._state.eta_minutes is not None:
-                if self._state.eta_minutes < 60:
-                    eta_str = f", ETA ~{self._state.eta_minutes:.0f}min"
-                else:
-                    eta_str = f", ETA ~{self._state.eta_minutes / 60:.1f}hr"
+                eta_seconds = self._state.eta_minutes * 60
+                eta_str = f", ETA ~{_format_duration(eta_seconds)}"
             else:
-                # Still collecting sample — don't lie
                 eta_str = ", ETA: estimating..."
             rate_str = ""
             if self._state.chunks_per_hour > 0:
-                rate_str = f" @ {self._state.chunks_per_hour:.0f} chunks/hr ({self._state.files_per_hour:.0f} files/hr)"
+                rate_str = (
+                    f" @ {_format_rate(self._state.chunks_per_hour, 'chunks')}"
+                    f", {_format_rate(self._state.files_per_hour, 'files')}"
+                )
             logger.info(
-                "[%d/%d] %d chunks total%s%s",
+                "[%d/%d] %d chunks in %s%s%s",
                 succeeded,
                 len(unindexed),
                 self._state.total_chunks_done,
+                _format_duration(elapsed),
                 rate_str,
                 eta_str,
             )
