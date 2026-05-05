@@ -71,3 +71,55 @@ class TestFilePathsIsJsonArray:
         assert payload["file_paths"] == ["/other/file.md", "/path/to/file.md"]
         assert "file_path" not in payload
         service.search.assert_called_once_with("test", top_k=1)
+
+
+class TestReadToolCompatibility:
+    """MCP read remains path-based and returns frontmatter plus chunk ranges."""
+
+    def test_read_tool_uses_file_path_and_returns_frontmatter_and_chunks(
+        self,
+    ) -> None:
+        mcp = _import_mcp()
+        service = MagicMock()
+        service.read.return_value = {
+            "file_path": "/path/to/file.md",
+            "total_chunks": 2,
+            "frontmatter": {
+                "title": "Compatibility Note",
+                "kind": "document",
+                "tags": ["source"],
+            },
+            "chunks": [
+                {
+                    "index": 0,
+                    "heading_hierarchy": ["Project", "Decision"],
+                    "text": "Keep path-based reads stable.",
+                }
+            ],
+        }
+        previous_service = mcp._service
+        mcp._service = service
+        try:
+            _content, structured_raw = asyncio.run(
+                mcp.mcp.call_tool(
+                    "read",
+                    {"file_path": "/path/to/file.md", "start": 0, "end": 1},
+                )
+            )
+        finally:
+            mcp._service = previous_service
+
+        structured = cast(dict[str, Any], structured_raw)
+        assert structured["file_path"] == "/path/to/file.md"
+        assert structured["total_chunks"] == 2
+        assert structured["frontmatter"]["title"] == "Compatibility Note"
+        assert structured["frontmatter"]["kind"] == "document"
+        assert structured["frontmatter"]["tags"] == ["source"]
+        assert structured["chunks"] == [
+            {
+                "index": 0,
+                "heading": "Project > Decision",
+                "text": "Keep path-based reads stable.",
+            }
+        ]
+        service.read.assert_called_once_with("/path/to/file.md", 0, 1)
