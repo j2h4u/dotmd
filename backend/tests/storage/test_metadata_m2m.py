@@ -322,6 +322,41 @@ class TestChunkSourceProvenance:
         )
 
 
+class TestDeleteAllClearsSourceProvenance:
+    """delete_all clears source-aware tables alongside legacy chunk tables."""
+
+    def test_delete_all_clears_source_documents_and_chunk_provenance(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        store = _build_m2m_store(tmp_path)
+        store.ensure_chunk_source_provenance_table(STRATEGY)
+        md_path = tmp_path / "note.md"
+        md_path.write_text("# Note\n", encoding="utf-8")
+
+        conn = sqlite3.connect(str(tmp_path / "metadata.db"))
+        store.upsert_source_document(_source_document(md_path), conn=conn)
+        store.add_chunk_provenance(
+            STRATEGY,
+            _filesystem_provenance(md_path),
+            VALID_CHUNK_ID,
+            conn=conn,
+        )
+        conn.commit()
+        conn.close()
+
+        store.delete_all()
+
+        source_count = store._conn.execute(
+            "SELECT COUNT(*) FROM source_documents"
+        ).fetchone()[0]
+        provenance_count = store._conn.execute(
+            f"SELECT COUNT(*) FROM chunk_source_provenance_{STRATEGY}"
+        ).fetchone()[0]
+        assert source_count == 0
+        assert provenance_count == 0
+
+
 class TestChunkModelRejectsCharOffset:
     """Decision #8: Chunk model must not accept char_offset after P1."""
 

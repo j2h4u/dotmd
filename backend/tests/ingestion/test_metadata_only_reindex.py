@@ -20,6 +20,58 @@ def _write_md(path: pathlib.Path, title: str, tags: list, body: str) -> None:
     )
 
 
+def _vector_chunk_ids(pipeline) -> set[str]:  # type: ignore[no-untyped-def]
+    return {
+        row[0]
+        for row in pipeline._conn.execute(
+            f"SELECT chunk_id FROM {pipeline._vector_store._META_TABLE}"
+        ).fetchall()
+    }
+
+
+def _chunk_ids_for_path(pipeline, path: pathlib.Path) -> list[str]:  # type: ignore[no-untyped-def]
+    return pipeline._metadata_store.get_chunk_ids_by_file(
+        pipeline._strategy,
+        str(path),
+    )
+
+
+def _vector_blob_for_chunk(pipeline, chunk_id: str) -> bytes:  # type: ignore[no-untyped-def]
+    row = pipeline._conn.execute(
+        f"""
+        SELECT v.embedding
+        FROM {pipeline._vector_store._VEC_TABLE} v
+        JOIN {pipeline._vector_store._META_TABLE} m ON m.rowid = v.rowid
+        WHERE m.chunk_id = ?
+        """,
+        (chunk_id,),
+    ).fetchone()
+    assert row is not None
+    return row[0]
+
+
+def _make_pipeline_with_directional_vectors(settings):  # type: ignore[no-untyped-def]
+    from dotmd.ingestion.pipeline import IndexingPipeline
+
+    def mock_encode_batch(texts):  # type: ignore[no-untyped-def]
+        vectors = []
+        for text in texts:
+            if "Updated" in text or "beta" in text:
+                vectors.append([0.0, 0.0, 1.0, 0.0])
+            elif "Initial" in text or "alpha" in text:
+                vectors.append([0.0, 1.0, 0.0, 0.0])
+            else:
+                vectors.append([1.0, 0.0, 0.0, 0.0])
+        return vectors
+
+    pipeline = IndexingPipeline(settings)
+    mock_engine = MagicMock()
+    mock_engine.encode_batch = mock_encode_batch
+    mock_engine.get_tei_model_id = MagicMock(return_value="test-model")
+    pipeline._semantic_engine = mock_engine
+    return pipeline
+
+
 @pytest.fixture
 def pipeline_settings(tmp_path):
     from dotmd.core.config import Settings
@@ -143,3 +195,85 @@ def test_body_change_triggers_full_reembedding(pipeline_settings):
         f"Body change must encode chunk bodies ({chunk_count}) + e_meta (1). "
         f"Got {total_texts} total texts across {len(encode_calls)} calls."
     )
+
+
+def test_metadata_only_bulk_index_retains_vectors_for_unchanged_files(
+    pipeline_settings,
+):
+    """Bulk metadata-only reindex must replace changed vectors without wiping siblings."""
+
+    doc_a = pipeline_settings.data_dir / "a.md"
+    doc_b = pipeline_settings.data_dir / "b.md"
+    _write_md(doc_a, "Initial A", ["alpha"], "Stable body A.")
+    _write_md(doc_b, "Initial B", ["alpha"], "Stable body B.")
+
+    pipeline = _make_pipeline_with_directional_vectors(pipeline_settings)
+    pipeline.index(pipeline_settings.data_dir)
+
+    doc_a_chunk_ids = set(_chunk_ids_for_path(pipeline, doc_a))
+    doc_b_chunk_ids = set(_chunk_ids_for_path(pipeline, doc_b))
+    assert doc_a_chunk_ids
+    assert doc_b_chunk_ids
+    assert _vector_chunk_ids(pipeline) == doc_a_chunk_ids | doc_b_chunk_ids
+
+    _write_md(doc_a, "Updated A", ["alpha", "beta"], "Stable body A.")
+    pipeline.index(pipeline_settings.data_dir)
+
+    assert _vector_chunk_ids(pipeline) == doc_a_chunk_ids | doc_b_chunk_ids
+    source_document = pipeline._metadata_store.get_source_document(
+        "filesystem",
+        str(doc_a.resolve()),
+    )
+    assert source_document is not None
+    assert source_document.title == "Updated A"
+
+
+def test_metadata_only_index_file_replaces_existing_fused_vector(
+    pipeline_settings,
+):
+    """Single-file metadata-only reindex must update vec0, not leave stale rows."""
+
+    doc = pipeline_settings.data_dir / "single.md"
+    _write_md(doc, "Initial", ["alpha"], "Stable body.")
+
+    pipeline = _make_pipeline_with_directional_vectors(pipeline_settings)
+    pipeline.index(pipeline_settings.data_dir)
+
+    chunk_id = _chunk_ids_for_path(pipeline, doc)[0]
+    before = _vector_blob_for_chunk(pipeline, chunk_id)
+
+    _write_md(doc, "Updated", ["alpha", "beta"], "Stable body.")
+    pipeline.index_file(doc)
+
+    after = _vector_blob_for_chunk(pipeline, chunk_id)
+    assert after != before
+    assert _vector_chunk_ids(pipeline) == {chunk_id}
+
+    source_document = pipeline._metadata_store.get_source_document(
+        "filesystem",
+        str(doc.resolve()),
+    )
+    assert source_document is not None
+    assert source_document.title == "Updated"
+
+
+def test_reindex_vectors_preserves_vectors_for_all_files(pipeline_settings):
+    """Vector rebuild must wipe once, then append each file's chunks."""
+
+    doc_a = pipeline_settings.data_dir / "a.md"
+    doc_b = pipeline_settings.data_dir / "b.md"
+    _write_md(doc_a, "Initial A", ["alpha"], "Stable body A.")
+    _write_md(doc_b, "Initial B", ["alpha"], "Stable body B.")
+
+    pipeline = _make_pipeline_with_directional_vectors(pipeline_settings)
+    pipeline.index(pipeline_settings.data_dir)
+
+    expected_chunk_ids = set(_chunk_ids_for_path(pipeline, doc_a)) | set(
+        _chunk_ids_for_path(pipeline, doc_b)
+    )
+    assert expected_chunk_ids
+
+    rebuilt = pipeline.reindex_vectors()
+
+    assert rebuilt == len(expected_chunk_ids)
+    assert _vector_chunk_ids(pipeline) == expected_chunk_ids

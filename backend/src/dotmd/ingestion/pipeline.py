@@ -718,6 +718,20 @@ class IndexingPipeline:
             documents_by_path[Path(file_info.path)] = document
         return files, documents_by_path
 
+    def _delete_vector_rows_for_chunks(self, chunks: list[Chunk]) -> None:
+        """Delete current vector rows for chunk IDs before replacing them."""
+        chunk_ids = [chunk.chunk_id for chunk in chunks]
+        if not chunk_ids:
+            return
+        if hasattr(self._vector_store, "delete_by_chunk_ids"):
+            self._vector_store.delete_by_chunk_ids(  # type: ignore[attr-defined]
+                self._strategy,
+                chunk_ids,
+                conn=self._conn,
+            )
+        else:
+            self._vector_store.delete_vectors_by_chunk_ids(chunk_ids)
+
     def _source_document_for_file_info(
         self,
         file_info: FileInfo,
@@ -995,10 +1009,17 @@ class IndexingPipeline:
         # Write e_fused to vec0 (add_chunks commits internally).
         # overwrite=False: _holder_aware_chunk_cleanup already removed orphan vec_meta rows.
         # Full-table wipe would destroy shared chunks still held by other files.
+        self._delete_vector_rows_for_chunks(chunks)
         self._vector_store.add_chunks(
             chunks, e_fused_vectors, overwrite=False,
             text_hashes=text_hashes if text_hashes else None,
         )
+        source_document = self._source_document_for_file_info(file_info)
+        self._metadata_store.upsert_source_document(
+            source_document,
+            conn=self._conn,
+        )
+        self._conn.commit()
         # Save meta fingerprint
         self._save_meta_fingerprint(file_info)
 
@@ -1097,7 +1118,7 @@ class IndexingPipeline:
                 self._fuse_vectors(e_t, e_meta, weights) for e_t in e_text_vectors
             ]
             self._vector_store.add_chunks(
-                chunks, e_fused, overwrite=True, text_hashes=text_hashes
+                chunks, e_fused, overwrite=False, text_hashes=text_hashes
             )
             total += len(chunks)
 
@@ -1809,9 +1830,17 @@ class IndexingPipeline:
             # _index_file_embed owns the full embed→fuse→store transaction.
             # body_changed=True when chunk_tracker fired (needs_embed set from chunking).
             # body_changed=False when only meta_tracker fired (metadata_only path).
+            embed_chunks = chunks
+            if metadata_only and not embed_chunks:
+                chunk_ids = self._metadata_store.get_chunk_ids_by_file(
+                    self._strategy,
+                    path_str,
+                ) or []
+                embed_chunks = self._metadata_store.get_chunks(chunk_ids) if chunk_ids else []
+
             self._index_file_embed(
                 file_info,
-                chunks,
+                embed_chunks,
                 body_changed=not metadata_only,
                 metadata_changed=needs_embed,
             )
@@ -2350,6 +2379,9 @@ class IndexingPipeline:
             Same logic as _index_file_embed() fast path.
         """
         weights = self._settings.parsed_embedding_weights
+        if model_switch:
+            self._vector_store.delete_all()
+            self._vec_components.delete_all()
 
         for fi in files:
             path_str = str(fi.path)
@@ -2386,7 +2418,7 @@ class IndexingPipeline:
                 )
                 self._conn.commit()  # Flush VecComponentStore stores before add_chunks
                 self._vector_store.add_chunks(
-                    chunks, e_fused_vectors, overwrite=True, text_hashes=text_hashes
+                    chunks, e_fused_vectors, overwrite=False, text_hashes=text_hashes
                 )
                 logger.info(
                     "_embed_existing_chunks (model_switch): %s — %d chunks, e_text + e_meta re-encoded",
@@ -2424,8 +2456,9 @@ class IndexingPipeline:
                     self._meta_entity_id(fi.path), "meta", e_meta
                 )
                 self._conn.commit()  # Flush VecComponentStore stores before add_chunks
+                self._delete_vector_rows_for_chunks(chunks)
                 self._vector_store.add_chunks(
-                    chunks, e_fused_vectors, overwrite=True,
+                    chunks, e_fused_vectors, overwrite=False,
                 )
                 logger.info(
                     "_embed_existing_chunks (cached e_text): %s — 1 TEI call (e_meta), "
@@ -2433,6 +2466,12 @@ class IndexingPipeline:
                     fi.path, len(chunks),
                 )
 
+            source_document = self._source_document_for_file_info(fi)
+            self._metadata_store.upsert_source_document(
+                source_document,
+                conn=self._conn,
+            )
+            self._conn.commit()
             self._save_meta_fingerprint(fi)
 
         logger.info(

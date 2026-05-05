@@ -937,6 +937,13 @@ class SQLiteMetadataStore:
         """Remove all chunks and statistics from the store."""
         self._conn.execute(f"DELETE FROM {self._table}")
         self._conn.execute("DELETE FROM stats")
+        self._conn.execute("DELETE FROM source_documents")
+        provenance_tables = self._conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name LIKE 'chunk_source_provenance_%'"
+        ).fetchall()
+        for (table_name,) in provenance_tables:
+            self._conn.execute(f"DELETE FROM {table_name}")
         # Clear FTS5 index if it exists
         with contextlib.suppress(sqlite3.OperationalError):  # FTS5 table not yet created
             self._conn.execute(f"DELETE FROM {self._fts_table}")
