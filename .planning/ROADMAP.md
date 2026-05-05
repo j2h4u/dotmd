@@ -119,7 +119,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 | 21. Reranker Quality Benchmark | 1/1 | Complete | 2026-05-02 |
 | 22. Improve Search Snippet Boundaries | 1/1 | Complete    | 2026-05-02 |
 | 23. Fix dotMD test contract | 1/1 | Complete | 2026-05-03 |
-| 24. Config separation | 2/2 | Complete   | 2026-05-05 |
+| 24. Config separation | 2/2 | Complete    | 2026-05-05 |
 
 ### Phase 17: MCP OAuth 2.0 — Claude Desktop remote connector support
 
