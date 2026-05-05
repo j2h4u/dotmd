@@ -237,6 +237,86 @@ class TestDropChunksClearsSourceAwareTables:
         assert not _table_exists(db_path, f"chunk_source_provenance_{strategy}")
         assert _count(db_path, "source_documents") == 0
 
+    def test_drop_chunks_preserves_source_documents_referenced_by_other_strategy(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        db_path = tmp_path / "index.db"
+        current_strategy = STRATEGIES[0]
+        other_strategy = "contextual_512_50"
+        conn = sqlite3.connect(str(db_path))
+        for strategy in (current_strategy, other_strategy):
+            conn.executescript(f"""
+                CREATE TABLE chunks_{strategy} (
+                    chunk_id TEXT PRIMARY KEY,
+                    heading_hierarchy TEXT NOT NULL DEFAULT '[]',
+                    level INTEGER NOT NULL DEFAULT 0,
+                    text TEXT NOT NULL DEFAULT ''
+                );
+                CREATE TABLE chunk_file_paths_{strategy} (
+                    chunk_id TEXT NOT NULL,
+                    file_path TEXT NOT NULL,
+                    chunk_index INTEGER NOT NULL,
+                    PRIMARY KEY (chunk_id, file_path, chunk_index)
+                );
+                CREATE VIRTUAL TABLE chunks_fts_{strategy} USING fts5(
+                    chunk_id UNINDEXED, text, tokenize='unicode61'
+                );
+                CREATE TABLE vec_meta_{strategy}_{MODEL} (
+                    rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chunk_id TEXT NOT NULL UNIQUE,
+                    text_hash TEXT
+                );
+                CREATE TABLE chunk_source_provenance_{strategy} (
+                    chunk_id TEXT NOT NULL,
+                    namespace TEXT NOT NULL,
+                    document_ref TEXT NOT NULL,
+                    source_unit_refs TEXT NOT NULL,
+                    chunk_strategy TEXT NOT NULL,
+                    parser_name TEXT,
+                    PRIMARY KEY (chunk_id, namespace, document_ref)
+                );
+            """)
+        conn.executescript("""
+            CREATE TABLE source_documents (
+                namespace TEXT NOT NULL,
+                document_ref TEXT NOT NULL,
+                ref TEXT NOT NULL,
+                source_uri TEXT NOT NULL,
+                file_path TEXT,
+                media_type TEXT NOT NULL,
+                parser_name TEXT NOT NULL,
+                document_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                content_fingerprint TEXT NOT NULL,
+                metadata_fingerprint TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                PRIMARY KEY (namespace, document_ref)
+            );
+        """)
+        conn.commit()
+        conn.close()
+
+        shared_path = "/shared.md"
+        current_chunk_id = "i" * 64
+        other_chunk_id = "j" * 64
+        for strategy, chunk_id in (
+            (current_strategy, current_chunk_id),
+            (other_strategy, other_chunk_id),
+        ):
+            _insert_chunk(db_path, strategy, chunk_id, "content")
+            _add_m2m(db_path, strategy, chunk_id, shared_path)
+            _add_chunk_provenance(db_path, strategy, chunk_id, shared_path)
+        _add_source_document(db_path, shared_path)
+
+        pipeline = _get_pipeline(db_path)
+        pipeline.drop_chunks()
+
+        assert not _table_exists(db_path, f"chunk_file_paths_{current_strategy}")
+        assert _table_exists(db_path, f"chunk_file_paths_{other_strategy}")
+        assert _count(db_path, "source_documents") == 1
+
 
 class TestPurgeSharedHolder:
     """Purging one holder of a shared chunk preserves the chunk."""

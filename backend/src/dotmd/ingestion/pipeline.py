@@ -515,15 +515,21 @@ class IndexingPipeline:
         chunks_table = f"chunks_{strategy}"
         fts_table = f"chunks_fts_{strategy}"
         chunk_fp_table = f"chunk_fingerprints_{strategy}"
-        m2m_table = f"chunk_file_paths_{strategy}"
         provenance_table = f"chunk_source_provenance_{strategy}"
+        m2m_paths: set[str] = set()
+        with contextlib.suppress(sqlite3.OperationalError):
+            m2m_paths = {
+                row[0]
+                for row in self._conn.execute(
+                    f"SELECT DISTINCT file_path FROM chunk_file_paths_{strategy}"
+                ).fetchall()
+            }
 
         # 1. Drop chunks and FTS5
         self._conn.execute(f"DROP TABLE IF EXISTS {chunks_table}")
         self._conn.execute(f"DROP TABLE IF EXISTS {fts_table}")
-        self._conn.execute(f"DROP TABLE IF EXISTS {m2m_table}")
+        self._conn.execute(f"DROP TABLE IF EXISTS chunk_file_paths_{strategy}")
         self._conn.execute(f"DROP TABLE IF EXISTS {provenance_table}")
-        self._conn.execute("DELETE FROM source_documents WHERE namespace = 'filesystem'")
 
         # 2. Clear chunk fingerprints
         with contextlib.suppress(sqlite3.OperationalError):  # table may not exist
@@ -557,6 +563,31 @@ class IndexingPipeline:
                     continue
                 self._conn.execute(f"DROP TABLE IF EXISTS {name}")
                 tables_dropped += 1
+
+        remaining_paths: set[str] = set()
+        m2m_rows = self._conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name LIKE 'chunk_file_paths_%'"
+        ).fetchall()
+        for (table_name,) in m2m_rows:
+            if not re.match(r"^[a-zA-Z0-9_]+$", table_name):
+                logger.warning("Skipping table with unexpected name: %r", table_name)
+                continue
+            remaining_paths.update(
+                row[0]
+                for row in self._conn.execute(
+                    f"SELECT DISTINCT file_path FROM {table_name}"
+                ).fetchall()
+            )
+        stale_paths = m2m_paths - remaining_paths
+        if stale_paths:
+            placeholders = ",".join("?" for _ in stale_paths)
+            self._conn.execute(
+                "DELETE FROM source_documents "
+                "WHERE namespace = 'filesystem' "
+                f"AND file_path IN ({placeholders})",
+                list(stale_paths),
+            )
 
         self._conn.commit()
 
@@ -2220,11 +2251,14 @@ class IndexingPipeline:
         edge_rows: list[dict] = []
 
         for fi in files:
-            if not fi.frontmatter:
-                continue
             file_path_str = str(fi.path)
+            self._graph_store.batch_add_file_nodes(
+                [{"file_path": file_path_str, "title": fi.title}]
+            )
             if hasattr(self._graph_store, "delete_frontmatter_edges"):
                 self._graph_store.delete_frontmatter_edges(file_path_str)  # type: ignore[attr-defined]
+            if not fi.frontmatter:
+                continue
 
             # --- Tags with optional namespace ---------------------------
             tags = fi.frontmatter.get("tags", [])

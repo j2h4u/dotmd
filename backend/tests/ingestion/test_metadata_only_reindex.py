@@ -59,6 +59,21 @@ def _fts_meta_for_chunk(pipeline, chunk_id: str) -> tuple[str, str]:  # type: ig
     return row[0], row[1]
 
 
+def _graph_node(pipeline, node_id: str) -> dict | None:  # type: ignore[no-untyped-def]
+    for node in pipeline._graph_store.get_graph_data()["nodes"]:
+        if node["id"] == node_id:
+            return node
+    return None
+
+
+def _graph_edges_from(pipeline, source_id: str, relation_type: str) -> list[dict]:  # type: ignore[no-untyped-def]
+    return [
+        edge
+        for edge in pipeline._graph_store.get_graph_data()["edges"]
+        if edge["source"] == source_id and edge["relation_type"] == relation_type
+    ]
+
+
 def _make_pipeline_with_directional_vectors(settings):  # type: ignore[no-untyped-def]
     from dotmd.ingestion.pipeline import IndexingPipeline
 
@@ -270,6 +285,60 @@ def test_metadata_only_index_file_replaces_existing_fused_vector(
     )
     assert source_document is not None
     assert source_document.title == "Updated"
+
+
+def test_metadata_only_index_file_refreshes_graph_title_and_removed_tags(
+    pipeline_settings,
+):
+    """Single-file metadata-only update refreshes graph File title and tag edges."""
+
+    doc = pipeline_settings.data_dir / "graph.md"
+    _write_md(doc, "Initial", ["obsolete"], "Stable body.")
+
+    pipeline = _make_pipeline_with_directional_vectors(pipeline_settings)
+    pipeline.index(pipeline_settings.data_dir)
+
+    path_str = str(doc)
+    initial_node = _graph_node(pipeline, path_str)
+    assert initial_node is not None
+    assert initial_node["properties"]["title"] == "Initial"
+    assert _graph_edges_from(pipeline, path_str, "HAS_TAG")
+
+    doc.write_text(
+        "---\ntitle: Updated\nkind: document\n---\nStable body.",
+        encoding="utf-8",
+    )
+    pipeline.index_file(doc)
+
+    updated_node = _graph_node(pipeline, path_str)
+    assert updated_node is not None
+    assert updated_node["properties"]["title"] == "Updated"
+    assert _graph_edges_from(pipeline, path_str, "HAS_TAG") == []
+
+
+def test_metadata_only_bulk_index_removes_stale_graph_tags(
+    pipeline_settings,
+):
+    """Bulk metadata-only update deletes old frontmatter graph edges."""
+
+    doc = pipeline_settings.data_dir / "bulk-graph.md"
+    _write_md(doc, "Initial", ["obsolete"], "Stable body.")
+
+    pipeline = _make_pipeline_with_directional_vectors(pipeline_settings)
+    pipeline.index(pipeline_settings.data_dir)
+    path_str = str(doc)
+    assert _graph_edges_from(pipeline, path_str, "HAS_TAG")
+
+    doc.write_text(
+        "---\ntitle: Updated\nkind: document\n---\nStable body.",
+        encoding="utf-8",
+    )
+    pipeline.index(pipeline_settings.data_dir)
+
+    updated_node = _graph_node(pipeline, path_str)
+    assert updated_node is not None
+    assert updated_node["properties"]["title"] == "Updated"
+    assert _graph_edges_from(pipeline, path_str, "HAS_TAG") == []
 
 
 def test_reindex_vectors_preserves_vectors_for_all_files(pipeline_settings):
