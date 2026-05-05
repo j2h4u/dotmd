@@ -6,7 +6,14 @@ from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 
 class SearchMode(StrEnum):
@@ -69,6 +76,69 @@ class FileInfo(BaseModel):
     size_bytes: int
     kind: str = DocKind.DOCUMENT
     frontmatter: dict = Field(default_factory=dict)
+
+
+class SourceDocument(BaseModel):
+    """Source-aware document identity and metadata."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    namespace: str
+    document_ref: str
+    ref: str
+    title: str
+    source_uri: str
+    media_type: str
+    parser_name: str
+    document_type: str = DocKind.DOCUMENT
+    updated_at: datetime
+    content_fingerprint: str
+    metadata_fingerprint: str
+    metadata_json: dict = Field(default_factory=dict)
+    file_path: Path | None = None
+
+    @model_validator(mode="after")
+    def _validate_refs(self) -> SourceDocument:
+        expected_ref = f"{self.namespace}:{self.document_ref}"
+        if self.ref != expected_ref:
+            raise ValueError(f"ref must be {expected_ref!r}")
+
+        if self.namespace == "filesystem" and self.file_path is not None:
+            document_ref = str(self.file_path.resolve())
+            if self.document_ref != document_ref:
+                raise ValueError(
+                    "filesystem document_ref must match resolved file_path"
+                )
+
+        return self
+
+
+class SourceUnit(BaseModel):
+    """Parser-emitted unit before dotMD chunking."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    namespace: str
+    document_ref: str
+    unit_ref: str
+    unit_type: str
+    text: str
+    order_key: str
+    fingerprint: str
+    metadata_json: dict = Field(default_factory=dict)
+    chunking_hints: dict = Field(default_factory=dict)
+
+
+class ChunkProvenance(BaseModel):
+    """Source-unit provenance attached to a dotMD chunk."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    namespace: str
+    document_ref: str
+    source_unit_refs: list[str] = Field(default_factory=list)
+    chunk_strategy: str
+    parser_name: str | None = None
 
 
 class Chunk(BaseModel):
