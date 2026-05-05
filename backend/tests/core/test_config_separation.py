@@ -1,6 +1,7 @@
 """Settings boundary tests for operator config and internal defaults."""
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -10,7 +11,7 @@ from dotmd.core.models import ExtractDepth
 
 
 def _runtime_settings(**overrides: object) -> Settings:
-    values: dict[str, object] = {
+    values: dict[str, Any] = {
         "data_dir": Path("/mnt"),
         "index_dir": Path("/dotmd-index"),
         "indexing_paths": ["/mnt"],

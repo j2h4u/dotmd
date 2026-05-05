@@ -9,6 +9,35 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, TomlConf
 
 from dotmd.core.models import ExtractDepth
 
+DEFAULT_INDEXING_EXCLUDE: tuple[str, ...] = (
+    "**/node_modules",
+    "**/.git",
+    "**/__pycache__",
+    "**/.pytest_cache",
+    "**/.ruff_cache",
+    "**/.mypy_cache",
+    "**/.tox",
+    "**/.nox",
+    "**/.venv",
+    "**/venv",
+    "**/dist",
+    "**/build",
+    "**/.cache",
+)
+DEFAULT_FALKORDB_URL = "redis://localhost:6379"
+DEFAULT_MAX_CHUNK_TOKENS = 512
+DEFAULT_CHUNK_OVERLAP_TOKENS = 50
+DEFAULT_TEI_BATCH_SIZE = 4
+DEFAULT_DEFAULT_TOP_K = 10
+DEFAULT_FUSION_K = 60
+DEFAULT_RERANK_POOL_SIZE = 20
+DEFAULT_SEMANTIC_SCORE_FLOOR = 0.85
+DEFAULT_SNIPPET_LENGTH = 300
+DEFAULT_POLL_INTERVAL_SECONDS = 3600.0
+DEFAULT_GRAPH_MAX_HOPS = 2
+DEFAULT_RERANKER_MIN_LENGTH = 50
+DEFAULT_RERANKER_LENGTH_PENALTY = True
+
 
 class Settings(BaseSettings):
     """Global configuration for dotMD.
@@ -54,13 +83,13 @@ class Settings(BaseSettings):
     reranker_name: str = "mmarco-minilm"
     reranker_compare_names: str = "mmarco-minilm"
     reranker_relevance_floor: float | None = None
-    reranker_length_penalty: bool = True  # penalize very short chunks
-    reranker_min_length: int = 50  # chars below which penalty applies
+    reranker_length_penalty: bool = DEFAULT_RERANKER_LENGTH_PENALTY
+    reranker_min_length: int = DEFAULT_RERANKER_MIN_LENGTH
 
     # Chunking
     chunk_strategy: str = "heading_512_50"
-    max_chunk_tokens: int = 512
-    chunk_overlap_tokens: int = 50
+    max_chunk_tokens: int = DEFAULT_MAX_CHUNK_TOKENS
+    chunk_overlap_tokens: int = DEFAULT_CHUNK_OVERLAP_TOKENS
 
     # Extraction
     extract_depth: ExtractDepth = ExtractDepth.NER
@@ -79,7 +108,7 @@ class Settings(BaseSettings):
 
     # Initial TEI batch size for embedding requests. Auto-tuned down on 413 errors.
     # Small batches (4-8) are often faster on CPU due to lower TEI queue/inference time.
-    tei_batch_size: int = 4
+    tei_batch_size: int = DEFAULT_TEI_BATCH_SIZE
 
     # Fusion weights for N-vector unified embeddings (Phase 999.12).
     # Format: "text=0.7,meta=0.3" — component names to float weights, comma-separated.
@@ -145,41 +174,29 @@ class Settings(BaseSettings):
         return v
 
     # Search
-    default_top_k: int = 10
-    fusion_k: int = 60  # RRF constant
-    rerank_pool_size: int = 20  # candidates to rerank
-    semantic_score_floor: float = 0.85  # ratio of top hit: keep results within 85% of best score
-    snippet_length: int = 300  # display snippet character limit
+    default_top_k: int = DEFAULT_DEFAULT_TOP_K
+    fusion_k: int = DEFAULT_FUSION_K
+    rerank_pool_size: int = DEFAULT_RERANK_POOL_SIZE
+    semantic_score_floor: float = DEFAULT_SEMANTIC_SCORE_FLOOR
+    snippet_length: int = DEFAULT_SNIPPET_LENGTH
 
     # Indexing paths (multi-path discovery)
     # Directories (full recursive .md scan) or glob patterns (e.g., "/home/**/README.md")
     indexing_paths: list[str] = []
-    # Exclude patterns -- glob patterns to filter out (e.g., "**/node_modules")
-    indexing_exclude: list[str] = [
-        "**/node_modules",
-        "**/.git",
-        "**/__pycache__",
-        "**/.pytest_cache",
-        "**/.ruff_cache",
-        "**/.mypy_cache",
-        "**/.tox",
-        "**/.nox",
-        "**/.venv",
-        "**/venv",
-        "**/dist",
-        "**/build",
-        "**/.cache",
-    ]
+    # Legacy replace-only exclude config. Prefer indexing_extra_exclude for
+    # operator additions, and effective_indexing_exclude for call sites.
+    indexing_exclude: list[str] = list(DEFAULT_INDEXING_EXCLUDE)
+    indexing_extra_exclude: list[str] = []
 
     # Trickle indexer settings
-    poll_interval_seconds: float = 3600.0  # 1 hour fallback poll
+    poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS
     profile_indexing: bool = False  # DOTMD_PROFILE_INDEXING=true → per-phase timing in logs
 
     # Graph
-    graph_max_hops: int = 2
+    graph_max_hops: int = DEFAULT_GRAPH_MAX_HOPS
     graph_backend: Literal["ladybugdb", "falkordb"] = "ladybugdb"
     # FalkorDB connection URL (Redis protocol). Only used when graph_backend="falkordb".
-    falkordb_url: str = "redis://localhost:6379"
+    falkordb_url: str = DEFAULT_FALKORDB_URL
 
     # Base URL for OAuth 2.0 endpoints served by FastMCP.
     # Must be the full Tailscale-facing URL including path prefix
@@ -246,6 +263,56 @@ class Settings(BaseSettings):
             for name in self.reranker_compare_names.split(",")
             if name.strip()
         ]
+
+    @property
+    def effective_indexing_exclude(self) -> list[str]:
+        """Return resolved exclude patterns with built-ins and operator extras."""
+        patterns = self.indexing_exclude or list(DEFAULT_INDEXING_EXCLUDE)
+        result: list[str] = []
+        seen: set[str] = set()
+        for pattern in [*patterns, *self.indexing_extra_exclude]:
+            if pattern in seen:
+                continue
+            seen.add(pattern)
+            result.append(pattern)
+        return result
+
+    def validate_for_runtime(self) -> None:
+        """Validate settings used by long-running runtime service entrypoints."""
+        errors: list[str] = []
+        if self.data_dir == Path("."):
+            errors.append("data_dir must be set for runtime startup")
+        if self.index_dir == Path.home() / ".dotmd":
+            errors.append("index_dir must be set for runtime startup")
+        if not self.indexing_paths:
+            errors.append("indexing_paths must not be empty for runtime startup")
+        if not self.embedding_url:
+            errors.append("embedding_url must not be empty for runtime startup")
+
+        identity_fields = {
+            "embedding_model": self.embedding_model,
+            "chunk_strategy": self.chunk_strategy,
+            "ner_model_name": self.ner_model_name,
+            "reranker_name": self.reranker_name,
+            "reranker_model": self.reranker_model,
+            "reranker_backend": self.reranker_backend,
+            "embedding_weights": self.embedding_weights,
+        }
+        for field_name, value in identity_fields.items():
+            if value == "":
+                errors.append(f"{field_name} must not be empty for runtime startup")
+
+        if self.graph_backend == "falkordb":
+            if not self.falkordb_url:
+                errors.append("falkordb_url must be set when graph_backend is falkordb")
+            elif self.falkordb_url == DEFAULT_FALKORDB_URL:
+                errors.append(
+                    "falkordb_url must not use DEFAULT_FALKORDB_URL "
+                    "when graph_backend is falkordb"
+                )
+
+        if errors:
+            raise ValueError("; ".join(errors))
 
     @property
     def config_path(self) -> Path:
@@ -320,3 +387,10 @@ def load_settings(**overrides: object) -> Settings:
     cannot model pydantic-settings sources.
     """
     return Settings(**overrides)  # type: ignore[call-arg]
+
+
+def load_runtime_settings(**overrides: object) -> Settings:
+    """Construct and validate Settings for long-running service startup."""
+    settings = load_settings(**overrides)
+    settings.validate_for_runtime()
+    return settings
