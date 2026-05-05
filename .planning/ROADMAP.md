@@ -516,6 +516,77 @@ Plans:
 
 ---
 
+### Backlog 999.23: Semantic enrichment — extract commitments and agreements
+
+**Goal:** Add a structured semantic-enrichment layer for meeting transcripts
+and other conversational documents so dotMD can recall important commitments
+even when the user does not remember the exact words.
+
+**Context captured 2026-05-05:**
+- A search for prior profit-sharing agreements found useful nearby results but
+  missed the Николай Сенин agreement until the exact phrase `65 на 35` was
+  supplied.
+- The missed transcript used `выручку делить`, `доли`, and `65/35`, while the
+  user asked with broader wording such as `распределение прибыли`. This showed
+  that embeddings + top-K search are not enough for high-recall retrieval of
+  agreements, commitments, and financial terms.
+- A quick PoC with `gpt-5.4-mini` over
+  `/mnt/knowledgebase/voicenotes/20260319-1358-Aqny3Jxn/transcript.md`
+  produced useful structured arrays for agreements, promises, decisions, open
+  questions, financial terms, and next steps. It caught the `65/35` financial
+  term and several action items, but also showed production needs quote/timecode
+  validation and normalization.
+
+**Proposed approach:**
+- During indexing, run a cheap candidate extractor over chunks, with overlap or
+  neighbouring context, to produce arrays:
+  `agreements`, `promises`, `decisions`, `open_questions`,
+  `financial_terms`, and `next_steps`.
+- Mark low-context items with a flag such as `requires_context` when a chunk
+  says "договорились" or "давай так" but the actual subject is in a neighbouring
+  chunk.
+- For candidates, re-read a wider window (`previous + current + next`) and run
+  a verifier/consolidator that confirms the item, normalizes participants,
+  extracts short evidence quotes, and pins source timecodes.
+- Store the final structured items as a separate searchable layer linked to
+  source file, chunk/window ids, participants, date, and project/topic hints.
+
+**Example target record:**
+```json
+{
+  "type": "financial_term",
+  "participants": ["Максим Бращенко", "Николай Сенин"],
+  "topic": "Nolium revenue split",
+  "summary": "Revenue split proposed as 65/35; Maxim's share is fixed.",
+  "numbers": ["65", "35"],
+  "source_file": "/mnt/knowledgebase/voicenotes/20260319-1358-Aqny3Jxn/transcript.md",
+  "timecodes": ["00:01:08", "00:05:57"],
+  "evidence_quotes": [
+    "выручку делить 35 на, соответственно, 65%",
+    "65. 65, 35",
+    "твоя доля, она, кстати, фиксирована"
+  ],
+  "confidence": 0.9
+}
+```
+
+**Open design questions:**
+- Whether this belongs in the existing graph layer, a new SQLite table family,
+  or both.
+- Whether extraction should run for every chunk by default, only for
+  transcript-like `kind`s, or behind an opt-in indexing mode.
+- How much overlap is needed for reliable commitment extraction without making
+  indexing too expensive.
+- Which model tier is acceptable for first-pass extraction, and whether a
+  stronger verifier is needed for low-confidence or financially sensitive items.
+
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+---
+
 ### Future ideas:
 - Semantic chunking (split by topic similarity, not just structure)
 - Doc-level chunks (whole-document embeddings for broad queries)

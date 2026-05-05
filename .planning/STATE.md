@@ -72,6 +72,12 @@ Progress: [██████████] 100%
   sources. Architecture context is captured in `docs/source-adapter-architecture.md`
   and expert-panel review in `docs/source-adapter-architecture-panel-review.md`.
 
+- Backlog 999.23 added: Semantic enrichment — extract commitments and
+  agreements. Captures the need for structured extraction of agreements,
+  promises, decisions, open questions, financial terms, and next steps from
+  transcript chunks so important договорённости remain discoverable without
+  remembering exact words like `65 на 35`.
+
 - Backlog `999.x` entries are documentation backlog items, not active phases;
   they should be promoted explicitly before planning/execution.
 
@@ -122,6 +128,11 @@ moving dotMD from file-centric markdown indexing to a source/document/source-uni
 model with Telegram as the first intended MVP source. See
 `docs/source-adapter-architecture.md` and
 `docs/source-adapter-architecture-panel-review.md`.
+
+Backlog 999.23 captured on 2026-05-05. It preserves the commitment/agreement
+extraction idea from the Николай Сенин search failure and the `gpt-5.4-mini`
+PoC: chunk-level extraction with overlap, followed by wider-window validation
+and document-level consolidation into a structured semantic-enrichment layer.
 
 Phase 24 complete. It promoted backlog item `999.6` and delivered explicit
 configuration separation: production/user-facing settings fail loudly when
