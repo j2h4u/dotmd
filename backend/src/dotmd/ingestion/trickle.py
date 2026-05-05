@@ -253,7 +253,7 @@ class TrickleIndexer:
             all_files = await asyncio.to_thread(
                 discover_files_multi,
                 self._settings.indexing_paths,
-                self._settings.indexing_exclude,
+                self._settings.effective_indexing_exclude,
             )
             discovered_paths = {str(fi.path) for fi in all_files}
             logger.info(
@@ -293,7 +293,7 @@ class TrickleIndexer:
         all_files = await asyncio.to_thread(
             discover_files_multi,
             self._settings.indexing_paths,
-            self._settings.indexing_exclude,
+            self._settings.effective_indexing_exclude,
         )
 
         # Diff against file tracker to find unindexed files
@@ -568,7 +568,7 @@ class TrickleIndexer:
         """Start watchdog Observer for all configured directory paths."""
         loop = asyncio.get_running_loop()
         handler = _MarkdownEventHandler(
-            loop, self._file_queue, self._settings.indexing_exclude
+            loop, self._file_queue, self._settings.effective_indexing_exclude
         )
         self._observer = Observer()
 

@@ -31,7 +31,7 @@ from starlette.routing import Route
 
 from dotmd.api.service import DotMDService
 from dotmd.auth import DotMDOAuthProvider, PairingCodeError
-from dotmd.core.config import load_settings
+from dotmd.core.config import load_runtime_settings
 from dotmd.feedback import FeedbackStore
 
 logger = logging.getLogger(__name__)
@@ -454,7 +454,7 @@ def _get_feedback() -> FeedbackStore:
     return _feedback
 
 
-def _init_for_stdio() -> None:
+def init_service() -> None:
     """Initialize service for the stdio transport path (no trickle, no warmup).
 
     The stdio entry point (``dotmd mcp``) calls ``mcp_app.run()`` directly,
@@ -466,9 +466,12 @@ def _init_for_stdio() -> None:
     ``initialize`` handshake completes.  Models load lazily on first use.
     """
     global _service, _feedback
-    settings = load_settings()
+    settings = load_runtime_settings()
     _service = DotMDService(settings)
     _feedback = FeedbackStore(settings.index_dir / "feedback.db")
+
+
+_init_for_stdio = init_service
 
 
 def create_app() -> Starlette:
@@ -491,7 +494,7 @@ def create_app() -> Starlette:
     async def _server_lifespan(app: Starlette) -> AsyncIterator[None]:
         global _service, _feedback
 
-        settings = load_settings()
+        settings = load_runtime_settings()
         svc = DotMDService(settings)
         # warmup() is CPU/disk-bound; run in thread to keep event loop free
         await asyncio.to_thread(svc.warmup)

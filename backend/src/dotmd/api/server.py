@@ -18,7 +18,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from dotmd.api.service import DotMDService
-from dotmd.core.config import load_settings
+from dotmd.core.config import load_runtime_settings
 from dotmd.core.models import ExtractDepth, IndexStats, SearchMode, SearchResult
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ def _get_service() -> DotMDService:
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _service
-    _service = DotMDService(load_settings())
+    _service = DotMDService(load_runtime_settings())
     _service.warmup()
     yield
     _service = None

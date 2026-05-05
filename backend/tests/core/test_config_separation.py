@@ -1,13 +1,18 @@
 """Settings boundary tests for operator config and internal defaults."""
 
+import inspect
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import Mock, patch
 
 import pytest
 
+from dotmd import mcp_server
+from dotmd.api.service import DotMDService
 from dotmd.core import config
 from dotmd.core.config import Settings
-from dotmd.core.models import ExtractDepth
+from dotmd.core.models import ExtractDepth, IndexStats, TrickleStatus
 
 
 def _runtime_settings(**overrides: object) -> Settings:
@@ -121,3 +126,48 @@ def test_base_url_none_remains_valid() -> None:
     settings = Settings(embedding_url="http://localhost:8088", base_url=None)
 
     assert settings.base_url is None
+
+
+def test_service_status_consumes_effective_indexing_exclude() -> None:
+    settings = Settings(
+        embedding_url="http://localhost:8088",
+        indexing_paths=["/mnt"],
+        indexing_extra_exclude=["**/private"],
+    )
+    service: Any = object.__new__(DotMDService)
+    service._settings = settings
+    service._pipeline = SimpleNamespace(
+        metadata_store=SimpleNamespace(get_stats=Mock(return_value=IndexStats())),
+        conn=None,
+        graph_store=SimpleNamespace(
+            node_count=Mock(side_effect=RuntimeError("not needed")),
+            edge_count=Mock(side_effect=RuntimeError("not needed")),
+        ),
+        chunk_tracker=SimpleNamespace(diff=Mock()),
+    )
+    service._trickle_indexer = SimpleNamespace(
+        state=SimpleNamespace(
+            status=TrickleStatus.IDLE,
+            indexed_count=0,
+            total_files=0,
+            current_file=None,
+            chunks_per_hour=0.0,
+            files_per_hour=0.0,
+            eta_minutes=None,
+        )
+    )
+
+    with patch("dotmd.ingestion.reader.discover_files_multi", return_value=[]) as discover:
+        service.status()
+
+    discover.assert_called_once_with(
+        settings.indexing_paths,
+        settings.effective_indexing_exclude,
+    )
+    assert "**/.git" in discover.call_args.args[1]
+    assert "**/private" in discover.call_args.args[1]
+
+
+def test_mcp_runtime_paths_use_runtime_settings_helper() -> None:
+    assert "load_runtime_settings()" in inspect.getsource(mcp_server.init_service)
+    assert "load_runtime_settings()" in inspect.getsource(mcp_server.create_app)

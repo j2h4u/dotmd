@@ -716,7 +716,7 @@ class DotMDService:
 
                     files = discover_files_multi(
                         self._settings.indexing_paths,
-                        self._settings.indexing_exclude,
+                        self._settings.effective_indexing_exclude,
                     )
                 elif stats.data_dir:
                     data_path = Path(stats.data_dir)
