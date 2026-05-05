@@ -623,7 +623,7 @@ of being hidden by Python defaults.
 **Requirements**: TBD
 **Depends on:** Phase 23
 **Backlog source:** 999.6
-**Plans:** 0 plans
+**Plans:** 2 plans ready
 
 Phase context:
 - Current `Settings` has many Python defaults. When TOML overrides exist,
@@ -652,7 +652,8 @@ Initial scope from backlog 999.6:
 - Update config templates and docs with the full user-facing surface.
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 24 to break down)
+- [ ] 24-01-config-boundary-and-validation-PLAN.md — Separate `Settings` from internal defaults, add runtime validation, and migrate effective exclude usage
+- [ ] 24-02-startup-docs-and-template-PLAN.md — Preserve/rename startup checks and align `.env.example` plus README with the new config surface
 
 ---
 
