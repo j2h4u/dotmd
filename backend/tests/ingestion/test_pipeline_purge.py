@@ -49,6 +49,31 @@ def _build_post_v16_db(tmp_path: Path, strategy: str = "heading_512_50") -> Path
             chunk_id TEXT NOT NULL UNIQUE,
             text_hash TEXT
         );
+        CREATE TABLE source_documents (
+            namespace TEXT NOT NULL,
+            document_ref TEXT NOT NULL,
+            ref TEXT NOT NULL,
+            source_uri TEXT NOT NULL,
+            file_path TEXT,
+            media_type TEXT NOT NULL,
+            parser_name TEXT NOT NULL,
+            document_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            content_fingerprint TEXT NOT NULL,
+            metadata_fingerprint TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{{}}',
+            PRIMARY KEY (namespace, document_ref)
+        );
+        CREATE TABLE chunk_source_provenance_{strategy} (
+            chunk_id TEXT NOT NULL,
+            namespace TEXT NOT NULL,
+            document_ref TEXT NOT NULL,
+            source_unit_refs TEXT NOT NULL,
+            chunk_strategy TEXT NOT NULL,
+            parser_name TEXT,
+            PRIMARY KEY (chunk_id, namespace, document_ref)
+        );
     """)
     conn.commit()
     conn.close()
@@ -85,6 +110,60 @@ def _add_m2m(db_path: Path, strategy: str, chunk_id: str, file_path: str, chunk_
     conn.close()
 
 
+def _add_source_document(db_path: Path, file_path: str) -> None:
+    document_ref = str(Path(file_path).resolve())
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "INSERT OR REPLACE INTO source_documents ("
+        "namespace, document_ref, ref, source_uri, file_path, media_type, "
+        "parser_name, document_type, title, updated_at, content_fingerprint, "
+        "metadata_fingerprint, metadata_json"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "filesystem",
+            document_ref,
+            f"filesystem:{document_ref}",
+            document_ref,
+            file_path,
+            "text/markdown",
+            "markdown",
+            "document",
+            Path(file_path).stem,
+            "2026-05-05T00:00:00+00:00",
+            "content",
+            "metadata",
+            "{}",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _add_chunk_provenance(
+    db_path: Path,
+    strategy: str,
+    chunk_id: str,
+    file_path: str,
+) -> None:
+    document_ref = str(Path(file_path).resolve())
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        f"INSERT OR REPLACE INTO chunk_source_provenance_{strategy} ("
+        "chunk_id, namespace, document_ref, source_unit_refs, chunk_strategy, parser_name"
+        ") VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            chunk_id,
+            "filesystem",
+            document_ref,
+            "[]",
+            strategy,
+            "markdown",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
 def _count(db_path: Path, table: str) -> int:
     conn = sqlite3.connect(str(db_path))
     n = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
@@ -111,6 +190,8 @@ class TestPurgeSingleHolder:
 
         _insert_chunk(db_path, strategy, chunk_id, "content")
         _add_m2m(db_path, strategy, chunk_id, "/file_A.md")
+        _add_source_document(db_path, "/file_A.md")
+        _add_chunk_provenance(db_path, strategy, chunk_id, "/file_A.md")
 
         pipeline = _get_pipeline(db_path)
         pipeline._purge_file("/file_A.md")
@@ -118,6 +199,8 @@ class TestPurgeSingleHolder:
         assert _count(db_path, f"chunks_{strategy}") == 0
         assert _count(db_path, f"vec_meta_{strategy}_{MODEL}") == 0
         assert _count(db_path, f"chunk_file_paths_{strategy}") == 0
+        assert _count(db_path, "source_documents") == 0
+        assert _count(db_path, f"chunk_source_provenance_{strategy}") == 0
 
 
 class TestPurgeSharedHolder:
@@ -132,6 +215,10 @@ class TestPurgeSharedHolder:
         _insert_chunk(db_path, strategy, chunk_id, "shared content")
         _add_m2m(db_path, strategy, chunk_id, "/file_A.md")
         _add_m2m(db_path, strategy, chunk_id, "/file_B.md")
+        _add_source_document(db_path, "/file_A.md")
+        _add_source_document(db_path, "/file_B.md")
+        _add_chunk_provenance(db_path, strategy, chunk_id, "/file_A.md")
+        _add_chunk_provenance(db_path, strategy, chunk_id, "/file_B.md")
 
         pipeline = _get_pipeline(db_path)
         pipeline._purge_file("/file_A.md")
@@ -146,6 +233,22 @@ class TestPurgeSharedHolder:
         file_paths = {r[0] for r in m2m_rows}
         assert "/file_B.md" in file_paths
         assert "/file_A.md" not in file_paths
+        conn = sqlite3.connect(str(db_path))
+        source_refs = {
+            r[0] for r in conn.execute(
+                "SELECT document_ref FROM source_documents"
+            ).fetchall()
+        }
+        provenance_refs = {
+            r[0] for r in conn.execute(
+                f"SELECT document_ref FROM chunk_source_provenance_{strategy}"
+            ).fetchall()
+        }
+        conn.close()
+        assert str(Path("/file_A.md").resolve()) not in source_refs
+        assert str(Path("/file_B.md").resolve()) in source_refs
+        assert str(Path("/file_A.md").resolve()) not in provenance_refs
+        assert str(Path("/file_B.md").resolve()) in provenance_refs
 
 
 class TestPurgeMixedOrphansAndShared:

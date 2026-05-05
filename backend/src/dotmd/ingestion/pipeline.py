@@ -1933,11 +1933,24 @@ class IndexingPipeline:
             cleanup (graph nodes, fingerprints).
         """
         all_orphans_by_strategy: dict[str, list[str]] = {}
+        document_ref = self._meta_entity_id(file_path)
+        self._metadata_store.delete_source_document_for_file(file_path, conn=conn)
         for strategy in self._present_strategies(conn):
+            self._metadata_store.delete_chunk_provenance_for_document(
+                strategy,
+                "filesystem",
+                document_ref,
+                conn=conn,
+            )
             orphans = self._metadata_store.delete_m2m_for_file(
                 strategy, file_path, conn=conn
             )
             if orphans:
+                self._metadata_store.delete_chunk_provenance(
+                    strategy,
+                    orphans,
+                    conn=conn,
+                )
                 self._metadata_store.delete_orphan_chunks(
                     strategy, orphans, conn=conn
                 )

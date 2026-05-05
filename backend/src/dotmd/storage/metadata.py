@@ -453,10 +453,27 @@ class SQLiteMetadataStore:
             return
         table = f"chunk_source_provenance_{strategy}"
         placeholders = ",".join("?" for _ in chunk_ids)
-        conn.execute(
-            f"DELETE FROM {table} WHERE chunk_id IN ({placeholders})",
-            list(chunk_ids),
-        )
+        with contextlib.suppress(sqlite3.OperationalError):
+            conn.execute(
+                f"DELETE FROM {table} WHERE chunk_id IN ({placeholders})",
+                list(chunk_ids),
+            )
+
+    def delete_chunk_provenance_for_document(
+        self,
+        strategy: str,
+        namespace: str,
+        document_ref: str,
+        *,
+        conn: sqlite3.Connection,
+    ) -> None:
+        """Delete provenance rows for one source document in a strategy."""
+        table = f"chunk_source_provenance_{strategy}"
+        with contextlib.suppress(sqlite3.OperationalError):
+            conn.execute(
+                f"DELETE FROM {table} WHERE namespace = ? AND document_ref = ?",
+                (namespace, document_ref),
+            )
 
     # -- chunks (Phase 16 M2M surface) --------------------------------------
 
