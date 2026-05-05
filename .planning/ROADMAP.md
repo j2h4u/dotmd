@@ -428,7 +428,7 @@ FastMCP поддерживает `Context.session.send_tool_list_changed()`. В 
 **Context:** Аудит 2026-04-29: 299/18515 (1.61%) чанков shared. Большинство — один файл в двух местах (skills cache + source repo) или voicenotes одной сессии → e_meta практически идентична, семантическое воздействие минимально. Но архитектурно некорректно.
 **Fix cost when needed:** Без TEI-запросов — переиспользовать хранящиеся e_text + e_meta_правильного_файла, пересчитать e_fused математически только для ~300 чанков. Требует изменения схемы vec_meta: UNIQUE(chunk_id) → UNIQUE(chunk_id, file_path) для shared chunks.
 **Requirements:** TBD
-**Plans:** 0 plans
+**Plans:** 4 plans
 
 Plans:
 - [ ] TBD (promote with /gsd-review-backlog when ready)
@@ -751,7 +751,10 @@ Phase context:
   a minimal slice into this phase.
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 25 to break down)
+- [ ] 25-01-domain-models-and-filesystem-adapter-PLAN.md — Define source-aware domain models and the in-process filesystem Markdown adapter contract
+- [ ] 25-02-ingestion-routing-and-chunk-provenance-PLAN.md — Route current Markdown ingestion through source documents and preserve chunk/fingerprint behavior
+- [ ] 25-03-provenance-persistence-and-read-search-compatibility-PLAN.md — Persist minimal source provenance while preserving `file_paths` and MCP read/search compatibility
+- [ ] 25-04-regression-docs-and-phase-verification-PLAN.md — Add cross-surface regression coverage, docs, and final phase verification
 
 ---
 
