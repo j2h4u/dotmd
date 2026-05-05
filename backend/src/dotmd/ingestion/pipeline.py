@@ -1601,29 +1601,10 @@ class IndexingPipeline:
 
         Returns the number of chunks created/updated.
         """
-        # Normalise: accept bare Path for test convenience.
-        if isinstance(file_info, Path):
-            _p = file_info
-            try:
-                _stat = _p.stat()
-            except OSError:
-                logger.warning("index_file: cannot stat %s — skipping", _p)
-                return 0
-            try:
-                _raw = read_file(_p)
-                _fm, _ = parse_frontmatter(_raw)
-            except OSError:
-                _fm = {}
-            from dotmd.core.models import DocKind
-            _kind = _fm.get("kind", DocKind.DOCUMENT)
-            file_info = FileInfo(
-                path=_p,
-                title=str(_fm.get("title", _p.stem)),
-                last_modified=datetime.fromtimestamp(_stat.st_mtime, tz=UTC),
-                size_bytes=_stat.st_size,
-                frontmatter=_fm,
-                kind=_kind,
-            )
+        normalized = self._file_info_and_source_document(file_info)
+        if normalized is None:
+            return 0
+        file_info, source_document = normalized
 
         path_str = str(file_info.path)
         needs_embed = False
@@ -1699,6 +1680,7 @@ class IndexingPipeline:
                 overlap_tokens=self._settings.chunk_overlap_tokens,
                 kind=file_info.kind,
                 chunk_strategy=self._strategy,
+                provenance=self._filesystem_chunk_provenance(source_document),
             )
             t_chunk = time.perf_counter() - t0
 

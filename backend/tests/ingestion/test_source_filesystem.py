@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
-from dotmd.core.models import SourceDocument
+from dotmd.core.models import FileInfo, SourceDocument
+from dotmd.ingestion.file_tracker import FileDiff
 from dotmd.ingestion.reader import chunk_checksum, meta_checksum
 from dotmd.ingestion.source import (
     FilesystemMarkdownSourceAdapter,
@@ -206,6 +208,121 @@ def test_pipeline_helper_builds_filesystem_chunk_provenance(
     assert provenance.ref == f"filesystem:{document_ref}"
     assert provenance.parser_name == "markdown"
     assert provenance.source_unit_refs == []
+
+
+def _pipeline_with_mock_embedding(data_dir: Path, index_dir: Path):
+    from dotmd.core.config import Settings
+    from dotmd.ingestion.pipeline import IndexingPipeline
+
+    pipeline = IndexingPipeline(
+        Settings(
+            data_dir=data_dir,
+            index_dir=index_dir,
+            embedding_url="http://localhost:18088",
+            vector_backend="sqlite-vec",
+            graph_backend="ladybugdb",
+            extract_depth="structural",
+        )
+    )
+    mock_engine = MagicMock()
+    mock_engine.encode_batch = lambda texts: [[0.1] * 768 for _ in texts]
+    mock_engine.get_tei_model_id = MagicMock(return_value="test-model")
+    pipeline._semantic_engine = mock_engine
+    return pipeline
+
+
+def _capture_indexed_chunks(pipeline) -> list:
+    captured_chunks = []
+
+    class KeywordRecorder:
+        def add_chunks(self, chunks, file_meta=None):  # type: ignore[no-untyped-def]
+            captured_chunks.extend(chunks)
+
+    pipeline._keyword_engine = KeywordRecorder()
+    return captured_chunks
+
+
+def test_index_file_path_and_file_info_use_same_filesystem_provenance(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    md_path = data_dir / "note.md"
+    _write_markdown(md_path, "Trickle", ["source"], "# Heading\n\nBody text.")
+
+    path_pipeline = _pipeline_with_mock_embedding(data_dir, tmp_path / "path-index")
+    path_chunks = _capture_indexed_chunks(path_pipeline)
+    path_pipeline.index_file(md_path)
+
+    file_info_pipeline = _pipeline_with_mock_embedding(
+        data_dir,
+        tmp_path / "file-info-index",
+    )
+    file_info_chunks = _capture_indexed_chunks(file_info_pipeline)
+    normalized = file_info_pipeline._file_info_and_source_document(md_path)
+    assert normalized is not None
+    file_info, _ = normalized
+    file_info_pipeline.index_file(file_info)
+
+    assert path_chunks
+    assert file_info_chunks
+    assert path_chunks[0].provenance == file_info_chunks[0].provenance
+    assert path_chunks[0].provenance is not None
+    assert path_chunks[0].provenance.document_ref == str(md_path.resolve())
+
+
+def test_bulk_and_index_file_use_identical_filesystem_provenance(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    md_path = data_dir / "note.md"
+    _write_markdown(md_path, "Bulk", ["source"], "# Heading\n\nBody text.")
+
+    bulk_pipeline = _pipeline_with_mock_embedding(data_dir, tmp_path / "bulk-index")
+    bulk_chunks = _capture_indexed_chunks(bulk_pipeline)
+    bulk_pipeline.index(data_dir)
+
+    file_pipeline = _pipeline_with_mock_embedding(data_dir, tmp_path / "file-index")
+    file_chunks = _capture_indexed_chunks(file_pipeline)
+    file_pipeline.index_file(md_path)
+
+    assert bulk_chunks
+    assert file_chunks
+    assert bulk_chunks[0].provenance == file_chunks[0].provenance
+    assert bulk_chunks[0].provenance is not None
+    document_ref = str(md_path.resolve())
+    assert bulk_chunks[0].provenance.namespace == "filesystem"
+    assert bulk_chunks[0].provenance.document_ref == document_ref
+    assert bulk_chunks[0].provenance.ref == f"filesystem:{document_ref}"
+    assert bulk_chunks[0].provenance.parser_name == "markdown"
+    assert bulk_chunks[0].provenance.source_unit_refs == []
+
+
+def test_index_file_trackers_receive_file_info_objects(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    md_path = data_dir / "note.md"
+    _write_markdown(md_path, "Tracker", ["source"], "Body text.")
+    pipeline = _pipeline_with_mock_embedding(data_dir, tmp_path / "index")
+    path_str = str(md_path)
+    tracker_inputs: list[list[FileInfo]] = []
+
+    def record_chunk_diff(files: list[FileInfo]) -> FileDiff:
+        tracker_inputs.append(files)
+        return FileDiff(unchanged=[path_str])
+
+    def record_meta_diff(files: list[FileInfo]) -> FileDiff:
+        tracker_inputs.append(files)
+        return FileDiff(unchanged=[path_str])
+
+    pipeline._chunk_tracker.diff = record_chunk_diff  # type: ignore[method-assign]
+    pipeline._meta_tracker.diff = record_meta_diff  # type: ignore[method-assign]
+
+    pipeline.index_file(md_path)
+
+    assert len(tracker_inputs) == 2
+    assert all(isinstance(files[0], FileInfo) for files in tracker_inputs)
 
 
 def test_discover_multi_excludes_empty_and_non_markdown_files(
