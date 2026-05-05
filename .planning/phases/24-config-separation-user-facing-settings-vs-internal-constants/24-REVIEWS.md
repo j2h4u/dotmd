@@ -111,3 +111,72 @@ Only OpenCode was requested and invoked for this review cycle, so there is no mu
 ### Divergent Views
 
 - None. Only one external reviewer was used in this cycle.
+
+---
+
+## Cycle 2 Re-Review
+
+**Reviewer:** OpenCode  
+**Reviewed at:** 2026-05-05T21:02:00+05:00  
+**Trigger:** Re-review after commit `4cd74e0 docs(24): address plan review feedback`.
+
+### OpenCode Review
+
+# Cross-AI Plan Review: Phase 24 — Cycle 2
+
+## Summary
+
+The cycle 1 HIGH concern (`falkordb_url` default passing validation silently) has been **fully resolved**. Both plans now explicitly define `DEFAULT_FALKORDB_URL`, reject it in `validate_for_runtime()` when `graph_backend="falkordb"`, cover both stdio and HTTP MCP paths with `load_runtime_settings()`, and expose `DOTMD_INDEXING_EXTRA_EXCLUDE` in `.env.example` and README. The cycle 1 MEDIUMs have also been addressed. The plans are execution-ready.
+
+## Strengths
+
+- **Cycle 1 HIGH fully resolved** — `DEFAULT_FALKORDB_URL = "redis://localhost:6379"` is a named constant (Task 2, line ~893), and `validate_for_runtime()` explicitly rejects both empty and `DEFAULT_FALKORDB_URL` when `graph_backend="falkordb"` (Task 2 lines 954–957, Task 1 test contract 8). The threat model now calls this out as a HIGH threat with mitigation. Verified against source: `config.py:182` confirms the current default is `"redis://localhost:6379"`.
+- **stdio MCP path covered** — Task 3 now explicitly targets both `init_service()` (line 469) and `create_app()` (line 494) for `load_runtime_settings()`. Acceptance criteria include grep-verifiable proof for the stdio path. Verified against source: both paths currently use `load_settings()` at `mcp_server.py:469` and `mcp_server.py:494`.
+- **Additive excludes discoverable** — Plan 02 Task 2 adds a `# Path filtering` block in `.env.example` with both `DOTMD_INDEXING_EXTRA_EXCLUDE` and `DOTMD_INDEXING_EXCLUDE`, with comments explaining additive vs replace-only semantics. Plan 02 Task 3 mirrors this in README with a dedicated path-filtering subsection. Acceptance criteria verify both fields appear and `DOTMD_INDEXING_EXTRA_EXCLUDE` is described as additive.
+- **`identity` fields handled correctly** — Task 2 action (lines 949–953) now says "Do not reject the selected Python defaults for these identity fields as unsafe; visibility for selected defaults is handled by `.env.example` and README in Plan 02." This is the right call — it avoids dead-code validation while achieving D-07 visibility through documentation.
+- **`effective_indexing_exclude` call-site migration is specific** — Task 3 names exact files (`trickle.py`, `service.py`) and the exact old→new attribute swap. Grep confirms 4 call sites currently using `indexing_exclude` in `trickle.py` (lines 256, 296, 571) and `service.py` (line 719), all of which need migration.
+
+## Concerns
+
+- **MEDIUM: Identity-field empty-string check is still documented but functionally unreachable.** Task 2 says `validate_for_runtime()` should reject when `embedding_model`, `chunk_strategy`, etc. are "explicitly empty." These fields all have non-empty Python defaults (`config.py:33`, `61`, `78`, etc.), so the only way to hit this is `Settings(embedding_model="")` — an explicit constructor call, not a deployment misconfiguration. The check protects against a hypothetical API misuse rather than the failure mode the phase addresses. This is harmless but adds code that no production path can trigger.
+- **LOW: `indexing_paths=[]` validation may conflict with legitimate CLI usage.** Task 2 validates `indexing_paths` is non-empty in `validate_for_runtime()`. This is correct for the container path. But `load_runtime_settings()` is explicitly applied to MCP `init_service()` (stdio), and stdio sessions can be launched for `dotmd mcp` without indexing — search-only usage with an existing index. If a stdio session doesn't set `DOTMD_INDEXING_PATHS`, it would fail validation even though it doesn't need indexing. The plan acknowledges CLI commands should not use runtime validation, but `init_service()` is the stdio *server* path, not a CLI command.
+- **LOW: Plan 02 Task 1 acceptance criteria duplicate `DOTMD_ENV` absence check.** Both Task 1 and Task 2 acceptance criteria in Plan 01 include `does not contain DOTMD_ENV`. Minor redundancy, not a functional issue.
+
+## Suggestions
+
+- Consider making the `indexing_paths` empty-list check conditional: require non-empty only when the service also starts trickle indexing, or gate it behind whether indexing is actually expected. If that's too much scope for this phase, document it as a known constraint so stdio search-only sessions set a dummy `DOTMD_INDEXING_PATHS=["/none"]`.
+- The identity-field empty-string checks could be removed from `validate_for_runtime()` since they are unreachable in practice. If retained for defense-in-depth, add a comment noting they guard against explicit constructor misuse, not deployment misconfiguration.
+- None of these suggestions block execution — the plans are sound as written.
+
+## Risk Assessment
+
+**Overall risk: LOW**
+
+The cycle 1 HIGH has been fully addressed with a concrete constant + explicit rejection. The remaining concerns are MEDIUM at worst and involve edge-case ergonomics rather than safety gaps. The plan structure is tight: TDD-first, minimal shape, no scope creep, and all acceptance criteria are grep/pytest-verifiable.
+
+CYCLE_SUMMARY: current_high=0
+
+## Current HIGH Concerns
+
+None.
+
+---
+
+## Cycle 2 Consensus Summary
+
+Only OpenCode was requested and invoked for cycle 2, so there is no multi-reviewer consensus to aggregate. The reviewer marked the prior HIGH as fully resolved and found no unresolved HIGH concerns.
+
+### Agreed Strengths
+
+- The previous FalkorDB runtime-safety blocker is now covered by explicit plan tasks, tests, and acceptance criteria.
+- The stdio and HTTP MCP runtime paths are both named for validation migration.
+- The additive exclude mechanism is now discoverable in both `.env.example` and README.
+
+### Agreed Concerns
+
+- MEDIUM: Empty-string identity checks are defensive but not a core deployment-misconfiguration guard.
+- LOW: Requiring `indexing_paths` for stdio runtime validation may be stricter than search-only sessions need.
+
+### Divergent Views
+
+- None. Only one external reviewer was used in this cycle.
