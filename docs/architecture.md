@@ -184,10 +184,19 @@ MCP currently exposes:
 
 ## Future Source Adapters
 
-dotMD currently indexes filesystem markdown, but the intended future direction
-is source/document/unit ingestion where filesystem files are only one source
-adapter. The design context and open questions for Telegram, Notion, Google
-Docs, Perplexity, ChatGPT/Claude exports, source state, and source-aware
+Phase 25 introduced a filesystem Markdown compatibility shim as the first
+source-aware slice. Internally, filesystem documents now map to
+`namespace = filesystem`, `document_ref = str(Path(file_path).resolve())`,
+`ref = filesystem:<document_ref>`, `media_type = text/markdown`, and
+`parser_name = markdown`; source provenance is persisted additively in
+`source_documents` and `chunk_source_provenance_<strategy>`. Public
+filesystem behavior remains path-compatible: search results expose `file_paths`
+and MCP `read(file_path, start, end)` remains the read contract.
+
+The intended future direction is source/document/unit ingestion where
+filesystem files are only one source adapter. The design context and open
+questions for Telegram, Notion, Google Docs, Perplexity, ChatGPT/Claude
+exports, source assets, entity catalogs, source state, and source-aware
 chunking are captured in
 [Source Adapter Architecture Context](source-adapter-architecture.md). The
 follow-up expert-panel review is captured in

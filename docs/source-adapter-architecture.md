@@ -8,6 +8,55 @@ examples discussed before a future planning phase.
 An expert-panel review of this context lives in
 [Source Adapter Architecture Expert Panel Review](source-adapter-architecture-panel-review.md).
 
+## Phase 25 Delivered State
+
+Phase 25 shipped the first internal source-aware slice as a filesystem Markdown
+compatibility shim. Current users still index Markdown files from the local
+filesystem, search results still expose `file_paths`, and MCP
+`read(file_path, start, end)` remains the public compatibility contract for
+filesystem hits. The change is internal: filesystem Markdown now enters the
+pipeline through `SourceDocument` identity and chunk provenance before being
+bridged back to the existing file-path surfaces.
+
+Canonical filesystem Markdown mapping:
+
+```text
+namespace = filesystem
+document_ref = str(Path(file_path).resolve())
+ref = filesystem:<document_ref>
+media_type = text/markdown
+parser_name = markdown
+```
+
+`SourceDocument.file_path` is a compatibility field for filesystem sources.
+When `namespace = filesystem` and `file_path` is present, it must resolve to
+`document_ref`; `file_path` is not the general source identity for future
+sources. Frontmatter fields that dotMD already depends on remain document
+metadata: `title`, `kind`, `tags`, and `participants` live on the source
+document metadata layer and continue to feed chunking, metadata embeddings,
+FTS metadata, and graph extraction.
+
+The Phase 25 storage split is intentionally additive:
+
+- `source_documents` is one strategy-independent table keyed by
+  `(namespace, document_ref)`.
+- `chunk_source_provenance_<strategy>` is strategy-scoped because chunk IDs,
+  chunk strategy, and source-unit refs belong to a chunking strategy.
+- `chunk_file_paths_<strategy>` remains the authoritative compatibility table
+  for filesystem search hydration and MCP `read(file_path, start, end)`.
+
+Filesystem Markdown chunks currently carry empty source-unit refs because Phase
+25 did not add durable parser-emitted units. This keeps the shim minimal while
+leaving `source_unit_refs[]` in the provenance contract for later source
+slices.
+
+Deferred scope remains explicit: Telegram read-only indexing, the
+`mcp-telegram` export API, source assets, entity catalogs, out-of-process
+adapter transports, TTL retention policy, and second-source validation are not
+implemented by Phase 25. PDF/DOCX/HTML parser support is also future work; it
+will still be `namespace = filesystem` when it arrives, but with different
+`media_type`, `parser_name`, parser output, and chunking behavior.
+
 ## Problem
 
 dotMD currently indexes markdown files from the local filesystem. That is too
