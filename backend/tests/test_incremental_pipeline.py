@@ -95,7 +95,7 @@ def mock_settings(index_dir: Path):
 class TestFirstIndex:
     """First index (no fingerprints) treats all files as new."""
 
-    @patch("dotmd.ingestion.pipeline.discover_files")
+    @patch("dotmd.ingestion.source.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
     @patch("dotmd.ingestion.chunker.chunk_file")
     def test_first_index_ingests_all_files(
@@ -129,7 +129,7 @@ class TestFirstIndex:
 class TestUnchangedFiles:
     """Unchanged files are skipped entirely."""
 
-    @patch("dotmd.ingestion.pipeline.discover_files")
+    @patch("dotmd.ingestion.source.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
     @patch("dotmd.ingestion.chunker.chunk_file")
     def test_unchanged_files_skip_embedding(
@@ -170,7 +170,7 @@ class TestUnchangedFiles:
 class TestModifiedFile:
     """Modified files get purged from all stores then re-ingested."""
 
-    @patch("dotmd.ingestion.pipeline.discover_files")
+    @patch("dotmd.ingestion.source.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
     @patch("dotmd.ingestion.chunker.chunk_file")
     def test_modified_file_purges_then_reingests(
@@ -220,7 +220,7 @@ class TestModifiedFile:
 class TestDeletedFile:
     """Deleted files get purged and fingerprint removed."""
 
-    @patch("dotmd.ingestion.pipeline.discover_files")
+    @patch("dotmd.ingestion.source.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
     @patch("dotmd.ingestion.chunker.chunk_file")
     def test_deleted_file_purges_and_removes_fingerprint(
@@ -270,7 +270,7 @@ class TestDeletedFile:
 class TestNewFileAdded:
     """New file added is ingested without touching existing data."""
 
-    @patch("dotmd.ingestion.pipeline.discover_files")
+    @patch("dotmd.ingestion.source.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
     @patch("dotmd.ingestion.chunker.chunk_file")
     def test_new_file_ingested_existing_untouched(
@@ -326,7 +326,7 @@ class TestFTS5UpdateAfterChanges:
 class TestFingerprintTiming:
     """Fingerprints are saved AFTER successful ingestion, not before."""
 
-    @patch("dotmd.ingestion.pipeline.discover_files")
+    @patch("dotmd.ingestion.source.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
     @patch("dotmd.ingestion.chunker.chunk_file")
     def test_fingerprints_saved_after_ingestion(
@@ -376,7 +376,7 @@ class TestFingerprintTiming:
 class TestForceReindex:
     """force=True processes all files regardless of fingerprints."""
 
-    @patch("dotmd.ingestion.pipeline.discover_files")
+    @patch("dotmd.ingestion.source.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
     @patch("dotmd.ingestion.chunker.chunk_file")
     def test_force_processes_all_files(
@@ -415,7 +415,7 @@ class TestForceReindex:
         assert mock_chunk_file.call_count == 2
         assert stats.total_files == 2
 
-    @patch("dotmd.ingestion.pipeline.discover_files")
+    @patch("dotmd.ingestion.source.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
     @patch("dotmd.ingestion.chunker.chunk_file")
     def test_force_clears_fingerprints(

@@ -205,7 +205,7 @@ class TestOldSchemaCompat:
 class TestPipelineIncrementalDiffCounts:
     """_incremental_index populates diff counts in IndexStats."""
 
-    @patch("dotmd.ingestion.pipeline.discover_files")
+    @patch("dotmd.ingestion.source.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
     @patch("dotmd.ingestion.chunker.chunk_file")
     def test_incremental_index_has_diff_counts(
@@ -291,7 +291,7 @@ class TestPipelineIncrementalDiffCounts:
 class TestPipelineFullIndexDiffCounts:
     """_full_index sets new_files=len(files), others=0."""
 
-    @patch("dotmd.ingestion.pipeline.discover_files")
+    @patch("dotmd.ingestion.source.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
     @patch("dotmd.ingestion.chunker.chunk_file")
     def test_force_index_all_new(
@@ -356,7 +356,7 @@ class TestPipelineFullIndexDiffCounts:
 class TestPipelineNoChangesDiffCounts:
     """No-changes short-circuit returns unchanged_files=len(unchanged), other diff fields=0."""
 
-    @patch("dotmd.ingestion.pipeline.discover_files")
+    @patch("dotmd.ingestion.source.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
     @patch("dotmd.ingestion.chunker.chunk_file")
     def test_no_changes_fresh_counts(
