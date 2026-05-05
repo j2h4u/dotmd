@@ -20,6 +20,7 @@ must_haves:
     - "D-04/D-05/D-06: The Phase 25 architecture panel contract is the planning source of truth"
     - "D-07/D-08: Telegram read-only and mcp-telegram export work are not implemented"
     - "D-09/D-10/D-11: filesystem Markdown behavior, frontmatter semantics, and split fingerprints remain compatible"
+    - "Filesystem document_ref is deterministic: document_ref == str(Path(file_path).resolve()) and ref == f\"filesystem:{document_ref}\""
     - "No SourceAsset, SourceEntity, out-of-process adapter transport, TTL policy, or second-source validation implementation is added"
 ---
 
@@ -41,6 +42,14 @@ domain concepts, then maps current `.md` discovery into:
 
 The plan does not change search behavior, does not add Telegram, and does not
 add source assets or entity catalogs.
+
+For filesystem Markdown, the canonical identity rule is fixed in this plan:
+`document_ref` MUST be `str(Path(file_path).resolve())`, `ref` MUST be
+`f"filesystem:{document_ref}"`, and `file_path` MUST either be `None` for
+non-filesystem future sources or point to the same resolved path for
+`namespace=="filesystem"`. A filesystem `SourceDocument` whose `file_path` and
+`document_ref` disagree is invalid; the adapter must fail construction or raise
+a validation error instead of silently choosing one value.
 </objective>
 
 <threat_model>
@@ -57,6 +66,7 @@ add source assets or entity catalogs.
 <tasks>
 <task id="1" type="execute">
 <title>Add source-aware domain models</title>
+<name>Add source-aware domain models</name>
 <read_first>
 - `.planning/phases/25-document-source-abstraction-source-adapter-mvp/25-CONTEXT.md`
 - `.planning/phases/25-document-source-abstraction-source-adapter-mvp/25-ARCHITECTURE-PANEL.md`
@@ -84,6 +94,11 @@ Add minimal Pydantic models to `backend/src/dotmd/core/models.py`:
   - `metadata_fingerprint: str`
   - `metadata_json: dict = Field(default_factory=dict)`
   - `file_path: Path | None = None`
+- Add the filesystem invariant in the model or adapter construction path:
+  - when `namespace == "filesystem"` and `file_path is not None`,
+    `document_ref == str(file_path.resolve())`
+  - `ref == f"{namespace}:{document_ref}"`
+  - invalid combinations raise `ValueError` or Pydantic validation error
 - `SourceUnit` with fields:
   - `namespace: str`
   - `document_ref: str`
@@ -117,11 +132,15 @@ Use `ConfigDict(extra="forbid")` on the new models. Do not add
 - `backend/src/dotmd/core/models.py` contains `class ChunkProvenance`.
 - `backend/src/dotmd/core/models.py` does not contain `class SourceAsset`.
 - `backend/src/dotmd/core/models.py` does not contain `class SourceEntity`.
+- `backend/tests/ingestion/test_source_filesystem.py` asserts `document_ref == str(path.resolve())`.
+- `backend/tests/ingestion/test_source_filesystem.py` asserts `ref == f"filesystem:{document_ref}"`.
+- `backend/tests/ingestion/test_source_filesystem.py` asserts mismatched filesystem `file_path` and `document_ref` is rejected.
 </acceptance_criteria>
 </task>
 
 <task id="2" type="execute">
 <title>Implement filesystem Markdown source adapter</title>
+<name>Implement filesystem Markdown source adapter</name>
 <read_first>
 - `backend/src/dotmd/ingestion/reader.py`
 - `backend/src/dotmd/core/models.py`
@@ -137,15 +156,20 @@ Create `backend/src/dotmd/ingestion/source.py` with a Protocol-style source
 adapter boundary and an in-process filesystem Markdown adapter.
 
 Concrete target state:
-- Define `SourceAdapterProtocol` with a method that can discover or export
-  `SourceDocument` objects for the filesystem Markdown source.
+- Define `filesystem_document_ref(path: Path) -> str` returning exactly
+  `str(Path(path).resolve())`. This helper is the only filesystem ref
+  normalizer and must match `IndexingPipeline._meta_entity_id(path)`.
+- Define `SourceAdapterProtocol` with explicit discovery methods:
+  - `discover(directory: Path) -> list[SourceDocument]`
+  - `discover_multi(paths: list[str], exclude: list[str] | None = None) -> list[SourceDocument]`
 - Define `FilesystemMarkdownSourceAdapter` that accepts the same path inputs
-  used by current discovery.
+  used by current `discover_files(directory)` and
+  `discover_files_multi(paths, exclude)` discovery.
 - For every discovered Markdown file, emit a `SourceDocument` with:
   - `namespace="filesystem"`
-  - `document_ref` set to a stable normalized path string using the same path
-    normalization convention everywhere in this adapter
+  - `document_ref=filesystem_document_ref(path)`
   - `ref=f"filesystem:{document_ref}"`
+  - `source_uri=document_ref`
   - `media_type="text/markdown"`
   - `parser_name="markdown"`
   - `document_type` from frontmatter `kind` with `DocKind.DOCUMENT` default
@@ -160,6 +184,10 @@ Concrete target state:
 <acceptance_criteria>
 - `backend/src/dotmd/ingestion/source.py` contains `class SourceAdapterProtocol`.
 - `backend/src/dotmd/ingestion/source.py` contains `class FilesystemMarkdownSourceAdapter`.
+- `backend/src/dotmd/ingestion/source.py` contains `def filesystem_document_ref`.
+- `backend/src/dotmd/ingestion/source.py` contains `def discover(self, directory: Path`.
+- `backend/src/dotmd/ingestion/source.py` contains `def discover_multi`.
+- `backend/src/dotmd/ingestion/source.py` contains `resolve()`.
 - `backend/src/dotmd/ingestion/source.py` contains `namespace = "filesystem"` or `namespace="filesystem"`.
 - `backend/src/dotmd/ingestion/source.py` contains `media_type = "text/markdown"` or `media_type="text/markdown"`.
 - `backend/src/dotmd/ingestion/source.py` contains `parser_name = "markdown"` or `parser_name="markdown"`.
@@ -173,6 +201,7 @@ Concrete target state:
 
 <task id="3" type="execute">
 <title>Preserve reader compatibility wrappers</title>
+<name>Preserve reader compatibility wrappers</name>
 <read_first>
 - `backend/src/dotmd/ingestion/reader.py`
 - `backend/src/dotmd/ingestion/source.py`
@@ -192,8 +221,17 @@ Concrete rules:
 - `discover_files_multi(paths, exclude)` still returns `list[FileInfo]`.
 - `parse_frontmatter(content)`, `chunk_checksum(path)`, and
   `meta_checksum(path)` keep their current public behavior.
-- Add a focused compatibility helper only if needed, for example converting a
-  `SourceDocument` back to `FileInfo` for old pipeline code.
+- Add `source_document_to_file_info(document: SourceDocument) -> FileInfo` in
+  `backend/src/dotmd/ingestion/source.py` or an equivalent focused helper.
+  For `namespace=="filesystem"`, it MUST require `document.file_path is not
+  None`, assert `document.document_ref == str(document.file_path.resolve())`,
+  and return a `FileInfo` with:
+  - `path=document.file_path`
+  - `title=document.title`
+  - `last_modified=document.updated_at`
+  - `size_bytes=document.file_path.stat().st_size`
+  - `kind=document.document_type`
+  - `frontmatter=document.metadata_json`
 - Do not change `.md`-only discovery in this plan.
 </action>
 <acceptance_criteria>
@@ -201,12 +239,14 @@ Concrete rules:
 - `backend/src/dotmd/ingestion/reader.py` still contains `def discover_files_multi(`.
 - `backend/src/dotmd/ingestion/reader.py` still contains `def chunk_checksum(`.
 - `backend/src/dotmd/ingestion/reader.py` still contains `def meta_checksum(`.
-- `backend/tests/ingestion/test_source_filesystem.py` has a test proving adapter output can be converted to or compared with `FileInfo` for title, kind, frontmatter, and path.
+- `backend/src/dotmd/ingestion/source.py` contains `source_document_to_file_info`.
+- `backend/tests/ingestion/test_source_filesystem.py` has a test proving adapter output converts to `FileInfo` with identical title, kind, frontmatter, path, and resolved `document_ref`.
 </acceptance_criteria>
 </task>
 
 <task id="4" type="execute">
 <title>Test filesystem adapter contract and explicit deferrals</title>
+<name>Test filesystem adapter contract and explicit deferrals</name>
 <read_first>
 - `backend/tests/ingestion/test_meta_checksum.py`
 - `backend/tests/ingestion/test_chunker.py`
@@ -224,6 +264,7 @@ tests.
 Required test cases:
 - A Markdown file with frontmatter produces one `SourceDocument` with
   `namespace=="filesystem"`, `ref.startswith("filesystem:")`,
+  `document_ref==str(path.resolve())`,
   `media_type=="text/markdown"`, `parser_name=="markdown"`, frontmatter title,
   `document_type` equal to frontmatter `kind`, and non-empty
   `content_fingerprint` plus `metadata_fingerprint`.

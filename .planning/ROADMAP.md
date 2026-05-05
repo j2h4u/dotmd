@@ -735,7 +735,7 @@ model.
 **Requirements:** TBD
 **Backlog source:** 999.22
 **Depends on:** Phase 24
-**Plans:** 0 plans
+**Plans:** 4 plans
 
 Phase context:
 - Use the architecture docs linked from backlog `999.22` as the source of

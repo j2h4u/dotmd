@@ -24,6 +24,7 @@ must_haves:
     - "D-09: Existing SearchResult.file_paths and MCP read(file_path, start, end) remain valid"
     - "D-10: Frontmatter metadata remains accessible to FTS, metadata embeddings, and graph behavior"
     - "D-11: New source provenance persistence does not break delete or metadata-only fast-path behavior"
+    - "source_documents is strategy-independent and keyed by filesystem document_ref; chunk_source_provenance remains strategy-scoped"
     - "No raw source-unit mirror, SourceAsset table, entity catalog table, TTL policy, or Telegram runtime table is added"
 ---
 
@@ -33,6 +34,12 @@ must_haves:
 Persist the minimal source/document/chunk provenance needed by the source-aware
 shim while keeping filesystem `file_paths`, search hydration, and MCP
 `read(file_path, start, end)` behavior compatible.
+
+Storage scoping is fixed for this phase: `source_documents` is a single
+strategy-independent table because source document metadata does not vary by
+chunking strategy or embedding model. Chunk-to-source provenance remains
+strategy-scoped as `chunk_source_provenance_<strategy>` because chunk IDs and
+source-unit refs are produced by a chunking strategy.
 </objective>
 
 <threat_model>
@@ -42,6 +49,8 @@ shim while keeping filesystem `file_paths`, search hydration, and MCP
 |---|---:|---|
 | Provenance tables leave orphan rows after file deletion | HIGH | Add provenance cleanup to holder-aware purge and test deletion cascades. |
 | Search clients lose `file_paths` while refs are introduced | HIGH | Keep `SearchResult.file_paths` and MCP `SearchHit.file_paths` unchanged; any `ref` metadata is additive. |
+| Strategy-scoped source_documents duplicates document metadata and changes helper APIs later | HIGH | Use one global `source_documents` table keyed by `(namespace, document_ref)`; keep only chunk provenance strategy-scoped. |
+| Trickle `index_file()` saves chunks without provenance rows | HIGH | Persist source documents and chunk provenance in both bulk `_save_and_embed_chunks()` and single-file `index_file()` save paths. |
 | New schema stores raw private source-unit text unnecessarily | MEDIUM | Persist provenance refs and metadata only; no durable raw source-unit mirror in Phase 25. |
 | Storage migration breaks existing index databases | HIGH | Use idempotent `CREATE TABLE IF NOT EXISTS` and additive columns/tables only. |
 </threat_model>
@@ -49,6 +58,7 @@ shim while keeping filesystem `file_paths`, search hydration, and MCP
 <tasks>
 <task id="1" type="execute">
 <title>Add additive SQLite provenance tables</title>
+<name>Add additive SQLite provenance tables</name>
 <read_first>
 - `backend/src/dotmd/storage/metadata.py`
 - `backend/tests/storage/test_metadata_m2m.py`
@@ -63,9 +73,8 @@ Add additive provenance persistence to `SQLiteMetadataStore` without replacing
 `chunk_file_paths_<strategy>`.
 
 Concrete target state:
-- Add an idempotent table for source documents, for example
-  `source_documents_<strategy>` or a non-strategy table if document metadata is
-  intentionally strategy-independent. It must store:
+- Add one idempotent strategy-independent table named exactly
+  `source_documents`. It must store:
   - `namespace`
   - `document_ref`
   - `ref`
@@ -79,7 +88,9 @@ Concrete target state:
   - `content_fingerprint`
   - `metadata_fingerprint`
   - `metadata_json`
-- Add a strategy-scoped chunk provenance table, for example
+- Primary key: `(namespace, document_ref)`. For filesystem Markdown,
+  `document_ref` is `str(Path(file_path).resolve())`.
+- Add a strategy-scoped chunk provenance table named
   `chunk_source_provenance_<strategy>`, storing:
   - `chunk_id`
   - `namespace`
@@ -87,12 +98,18 @@ Concrete target state:
   - `source_unit_refs` as JSON text
   - `chunk_strategy`
   - `parser_name`
+- Add an index on `chunk_source_provenance_<strategy>(chunk_id)` for batch
+  hydration.
 - Add helper methods with concrete names chosen by implementation, for example:
-  - `ensure_source_tables(strategy)`
-  - `upsert_source_document(...)`
-  - `add_chunk_provenance(...)`
+  - `ensure_source_document_table()`
+  - `ensure_chunk_source_provenance_table(strategy)`
+  - `upsert_source_document(document, conn=None)`
+  - `get_source_document(namespace, document_ref, conn=None)`
+  - `delete_source_document(namespace, document_ref, conn=None)`
+  - `delete_source_document_for_file(file_path, conn=None)`, implemented by
+    deriving `document_ref=str(Path(file_path).resolve())`
+  - `add_chunk_provenance(strategy, provenance, chunk_id, conn=None)`
   - `get_chunk_provenance_for_chunk_ids(strategy, chunk_ids)`
-  - `delete_source_document_for_file(strategy, file_path, conn=...)`
   - `delete_chunk_provenance(strategy, chunk_ids, conn=...)`
 - Use `CREATE TABLE IF NOT EXISTS`.
 - Use idempotent insert/upsert semantics.
@@ -101,7 +118,9 @@ Concrete target state:
 </action>
 <acceptance_criteria>
 - `backend/src/dotmd/storage/metadata.py` contains `source_documents`.
+- `backend/src/dotmd/storage/metadata.py` contains `PRIMARY KEY (namespace, document_ref)` or equivalent composite primary key syntax.
 - `backend/src/dotmd/storage/metadata.py` contains `chunk_source_provenance`.
+- `backend/src/dotmd/storage/metadata.py` contains `CREATE INDEX IF NOT EXISTS`.
 - `backend/src/dotmd/storage/metadata.py` contains `source_unit_refs`.
 - `backend/src/dotmd/storage/metadata.py` still contains `chunk_file_paths_`.
 - `backend/src/dotmd/storage/metadata.py` contains `CREATE TABLE IF NOT EXISTS`.
@@ -112,6 +131,7 @@ Concrete target state:
 
 <task id="2" type="execute">
 <title>Write provenance during chunk save without changing file path hydration</title>
+<name>Write provenance during chunk save without changing file path hydration</name>
 <read_first>
 - `backend/src/dotmd/ingestion/pipeline.py`
 - `backend/src/dotmd/storage/metadata.py`
@@ -131,16 +151,27 @@ provenance alongside existing chunks and file path M2M associations.
 Concrete behavior:
 - `save_chunks()` or the pipeline path must still call `add_file_path(...)`
   for every filesystem chunk.
-- Persist one source document row per discovered Markdown file.
-- Persist one chunk provenance row per chunk with `namespace="filesystem"`,
+- Persist one source document row per discovered Markdown file into global
+  `source_documents`.
+- Persist one chunk provenance row per chunk into
+  `chunk_source_provenance_<strategy>` with `namespace="filesystem"`,
   the source document `document_ref`, `source_unit_refs`, strategy, and
   `parser_name="markdown"`.
+- Write provenance in every chunk save path:
+  - bulk `_save_and_embed_chunks(...)`
+  - trickle/single-file `index_file(...)`
+  - any `save_chunks(...)` helper if that is the common storage boundary
+- `reindex_vectors(...)` must not create duplicate source document rows and
+  must not drop existing provenance; if it rewrites chunks, it must use the
+  same provenance helper as `_save_and_embed_chunks(...)`.
 - Do not persist raw source-unit text in the provenance table.
 - Keep FTS5, vector, and graph write behavior equivalent.
 </action>
 <acceptance_criteria>
 - `backend/src/dotmd/ingestion/pipeline.py` or `backend/src/dotmd/storage/metadata.py` calls `upsert_source_document` or the chosen source document helper.
 - `backend/src/dotmd/ingestion/pipeline.py` or `backend/src/dotmd/storage/metadata.py` calls `add_chunk_provenance` or the chosen chunk provenance helper.
+- `backend/src/dotmd/ingestion/pipeline.py` contains provenance write calls or helper calls reachable from `_save_and_embed_chunks`.
+- `backend/src/dotmd/ingestion/pipeline.py` contains provenance write calls or helper calls reachable from `index_file`.
 - `backend/src/dotmd/storage/metadata.py` still contains `add_file_path`.
 - `backend/tests/storage/test_metadata_m2m.py` asserts `file_paths` are still returned for a chunk with provenance.
 - `backend/tests/storage/test_metadata_m2m.py` asserts stored `source_unit_refs` round-trip as a list.
@@ -149,6 +180,7 @@ Concrete behavior:
 
 <task id="3" type="execute">
 <title>Preserve search and MCP read compatibility with additive refs only</title>
+<name>Preserve search and MCP read compatibility with additive refs only</name>
 <read_first>
 - `backend/src/dotmd/search/fusion.py`
 - `backend/src/dotmd/api/service.py`
@@ -191,6 +223,7 @@ Concrete behavior:
 
 <task id="4" type="execute">
 <title>Extend delete cleanup to source provenance</title>
+<name>Extend delete cleanup to source provenance</name>
 <read_first>
 - `backend/src/dotmd/ingestion/pipeline.py`
 - `backend/src/dotmd/storage/metadata.py`
@@ -209,7 +242,9 @@ filesystem Markdown files and orphaned chunks.
 
 Concrete behavior:
 - When a filesystem file is deleted, remove its source document row by
-  compatibility `file_path` or by derived `document_ref`.
+  deriving `document_ref=str(Path(file_path).resolve())` from compatibility
+  `file_path`, then deleting `(namespace="filesystem", document_ref)` from the
+  global `source_documents` table.
 - When chunk IDs become orphaned, delete their `chunk_source_provenance_*`
   rows in the same DB cleanup path.
 - Preserve current behavior for shared chunks: deleting one file holder must

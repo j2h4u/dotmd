@@ -51,6 +51,7 @@ filesystem search/read workflow.
 <tasks>
 <task id="1" type="execute">
 <title>Add cross-surface filesystem compatibility regression tests</title>
+<name>Add cross-surface filesystem compatibility regression tests</name>
 <read_first>
 - `.planning/phases/25-document-source-abstraction-source-adapter-mvp/25-RESEARCH.md`
 - `backend/tests/ingestion/test_source_filesystem.py`
@@ -93,6 +94,7 @@ Required coverage:
 
 <task id="2" type="execute">
 <title>Document the shipped filesystem shim and future-source boundary</title>
+<name>Document the shipped filesystem shim and future-source boundary</name>
 <read_first>
 - `docs/source-adapter-architecture.md`
 - `docs/source-adapter-architecture-panel-review.md`
@@ -112,12 +114,18 @@ Required doc content:
   source-aware internal model.
 - Canonical filesystem mapping:
   - `namespace = filesystem`
-  - `document_ref = normalized Markdown path/ref`
+  - `document_ref = str(Path(file_path).resolve())`
   - `ref = filesystem:<document_ref>`
   - `media_type = text/markdown`
   - `parser_name = markdown`
+- `SourceDocument.file_path` is a compatibility field for filesystem sources;
+  when present with `namespace = filesystem`, it must resolve to
+  `document_ref`.
 - Frontmatter `title`, `kind`, `tags`, and `participants` remain document
   metadata.
+- `source_documents` is a single strategy-independent table keyed by
+  `(namespace, document_ref)`; `chunk_source_provenance_<strategy>` is
+  strategy-scoped.
 - `file_paths` and MCP `read(file_path, start, end)` remain the public
   compatibility contract for filesystem hits.
 - Telegram read-only, source assets, entity catalogs, adapter transports, TTL
@@ -125,6 +133,9 @@ Required doc content:
 </action>
 <acceptance_criteria>
 - `docs/source-adapter-architecture.md` contains `filesystem:<document_ref>`.
+- `docs/source-adapter-architecture.md` contains `str(Path(file_path).resolve())`.
+- `docs/source-adapter-architecture.md` contains `source_documents`.
+- `docs/source-adapter-architecture.md` contains `chunk_source_provenance`.
 - `docs/source-adapter-architecture.md` contains `media_type = text/markdown`.
 - `docs/source-adapter-architecture.md` contains `parser_name = markdown`.
 - `docs/source-adapter-architecture.md` contains `read(file_path`.
@@ -135,6 +146,7 @@ Required doc content:
 
 <task id="3" type="execute">
 <title>Run full focused verification gate</title>
+<name>Run full focused verification gate</name>
 <read_first>
 - `.planning/phases/25-document-source-abstraction-source-adapter-mvp/25-01-SUMMARY.md`
 - `.planning/phases/25-document-source-abstraction-source-adapter-mvp/25-02-SUMMARY.md`
@@ -178,6 +190,7 @@ for a live smoke.
 
 <task id="4" type="execute">
 <title>Write final phase summary with deferred scope audit</title>
+<name>Write final phase summary with deferred scope audit</name>
 <read_first>
 - `.planning/phases/25-document-source-abstraction-source-adapter-mvp/25-CONTEXT.md`
 - `.planning/phases/25-document-source-abstraction-source-adapter-mvp/25-RESEARCH.md`
@@ -193,11 +206,15 @@ Complete `.planning/phases/25-document-source-abstraction-source-adapter-mvp/25-
 with:
 
 - the shipped internal model fields;
-- the canonical filesystem ref rule;
+- the canonical filesystem ref rule: `document_ref = str(Path(file_path).resolve())`;
 - where `file_path` is intentionally preserved;
+- the `SourceDocument.file_path` and `document_ref` invariant;
 - which object owns frontmatter metadata;
 - how source-unit refs are attached to chunks;
-- schema/storage changes made;
+- schema/storage changes made, including global `source_documents` and
+  strategy-scoped `chunk_source_provenance_<strategy>`;
+- how bulk `index(directory)` and trickle `index_file(path)` share the adapter
+  and provenance path;
 - how metadata-only change detection still avoids full re-chunking;
 - commands run and outcomes;
 - explicit deferred scope audit:
@@ -211,7 +228,10 @@ with:
 </action>
 <acceptance_criteria>
 - `.planning/phases/25-document-source-abstraction-source-adapter-mvp/25-04-SUMMARY.md` contains `Canonical filesystem ref`.
+- `.planning/phases/25-document-source-abstraction-source-adapter-mvp/25-04-SUMMARY.md` contains `str(Path(file_path).resolve())`.
 - `.planning/phases/25-document-source-abstraction-source-adapter-mvp/25-04-SUMMARY.md` contains `file_path is preserved`.
+- `.planning/phases/25-document-source-abstraction-source-adapter-mvp/25-04-SUMMARY.md` contains `index_file(path)`.
+- `.planning/phases/25-document-source-abstraction-source-adapter-mvp/25-04-SUMMARY.md` contains `source_documents`.
 - `.planning/phases/25-document-source-abstraction-source-adapter-mvp/25-04-SUMMARY.md` contains `Frontmatter metadata owner`.
 - `.planning/phases/25-document-source-abstraction-source-adapter-mvp/25-04-SUMMARY.md` contains `Source-unit refs`.
 - `.planning/phases/25-document-source-abstraction-source-adapter-mvp/25-04-SUMMARY.md` contains `Telegram read-only adapter not implemented`.
