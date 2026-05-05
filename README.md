@@ -184,25 +184,76 @@ Index data is stored in the `dotmd-index` Docker volume.
 
 ## Configuration
 
-Configuration comes from `DOTMD_` environment variables, explicit `Settings(...)` overrides, and `~/.dotmd/config.toml`.
+Configuration comes from `DOTMD_` environment variables, explicit `Settings(...)` overrides, and `~/.dotmd/config.toml`. Long-running runtime entry points validate the deployment-bound values at startup, so the live container should set them explicitly instead of relying on local Python defaults.
+
+### Required deployment configuration
+
+Set these for the live container:
+
+| Variable | Example | Description |
+|----------|---------|-------------|
+| `DOTMD_DATA_DIR` | `/data` | Markdown source root inside the container |
+| `DOTMD_INDEX_DIR` | `/dotmd-index` | Persistent index directory inside the container |
+| `DOTMD_INDEXING_PATHS` | `["/data"]` | Roots or glob patterns watched by the trickle indexer |
+| `DOTMD_EMBEDDING_URL` | `http://tei:80` | TEI-compatible embedding endpoint |
+| `DOTMD_GRAPH_BACKEND` | `ladybugdb` | `ladybugdb` or `falkordb` |
+| `DOTMD_FALKORDB_URL` | `redis://falkordb:6379` | Required only when `DOTMD_GRAPH_BACKEND=falkordb` |
+
+When `DOTMD_GRAPH_BACKEND=falkordb`, set `DOTMD_FALKORDB_URL=redis://falkordb:6379` or another reachable Redis URL. The runtime validator rejects the unsafe `redis://localhost:6379` default in FalkorDB mode because it usually points at the container itself, not the graph service.
+
+Path filtering:
+
+- `DOTMD_INDEXING_PATHS` selects the roots and glob patterns to index.
+- `DOTMD_INDEXING_EXTRA_EXCLUDE` is the preferred additive way to add operator ignore patterns while preserving built-in excludes such as `**/.git` and `**/node_modules`.
+- `DOTMD_INDEXING_EXCLUDE` is the legacy replace-only setting for replacing the whole exclude list and should be used only when replacement is intentional.
+- Example: `DOTMD_INDEXING_EXTRA_EXCLUDE=["**/private","**/drafts"]`.
+
+### Index/search identity
+
+These values define index compatibility, extraction cache identity, or ranking behavior. Keep them visible in deployment config because changing them can require reindexing or benchmark review.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DOTMD_DATA_DIR` | `.` | Markdown source root |
-| `DOTMD_INDEX_DIR` | `~/.dotmd` | Index directory |
-| `DOTMD_EMBEDDING_URL` | required | TEI-compatible embedding endpoint |
-| `DOTMD_EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Model name used for local settings and TEI metadata |
-| `DOTMD_TEI_BATCH_SIZE` | `4` | Embedding batch size |
-| `DOTMD_VECTOR_BACKEND` | `sqlite-vec` | Vector backend; LanceDB remains legacy/optional |
-| `DOTMD_GRAPH_BACKEND` | `ladybugdb` | `ladybugdb` or `falkordb` |
-| `DOTMD_FALKORDB_URL` | `redis://localhost:6379` | FalkorDB Redis URL |
+| `DOTMD_EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Embedding model identity used for cache/index naming and TEI metadata checks |
+| `DOTMD_CHUNK_STRATEGY` | `heading_512_50` | Chunk strategy used in chunk/index identity |
 | `DOTMD_EXTRACT_DEPTH` | `ner` | `structural` or `ner` |
-| `DOTMD_BASE_URL` | unset | Public HTTPS base URL for OAuth-enabled MCP deployments |
+| `DOTMD_NER_MODEL_NAME` | `urchade/gliner_multi-v2.1` | GLiNER model identity for extraction caching |
 | `DOTMD_RERANKER_NAME` | `mmarco-minilm` | Stable reranker name selected for normal production search |
-| `DOTMD_RERANKER_COMPARE_NAMES` | `mmarco-minilm` | Default developer comparison set; add temporary candidates only for benchmark runs |
 | `DOTMD_RERANKER_BACKEND` | `cross_encoder` | Reranker provider boundary; currently local CrossEncoder |
 | `DOTMD_RERANKER_MODEL` | `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` | Selected multilingual reranker model |
+| `DOTMD_RERANKER_COMPARE_NAMES` | `mmarco-minilm` | Default developer comparison set; add temporary candidates only for benchmark runs |
+| `DOTMD_EMBEDDING_WEIGHTS` | `text=0.7,meta=0.3` | Dual-encoder text/meta fusion weights; must sum to 1.0 |
+
+### Optional features
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DOTMD_BASE_URL` | unset | Public base URL for OAuth-enabled MCP deployments. Must use HTTPS except `http://localhost`; leave unset to disable OAuth for stdio/internal MCP transports. |
+| `DOTMD_PROFILE_INDEXING` | `false` | Emit per-stage indexing timings in logs |
+| `DOTMD_RUN_STARTUP_CHECKS` | unset | Set to `true` to run the restart-time lint/type/live-MCP e2e safety gate before serving |
+
+`ENVIRONMENT=dev` is accepted as a temporary compatibility alias for `DOTMD_RUN_STARTUP_CHECKS=true`. It is not an environment profile model.
+
+### Advanced tuning
+
+These values can be changed for experiments but are not the primary operator checklist.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DOTMD_TEI_BATCH_SIZE` | `4` | Initial embedding batch size before TEI auto-tuning |
+| `DOTMD_VECTOR_BACKEND` | `sqlite-vec` | Vector backend; LanceDB remains legacy/optional |
+| `DOTMD_GRAPH_MAX_HOPS` | `2` | Graph traversal depth for graph-direct search |
+| `DOTMD_DEFAULT_TOP_K` | `10` | Default result count |
+| `DOTMD_FUSION_K` | `60` | Reciprocal rank fusion constant |
+| `DOTMD_RERANK_POOL_SIZE` | `20` | Candidate pool sent to the reranker |
+| `DOTMD_SEMANTIC_SCORE_FLOOR` | `0.85` | Semantic score floor before fusion |
+| `DOTMD_SNIPPET_LENGTH` | `300` | Search result snippet length |
 | `DOTMD_RERANKER_RELEVANCE_FLOOR` | unset | Optional raw-score floor; unset keeps all reranked candidates |
+| `DOTMD_RERANKER_LENGTH_PENALTY` | `true` | Penalize very short reranked candidates |
+| `DOTMD_RERANKER_MIN_LENGTH` | `50` | Minimum length threshold for the reranker length penalty |
+| `DOTMD_MAX_CHUNK_TOKENS` | `512` | Chunk token budget |
+| `DOTMD_CHUNK_OVERLAP_TOKENS` | `50` | Chunk overlap token budget |
+| `DOTMD_POLL_INTERVAL_SECONDS` | `3600.0` | Polling fallback interval for the trickle indexer |
 
 ## Architecture
 
