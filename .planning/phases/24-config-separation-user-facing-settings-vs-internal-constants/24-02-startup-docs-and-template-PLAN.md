@@ -14,11 +14,12 @@ requirements: []
 requirements_addressed: []
 must_haves:
   truths:
-    - "D-07: The startup pre-flight gate is preserved as an operational safety switch"
-    - "D-08: `DOTMD_RUN_STARTUP_CHECKS=true` is the primary startup-check switch"
-    - "D-09: `ENVIRONMENT=dev` remains a temporary compatibility alias"
+    - "D-13: The restart-time pre-flight gate in `backend/start.sh` is preserved, including ruff, pyright ratchet, live MCP `/health`, `tests/e2e/`, and non-zero exit on failure"
+    - "D-14: The startup gate is documented as an operational safety switch, not a multi-environment profile model"
+    - "D-15: `DOTMD_RUN_STARTUP_CHECKS=true` is the primary startup-check switch and `ENVIRONMENT=dev` remains only as a temporary compatibility alias"
     - "D-10: `.env.example` emphasizes operator/deployment config first and moves internal tuning to an advanced section"
     - "D-11: README documents required runtime config, selected identity config, optional features, and advanced tuning separately"
+    - "D-12: Additive indexing excludes are discoverable through `DOTMD_INDEXING_EXTRA_EXCLUDE`; legacy `DOTMD_INDEXING_EXCLUDE` is documented as replace-only"
   artifacts:
     - path: "backend/start.sh"
       provides: "container startup check switch"
@@ -54,6 +55,7 @@ documented configuration surface matches the Phase 24 public settings boundary.
 | Docs imply dotMD has multiple environment profiles | MEDIUM | Remove `ENVIRONMENT=dev` as primary wording; describe a startup-check switch instead. |
 | Internal tuning remains indistinguishable from required config | MEDIUM | Move tuning variables to an explicitly marked advanced section in both docs and template. |
 | Compose/TEI examples drift from selected model names | MEDIUM | Keep `.env.example`, README, and `docker-compose.yml` TEI model defaults aligned. |
+| Operators cannot discover additive exclude configuration | MEDIUM | Add a path-filtering subsection to `.env.example` and README covering `DOTMD_INDEXING_EXTRA_EXCLUDE` and the legacy replace-only `DOTMD_INDEXING_EXCLUDE`. |
 </threat_model>
 
 <tasks>
@@ -141,7 +143,20 @@ Under required deployment configuration, include:
 - `DOTMD_INDEXING_PATHS=["/data"]`
 - `DOTMD_EMBEDDING_URL=http://tei:80`
 - `DOTMD_GRAPH_BACKEND=ladybugdb`
-- `DOTMD_FALKORDB_URL=redis://falkordb:6379`
+- `DOTMD_FALKORDB_URL=redis://falkordb:6379` with a comment that this value is
+  required only when `DOTMD_GRAPH_BACKEND=falkordb`; the Python default
+  `redis://localhost:6379` is intentionally unsafe for FalkorDB runtime startup.
+
+Add a `# Path filtering` comment block immediately after
+`DOTMD_INDEXING_PATHS=["/data"]`:
+
+- `# DOTMD_INDEXING_EXTRA_EXCLUDE=["**/private","**/drafts"]`
+- `# DOTMD_INDEXING_EXCLUDE=["**/node_modules","**/.git"]`
+
+The comments must explain that `DOTMD_INDEXING_EXTRA_EXCLUDE` is the preferred
+additive operator setting and preserves built-in excludes, while
+`DOTMD_INDEXING_EXCLUDE` is a legacy replace-only setting for replacing the
+whole exclude list.
 
 Under index/search identity, include:
 
@@ -197,6 +212,10 @@ override. Prefer `0.85`.
 <acceptance_criteria>
 - `.env.example` contains `# -- Required deployment configuration`.
 - `.env.example` contains `DOTMD_INDEXING_PATHS=["/data"]`.
+- `.env.example` contains `DOTMD_INDEXING_EXTRA_EXCLUDE`.
+- `.env.example` contains `DOTMD_INDEXING_EXCLUDE`.
+- `.env.example` describes `DOTMD_INDEXING_EXTRA_EXCLUDE` as additive.
+- `.env.example` describes `DOTMD_FALKORDB_URL` as required only when `DOTMD_GRAPH_BACKEND=falkordb`.
 - `.env.example` contains `DOTMD_RUN_STARTUP_CHECKS=true`.
 - `.env.example` contains `ENVIRONMENT=dev`.
 - `.env.example` contains `# -- Advanced tuning`.
@@ -238,6 +257,20 @@ In required deployment configuration, state that the live container should set:
 - `DOTMD_GRAPH_BACKEND`
 - `DOTMD_FALKORDB_URL` when `DOTMD_GRAPH_BACKEND=falkordb`
 
+Add a path-filtering subsection under required deployment configuration that
+documents:
+
+- `DOTMD_INDEXING_PATHS` selects the roots to index.
+- `DOTMD_INDEXING_EXTRA_EXCLUDE` is the preferred additive way to add operator
+  ignore patterns while preserving built-in excludes such as `**/.git`.
+- `DOTMD_INDEXING_EXCLUDE` is the legacy replace-only setting for replacing the
+  whole exclude list and should be used only when replacement is intentional.
+- Example: `DOTMD_INDEXING_EXTRA_EXCLUDE=["**/private","**/drafts"]`.
+
+State that `DOTMD_FALKORDB_URL=redis://falkordb:6379` is required only when
+`DOTMD_GRAPH_BACKEND=falkordb`; the runtime validator rejects the unsafe
+`redis://localhost:6379` default in FalkorDB mode.
+
 In index/search identity, include:
 
 - `DOTMD_EMBEDDING_MODEL`
@@ -275,6 +308,10 @@ values.
 <acceptance_criteria>
 - `README.md` contains `### Required deployment configuration`.
 - `README.md` contains `DOTMD_INDEXING_PATHS`.
+- `README.md` contains `DOTMD_INDEXING_EXTRA_EXCLUDE`.
+- `README.md` contains `DOTMD_INDEXING_EXCLUDE`.
+- README describes `DOTMD_INDEXING_EXTRA_EXCLUDE` as additive.
+- README says `DOTMD_FALKORDB_URL` is required only when `DOTMD_GRAPH_BACKEND=falkordb`.
 - `README.md` contains `DOTMD_EMBEDDING_WEIGHTS`.
 - `README.md` contains `DOTMD_NER_MODEL_NAME`.
 - `README.md` contains `DOTMD_RUN_STARTUP_CHECKS`.

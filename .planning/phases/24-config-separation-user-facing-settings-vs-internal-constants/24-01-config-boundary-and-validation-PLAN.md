@@ -19,12 +19,18 @@ must_haves:
     - "D-02: Deployment-bound values can fail loudly at startup without forcing every local unit test to look like production"
     - "D-03: Internal tuning defaults are named constants or grouped defaults, not undocumented operator checklist items"
     - "D-04: `base_url=None` remains valid and disables remote OAuth"
-    - "D-05: `falkordb_url` is required only when `graph_backend` is `falkordb`"
+    - "D-05: `falkordb_url` is required only when `graph_backend` is `falkordb`, and the unsafe Python default `redis://localhost:6379` is rejected for FalkorDB runtime startup"
     - "D-06: Built-in indexing excludes cannot disappear silently when operator excludes are configured"
+    - "D-07: Model and index identity values remain visible operator/index-identity configuration because they affect cache keys, index compatibility, extraction cache validity, or ranking behavior"
+    - "D-08: `indexing_exclude` has explicit replace-only semantics, `indexing_extra_exclude` is additive, and `effective_indexing_exclude` prevents TOML list replacement from hiding built-in excludes"
+    - "D-09: Optional feature configuration stays optional; `base_url=None` disables remote OAuth and only non-empty `base_url` values validate strictly"
   artifacts:
     - path: "backend/src/dotmd/core/config.py"
       provides: "public Settings surface plus internal defaults boundary"
       contains: "DEFAULT_INDEXING_EXCLUDE"
+    - path: "backend/src/dotmd/core/config.py"
+      provides: "FalkorDB runtime safety guard"
+      contains: "DEFAULT_FALKORDB_URL"
     - path: "backend/tests/core/test_config_separation.py"
       provides: "focused config separation regression coverage"
       contains: "test_runtime_validation"
@@ -55,6 +61,7 @@ fail loudly without adding environment-profile abstractions.
 | Tests become dependent on live TEI/FalkorDB or production paths | HIGH | Keep direct `Settings(...)` and `load_settings(**overrides)` usable with explicit test fixtures; do not require runtime validation for unit construction. |
 | Optional OAuth is forced on | MEDIUM | Keep `base_url=None` valid; validate only when a value is provided. |
 | FalkorDB URL becomes mandatory for LadybugDB local usage | MEDIUM | Validate `falkordb_url` conditionally only when `graph_backend == "falkordb"`. |
+| FalkorDB runtime startup silently uses `redis://localhost:6379` | HIGH | Define `DEFAULT_FALKORDB_URL = "redis://localhost:6379"` and reject that default when `graph_backend == "falkordb"` in `validate_for_runtime()`. |
 | Internal tuning values disappear from call sites unexpectedly | MEDIUM | Keep compatibility properties/fields where call sites still read `settings.*`; assign defaults from named constants before migrating broader API shape. |
 </threat_model>
 
@@ -88,10 +95,12 @@ Add tests for these exact contracts:
 4. Operator extra excludes are additive: constructing with
    `indexing_extra_exclude=["**/private"]` makes
    `effective_indexing_exclude` contain both `"**/.git"` and `"**/private"`.
-5. Runtime validation fails when `data_dir` is `"."`, `index_dir` is
+5. `dotmd.core.config.DEFAULT_FALKORDB_URL` exists and equals
+   `"redis://localhost:6379"`.
+6. Runtime validation fails when `data_dir` is `"."`, `index_dir` is
    `Path.home() / ".dotmd"`, or `indexing_paths=[]`. Use the method or helper
    name `validate_for_runtime()` in the test expectation.
-6. Runtime validation accepts explicit deployment values:
+7. Runtime validation accepts explicit deployment values:
    `data_dir=Path("/mnt")`, `index_dir=Path("/dotmd-index")`,
    `indexing_paths=["/mnt"]`, `embedding_url="http://tei:80"`,
    `embedding_model="BAAI/bge-small-en-v1.5"`,
@@ -101,10 +110,12 @@ Add tests for these exact contracts:
    `reranker_model="cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"`,
    `reranker_backend="cross_encoder"`, and
    `embedding_weights="text=0.7,meta=0.3"`.
-7. Runtime validation fails for `graph_backend="falkordb"` with
-   `falkordb_url=""`, and passes for `graph_backend="ladybugdb"` with
-   `falkordb_url=""`.
-8. `base_url=None` remains valid.
+   `falkordb_url="redis://falkordb:6379"`.
+8. Runtime validation fails for `graph_backend="falkordb"` with either
+   `falkordb_url=""` or `falkordb_url=DEFAULT_FALKORDB_URL`.
+9. Runtime validation passes for `graph_backend="ladybugdb"` with
+   `falkordb_url=""` and with `falkordb_url=DEFAULT_FALKORDB_URL`.
+10. `base_url=None` remains valid.
 
 The first test run should fail on missing `DEFAULT_INDEXING_EXCLUDE`,
 `indexing_extra_exclude`, `effective_indexing_exclude`, and
@@ -117,8 +128,10 @@ The first test run should fail on missing `DEFAULT_INDEXING_EXCLUDE`,
 <acceptance_criteria>
 - `backend/tests/core/test_config_separation.py` contains `test_runtime_validation`.
 - `backend/tests/core/test_config_separation.py` contains `DEFAULT_INDEXING_EXCLUDE`.
+- `backend/tests/core/test_config_separation.py` contains `DEFAULT_FALKORDB_URL`.
 - `backend/tests/core/test_config_separation.py` contains `effective_indexing_exclude`.
 - `backend/tests/core/test_config_separation.py` contains `indexing_extra_exclude`.
+- `backend/tests/core/test_config_separation.py` asserts `redis://localhost:6379` fails when `graph_backend="falkordb"`.
 - `backend/tests/core/test_config_separation.py` asserts `base_url is None`.
 - The initial test run fails before Task 2 because production code has not implemented the new contract.
 </acceptance_criteria>
@@ -150,6 +163,8 @@ Add module-level constants for internal defaults:
   `"**/.pytest_cache"`, `"**/.ruff_cache"`, `"**/.mypy_cache"`, `"**/.tox"`,
   `"**/.nox"`, `"**/.venv"`, `"**/venv"`, `"**/dist"`, `"**/build"`,
   `"**/.cache"`.
+- `DEFAULT_FALKORDB_URL = "redis://localhost:6379"` and use it as the
+  `Settings.falkordb_url` default.
 - `DEFAULT_MAX_CHUNK_TOKENS = 512`
 - `DEFAULT_CHUNK_OVERLAP_TOKENS = 50`
 - `DEFAULT_TEI_BATCH_SIZE = 4`
@@ -204,9 +219,15 @@ This method must raise `ValueError` with field names in the message when:
 - `index_dir == Path.home() / ".dotmd"`
 - `indexing_paths` is empty
 - `embedding_url` is empty
-- `embedding_model`, `chunk_strategy`, `ner_model_name`, `reranker_name`,
-  `reranker_model`, `reranker_backend`, or `embedding_weights` is empty
+- any of `embedding_model`, `chunk_strategy`, `ner_model_name`,
+  `reranker_name`, `reranker_model`, `reranker_backend`, or
+  `embedding_weights` is explicitly empty. Do not reject the selected Python
+  defaults for these identity fields as unsafe; visibility for selected
+  defaults is handled by `.env.example` and README in Plan 02.
 - `graph_backend == "falkordb"` and `falkordb_url` is empty
+- `graph_backend == "falkordb"` and `falkordb_url == DEFAULT_FALKORDB_URL`
+  (`"redis://localhost:6379"`). This is a blocking deployment safety check:
+  the unsafe Python default must not pass in FalkorDB runtime mode.
 
 Do not make `base_url` required. Do not add `DOTMD_ENV`, `production`, `dev`,
 `staging`, or profile-specific settings.
@@ -229,12 +250,13 @@ Keep `load_settings(**overrides)` unchanged as the general construction helper.
 </verify>
 <acceptance_criteria>
 - `backend/src/dotmd/core/config.py` contains `DEFAULT_INDEXING_EXCLUDE`.
+- `backend/src/dotmd/core/config.py` contains `DEFAULT_FALKORDB_URL = "redis://localhost:6379"`.
 - `backend/src/dotmd/core/config.py` contains `indexing_extra_exclude`.
 - `backend/src/dotmd/core/config.py` contains `def effective_indexing_exclude`.
 - `backend/src/dotmd/core/config.py` contains `def validate_for_runtime`.
 - `backend/src/dotmd/core/config.py` contains `def load_runtime_settings`.
 - `backend/src/dotmd/core/config.py` does not contain `DOTMD_ENV`.
-- `backend/src/dotmd/core/config.py` does not contain `DOTMD_ENV`.
+- `backend/src/dotmd/core/config.py` rejects `DEFAULT_FALKORDB_URL` when `graph_backend == "falkordb"`.
 - `backend/src/dotmd/core/config.py` does not contain a `Literal["local", "dev", "staging", "prod", "production"]` profile field.
 - `cd backend && uv run pytest tests/core/test_config_separation.py tests/core/test_config_base_url.py -q` exits 0.
 - `cd backend && uv run ruff check src/dotmd/core/config.py tests/core/test_config_separation.py tests/core/test_config_base_url.py` exits 0.
@@ -275,11 +297,17 @@ Update runtime call sites narrowly:
    `self._settings.effective_indexing_exclude`.
 3. In the container/server startup path only, use `load_runtime_settings()` so
    the live service fails before serving when runtime-required values are
-   missing. Check these entrypoints and choose the narrowest one that covers the
-   HTTP MCP container path without breaking local CLI/tests:
-   - `backend/src/dotmd/api/server.py`
-   - `backend/src/dotmd/mcp_server.py`
-   - `backend/src/dotmd/cli.py`
+   missing. The runtime-validation target is both long-running MCP server
+   paths:
+   - `backend/src/dotmd/mcp_server.py` `create_app()` for streamable-HTTP MCP
+     container startup.
+   - `backend/src/dotmd/mcp_server.py` `init_service()` for stdio MCP sessions
+     launched through `docker exec dotmd dotmd mcp`.
+
+   Check `backend/src/dotmd/api/server.py` and `backend/src/dotmd/cli.py` for
+   any additional long-running serving path that constructs `Settings`, but do
+   not broaden validation to short-lived CLI maintenance commands unless they
+   serve live traffic.
 
 Do not call `load_runtime_settings()` inside every CLI command. Development CLI
 commands and tests should continue to use explicit overrides and `load_settings`
@@ -289,6 +317,12 @@ Add or adjust tests to prove effective excludes are consumed by at least one
 call boundary. A mock-based test is acceptable if it asserts that the value
 passed to discovery/filtering contains both `"**/.git"` and an extra exclude
 from `indexing_extra_exclude=["**/private"]`.
+
+Add runtime-path coverage for stdio MCP construction. A focused test may mock
+`load_runtime_settings()` in `backend/src/dotmd/mcp_server.py` and assert that
+`init_service()` calls it, while a separate check asserts `create_app()` also
+uses the same helper. The test must not require a live MCP client, TEI, or
+FalkorDB container.
 </action>
 <verify>
 <automated>rg --no-heading "indexing_exclude" backend/src/dotmd/api/service.py backend/src/dotmd/ingestion/trickle.py</automated>
@@ -301,8 +335,10 @@ from `indexing_extra_exclude=["**/private"]`.
 - `backend/src/dotmd/ingestion/trickle.py` contains `effective_indexing_exclude`.
 - `backend/src/dotmd/api/service.py` contains `effective_indexing_exclude`.
 - Runtime server construction imports or calls `load_runtime_settings`.
+- `backend/src/dotmd/mcp_server.py` uses `load_runtime_settings()` in both `init_service()` and `create_app()`.
 - No call site invokes `load_settings()` from inside a search method.
 - A test proves effective excludes include both `"**/.git"` and `"**/private"` at a consumed call boundary.
+- A test or grep-verifiable assertion proves the stdio MCP path (`init_service()`) uses runtime validation.
 - `cd backend && uv run pytest tests/ingestion/test_trickle_metrics.py tests/api/test_service_search.py -q` exits 0.
 </acceptance_criteria>
 <done>
