@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
 status: executing
-last_updated: "2026-05-05T15:51:38.807Z"
-last_activity: 2026-05-05 — Phase 24 planning complete
+last_updated: "2026-05-05T16:04:27.100Z"
+last_activity: 2026-05-05
 progress:
   total_phases: 10
   completed_phases: 9
   total_plans: 23
-  completed_plans: 21
-  percent: 91
+  completed_plans: 22
+  percent: 96
 ---
 
 # GSD State
@@ -20,18 +20,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 24 ready to plan — Config separation, promoted from backlog 999.6
+**Current focus:** Phase 24 — config-separation-user-facing-settings-vs-internal-constants
 
 ## Current Milestone
 
 **v1.4 — Search Quality & Architecture**
 
 Phase: 24
-Plan: 0/2 planned
-Status: Ready to execute
-Last activity: 2026-05-05 — Phase 24 planning complete
+Plan: 1/2 executed
+Status: Executing Phase 24
+Last activity: 2026-05-05
 
-Progress: [█████████░] 90%
+Progress: [██████████] 96%
 
 ## Performance Metrics
 
@@ -52,6 +52,7 @@ Progress: [█████████░] 90%
 | 18 | 1 | - | - |
 | 19 | 4 | - | - |
 | 22 | 1 | - | - |
+| Phase 24 P01-config-boundary-and-validation | 8 min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
