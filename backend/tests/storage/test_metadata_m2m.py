@@ -265,6 +265,34 @@ class TestChunkSourceProvenance:
         assert loaded[VALID_CHUNK_ID].source_unit_refs == []
         assert loaded[VALID_CHUNK_ID].parser_name == "markdown"
 
+    def test_file_paths_still_return_for_chunk_with_provenance(
+        self, tmp_path: Path
+    ) -> None:
+        store = _build_m2m_store(tmp_path)
+        store.ensure_chunk_source_provenance_table(STRATEGY)
+        md_path = tmp_path / "note.md"
+        md_path.write_text("# Note\n", encoding="utf-8")
+        store.insert_chunk(STRATEGY, VALID_CHUNK_ID, ["H"], 1, "text")
+        store.add_file_path(
+            STRATEGY,
+            VALID_CHUNK_ID,
+            str(md_path),
+            chunk_index=0,
+        )
+        conn = sqlite3.connect(str(tmp_path / "metadata.db"))
+        store.add_chunk_provenance(
+            STRATEGY,
+            _filesystem_provenance(md_path),
+            VALID_CHUNK_ID,
+            conn=conn,
+        )
+        conn.commit()
+        conn.close()
+
+        assert store.get_file_paths_by_chunk_id(STRATEGY, VALID_CHUNK_ID) == [
+            str(md_path)
+        ]
+
     def test_chunk_provenance_batch_hydration(
         self, tmp_path: Path
     ) -> None:

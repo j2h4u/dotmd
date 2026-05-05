@@ -300,6 +300,71 @@ def test_bulk_and_index_file_use_identical_filesystem_provenance(
     assert bulk_chunks[0].provenance.source_unit_refs == []
 
 
+def test_reindex_vectors_preserves_existing_provenance_and_skips_legacy_chunks(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    md_path = data_dir / "note.md"
+    _write_markdown(md_path, "Reindex", ["source"], "# Heading\n\nBody text.")
+    pipeline = _pipeline_with_mock_embedding(data_dir, tmp_path / "index")
+    normalized = pipeline._file_info_and_source_document(md_path)
+    assert normalized is not None
+    file_info, source_document = normalized
+    provenance = pipeline._filesystem_chunk_provenance(source_document)
+    with_provenance_id = "a" * 64
+    legacy_id = "b" * 64
+
+    pipeline._metadata_store.insert_chunk(
+        pipeline._strategy,
+        with_provenance_id,
+        ["Heading"],
+        1,
+        "with provenance",
+    )
+    pipeline._metadata_store.insert_chunk(
+        pipeline._strategy,
+        legacy_id,
+        ["Heading"],
+        1,
+        "legacy",
+    )
+    pipeline._metadata_store.add_file_path(
+        pipeline._strategy,
+        with_provenance_id,
+        str(file_info.path),
+        chunk_index=0,
+    )
+    pipeline._metadata_store.add_file_path(
+        pipeline._strategy,
+        legacy_id,
+        str(file_info.path),
+        chunk_index=1,
+    )
+    pipeline._metadata_store.ensure_chunk_source_provenance_table(pipeline._strategy)
+    pipeline._metadata_store.upsert_source_document(
+        source_document,
+        conn=pipeline._conn,
+    )
+    pipeline._metadata_store.add_chunk_provenance(
+        pipeline._strategy,
+        provenance,
+        with_provenance_id,
+        conn=pipeline._conn,
+    )
+    pipeline._conn.commit()
+
+    rebuilt_count = pipeline.reindex_vectors()
+    loaded = pipeline._metadata_store.get_chunk_provenance_for_chunk_ids(
+        pipeline._strategy,
+        [with_provenance_id, legacy_id],
+    )
+
+    assert rebuilt_count == 2
+    assert sorted(loaded) == [with_provenance_id]
+    assert loaded[with_provenance_id].source_unit_refs == []
+
+
 def test_adapter_routed_chunks_preserve_markdown_chunk_payload(
     tmp_path: Path,
 ) -> None:

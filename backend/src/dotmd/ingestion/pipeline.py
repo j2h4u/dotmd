@@ -1047,12 +1047,27 @@ class IndexingPipeline:
         # Build FileInfo for all files (read frontmatter from disk)
         file_infos: list[FileInfo] = []
         for fp in all_file_paths:
+            path = Path(fp)
             try:
-                content = read_file(Path(fp))
+                content = read_file(path)
                 fm, _ = parse_frontmatter(content)
+                stat = path.stat()
+                last_modified = datetime.fromtimestamp(stat.st_mtime, tz=UTC)
+                size_bytes = stat.st_size
             except Exception:
                 fm = {}
-            file_infos.append(FileInfo(path=Path(fp), frontmatter=fm))
+                last_modified = datetime.fromtimestamp(0, tz=UTC)
+                size_bytes = 0
+            file_infos.append(
+                FileInfo(
+                    path=path,
+                    title=str(fm.get("title", path.stem)),
+                    last_modified=last_modified,
+                    size_bytes=size_bytes,
+                    kind=fm.get("kind", DocKind.DOCUMENT),
+                    frontmatter=fm,
+                )
+            )
 
         # Batch encode e_meta for ALL files in a single TEI call (1 batch for all metadata)
         weights = self._settings.parsed_embedding_weights
@@ -1424,6 +1439,11 @@ class IndexingPipeline:
         """
         t0 = time.perf_counter()
         self._metadata_store.save_chunks(chunks)
+        source_documents = [
+            self._source_document_for_file_info(file_info)
+            for file_info in files
+        ]
+        self._persist_chunk_source_provenance(chunks, source_documents)
         logger.info("[%s] metadata_save: %d chunks (%.2fs)", run_id, len(chunks), time.perf_counter() - t0)
 
         weights = self._settings.parsed_embedding_weights
@@ -1696,8 +1716,13 @@ class IndexingPipeline:
             # insert_chunk and add_file_path are atomic: a crash between the two
             # cannot leave a chunks_* row without a chunk_file_paths_* entry.
             self._metadata_store.ensure_m2m_table(self._strategy)
+            self._metadata_store.ensure_chunk_source_provenance_table(self._strategy)
             self._conn.execute("BEGIN")
             try:
+                self._metadata_store.upsert_source_document(
+                    source_document,
+                    conn=self._conn,
+                )
                 for c in chunks:
                     existing = self._metadata_store.get_stored_payload(
                         self._strategy, c.chunk_id
@@ -1736,6 +1761,7 @@ class IndexingPipeline:
                         c.chunk_index,
                         _commit=False,
                     )
+                    self._persist_one_chunk_source_provenance(c, conn=self._conn)
                 self._conn.execute("COMMIT")
             except Exception:
                 self._conn.execute("ROLLBACK")
@@ -1817,6 +1843,45 @@ class IndexingPipeline:
     # ------------------------------------------------------------------
     # Per-file purge
     # ------------------------------------------------------------------
+
+    def _persist_chunk_source_provenance(
+        self,
+        chunks: list[Chunk],
+        source_documents: list[SourceDocument],
+    ) -> None:
+        """Persist source_documents and chunk provenance for saved chunks."""
+        if not chunks and not source_documents:
+            return
+        self._metadata_store.ensure_chunk_source_provenance_table(self._strategy)
+        self._conn.execute("BEGIN")
+        try:
+            for source_document in source_documents:
+                self._metadata_store.upsert_source_document(
+                    source_document,
+                    conn=self._conn,
+                )
+            for chunk in chunks:
+                self._persist_one_chunk_source_provenance(chunk, conn=self._conn)
+            self._conn.execute("COMMIT")
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+
+    def _persist_one_chunk_source_provenance(
+        self,
+        chunk: Chunk,
+        *,
+        conn: sqlite3.Connection,
+    ) -> None:
+        """Persist provenance attached by the filesystem source shim."""
+        if chunk.provenance is None:
+            return
+        self._metadata_store.add_chunk_provenance(
+            self._strategy,
+            chunk.provenance,
+            chunk.chunk_id,
+            conn=conn,
+        )
 
     def _present_strategies(self, conn: sqlite3.Connection) -> list[str]:
         """Return strategy names that have a chunk_file_paths_* M2M table in the DB.
