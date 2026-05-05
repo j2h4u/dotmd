@@ -735,7 +735,7 @@ model.
 **Requirements:** TBD
 **Backlog source:** 999.22
 **Depends on:** Phase 24
-**Plans:** 2/4 plans executed
+**Plans:** 4/4 plans complete
 
 Phase context:
 - Use the architecture docs linked from backlog `999.22` as the source of
@@ -758,10 +758,10 @@ Plans:
 - [x] 25-02-ingestion-routing-and-chunk-provenance-PLAN.md — Route current Markdown ingestion through source documents and preserve chunk/fingerprint behavior
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 25-03-provenance-persistence-and-read-search-compatibility-PLAN.md — Persist minimal source provenance while preserving `file_paths` and MCP read/search compatibility
+- [x] 25-03-provenance-persistence-and-read-search-compatibility-PLAN.md — Persist minimal source provenance while preserving `file_paths` and MCP read/search compatibility
 
 **Wave 4** *(blocked on Wave 3 completion)*
-- [ ] 25-04-regression-docs-and-phase-verification-PLAN.md — Add cross-surface regression coverage, docs, and final phase verification
+- [x] 25-04-regression-docs-and-phase-verification-PLAN.md — Add cross-surface regression coverage, docs, and final phase verification
 
 ---
 

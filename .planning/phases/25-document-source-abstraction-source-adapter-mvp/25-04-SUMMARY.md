@@ -71,7 +71,7 @@ Each task was committed atomically:
 1. **Task 1: Add cross-surface filesystem compatibility regression tests** - `c77edb1` (test)
 2. **Task 2: Document the shipped filesystem shim and future-source boundary** - `27e7bcc` (docs)
 3. **Task 3: Run full focused verification gate** - `75bc0be` (docs)
-4. **Task 4: Write final phase summary with deferred scope audit** - this commit (docs)
+4. **Task 4: Write final phase summary with deferred scope audit** - `f6f92a0` (docs)
 
 ## Files Created/Modified
 
@@ -149,7 +149,7 @@ Phase 25 is ready for completion. Current filesystem Markdown search/read behavi
 - Created summary exists: `.planning/phases/25-document-source-abstraction-source-adapter-mvp/25-04-SUMMARY.md`.
 - Modified files exist: `backend/tests/mcp/test_search_tool.py`, `docs/source-adapter-architecture.md`, `docs/architecture.md`.
 - Summary contains `Canonical filesystem ref`, `str(Path(file_path).resolve())`, `file_path is preserved`, `index_file(path)`, `source_documents`, `Frontmatter metadata owner`, `Source-unit refs`, `Telegram read-only adapter not implemented`, and `Self-Check: PASSED`.
-- Task commits exist: `c77edb1`, `27e7bcc`, `75bc0be`.
+- Task commits exist: `c77edb1`, `27e7bcc`, `75bc0be`, `f6f92a0`.
 - Focused regression tests pass and repo-standard pyright ratchet passes.
 
 ---

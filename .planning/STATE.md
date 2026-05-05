@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
 status: executing
-last_updated: "2026-05-05T20:46:29.696Z"
+last_updated: "2026-05-05T21:04:45.744Z"
 last_activity: 2026-05-05
 progress:
   total_phases: 11
-  completed_phases: 10
+  completed_phases: 11
   total_plans: 27
-  completed_plans: 25
-  percent: 93
+  completed_plans: 27
+  percent: 100
 ---
 
 # GSD State
@@ -27,11 +27,11 @@ See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 **v1.4 — Search Quality & Architecture**
 
 Phase: 25
-Plan: Not started
-Status: Executing Phase 25
+Plan: Complete
+Status: Phase 25 complete
 Last activity: 2026-05-05
 
-Progress: [█████████░] 93%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Progress: [█████████░] 93%
 | 24 | 2 | - | - |
 | Phase 25 P01 | 4 min | 4 tasks | 5 files |
 | Phase 25 P02 | 7 min | 5 tasks | 6 files |
+| Phase 25 P04 | 6min | 4 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -102,6 +103,8 @@ Recent decisions affecting current work:
 - [Phase 11]: Auto-detect E5/BGE prefix need from model name; use_prefix defaults True for backward compat
 - [Phase 11-embedding-model-swap]: GET /search (not POST) for eval scripts -- matches actual API
 - [Phase 18]: Reranker replacement will use public benchmark evidence instead of local eval-set preparation. Publication age is now a hard gate; license is metadata-only for this personal-use project; `Qwen/Qwen3-Reranker-0.6B` is selected as the first implementation target because the top fresh rerankers are close enough in quality that text-only operational fit wins. ContextualAI rerank-v2 and Jina v3 remain real alternates if Qwen integration or latency fails.
+- [Phase 25]: Canonical filesystem ref is document_ref = str(Path(file_path).resolve()) and ref = filesystem:<document_ref>. — Plans 25-01 through 25-04 use this invariant for SourceDocument identity and documentation.
+- [Phase 25]: Phase 25 keeps MCP read(file_path, start, end) as the public filesystem read contract. — Plan 25-04 regression coverage and docs preserve user-visible filesystem compatibility.
 
 ### Pending Todos
 
