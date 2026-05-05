@@ -36,6 +36,7 @@ import dotmd.ingestion.chunker as _chunker_module
 from dotmd.core.config import Settings
 from dotmd.core.models import (
     Chunk,
+    ChunkProvenance,
     DocKind,
     EntityType,
     ExtractDepth,
@@ -43,6 +44,7 @@ from dotmd.core.models import (
     FileInfo,
     IndexStats,
     RelationType,
+    SourceDocument,
 )
 from dotmd.extraction.acronyms import extract_acronyms_from_chunks
 from dotmd.extraction.keyterms import KeyTermExtractor
@@ -51,10 +53,13 @@ from dotmd.extraction.structural import StructuralExtractor
 from dotmd.ingestion.file_tracker import FileDiff, FileTracker
 from dotmd.ingestion.reader import (
     chunk_checksum,
-    discover_files,
     meta_checksum,
     parse_frontmatter,
     read_file,
+)
+from dotmd.ingestion.source import (
+    FilesystemMarkdownSourceAdapter,
+    source_document_to_file_info,
 )
 from dotmd.search.fts5 import FTS5SearchEngine
 from dotmd.search.semantic import SemanticSearchEngine
@@ -385,12 +390,18 @@ class IndexingPipeline:
         t_start = time.perf_counter()
 
         t0 = time.perf_counter()
-        files = discover_files(directory)
+        documents = self._discover_documents(directory)
+        files, documents_by_path = self._file_infos_by_source_document(documents)
         logger.info("[%s] discover: %d files in %s (%.2fs)", run_id, len(files), directory, time.perf_counter() - t0)
         data_dir_str = str(directory)
 
         if force:
-            stats = self._full_index(files, data_dir=data_dir_str, run_id=run_id)
+            stats = self._full_index(
+                files,
+                documents_by_path=documents_by_path,
+                data_dir=data_dir_str,
+                run_id=run_id,
+            )
             logger.info("[%s] total: %.1fs (force)", run_id, time.perf_counter() - t_start)
             return stats
 
@@ -433,7 +444,13 @@ class IndexingPipeline:
             logger.info("[%s] total: %.1fs (embed-only)", run_id, time.perf_counter() - t_start)
             return stats
 
-        stats = self._incremental_index(files, diff, data_dir=data_dir_str, run_id=run_id)
+        stats = self._incremental_index(
+            files,
+            diff,
+            documents_by_path=documents_by_path,
+            data_dir=data_dir_str,
+            run_id=run_id,
+        )
         logger.info("[%s] total: %.1fs (incremental)", run_id, time.perf_counter() - t_start)
         return stats
 
@@ -674,6 +691,59 @@ class IndexingPipeline:
           - run() bulk embed loop           — stores meta component
         """
         return str(Path(path).resolve())
+
+    def _discover_documents(self, directory: Path) -> list[SourceDocument]:
+        """Discover filesystem Markdown source documents for one directory."""
+        return FilesystemMarkdownSourceAdapter().discover(directory)
+
+    def _discover_documents_multi(
+        self,
+        paths: list[str],
+        exclude: list[str] | None = None,
+    ) -> list[SourceDocument]:
+        """Discover filesystem Markdown source documents from many path specs."""
+        return FilesystemMarkdownSourceAdapter().discover_multi(paths, exclude)
+
+    def _file_infos_by_source_document(
+        self,
+        documents: list[SourceDocument],
+    ) -> tuple[list[FileInfo], dict[Path, SourceDocument]]:
+        """Bridge source documents to FileInfo while retaining provenance."""
+        files: list[FileInfo] = []
+        documents_by_path: dict[Path, SourceDocument] = {}
+        for document in documents:
+            file_info = source_document_to_file_info(document)
+            self._assert_filesystem_document_ref(file_info, document)
+            files.append(file_info)
+            documents_by_path[Path(file_info.path)] = document
+        return files, documents_by_path
+
+    def _assert_filesystem_document_ref(
+        self,
+        file_info: FileInfo,
+        source_document: SourceDocument,
+    ) -> None:
+        """Ensure filesystem source refs match existing metadata entity ids."""
+        document_ref = self._meta_entity_id(file_info.path)
+        if source_document.document_ref != document_ref:
+            raise ValueError(
+                "filesystem document_ref must match metadata entity id: "
+                f"{source_document.document_ref!r} != {document_ref!r}"
+            )
+
+    def _filesystem_chunk_provenance(
+        self,
+        source_document: SourceDocument,
+    ) -> ChunkProvenance:
+        """Return Phase 25 filesystem Markdown provenance for chunks."""
+        return ChunkProvenance(
+            namespace="filesystem",
+            document_ref=source_document.document_ref,
+            ref=f"filesystem:{source_document.document_ref}",
+            source_unit_refs=[],
+            chunk_strategy=self._strategy,
+            parser_name="markdown",
+        )
 
     @staticmethod
     def _normalize_vector(v: list[float]) -> list[float]:
@@ -1105,7 +1175,12 @@ class IndexingPipeline:
     # ------------------------------------------------------------------
 
     def _full_index(
-        self, files: list[FileInfo], *, data_dir: str | None = None, run_id: str = "",
+        self,
+        files: list[FileInfo],
+        *,
+        documents_by_path: dict[Path, SourceDocument],
+        data_dir: str | None = None,
+        run_id: str = "",
     ) -> IndexStats:
         """Process all files from scratch (used for force=True).
 
@@ -1124,13 +1199,17 @@ class IndexingPipeline:
             pass  # FTS5 table may not exist yet
         return self._ingest_and_finalize(
             files, list(files),
+            documents_by_path=documents_by_path,
             diff_counts={"new": len(files), "modified": 0, "deleted": 0, "unchanged": 0},
             data_dir=data_dir, run_id=run_id,
         )
 
     def _incremental_index(
         self, all_files: list[FileInfo], diff: FileDiff,
-        *, data_dir: str | None = None, run_id: str = "",
+        *,
+        documents_by_path: dict[Path, SourceDocument],
+        data_dir: str | None = None,
+        run_id: str = "",
     ) -> IndexStats:
         """Process only changed files (chunk_diff driven)."""
         # 1. Purge deleted files
@@ -1169,6 +1248,7 @@ class IndexingPipeline:
         # 5. Ingest changed files + finalize (includes embed-only pass)
         return self._ingest_and_finalize(
             all_files, files_to_ingest,
+            documents_by_path=documents_by_path,
             embed_only_files=embed_only_files,
             overwrite_vectors=False,
             diff_counts={
@@ -1189,6 +1269,7 @@ class IndexingPipeline:
         all_files: list[FileInfo],
         files_to_ingest: list[FileInfo],
         *,
+        documents_by_path: dict[Path, SourceDocument],
         embed_only_files: list[FileInfo] | None = None,
         overwrite_vectors: bool = True,
         diff_counts: dict[str, int] | None = None,
@@ -1204,7 +1285,11 @@ class IndexingPipeline:
             (e.g. after a model switch).  Only the embed phase runs
             for these files.
         """
-        new_chunks = self._chunk_files(files_to_ingest, run_id)
+        new_chunks = self._chunk_files(
+            files_to_ingest,
+            run_id,
+            documents_by_path=documents_by_path,
+        )
 
         if new_chunks:
             self._save_and_embed_chunks(
@@ -1236,19 +1321,25 @@ class IndexingPipeline:
     # ------------------------------------------------------------------
 
     def _chunk_files(
-        self, files: list[FileInfo], run_id: str,
+        self,
+        files: list[FileInfo],
+        run_id: str,
+        *,
+        documents_by_path: dict[Path, SourceDocument],
     ) -> list[Chunk]:
         """Read and chunk files into Chunk objects."""
         t0 = time.perf_counter()
         chunks: list[Chunk] = []
         for fi in files:
             content = read_file(fi.path)
+            source_document = documents_by_path[Path(fi.path)]
             chunks.extend(_chunker_module.chunk_file(
                 fi.path, content,
                 max_tokens=self._settings.max_chunk_tokens,
                 overlap_tokens=self._settings.chunk_overlap_tokens,
                 kind=fi.kind,
                 chunk_strategy=self._strategy,
+                provenance=self._filesystem_chunk_provenance(source_document),
             ))
         logger.info("[%s] chunk: %d chunks from %d files (%.2fs)", run_id, len(chunks), len(files), time.perf_counter() - t0)
         return chunks
