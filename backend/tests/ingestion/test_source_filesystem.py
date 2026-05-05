@@ -12,6 +12,7 @@ from dotmd.ingestion.reader import chunk_checksum, meta_checksum
 from dotmd.ingestion.source import (
     FilesystemMarkdownSourceAdapter,
     filesystem_document_ref,
+    source_document_to_file_info,
 )
 
 
@@ -97,3 +98,30 @@ def test_filesystem_document_ref_matches_pipeline_meta_entity_id_rule(
     md_path.write_text("# Note\n", encoding="utf-8")
 
     assert filesystem_document_ref(md_path) == str(md_path.resolve())
+
+
+def test_source_document_converts_to_file_info_with_compatibility_fields(
+    tmp_path: Path,
+) -> None:
+    md_path = tmp_path / "note.md"
+    md_path.write_text(
+        "---\n"
+        "title: Compatibility Note\n"
+        "kind: voicenote\n"
+        "tags:\n"
+        "  - source\n"
+        "---\n"
+        "Body text.\n",
+        encoding="utf-8",
+    )
+    document = FilesystemMarkdownSourceAdapter().discover(tmp_path)[0]
+
+    file_info = source_document_to_file_info(document)
+
+    assert file_info.path == md_path
+    assert file_info.title == document.title
+    assert file_info.kind == document.document_type
+    assert file_info.frontmatter == document.metadata_json
+    assert file_info.size_bytes == md_path.stat().st_size
+    assert file_info.last_modified == document.updated_at
+    assert document.document_ref == str(file_info.path.resolve())

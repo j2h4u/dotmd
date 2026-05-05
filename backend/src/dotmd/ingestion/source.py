@@ -77,3 +77,26 @@ class FilesystemMarkdownSourceAdapter:
             metadata_json=dict(file_info.frontmatter),
             file_path=file_info.path,
         )
+
+
+def source_document_to_file_info(document: SourceDocument) -> FileInfo:
+    """Convert a filesystem source document back to reader FileInfo."""
+    if document.namespace != "filesystem":
+        raise ValueError("only filesystem source documents can convert to FileInfo")
+    if document.file_path is None:
+        raise ValueError("filesystem source document requires file_path")
+    if not document.file_path.exists():
+        raise FileNotFoundError(f"Source file does not exist: {document.file_path}")
+
+    document_ref = filesystem_document_ref(document.file_path)
+    if document.document_ref != document_ref:
+        raise ValueError("filesystem document_ref must match resolved file_path")
+
+    return FileInfo(
+        path=document.file_path,
+        title=document.title,
+        last_modified=document.updated_at,
+        size_bytes=document.file_path.stat().st_size,
+        kind=document.document_type,
+        frontmatter=dict(document.metadata_json),
+    )
