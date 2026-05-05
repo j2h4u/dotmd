@@ -119,7 +119,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 | 21. Reranker Quality Benchmark | 1/1 | Complete | 2026-05-02 |
 | 22. Improve Search Snippet Boundaries | 1/1 | Complete    | 2026-05-02 |
 | 23. Fix dotMD test contract | 1/1 | Complete | 2026-05-03 |
-| 24. Config separation | 1/2 | In Progress|  |
+| 24. Config separation | 2/2 | Complete   | 2026-05-05 |
 
 ### Phase 17: MCP OAuth 2.0 — Claude Desktop remote connector support
 
@@ -623,7 +623,7 @@ of being hidden by Python defaults.
 **Requirements**: TBD
 **Depends on:** Phase 23
 **Backlog source:** 999.6
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 
 Phase context:
 - Current `Settings` has many Python defaults. When TOML overrides exist,
@@ -653,7 +653,7 @@ Initial scope from backlog 999.6:
 
 Plans:
 - [x] 24-01-config-boundary-and-validation-PLAN.md — Separate `Settings` from internal defaults, add runtime validation, and migrate effective exclude usage
-- [ ] 24-02-startup-docs-and-template-PLAN.md — Preserve/rename startup checks and align `.env.example` plus README with the new config surface
+- [x] 24-02-startup-docs-and-template-PLAN.md — Preserve/rename startup checks and align `.env.example` plus README with the new config surface
 
 ---
 

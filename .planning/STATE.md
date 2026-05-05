@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
-status: executing
-last_updated: "2026-05-05T16:04:27.100Z"
+status: complete
+last_updated: "2026-05-05T16:10:29.039Z"
 last_activity: 2026-05-05
 progress:
   total_phases: 10
-  completed_phases: 9
+  completed_phases: 10
   total_plans: 23
-  completed_plans: 22
-  percent: 96
+  completed_plans: 23
+  percent: 100
 ---
 
 # GSD State
@@ -27,11 +27,11 @@ See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 **v1.4 — Search Quality & Architecture**
 
 Phase: 24
-Plan: 1/2 executed
-Status: Executing Phase 24
+Plan: 2/2 executed
+Status: Phase 24 complete
 Last activity: 2026-05-05
 
-Progress: [██████████] 96%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -53,6 +53,7 @@ Progress: [██████████] 96%
 | 19 | 4 | - | - |
 | 22 | 1 | - | - |
 | Phase 24 P01-config-boundary-and-validation | 8 min | 3 tasks | 7 files |
+| Phase 24 P02-startup-docs-and-template | 3 min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -121,10 +122,10 @@ model with Telegram as the first intended MVP source. See
 `docs/source-adapter-architecture.md` and
 `docs/source-adapter-architecture-panel-review.md`.
 
-Phase 24 promoted from backlog item `999.6` on 2026-05-05. It targets explicit
-configuration separation: production/user-facing settings should fail loudly
-when missing, while internal tuning constants should stop masquerading as
-operator config. Next GSD step: plan Phase 24.
+Phase 24 complete. It promoted backlog item `999.6` and delivered explicit
+configuration separation: production/user-facing settings fail loudly when
+missing, internal tuning constants no longer masquerade as operator config, and
+startup/docs/templates now present the public config boundary clearly.
 
 2026-05-02 housekeeping: active `.planning/phases/` now contains current
 milestone phase artifacts only. Shipped v1.2/v1.3 phase artifacts were moved
