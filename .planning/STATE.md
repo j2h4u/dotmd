@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
-status: active
-last_updated: "2026-05-05T16:10:29.039Z"
+status: context_gathered
+last_updated: "2026-05-05T17:59:24.249Z"
 last_activity: 2026-05-05
 progress:
-  total_phases: 10
-  completed_phases: 11
+  total_phases: 11
+  completed_phases: 10
   total_plans: 23
   completed_plans: 23
-  percent: 110
+  percent: 100
 ---
 
 # GSD State
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 Phase: 25
 Plan: Not started
-Status: Phase added, not planned
+Status: Context gathered; architecture panel needed before planning
 Last activity: 2026-05-05
 
 Progress: [██████████] 100%
@@ -67,8 +67,12 @@ Progress: [██████████] 100%
 - Phase 23 added: Fix dotMD test contract
 - Phase 24 added: Config separation — user-facing settings vs internal constants
   (promoted from backlog 999.6)
+
 - Phase 25 added: Document Source Abstraction — source adapter MVP
   (promoted from backlog 999.22)
+- Phase 25 context gathered: reproduce current filesystem Markdown behavior
+  through the new source-aware model first; run an architecture panel on the
+  domain model and contracts before implementation planning.
 
 - Backlog 999.22 added: Document Source Abstraction — index non-filesystem
   sources. Architecture context is captured in `docs/source-adapter-architecture.md`
