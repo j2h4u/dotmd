@@ -2,7 +2,7 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
-status: executing
+status: milestone_complete
 last_updated: "2026-05-05T21:04:45.744Z"
 last_activity: 2026-05-05
 progress:
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 Phase: 25
 Plan: Complete
-Status: Phase 25 complete
+Status: Milestone complete
 Last activity: 2026-05-05
 
 Progress: [██████████] 100%
@@ -37,7 +37,7 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 29 (across v1.1 + v1.2 + v1.3)
+- Total plans completed: 33 (across all milestones)
 - Average duration: ~3 min
 - Total execution time: —
 
@@ -58,6 +58,7 @@ Progress: [██████████] 100%
 | Phase 25 P01 | 4 min | 4 tasks | 5 files |
 | Phase 25 P02 | 7 min | 5 tasks | 6 files |
 | Phase 25 P04 | 6min | 4 tasks | 4 files |
+| 25 | 4 | - | - |
 
 ## Accumulated Context
 
