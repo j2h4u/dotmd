@@ -171,6 +171,43 @@ def test_title_and_tags_change_updates_metadata_fingerprint_only(
     assert changed.content_fingerprint == original.content_fingerprint
 
 
+def test_pipeline_helper_builds_filesystem_chunk_provenance(
+    tmp_path: Path,
+) -> None:
+    from dotmd.core.config import Settings
+    from dotmd.ingestion.pipeline import IndexingPipeline
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    index_dir = tmp_path / "index"
+    index_dir.mkdir()
+    md_path = data_dir / "note.md"
+    _write_markdown(md_path, "Provenance", ["source"], "Body text.")
+    pipeline = IndexingPipeline(
+        Settings(
+            data_dir=data_dir,
+            index_dir=index_dir,
+            embedding_url="http://localhost:18088",
+            vector_backend="sqlite-vec",
+            graph_backend="ladybugdb",
+            extract_depth="structural",
+        )
+    )
+    normalized = pipeline._file_info_and_source_document(md_path)
+    assert normalized is not None
+    file_info, source_document = normalized
+
+    provenance = pipeline._filesystem_chunk_provenance(source_document)
+
+    document_ref = str(md_path.resolve())
+    assert file_info.path == md_path
+    assert provenance.namespace == "filesystem"
+    assert provenance.document_ref == document_ref
+    assert provenance.ref == f"filesystem:{document_ref}"
+    assert provenance.parser_name == "markdown"
+    assert provenance.source_unit_refs == []
+
+
 def test_discover_multi_excludes_empty_and_non_markdown_files(
     tmp_path: Path,
 ) -> None:

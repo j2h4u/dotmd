@@ -718,6 +718,58 @@ class IndexingPipeline:
             documents_by_path[Path(file_info.path)] = document
         return files, documents_by_path
 
+    def _source_document_for_file_info(
+        self,
+        file_info: FileInfo,
+    ) -> SourceDocument:
+        """Build a filesystem SourceDocument for an existing FileInfo."""
+        source_document = FilesystemMarkdownSourceAdapter()._from_file_info(file_info)
+        bridged_file_info = source_document_to_file_info(source_document)
+        if (
+            bridged_file_info.path != file_info.path
+            or bridged_file_info.title != file_info.title
+            or bridged_file_info.kind != file_info.kind
+            or bridged_file_info.frontmatter != file_info.frontmatter
+        ):
+            raise ValueError("filesystem SourceDocument bridge changed FileInfo")
+        self._assert_filesystem_document_ref(file_info, source_document)
+        return source_document
+
+    def _file_info_and_source_document(
+        self,
+        file_info_or_path: FileInfo | Path,
+    ) -> tuple[FileInfo, SourceDocument] | None:
+        """Normalize a Path/FileInfo input and return its source document."""
+        if isinstance(file_info_or_path, FileInfo):
+            file_info = file_info_or_path
+        else:
+            path = file_info_or_path
+            if not path.exists():
+                logger.warning("index_file: cannot stat %s — skipping", path)
+                return None
+            try:
+                stat = path.stat()
+            except OSError:
+                logger.warning("index_file: cannot stat %s — skipping", path)
+                return None
+            try:
+                raw = read_file(path)
+                frontmatter, _ = parse_frontmatter(raw)
+            except OSError:
+                frontmatter = {}
+            kind = frontmatter.get("kind", DocKind.DOCUMENT)
+            file_info = FileInfo(
+                path=path,
+                title=str(frontmatter.get("title", path.stem)),
+                last_modified=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
+                size_bytes=stat.st_size,
+                frontmatter=frontmatter,
+                kind=kind,
+            )
+
+        source_document = self._source_document_for_file_info(file_info)
+        return file_info, source_document
+
     def _assert_filesystem_document_ref(
         self,
         file_info: FileInfo,
