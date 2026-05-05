@@ -1,7 +1,8 @@
 ---
 phase: 25
 reviewers: [opencode]
-reviewed_at: 2026-05-05T23:29:09+05:00
+reviewed_at: 2026-05-05T23:57:00+05:00
+convergence_cycle: 2
 plans_reviewed:
   - 25-01-domain-models-and-filesystem-adapter-PLAN.md
   - 25-02-ingestion-routing-and-chunk-provenance-PLAN.md
@@ -13,194 +14,153 @@ plans_reviewed:
 
 ## OpenCode Review
 
-# Cross-AI Plan Review: Phase 25 — Document Source Abstraction
+# Cross-AI Plan Review: Phase 25 — Document Source Abstraction (Cycle 2)
 
 ## Plan 25-01: Source Models and Filesystem Markdown Adapter
 
 ### Summary
-
-A clean, focused plan that defines new domain models and wraps existing reader behavior behind a Protocol-style adapter. The scope is appropriately narrow — models only, no pipeline changes — and the test strategy is solid. The main gaps are around the SourceDocument/FileInfo relationship semantics and the undefined adapter protocol method signature.
+A well-scoped plan that introduces `SourceDocument`, `SourceUnit`, and `ChunkProvenance` Pydantic models plus a `FilesystemMarkdownSourceAdapter` wrapping current discovery logic. The filesystem identity invariant (`document_ref == str(Path.resolve())`) is clearly defined and validated. Scope is tightly bounded with explicit deferral tests.
 
 ### Strengths
-
-- **Tight scope boundary.** No pipeline changes, no search changes, just models + adapter + tests. This is the right MVP shape.
-- **Explicit deferral tests.** Task 4 explicitly checks that no Telegram/SourceAsset/entity code enters the codebase — good scope enforcement.
-- **Fingerprint preservation.** The plan explicitly preserves the split content/metadata fingerprint semantics and asserts they match existing `chunk_checksum`/`meta_checksum` formulas.
-- **`ConfigDict(extra="forbid")` on new models.** Consistent with `Chunk`'s existing pattern and prevents accidental field drift.
+- **Invariant enforcement is excellent.** The `file_path` / `document_ref` mismatch check (Task 1) and the `filesystem_document_ref()` normalizer matching `_meta_entity_id()` (Task 2) prevent the most dangerous silent divergence bug in this phase.
+- **ConfigDict(extra="forbid")** on new models prevents accidental field injection — a good forward-looking choice for a model that will see many consumers.
+- **Protocol-style adapter boundary** with in-process constraint matches established dotMD patterns (`VectorStoreProtocol`, `GraphStoreProtocol`).
+- **Explicit negative acceptance criteria** ("does not contain `telegram`", "does not contain `SourceAsset`") are a strong scope guard.
+- **Fingerprint preservation tests** (body-only vs metadata-only change) directly address TH-25-04 from the research threat model.
 
 ### Concerns
 
-1. **`SourceDocument.file_path: Path | None` and `document_ref` coexistence is underspecified.** (HIGH) — The plan says `file_path` is "compatibility" but doesn't define the invariant: is `document_ref` always derivable from `file_path`? What happens if they disagree? For filesystem, `document_ref` should be a deterministic function of `file_path`, and a test should assert this.
-
-2. **`content_fingerprint` semantics don't match `chunk_checksum` signature.** (MEDIUM) — `chunk_checksum(path: Path)` reads the file from disk, parses frontmatter, and hashes `kind + "\n" + body`. The adapter plan says "content_fingerprint equal to the current chunk_checksum(path)" but `SourceDocument` is already parsed — it doesn't re-read from disk. The plan needs to clarify whether the adapter calls `chunk_checksum(file_path)` directly (disk read) or computes the equivalent from already-parsed data. If the latter, the fingerprint formula must be documented as identical to `chunk_checksum`'s.
-
-3. **`SourceAdapterProtocol` method signature is undefined.** (MEDIUM) — Task 2 says "a method that can discover or export SourceDocument objects" but doesn't specify: is it `discover(directory: Path) -> list[SourceDocument]`? `discover(paths: list[str], exclude: list[str]) -> list[SourceDocument]`? This matters because `discover_files_multi` supports multi-path + excludes, and the protocol must cover that or explicitly not cover it in this plan.
-
-4. **`metadata_json` vs `FileInfo.frontmatter` redundancy.** (LOW) — `SourceDocument.metadata_json: dict` and `FileInfo.frontmatter: dict` serve the same purpose. The plan should clarify that `metadata_json` is the frontmatter dict and that the FileInfo conversion path preserves it directly.
-
-5. **`SourceUnit` is defined but never populated in this plan.** (LOW) — The model is added in Task 1 but no filesystem adapter code emits SourceUnits in Tasks 2-3. This is fine for the model definition, but the plan should explicitly state that SourceUnit population is deferred to Plan 25-02 where chunking happens.
+- **MEDIUM — `source_document_to_file_info()` calls `stat()` at conversion time.** Task 3 requires `size_bytes=document.file_path.stat().st_size`, but the adapter already called `stat()` during discovery (reader.py line 142). This is a redundant I/O syscall per file. For 13,500 files that's non-trivial during full reindex. Consider storing `size_bytes` on `SourceDocument` or passing it through from the original discovery.
+- **MEDIUM — `SourceUnit` is defined but never emitted or used in Plan 01.** The model is added to `models.py` but no adapter method produces `SourceUnit` instances. This is acceptable scaffolding but the acceptance criteria should note it's a type-only addition (no runtime behavior) to avoid confusion during execution.
+- **LOW — `_meta_entity_id()` alignment is asserted in Plan 02, not Plan 01.** Plan 01 Task 2 says `filesystem_document_ref()` "must match `_meta_entity_id(path)`" but the assertion/test is in Plan 02 Task 2. Consider adding a unit test in Plan 01 that compares both functions directly, so the invariant is validated at the boundary where it's defined.
 
 ### Suggestions
-
-- Add a test asserting `document_ref` is a deterministic function of the filesystem path (e.g., `str(Path(path).resolve())`).
-- Define the `SourceAdapterProtocol` method signature explicitly in Task 2 — suggest `discover(directory: Path) -> list[SourceDocument]` and `discover_multi(paths: list[str], exclude: list[str]) -> list[SourceDocument]`.
-- Document the fingerprint computation strategy: adapter calls existing `chunk_checksum(file_path)` / `meta_checksum(file_path)` from reader.py (preserving disk-read semantics), or computes equivalent from parsed content with an explicit formula assertion test.
-- Consider adding `source_uri: str` normalization to always use `str(Path(path).resolve())` for consistency with `_meta_entity_id()`.
+- Add `size_bytes: int` to `SourceDocument` to avoid the redundant `stat()` call in the bridge helper.
+- Add a direct unit test: `assert filesystem_document_ref(p) == IndexingPipeline._meta_entity_id(p)` in Plan 01 test suite.
+- Clarify in the plan that `SourceUnit` is model-only in Plan 01 — the first emission belongs to Plan 02 chunking.
 
 ### Risk Assessment: **LOW**
-
-This plan adds models and an adapter layer without touching the pipeline. The worst case is that the models need adjustment in Plan 02 when they meet the pipeline, but the cost of model changes is low since nothing depends on them yet.
+The plan introduces new types and an adapter that wraps existing code without modifying the pipeline. The `discover_files()` functions are preserved as-is. Regression risk is minimal because nothing in the existing code path changes yet.
 
 ---
 
 ## Plan 25-02: Ingestion Routing and Chunk Provenance
 
 ### Summary
-
-This is the highest-risk plan in the phase. It routes the existing pipeline through the new adapter, attaches provenance to chunks, and must preserve fingerprint behavior, chunk text, file_paths, and metadata-only fast paths. The plan correctly identifies the critical compatibility risks but leaves too many integration details to implementer discretion, particularly around the FileTracker/SourceDocument impedance mismatch.
+The highest-risk plan. Routes filesystem Markdown indexing through the adapter-backed path while preserving `FileTracker.diff()` on `FileInfo` objects. The dual-object approach (`SourceDocument` → provenance, `FileInfo` → tracker diffing) is architecturally sound but creates a synchronization surface that needs careful testing.
 
 ### Strengths
-
-- **Correct threat identification.** All four threats are real and correctly prioritized: chunk text drift, metadata-only regression, file_path loss, and provenance vagueness.
-- **Chunk text comparison test.** Task 4 explicitly asserts chunk text remains identical before and after provenance-aware chunking — this is the single most important compatibility test.
-- **Metadata-only path preservation.** Task 3 explicitly requires the `test_metadata_only_reindex_exactly_one_tei_call` test to keep passing, which is the right regression gate.
+- **The `documents_by_path` bridge pattern is correct.** Converting `SourceDocument` → `FileInfo` for tracker diffing while maintaining a parallel mapping for provenance avoids changing `FileTracker` internals.
+- **`_meta_entity_id()` alignment assertion** (Task 2) is the most critical invariant check in the entire phase. Placing it at the diff/save boundary catches mismatches early.
+- **The explicit rule "tracker calls never receive `SourceDocument`"** prevents a common error where adapter types leak into storage internals.
+- **Test that `index_file(Path(...))` produces identical provenance as bulk `index()`** (Task 4) catches the most likely real-world divergence.
 
 ### Concerns
 
-1. **`FileTracker.diff()` works with `list[FileInfo]`, not `list[SourceDocument]`.** (HIGH) — The pipeline's `index()` method currently calls `discover_files(directory)` → `list[FileInfo]` → `self._chunk_tracker.diff(files)`. The plan says to route discovery through the adapter, which returns `list[SourceDocument]`. But `FileTracker.diff()` expects `FileInfo` objects (it accesses `fi.path`, `fi.last_modified`, `fi.size_bytes`). The plan says "maps adapter documents to the existing FileInfo/chunking flow" but doesn't specify: does the adapter also return FileInfo? Does the pipeline convert SourceDocument → FileInfo? This is the central integration decision and it's left to implementer discretion.
-
-2. **`index_file()` (trickle path) is not addressed.** (HIGH) — The trickle indexer calls `pipeline.index_file(file_info)` which accepts `FileInfo | Path`, constructs its own `FileInfo`, and runs the two-phase pipeline independently. Plan 02 Task 2 only mentions `pipeline.index(directory)` and `_chunk_files()`. The trickle path must also go through the adapter, or the two paths will produce inconsistent provenance. The plan doesn't address this.
-
-3. **`discover_files_multi()` is not addressed.** (MEDIUM) — Production uses `discover_files_multi(paths, exclude)` via `DotMDService`. The plan routes bulk discovery through the adapter but only describes the single-directory case. If `FilesystemMarkdownSourceAdapter` only wraps `discover_files()`, the multi-path code path will bypass the adapter, creating two discovery paths.
-
-4. **`chunk_file()` provenance signature is vague.** (MEDIUM) — Task 1 says "Update chunk_file() to accept optional provenance inputs" with parameters like `namespace: str = "filesystem"`, `document_ref: str | None = None`, `source_unit_refs`. But `chunk_file()` is also called from many test fixtures with just `(path, content)`. Adding optional parameters is fine, but the plan doesn't specify whether provenance is populated inside `chunk_file()` or by the caller after chunking.
-
-5. **`_meta_entity_id()` normalization must align with `document_ref`.** (MEDIUM) — `_meta_entity_id()` returns `str(Path(path).resolve())` and is used as the key for VecComponentStore. If `document_ref` uses a different normalization, the metadata-only fast path will break because e_meta lookups will miss. The plan doesn't address this alignment.
-
-6. **`_save_and_embed_chunks` groups chunks by `str(fi.path)` lookup into `fi_by_path` dict.** (LOW) — If the adapter changes the path representation (e.g., to `document_ref`), this grouping logic needs updating. The plan doesn't flag this.
+- **HIGH — `index_file()` refactoring complexity is underestimated.** The current `index_file()` (pipeline.py:1446-1690) is a 244-line method with multiple phases, error handling branches, beacon writes, and two-phase embed logic. Plan 02 Task 3 proposes significant structural changes to it (constructing `SourceDocument` from `Path` or `FileInfo`, asserting `_meta_entity_id` alignment, passing provenance through to chunking/save). The plan treats this as one task but it touches the most complex method in the codebase. A missed edge case here could break trickle indexing silently.
+- **HIGH — `chunk_file()` signature change may break existing callers.** Task 1 proposes adding provenance parameters to `chunk_file()`. The current signature is clean (`file_path, content, max_tokens, overlap_tokens, kind, chunk_strategy`). Adding optional provenance params is backward-compatible at the type level, but `chunk_file()` is called from multiple sites (`_chunk_files()`, `index_file()`, and tests). The plan says "caller-owned provenance is preferred" but doesn't specify what happens when `chunk_file()` is called without provenance from a test or non-adapter path.
+- **MEDIUM — `_save_and_embed_chunks()` provenance injection point is ambiguous.** The plan says "Persist source document row per discovered Markdown file into global `source_documents`" but `_save_and_embed_chunks()` operates on `list[Chunk]` grouped by file, not on `SourceDocument` objects. The mapping between chunks and source documents must go through `file_paths[0]` → `documents_by_path`, which is fragile if `file_paths` ordering changes or a chunk is shared across documents.
+- **MEDIUM — `reindex_vectors()` is mentioned as "must not create duplicate source document rows" but Plan 02 doesn't modify `reindex_vectors()`.** The `reindex_vectors()` path (pipeline.py:899-975) discovers files from M2M table and re-embeds them. If it runs after Plan 02 without provenance writes, it creates chunks without source provenance. This gap should be acknowledged explicitly or addressed in Plan 03.
 
 ### Suggestions
+- **Split Task 3 into two tasks**: one for the bulk `index()` path and one for `index_file()`. The trickle path is complex enough to warrant its own focused task with dedicated tests.
+- **Specify the default provenance behavior for `chunk_file()` without adapter context.** When called directly from tests or `reindex_vectors()`, should it default to `namespace="filesystem"` with no `document_ref`? Or should it require provenance? This should be an explicit design decision.
+- **Add a test that `reindex_vectors()` does not crash or produce inconsistent state after Plan 02 changes.** Even if provenance writes are deferred to Plan 03, the read path must handle chunks with and without provenance gracefully.
+- **Document the `file_paths[0]` → `documents_by_path` lookup contract explicitly** in the plan. If this mapping ever fails (shared chunk from two different source documents), the plan should specify the fallback behavior.
 
-- **Specify the FileTracker impedance solution explicitly.** Either: (a) the adapter returns `SourceDocument` + a method to extract compatible `FileInfo`, or (b) the pipeline maintains a parallel `list[FileInfo]` alongside `list[SourceDocument]`. Option (a) is cleaner.
-- **Add a task or acceptance criterion covering the `index_file()` trickle path.** At minimum, assert that trickle-indexed files have the same provenance as bulk-indexed files.
-- **Address `discover_files_multi`.** Either the adapter wraps both discovery functions, or the plan explicitly documents that multi-path discovery is a Plan 03 follow-up with a temporary bypass.
-- **Specify `document_ref` normalization as `str(Path(path).resolve())` explicitly** to align with `_meta_entity_id()`.
-
-### Risk Assessment: **HIGH**
-
-This plan modifies the core indexing pipeline — the most complex and test-sensitive component in the codebase. The FileTracker/SourceDocument impedance mismatch, the unaddressed trickle path, and the `_meta_entity_id` normalization alignment are all HIGH-severity integration gaps that could cause silent regressions in incremental indexing or embedding reuse.
+### Risk Assessment: **MEDIUM**
+This plan touches the most critical and complex code path (`index_file()` and `_save_and_embed_chunks()`). The dual-object synchronization pattern is sound but creates a new invariant surface. The 244-line `index_file()` method is the primary risk — the plan should either split the work or add more granular intermediate verification.
 
 ---
 
 ## Plan 25-03: Provenance Persistence and Read/Search Compatibility
 
 ### Summary
-
-Adds SQLite provenance tables and integrates provenance writes into the pipeline's save path, then extends delete cleanup to the new tables. The plan correctly keeps provenance additive and preserves `file_paths`/MCP read as the compatibility path. The main gap is the strategy-scoping ambiguity for source_documents.
+Adds two new SQLite tables (`source_documents` global, `chunk_source_provenance_<strategy>` per-strategy) and wires provenance writes into all chunk save paths. The table scoping decision (global vs strategy-scoped) is well-justified and correctly documented.
 
 ### Strengths
-
-- **Additive schema only.** `CREATE TABLE IF NOT EXISTS` with no column drops or renames. Safe for existing index databases.
-- **Delete cleanup is a first-class task, not an afterthought.** Task 4 addresses provenance row deletion within the existing `_holder_aware_chunk_cleanup` transaction boundary.
-- **`file_paths` remains authoritative for search/read.** The plan explicitly does not replace `chunk_file_paths_<strategy>` with provenance-based hydration for MCP/search, which prevents a compatibility break.
-- **Search compatibility tests.** Task 3 asserts `SearchResult.file_paths`, MCP `SearchHit.file_paths`, and MCP `read(file_path)` remain valid.
+- **The global vs strategy-scoped split is correct.** Source documents are independent of chunking strategy — a Markdown file is the same document regardless of how it's chunked. Only chunk-level provenance varies by strategy.
+- **Delete cleanup cascade (Task 4)** correctly extends the existing holder-aware purge pattern to clean provenance rows alongside M2M rows.
+- **`CREATE TABLE IF NOT EXISTS` and additive-only schema** is the right migration strategy for an existing production database.
+- **The `delete_source_document_for_file()` helper** deriving `document_ref` from `file_path` maintains the filesystem identity contract at the storage layer.
 
 ### Concerns
 
-1. **`source_documents` table scoping is ambiguous.** (HIGH) — The plan says "source_documents_<strategy> or a non-strategy table" — this decision is deferred to implementation. But it's not a trivial choice: if strategy-scoped, every strategy gets a separate copy of the same source document metadata (wasteful); if global, the helper methods need a different API (no `strategy` parameter). The research doc raises this ambiguity and the plan doesn't resolve it. This should be a plan-time decision.
-
-2. **Provenance write location in pipeline is unspecified.** (MEDIUM) — Task 2 says "When saving adapter-routed chunks, persist source documents and chunk provenance alongside existing chunks." But it doesn't specify: is it in `_save_and_embed_chunks`? In `save_chunks`? In a new method? The pipeline has multiple chunk-save paths (bulk `_save_and_embed_chunks`, trickle `index_file`'s per-chunk loop, `reindex_vectors`). Each needs provenance writes, and the plan only addresses the bulk path.
-
-3. **`source_unit_refs` stored as JSON text — no query capability.** (LOW) — Storing `source_unit_refs` as a JSON text column means you can't efficiently query "which chunks came from source unit X." This is fine for Phase 25 (query not needed) but should be documented as a known limitation for the future Telegram phase.
-
-4. **`delete_source_document_for_file(strategy, file_path, conn=...)` has confusing parameters.** (LOW) — If source_documents is strategy-independent, `strategy` is a misleading parameter. If strategy-scoped, `file_path` should maybe be `document_ref`. The helper API should match the chosen table scoping.
+- **HIGH — `source_unit_refs` stored as JSON text has no query surface.** The plan stores `source_unit_refs` as a JSON TEXT column in `chunk_source_provenance_<strategy>`. This is fine for persistence, but Phase 25 never defines what `source_unit_refs` actually contains for filesystem Markdown. Plan 01 defines `SourceUnit` but no adapter method emits units. Plan 02 says "at least one deterministic source unit ref" in tests but never specifies the format. If `source_unit_refs` is always `[]` for Phase 25, this is dead storage. If it contains something, the format must be defined before persistence is implemented.
+- **MEDIUM — Provenance write in `reindex_vectors()` is not covered.** Task 2 says "reindex_vectors() must not create duplicate source document rows and must not drop existing provenance" but doesn't specify whether `reindex_vectors()` should *create* provenance rows for chunks that lack them (e.g., chunks created before Phase 25). This is a migration concern.
+- **MEDIUM — `conn=None` parameter pattern in helper methods may cause transaction issues.** The plan proposes helpers like `upsert_source_document(document, conn=None)`. But the existing `SQLiteMetadataStore` pattern (e.g., `delete_m2m_for_file`) requires explicit `conn` with caller-managed transactions. Optional `conn` with a fallback to `self._conn` can silently break transaction boundaries. The helpers should either always require `conn` or document when autocommit is acceptable.
+- **LOW — No VACUUM or migration test for existing databases.** Adding two tables to an existing ~50-min-full-reindex production database should include a test that proves the DDL is idempotent on a populated database.
 
 ### Suggestions
-
-- **Resolve the strategy-scoping decision now.** I recommend a non-strategy-scoped `source_documents` table (source metadata is strategy-independent by nature — a Markdown file's namespace/ref/media_type doesn't change per chunk strategy). Use `document_ref` as the primary key.
-- **Specify all write paths that need provenance.** List: `_save_and_embed_chunks`, `index_file`'s per-chunk transaction, and `reindex_vectors`. At minimum, add acceptance criteria covering trickle-indexed file provenance.
-- **Add an index on `chunk_source_provenance.chunk_id`** for efficient batch hydration.
+- **Define what `source_unit_refs` contains for filesystem Markdown before persisting it.** If the answer is "always empty list for Phase 25," say so explicitly and add a test asserting it. If it should contain something meaningful (e.g., `["filesystem:<path>:chunk:<index>"]`), define the format.
+- **Unify the `conn` parameter pattern** with existing store helpers. Prefer mandatory `conn` for methods called inside transactions and document autocommit behavior for standalone calls.
+- **Add a test for the migration path**: open an existing `index.db` with chunks and M2M data, create provenance tables, verify no data loss.
 
 ### Risk Assessment: **MEDIUM**
-
-The additive schema approach limits blast radius, but the strategy-scoping ambiguity and the multiple unaddressed write paths (trickle, reindex) could leave provenance incomplete. The delete cleanup is well-designed.
+The storage changes are additive and safe in isolation. The primary risk is the undefined `source_unit_refs` content — implementing persistence before defining what's being persisted could lead to a format that's wrong for future Telegram work and requires a migration to fix.
 
 ---
 
 ## Plan 25-04: Regression Suite, Documentation, and Phase Verification
 
 ### Summary
-
-A solid closing plan that runs all test surfaces, updates documentation, and writes a comprehensive final summary. The deferred scope audit is a good practice. Minor concerns about acceptance criteria fragility and the grep-based scope enforcement test.
+A solid closing plan that adds cross-surface regression tests, updates documentation, and writes the final phase summary. The deferred-scope audit is a strong pattern that prevents scope creep from going unnoticed.
 
 ### Strengths
-
-- **Cross-surface regression coverage.** Tests ingestion, storage, API, and MCP in a single verification pass.
-- **Deferred scope audit in the final summary.** Explicitly listing all deferred items (Telegram, assets, entities, transports, TTL, validation) is excellent for future phase boundaries.
-- **Architecture panel acceptance gate answers.** Task 4 explicitly answers every question from the planning acceptance gate.
-- **No production restart.** Explicitly documents that `dotmd index --force` and production restarts are not part of verification.
+- **The deferred-scope audit (Task 4)** with explicit checklists ("Telegram read-only adapter not implemented") is an excellent scope-control mechanism.
+- **Running all test suites together** (ingestion + storage + API + MCP) provides the integration coverage that individual plan tests cannot.
+- **The documentation task (Task 2)** correctly captures the canonical mapping rules and future-scope boundary.
 
 ### Concerns
 
-1. **Grep-based scope enforcement test is fragile.** (LOW) — Task 1 says "at least one test asserts no runtime Telegram adapter or source asset/entity implementation exists in Phase 25 files." String-matching source code for absence of terms is fragile (e.g., a docstring mentioning "Telegram" as a future reference would fail). Consider testing for the absence of specific imports or class instantiations instead.
-
-2. **No performance regression test.** (LOW) — Phase 25 adds new DB tables and provenance writes on every chunk save. There's no test verifying that the overhead is negligible (e.g., timing assertion that bulk indexing N files with provenance is within 5% of baseline without provenance). This matters on the Ivy Bridge hardware.
-
-3. **Acceptance criteria are string-matching checks.** (LOW) — e.g., "`25-04-SUMMARY.md` contains `Canonical filesystem ref`". These are easily gamed and don't verify content quality. However, given the autonomous execution context, this is an acceptable trade-off.
+- **MEDIUM — Task 1 is a meta-task without new test code.** It says "Ensure the final test coverage proves the compatibility shim at every surface" but lists test files from Plans 01-03. If Plans 01-03 already wrote all the tests, Task 1 is verification-only. If additional tests are needed, the plan should specify which ones. As written, an executor could interpret this as "run existing tests and confirm they pass" without adding anything new.
+- **LOW — `pyright` verification but no `ruff` or `mypy`.** The AGENTS.md specifies `ruff check .` and `mypy` as pre-commit gates. Plan 04 only mentions `pyright`. Either add `ruff` and `mypy` to the verification command, or document why `pyright` alone is sufficient for Phase 25.
 
 ### Suggestions
-
-- Replace the grep-based scope test with a structural test: verify `SourceAdapterProtocol.__abstractmethods__` contains only the expected methods, or verify `SourceDocument` has no `telegram`/`SourceAsset`/`SourceEntity` fields via Pydantic schema inspection.
-- Add a lightweight performance assertion (e.g., indexing 10 files with provenance completes in <2x the time without provenance).
+- **Make Task 1 concrete**: list specific new test cases (if any) beyond what Plans 01-03 already added. If no new tests are needed, rename the task to "Verify existing test coverage is sufficient."
+- **Add `ruff check` to the verification gate** to match AGENTS.md pre-commit requirements.
+- **Consider a grep-based scope audit test** (e.g., `rg -l "telegram|SourceAsset|TTL" backend/src/dotmd/ingestion/source.py backend/src/dotmd/core/models.py`) as an automated check that can run in CI.
 
 ### Risk Assessment: **LOW**
-
-This is a verification and documentation plan with minimal code changes. The main risk is incomplete coverage, not regressions.
+This plan is primarily verification and documentation. The main risk is under-coverage if Plans 01-03 tests have gaps, but the cross-surface test run should surface most issues.
 
 ---
 
 ## Overall Phase Assessment
 
-### Risk Assessment: **MEDIUM**
+**Overall Risk: MEDIUM**
 
-The phase is well-scoped and the four-plan decomposition is logical. Plans 01 and 04 are LOW risk. Plan 03 is MEDIUM risk due to schema ambiguity but is bounded by its additive approach. **Plan 02 is the critical risk path** — it touches the pipeline's core indexing loop and has three unresolved HIGH-severity integration gaps:
+The phase is well-structured with clear dependencies (Wave 1→2→3→4), tight scope boundaries, and strong negative acceptance criteria. The primary risks are:
 
-1. **FileTracker/SourceDocument impedance mismatch** — the central routing decision is unspecified
-2. **Unaddressed trickle `index_file()` path** — will produce inconsistent provenance
-3. **`_meta_entity_id()` normalization alignment** — will silently break the metadata-only fast path
+1. **Plan 02 complexity** — `index_file()` refactoring in a single task is the highest-risk single unit of work in the phase.
+2. **`source_unit_refs` is undefined** — the three new models are defined but only `SourceDocument` has clear Phase 25 semantics. `SourceUnit` and `ChunkProvenance.source_unit_refs` are scaffolding for future work, and persisting `source_unit_refs` before defining its format is premature.
+3. **`reindex_vectors()` gap** — Plans 02 and 03 both mention it but neither fully addresses provenance behavior for the rebuild path. This could leave chunks with partial provenance.
 
-### Cross-Cutting Recommendations
+**Cross-plan dependency concern:** Plan 03 Task 2 requires writing provenance during `_save_and_embed_chunks()`, but the `documents_by_path` mapping is created in Plan 02 Task 2. If Plan 02 stores this mapping as a local variable inside `index()`, Plan 03 cannot access it in `_save_and_embed_chunks()`. The plans should agree on where this mapping lives (e.g., a pipeline attribute or a parameter passed through the call chain).
 
-1. **Resolve `document_ref` normalization now, not in implementation.** Specify that `document_ref = str(Path(path).resolve())` for filesystem Markdown. This aligns with `_meta_entity_id()`, `VecComponentStore` keys, and existing path-based lookups.
-
-2. **Resolve the SourceDocument → FileInfo bridge now.** The simplest approach: `FilesystemMarkdownSourceAdapter.discover()` returns `list[SourceDocument]`, each of which can produce a `FileInfo` via a `to_file_info()` method. The pipeline continues to use `FileInfo` for tracker operations but uses `SourceDocument` for provenance.
-
-3. **Address all pipeline write paths, not just bulk `index()`.** The trickle `index_file()` path and `reindex_vectors()` must be included in Plans 02-03 scope.
-
-4. **Address `discover_files_multi`.** Either the adapter wraps it, or the plan documents it as temporarily bypassed with a follow-up task.
-
-5. **Resolve `source_documents` table scoping as strategy-independent.** Source metadata (namespace, document_ref, media_type) is inherently strategy-independent. Use `document_ref` as PK.
+**Scope control is excellent.** The explicit deferral tests and negative acceptance criteria are the strongest aspect of this plan suite. They make it very difficult for scope creep to enter during execution.
 
 ---
 
 ## Consensus Summary
 
-Only OpenCode was invoked in this cycle, per the requested reviewer set. The synthesis below therefore captures recurring or phase-level themes inside the single OpenCode review rather than cross-reviewer agreement.
+Only OpenCode was invoked in this convergence cycle, per the requested reviewer set. This summary therefore synthesizes repeated or cross-plan themes from that single review rather than cross-reviewer agreement.
 
 ### Agreed Strengths
 
-- Phase 25 is decomposed cleanly into model, routing, persistence, and verification plans.
-- The plans preserve current filesystem Markdown behavior as the MVP path and defer Telegram/source asset/entity expansion.
-- Compatibility with existing chunk text, fingerprints, `file_paths`, and MCP read/search surfaces is treated as a first-class regression concern.
-- The persistence plan is additive and keeps `file_paths` authoritative for current search/read compatibility.
+- Phase 25 remains well-structured with clear sequencing from source models to ingestion routing, provenance persistence, and verification.
+- The replanned filesystem identity invariant, especially `document_ref == str(Path.resolve())`, directly addresses prior path-normalization risks.
+- Scope control is strong: Telegram, `SourceAsset`, entity catalog work, TTL, and validation-source expansion remain explicitly deferred.
+- The persistence design is additive and keeps existing `file_paths`/MCP read/search behavior as the compatibility surface.
 
 ### Agreed Concerns
 
-- HIGH: `SourceDocument.file_path` and `document_ref` coexistence lacks an explicit invariant and deterministic filesystem normalization rule.
-- HIGH: The `SourceDocument` to `FileInfo` bridge for `FileTracker.diff()` is not specified, leaving the core routing decision to implementation.
-- HIGH: The trickle `index_file()` path is not covered, so it may bypass adapter/provenance behavior used by bulk indexing.
-- HIGH: `source_documents` table scoping is unresolved even though strategy-scoped versus global storage changes helper APIs and duplication behavior.
-- MEDIUM: `discover_files_multi`, provenance write locations, and `document_ref` alignment with `_meta_entity_id()` need explicit plan-time decisions.
+- HIGH: Plan 25-02 still underestimates the complexity of refactoring the 244-line `index_file()` trickle path.
+- HIGH: Plan 25-02 does not fully specify default provenance behavior for `chunk_file()` callers that do not have adapter context.
+- HIGH: Plan 25-03 persists `source_unit_refs` before defining concrete filesystem semantics or deciding whether it is intentionally empty in Phase 25.
+- MEDIUM: Provenance behavior for `reindex_vectors()` remains incomplete across Plans 25-02 and 25-03.
+- MEDIUM: The handoff of `documents_by_path` from Plan 25-02 to Plan 25-03 needs a concrete call-chain or ownership decision.
+
 ### Divergent Views
 
 - No divergent reviewer views: this cycle intentionally used OpenCode only.
