@@ -192,9 +192,9 @@ Set these for the live container:
 
 | Variable | Example | Description |
 |----------|---------|-------------|
-| `DOTMD_DATA_DIR` | `/data` | Markdown source root inside the container |
+| `DOTMD_DATA_DIR` | `/mnt` | Markdown source root inside the container |
 | `DOTMD_INDEX_DIR` | `/dotmd-index` | Persistent index directory inside the container |
-| `DOTMD_INDEXING_PATHS` | `["/data"]` | Roots or glob patterns watched by the trickle indexer |
+| `DOTMD_INDEXING_PATHS` | `["/mnt"]` | Roots or glob patterns watched by the trickle indexer |
 | `DOTMD_EMBEDDING_URL` | `http://tei:80` | TEI-compatible embedding endpoint |
 | `DOTMD_GRAPH_BACKEND` | `ladybugdb` | `ladybugdb` or `falkordb` |
 | `DOTMD_FALKORDB_URL` | `redis://falkordb:6379` | Required only when `DOTMD_GRAPH_BACKEND=falkordb` |

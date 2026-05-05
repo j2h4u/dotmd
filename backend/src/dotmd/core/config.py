@@ -37,6 +37,21 @@ DEFAULT_POLL_INTERVAL_SECONDS = 3600.0
 DEFAULT_GRAPH_MAX_HOPS = 2
 DEFAULT_RERANKER_MIN_LENGTH = 50
 DEFAULT_RERANKER_LENGTH_PENALTY = True
+RUNTIME_DATA_DIR = Path("/mnt")
+RUNTIME_INDEX_DIR = Path("/dotmd-index")
+
+
+def _path_spec_is_absolute(path_spec: str) -> bool:
+    """Return whether a directory/glob path spec is anchored at an absolute path."""
+    wildcard_positions = [
+        pos for pos in (path_spec.find("*"), path_spec.find("?"), path_spec.find("["))
+        if pos != -1
+    ]
+    prefix = path_spec[: min(wildcard_positions)] if wildcard_positions else path_spec
+    prefix = prefix.rstrip("/")
+    if not prefix:
+        return path_spec.startswith("/")
+    return Path(prefix).is_absolute()
 
 
 class Settings(BaseSettings):
@@ -280,12 +295,18 @@ class Settings(BaseSettings):
     def validate_for_runtime(self) -> None:
         """Validate settings used by long-running runtime service entrypoints."""
         errors: list[str] = []
-        if self.data_dir == Path("."):
-            errors.append("data_dir must be set for runtime startup")
-        if self.index_dir == Path.home() / ".dotmd":
-            errors.append("index_dir must be set for runtime startup")
+        if not self.data_dir.is_absolute():
+            errors.append("data_dir must be absolute for runtime startup")
+        elif self.data_dir != RUNTIME_DATA_DIR:
+            errors.append("data_dir must be /mnt for runtime startup")
+        if not self.index_dir.is_absolute():
+            errors.append("index_dir must be absolute for runtime startup")
+        elif self.index_dir != RUNTIME_INDEX_DIR:
+            errors.append("index_dir must be /dotmd-index for runtime startup")
         if not self.indexing_paths:
             errors.append("indexing_paths must not be empty for runtime startup")
+        elif any(not _path_spec_is_absolute(path_spec) for path_spec in self.indexing_paths):
+            errors.append("indexing_paths must contain absolute paths for runtime startup")
         if not self.embedding_url:
             errors.append("embedding_url must not be empty for runtime startup")
 

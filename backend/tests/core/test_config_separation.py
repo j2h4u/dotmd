@@ -1,14 +1,15 @@
 """Settings boundary tests for operator config and internal defaults."""
 
-import inspect
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
+from starlette.testclient import TestClient
 
 from dotmd import mcp_server
+from dotmd.api import server as api_server
 from dotmd.api.service import DotMDService
 from dotmd.core import config
 from dotmd.core.config import Settings
@@ -82,6 +83,8 @@ def test_default_falkordb_url_is_exported() -> None:
         ("data_dir", {"data_dir": Path(".")}),
         ("index_dir", {"index_dir": Path.home() / ".dotmd"}),
         ("indexing_paths", {"indexing_paths": []}),
+        ("data_dir", {"data_dir": Path("/data")}),
+        ("index_dir", {"index_dir": Path("/tmp/dotmd-index")}),
     ],
 )
 def test_runtime_validation_rejects_unsafe_deployment_defaults(
@@ -92,6 +95,30 @@ def test_runtime_validation_rejects_unsafe_deployment_defaults(
 
     with pytest.raises(ValueError, match=field):
         settings.validate_for_runtime()
+
+
+@pytest.mark.parametrize(
+    ("field", "overrides"),
+    [
+        ("data_dir", {"data_dir": Path("data")}),
+        ("index_dir", {"index_dir": Path("idx")}),
+        ("indexing_paths", {"indexing_paths": ["data"]}),
+    ],
+)
+def test_runtime_validation_rejects_relative_runtime_paths(
+    field: str,
+    overrides: dict[str, object],
+) -> None:
+    settings = _runtime_settings(**overrides)
+
+    with pytest.raises(ValueError, match=field):
+        settings.validate_for_runtime()
+
+
+def test_runtime_validation_accepts_absolute_indexing_globs() -> None:
+    settings = _runtime_settings(indexing_paths=["/mnt/**/*.md"])
+
+    settings.validate_for_runtime()
 
 
 def test_runtime_validation_accepts_explicit_deployment_values() -> None:
@@ -160,14 +187,38 @@ def test_service_status_consumes_effective_indexing_exclude() -> None:
     with patch("dotmd.ingestion.reader.discover_files_multi", return_value=[]) as discover:
         service.status()
 
-    discover.assert_called_once_with(
-        settings.indexing_paths,
-        settings.effective_indexing_exclude,
-    )
+    discover.assert_called_once_with(settings.indexing_paths, settings.effective_indexing_exclude)
     assert "**/.git" in discover.call_args.args[1]
     assert "**/private" in discover.call_args.args[1]
 
 
-def test_mcp_runtime_paths_use_runtime_settings_helper() -> None:
-    assert "load_runtime_settings()" in inspect.getsource(mcp_server.init_service)
-    assert "load_runtime_settings()" in inspect.getsource(mcp_server.create_app)
+def test_mcp_stdio_runtime_path_uses_runtime_settings_helper() -> None:
+    settings = _runtime_settings()
+
+    with (
+        patch("dotmd.mcp_server.load_runtime_settings", return_value=settings) as load_runtime,
+        patch("dotmd.mcp_server.DotMDService") as service_cls,
+        patch("dotmd.mcp_server.FeedbackStore") as feedback_cls,
+    ):
+        mcp_server.init_service()
+
+    load_runtime.assert_called_once_with()
+    service_cls.assert_called_once_with(settings)
+    feedback_cls.assert_called_once_with(settings.index_dir / "feedback.db")
+
+
+def test_fastapi_runtime_path_uses_runtime_settings_helper() -> None:
+    settings = _runtime_settings()
+
+    with (
+        patch("dotmd.api.server.load_runtime_settings", return_value=settings) as load_runtime,
+        patch("dotmd.api.server.DotMDService") as service_cls,
+    ):
+        service = service_cls.return_value
+        service.warmup.return_value = None
+        with TestClient(api_server.app) as client:
+            assert client.get("/health").status_code == 200
+
+    load_runtime.assert_called_once_with()
+    service_cls.assert_called_once_with(settings)
+    service.warmup.assert_called_once_with()
