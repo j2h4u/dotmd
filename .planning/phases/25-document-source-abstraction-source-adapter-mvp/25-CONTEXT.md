@@ -92,6 +92,9 @@ non-filesystem validation source after the filesystem shim proves the contract.
 
 ### Source Adapter Architecture
 
+- `.planning/phases/25-document-source-abstraction-source-adapter-mvp/25-ARCHITECTURE-PANEL.md`
+  - Phase-specific expert-panel narrowing: minimal filesystem Markdown shim
+  contract, compatibility requirements, deferrals, and planning acceptance gate.
 - `docs/source-adapter-architecture.md` - source/document/source-unit/chunk
   vocabulary, source assets, metadata layers, source entity catalogs,
   cross-source identity resolution, parser/content-format axis, and MVP shape.
