@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.4
-milestone_name: Search Quality & Architecture
-status: active
-last_updated: "2026-05-05T14:56:43.963Z"
+milestone_name: milestone
+status: planning
+last_updated: "2026-05-05T15:50:47.514Z"
 last_activity: 2026-05-05
 progress:
   total_phases: 10
   completed_phases: 9
-  total_plans: 21
+  total_plans: 23
   completed_plans: 21
-  percent: 90
+  percent: 91
 ---
 
 # GSD State
@@ -64,9 +64,11 @@ Progress: [█████████░] 90%
 - Phase 23 added: Fix dotMD test contract
 - Phase 24 added: Config separation — user-facing settings vs internal constants
   (promoted from backlog 999.6)
+
 - Backlog 999.22 added: Document Source Abstraction — index non-filesystem
   sources. Architecture context is captured in `docs/source-adapter-architecture.md`
   and expert-panel review in `docs/source-adapter-architecture-panel-review.md`.
+
 - Backlog `999.x` entries are documentation backlog items, not active phases;
   they should be promoted explicitly before planning/execution.
 
