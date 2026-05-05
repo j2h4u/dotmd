@@ -144,6 +144,16 @@ from the built-in reranker registry. The active comparison set is
 `msmarco-minilm`, `mmarco-minilm`, and `mxbai-xsmall-v1`; default search now
 uses `mmarco-minilm` pending the Phase 21 quality benchmark.
 
+Phase 24 complete (2026-05-05): Configuration is now split conceptually between
+deployment-bound operator config and internal tuning defaults. Runtime service
+entry points validate required deployment values before serving, preserving the
+single live container contract (`/mnt`, `/dotmd-index`, explicit indexing paths,
+TEI URL, and FalkorDB URL when selected). Built-in indexing excludes are
+preserved through `effective_indexing_exclude`, with additive
+`indexing_extra_exclude` for operator-specific ignores. The restart safety gate
+is now named `DOTMD_RUN_STARTUP_CHECKS`, while `ENVIRONMENT=dev` remains a
+temporary compatibility alias.
+
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
@@ -162,4 +172,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-01 after Phase 19 complete*
+*Last updated: 2026-05-05 after Phase 24 complete*
