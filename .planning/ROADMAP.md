@@ -726,6 +726,32 @@ Plans:
 - [x] 24-01-config-boundary-and-validation-PLAN.md — Separate `Settings` from internal defaults, add runtime validation, and migrate effective exclude usage
 - [x] 24-02-startup-docs-and-template-PLAN.md — Preserve/rename startup checks and align `.env.example` plus README with the new config surface
 
+### Phase 25: Document Source Abstraction — source adapter MVP
+
+**Goal:** Start the move from file-centric Markdown indexing toward a
+source/document/source-unit/chunk model by defining the minimal source adapter
+contract and shaping the first Telegram read-only MVP.
+**Requirements:** TBD
+**Backlog source:** 999.22
+**Depends on:** Phase 24
+**Plans:** 0 plans
+
+Phase context:
+- Use the architecture docs linked from backlog `999.22` as the source of
+  truth: `docs/source-adapter-architecture.md` and
+  `docs/source-adapter-architecture-panel-review.md`.
+- Keep the first implementation path MVP-first: minimal source model shim,
+  filesystem compatibility, then Telegram read-only as the first real
+  non-filesystem source.
+- Preserve the source-vs-parser distinction: source adapters discover assets
+  and units; parser/chunking behavior follows media type and parser metadata.
+- Keep entity catalogs, fuzzy identity resolution, delete/edit propagation, and
+  second-source validation as follow-up scope unless planning explicitly pulls
+  a minimal slice into this phase.
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 25 to break down)
+
 ---
 
 *Roadmap created: 2026-03-26*

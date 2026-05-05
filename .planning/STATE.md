@@ -2,7 +2,7 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
-status: milestone_complete
+status: active
 last_updated: "2026-05-05T16:10:29.039Z"
 last_activity: 2026-05-05
 progress:
@@ -20,15 +20,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 24 — config-separation-user-facing-settings-vs-internal-constants
+**Current focus:** Phase 25 — Document Source Abstraction — source adapter MVP
 
 ## Current Milestone
 
 **v1.4 — Search Quality & Architecture**
 
-Phase: 24
+Phase: 25
 Plan: Not started
-Status: Milestone complete
+Status: Phase added, not planned
 Last activity: 2026-05-05
 
 Progress: [██████████] 100%
@@ -67,6 +67,8 @@ Progress: [██████████] 100%
 - Phase 23 added: Fix dotMD test contract
 - Phase 24 added: Config separation — user-facing settings vs internal constants
   (promoted from backlog 999.6)
+- Phase 25 added: Document Source Abstraction — source adapter MVP
+  (promoted from backlog 999.22)
 
 - Backlog 999.22 added: Document Source Abstraction — index non-filesystem
   sources. Architecture context is captured in `docs/source-adapter-architecture.md`
