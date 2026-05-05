@@ -341,6 +341,14 @@ class GraphStoreProtocol(Protocol):
         """
         ...
 
+    def delete_chunks_from_graph(self, chunk_ids: list[str]) -> None:
+        """Delete Section nodes by chunk id while preserving File nodes."""
+        ...
+
+    def delete_file_node(self, file_path: str) -> None:
+        """Delete one File node and its direct edges."""
+        ...
+
     def delete_frontmatter_edges(self, file_path: str) -> None:
         """Delete frontmatter-derived File edges before metadata refresh."""
         ...

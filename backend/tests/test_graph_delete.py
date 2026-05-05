@@ -254,3 +254,36 @@ class TestDeleteFileSubgraph:
 
         # Removed: 1 File + 2 Sections = 3 nodes. Remaining: 4
         assert graph_store.node_count() == 4
+
+
+class TestHolderAwareGraphDelete:
+    """Tests for narrow holder-aware graph cleanup helpers."""
+
+    def test_delete_file_node_preserves_shared_sections(
+        self,
+        graph_store: LadybugDBGraphStore,
+    ) -> None:
+        _populate_graph(graph_store)
+        assert _count_nodes(graph_store, "Section") == 2
+
+        graph_store.delete_file_node("doc/test.md")
+
+        assert _count_nodes(graph_store, "File") == 0
+        assert _count_nodes(graph_store, "Section") == 2
+
+    def test_delete_chunks_from_graph_removes_only_orphan_sections(
+        self,
+        graph_store: LadybugDBGraphStore,
+    ) -> None:
+        _populate_graph(graph_store)
+
+        graph_store.delete_chunks_from_graph(["chunk-1"])
+
+        data = graph_store.get_graph_data()
+        section_ids = {
+            node["id"]
+            for node in data["nodes"]
+            if node["label"] == "Section"
+        }
+        assert "chunk-1" not in section_ids
+        assert "chunk-2" in section_ids

@@ -2102,16 +2102,6 @@ class IndexingPipeline:
             ]
             self._graph_store.delete_chunks_from_graph(all_orphan_ids)
             self._graph_store.delete_file_node(file_path)
-        except AttributeError:
-            # Graph store does not implement narrow helpers (e.g. LadybugDB).
-            # Fall back to the broad delete_file_subgraph (pre-M2M behaviour).
-            try:
-                self._graph_store.delete_file_subgraph(file_path)
-            except Exception as _e:
-                logger.warning(
-                    "graph cleanup (fallback) failed after DB commit: %s (file=%s)",
-                    _e, file_path,
-                )
         except Exception as e:
             logger.warning(
                 "graph cleanup failed after DB commit: %s (file=%s)", e, file_path,

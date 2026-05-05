@@ -524,16 +524,24 @@ class TestGraphHolderAwarePath:
 
         pipeline = _get_pipeline(db_path)
         delete_calls = []
+        file_node_delete_calls = []
 
         # Spy on graph narrow helpers to assert they are NOT called for shared chunks
-        if hasattr(pipeline._graph_store, "delete_chunks_from_graph"):
-            original = pipeline._graph_store.delete_chunks_from_graph
+        original = pipeline._graph_store.delete_chunks_from_graph
 
-            def spy_delete(chunk_ids, *args, **kwargs):  # type: ignore[no-untyped-def]
-                delete_calls.extend(chunk_ids)
-                return original(chunk_ids, *args, **kwargs)
+        def spy_delete(chunk_ids, *args, **kwargs):  # type: ignore[no-untyped-def]
+            delete_calls.extend(chunk_ids)
+            return original(chunk_ids, *args, **kwargs)
 
-            pipeline._graph_store.delete_chunks_from_graph = spy_delete
+        pipeline._graph_store.delete_chunks_from_graph = spy_delete
+
+        original_file_node_delete = pipeline._graph_store.delete_file_node
+
+        def spy_file_node_delete(file_path, *args, **kwargs):  # type: ignore[no-untyped-def]
+            file_node_delete_calls.append(file_path)
+            return original_file_node_delete(file_path, *args, **kwargs)
+
+        pipeline._graph_store.delete_file_node = spy_file_node_delete
 
         pipeline._purge_file("/file_A.md")
 
@@ -541,3 +549,4 @@ class TestGraphHolderAwarePath:
         assert shared_cid not in delete_calls, (
             f"Shared chunk {shared_cid!r} should not be removed from graph (still held by /file_B.md)"
         )
+        assert file_node_delete_calls == ["/file_A.md"]

@@ -287,6 +287,25 @@ class LadybugDBGraphStore:
                 parameters={"fp": file_path},
             )
 
+    def delete_chunks_from_graph(self, chunk_ids: list[str]) -> None:
+        """Delete Section nodes for orphan chunks only."""
+        if not chunk_ids:
+            return
+        with self._connection() as conn:
+            for chunk_id in chunk_ids:
+                conn.execute(
+                    "MATCH (s:Section {id: $id}) DETACH DELETE s",
+                    parameters={"id": chunk_id},
+                )
+
+    def delete_file_node(self, file_path: str) -> None:
+        """Delete a File node and direct edges without touching Section nodes."""
+        with self._connection() as conn:
+            conn.execute(
+                "MATCH (f:File {id: $fp}) DETACH DELETE f",
+                parameters={"fp": file_path},
+            )
+
     def delete_frontmatter_edges(self, file_path: str) -> None:
         """Delete frontmatter-derived File edges while preserving chunks."""
         with self._connection() as conn:
