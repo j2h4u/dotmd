@@ -16,12 +16,13 @@ Assertion style: return-value assertions only (Review-LOW-10).
 from __future__ import annotations
 
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 # These imports will ImportError or AttributeError until P1 ships:
-from dotmd.core.models import Chunk
+from dotmd.core.models import Chunk, ChunkProvenance, SourceDocument
 from dotmd.storage.metadata import SQLiteMetadataStore
 
 STRATEGY = "heading_512_50"
@@ -36,6 +37,37 @@ def _build_m2m_store(tmp_path: Path) -> SQLiteMetadataStore:
     # P1 must provide ensure_m2m_table — call it to create chunk_file_paths_*
     store.ensure_m2m_table(STRATEGY)
     return store
+
+
+def _source_document(path: Path) -> SourceDocument:
+    document_ref = str(path.resolve())
+    return SourceDocument(
+        namespace="filesystem",
+        document_ref=document_ref,
+        ref=f"filesystem:{document_ref}",
+        source_uri=document_ref,
+        file_path=path,
+        media_type="text/markdown",
+        parser_name="markdown",
+        document_type="document",
+        title="Source Document",
+        updated_at=datetime.now(tz=UTC),
+        content_fingerprint="content-fp",
+        metadata_fingerprint="metadata-fp",
+        metadata_json={"tags": ["source"]},
+    )
+
+
+def _filesystem_provenance(path: Path) -> ChunkProvenance:
+    document_ref = str(path.resolve())
+    return ChunkProvenance(
+        namespace="filesystem",
+        document_ref=document_ref,
+        ref=f"filesystem:{document_ref}",
+        source_unit_refs=[],
+        chunk_strategy=STRATEGY,
+        parser_name="markdown",
+    )
 
 
 class TestInsertChunkIsIdempotent:
@@ -177,6 +209,88 @@ class TestDeleteM2MForFileReturnsOrphans:
         )
         assert shared_cid not in orphans, (
             f"shared_cid should NOT be in orphans (still held by file_b), got {orphans!r}"
+        )
+
+
+class TestSourceDocumentPersistence:
+    """source_documents stores filesystem source document identity additively."""
+
+    def test_source_document_persistence(self, tmp_path: Path) -> None:
+        store = _build_m2m_store(tmp_path)
+        md_path = tmp_path / "note.md"
+        md_path.write_text("# Note\n", encoding="utf-8")
+        document = _source_document(md_path)
+
+        conn = sqlite3.connect(str(tmp_path / "metadata.db"))
+        store.upsert_source_document(document, conn=conn)
+        conn.commit()
+        conn.close()
+
+        loaded = store.get_source_document("filesystem", str(md_path.resolve()))
+
+        assert loaded is not None
+        assert loaded.document_ref == str(md_path.resolve())
+        assert loaded.ref == f"filesystem:{md_path.resolve()}"
+        assert loaded.file_path == md_path
+        assert loaded.metadata_json == {"tags": ["source"]}
+
+
+class TestChunkSourceProvenance:
+    """chunk_source_provenance_<strategy> stores filesystem chunk provenance."""
+
+    def test_filesystem_chunk_provenance_round_trips_empty_source_unit_refs(
+        self, tmp_path: Path
+    ) -> None:
+        store = _build_m2m_store(tmp_path)
+        store.ensure_chunk_source_provenance_table(STRATEGY)
+        md_path = tmp_path / "note.md"
+        md_path.write_text("# Note\n", encoding="utf-8")
+
+        conn = sqlite3.connect(str(tmp_path / "metadata.db"))
+        store.add_chunk_provenance(
+            STRATEGY,
+            _filesystem_provenance(md_path),
+            VALID_CHUNK_ID,
+            conn=conn,
+        )
+        conn.commit()
+        conn.close()
+
+        loaded = store.get_chunk_provenance_for_chunk_ids(
+            STRATEGY,
+            [VALID_CHUNK_ID],
+        )
+
+        assert loaded[VALID_CHUNK_ID].document_ref == str(md_path.resolve())
+        assert loaded[VALID_CHUNK_ID].source_unit_refs == []
+        assert loaded[VALID_CHUNK_ID].parser_name == "markdown"
+
+    def test_chunk_provenance_batch_hydration(
+        self, tmp_path: Path
+    ) -> None:
+        store = _build_m2m_store(tmp_path)
+        store.ensure_chunk_source_provenance_table(STRATEGY)
+        md_path = tmp_path / "note.md"
+        md_path.write_text("# Note\n", encoding="utf-8")
+        chunk_ids = ["e" * 64, "f" * 64]
+
+        conn = sqlite3.connect(str(tmp_path / "metadata.db"))
+        for chunk_id in chunk_ids:
+            store.add_chunk_provenance(
+                STRATEGY,
+                _filesystem_provenance(md_path),
+                chunk_id,
+                conn=conn,
+            )
+        conn.commit()
+        conn.close()
+
+        loaded = store.get_chunk_provenance_for_chunk_ids(STRATEGY, chunk_ids)
+
+        assert sorted(loaded) == sorted(chunk_ids)
+        assert all(
+            provenance.source_unit_refs == []
+            for provenance in loaded.values()
         )
 
 

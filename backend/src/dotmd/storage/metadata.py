@@ -26,7 +26,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
-from dotmd.core.models import Chunk, IndexStats
+from dotmd.core.models import Chunk, ChunkProvenance, IndexStats, SourceDocument
 
 # ---------------------------------------------------------------------------
 # _ConnProxy — thin wrapper around sqlite3.Connection
@@ -93,6 +93,42 @@ CREATE INDEX IF NOT EXISTS {idx_name}
     ON {m2m_table}(file_path)
 """
 
+_CREATE_SOURCE_DOCUMENTS = """
+CREATE TABLE IF NOT EXISTS source_documents (
+    namespace            TEXT NOT NULL,
+    document_ref         TEXT NOT NULL,
+    ref                  TEXT NOT NULL,
+    source_uri           TEXT NOT NULL,
+    file_path            TEXT,
+    media_type           TEXT NOT NULL,
+    parser_name          TEXT NOT NULL,
+    document_type        TEXT NOT NULL,
+    title                TEXT NOT NULL,
+    updated_at           TEXT NOT NULL,
+    content_fingerprint  TEXT NOT NULL,
+    metadata_fingerprint TEXT NOT NULL,
+    metadata_json        TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (namespace, document_ref)
+)
+"""
+
+_CREATE_CHUNK_SOURCE_PROVENANCE_TPL = """
+CREATE TABLE IF NOT EXISTS {table} (
+    chunk_id         TEXT NOT NULL,
+    namespace        TEXT NOT NULL,
+    document_ref     TEXT NOT NULL,
+    source_unit_refs TEXT NOT NULL,
+    chunk_strategy   TEXT NOT NULL,
+    parser_name      TEXT,
+    PRIMARY KEY (chunk_id, namespace, document_ref)
+)
+"""
+
+_CREATE_CHUNK_SOURCE_PROVENANCE_IDX_TPL = """
+CREATE INDEX IF NOT EXISTS {idx_name}
+    ON {table}(chunk_id)
+"""
+
 _CREATE_STATS = """
 CREATE TABLE IF NOT EXISTS stats (
     id              INTEGER PRIMARY KEY DEFAULT 1,
@@ -114,6 +150,35 @@ VALUES (?, ?, ?, ?)
 _INSERT_M2M_TPL = """
 INSERT OR IGNORE INTO {m2m_table} (chunk_id, file_path, chunk_index)
 VALUES (?, ?, ?)
+"""
+
+_UPSERT_SOURCE_DOCUMENT = """
+INSERT INTO source_documents (
+    namespace, document_ref, ref, source_uri, file_path, media_type,
+    parser_name, document_type, title, updated_at, content_fingerprint,
+    metadata_fingerprint, metadata_json
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(namespace, document_ref) DO UPDATE SET
+    ref = excluded.ref,
+    source_uri = excluded.source_uri,
+    file_path = excluded.file_path,
+    media_type = excluded.media_type,
+    parser_name = excluded.parser_name,
+    document_type = excluded.document_type,
+    title = excluded.title,
+    updated_at = excluded.updated_at,
+    content_fingerprint = excluded.content_fingerprint,
+    metadata_fingerprint = excluded.metadata_fingerprint,
+    metadata_json = excluded.metadata_json
+"""
+
+_INSERT_CHUNK_SOURCE_PROVENANCE_TPL = """
+INSERT OR REPLACE INTO {table} (
+    chunk_id, namespace, document_ref, source_unit_refs,
+    chunk_strategy, parser_name
+)
+VALUES (?, ?, ?, ?, ?, ?)
 """
 
 _UPSERT_STATS = """
@@ -183,6 +248,7 @@ class SQLiteMetadataStore:
             self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute(_CREATE_CHUNKS_TPL.format(table=self._table))
         self._conn.execute(_CREATE_STATS)
+        self.ensure_source_document_table()
         # Idempotent schema migration: add diff-reporting columns
         for col, typedef in [
             ("new_files", "INTEGER NOT NULL DEFAULT 0"),
@@ -199,6 +265,25 @@ class SQLiteMetadataStore:
 
     # -- M2M table management -----------------------------------------------
 
+    def ensure_source_document_table(self) -> None:
+        """Create the global source_documents table if absent."""
+        self._conn.execute(_CREATE_SOURCE_DOCUMENTS)
+
+    def ensure_chunk_source_provenance_table(self, strategy: str) -> None:
+        """Create chunk_source_provenance_<strategy> and its chunk index."""
+        table = f"chunk_source_provenance_{strategy}"
+        idx_name = f"idx_chunk_source_provenance_{strategy}_chunk_id"
+        self._conn.execute(
+            _CREATE_CHUNK_SOURCE_PROVENANCE_TPL.format(table=table)
+        )
+        self._conn.execute(
+            _CREATE_CHUNK_SOURCE_PROVENANCE_IDX_TPL.format(
+                idx_name=idx_name,
+                table=table,
+            )
+        )
+        self._conn.commit()
+
     def ensure_m2m_table(self, strategy: str) -> None:
         """Create chunk_file_paths_<strategy> and its file_path index if absent.
 
@@ -211,6 +296,167 @@ class SQLiteMetadataStore:
             _CREATE_M2M_IDX_TPL.format(idx_name=idx_name, m2m_table=m2m_table)
         )
         self._conn.commit()
+
+    # -- source provenance --------------------------------------------------
+
+    def upsert_source_document(
+        self,
+        document: SourceDocument,
+        *,
+        conn: sqlite3.Connection,
+    ) -> None:
+        """Upsert one source document using caller-owned transaction scope."""
+        conn.execute(
+            _UPSERT_SOURCE_DOCUMENT,
+            (
+                document.namespace,
+                document.document_ref,
+                document.ref,
+                document.source_uri,
+                str(document.file_path) if document.file_path is not None else None,
+                document.media_type,
+                document.parser_name,
+                document.document_type,
+                document.title,
+                document.updated_at.isoformat(),
+                document.content_fingerprint,
+                document.metadata_fingerprint,
+                json.dumps(document.metadata_json, sort_keys=True),
+            ),
+        )
+
+    def get_source_document(
+        self,
+        namespace: str,
+        document_ref: str,
+        *,
+        conn: sqlite3.Connection | None = None,
+    ) -> SourceDocument | None:
+        """Return one SourceDocument by namespace/ref, or None."""
+        read_conn = conn or self._conn
+        row = read_conn.execute(
+            "SELECT namespace, document_ref, ref, source_uri, file_path, "
+            "media_type, parser_name, document_type, title, updated_at, "
+            "content_fingerprint, metadata_fingerprint, metadata_json "
+            "FROM source_documents WHERE namespace = ? AND document_ref = ?",
+            (namespace, document_ref),
+        ).fetchone()
+        if row is None:
+            return None
+        return SourceDocument(
+            namespace=row[0],
+            document_ref=row[1],
+            ref=row[2],
+            source_uri=row[3],
+            file_path=Path(row[4]) if row[4] is not None else None,
+            media_type=row[5],
+            parser_name=row[6],
+            document_type=row[7],
+            title=row[8],
+            updated_at=datetime.fromisoformat(row[9]),
+            content_fingerprint=row[10],
+            metadata_fingerprint=row[11],
+            metadata_json=json.loads(row[12]),
+        )
+
+    def delete_source_document(
+        self,
+        namespace: str,
+        document_ref: str,
+        *,
+        conn: sqlite3.Connection,
+    ) -> None:
+        """Delete one source document using caller-owned transaction scope."""
+        conn.execute(
+            "DELETE FROM source_documents WHERE namespace = ? AND document_ref = ?",
+            (namespace, document_ref),
+        )
+
+    def delete_source_document_for_file(
+        self,
+        file_path: str | Path,
+        *,
+        conn: sqlite3.Connection,
+    ) -> None:
+        """Delete filesystem source document derived from resolved file_path."""
+        document_ref = str(Path(file_path).resolve())
+        self.delete_source_document(
+            "filesystem",
+            document_ref,
+            conn=conn,
+        )
+
+    def add_chunk_provenance(
+        self,
+        strategy: str,
+        provenance: ChunkProvenance,
+        chunk_id: str,
+        *,
+        conn: sqlite3.Connection,
+    ) -> None:
+        """Persist one chunk provenance row using caller-owned transaction scope."""
+        if provenance.namespace == "filesystem" and provenance.source_unit_refs:
+            raise ValueError("filesystem source_unit_refs must be empty in Phase 25")
+        if provenance.chunk_strategy != strategy:
+            raise ValueError("chunk provenance strategy must match storage strategy")
+
+        table = f"chunk_source_provenance_{strategy}"
+        conn.execute(
+            _INSERT_CHUNK_SOURCE_PROVENANCE_TPL.format(table=table),
+            (
+                chunk_id,
+                provenance.namespace,
+                provenance.document_ref,
+                json.dumps(provenance.source_unit_refs),
+                provenance.chunk_strategy,
+                provenance.parser_name,
+            ),
+        )
+
+    def get_chunk_provenance_for_chunk_ids(
+        self,
+        strategy: str,
+        chunk_ids: Sequence[str],
+    ) -> dict[str, ChunkProvenance]:
+        """Batch-hydrate chunk provenance rows by chunk_id."""
+        if not chunk_ids:
+            return {}
+        table = f"chunk_source_provenance_{strategy}"
+        placeholders = ",".join("?" for _ in chunk_ids)
+        rows = self._conn.execute(
+            f"SELECT chunk_id, namespace, document_ref, source_unit_refs, "
+            f"chunk_strategy, parser_name FROM {table} "
+            f"WHERE chunk_id IN ({placeholders}) ORDER BY chunk_id",
+            list(chunk_ids),
+        ).fetchall()
+        return {
+            row[0]: ChunkProvenance(
+                namespace=row[1],
+                document_ref=row[2],
+                ref=f"{row[1]}:{row[2]}",
+                source_unit_refs=json.loads(row[3]),
+                chunk_strategy=row[4],
+                parser_name=row[5],
+            )
+            for row in rows
+        }
+
+    def delete_chunk_provenance(
+        self,
+        strategy: str,
+        chunk_ids: Sequence[str],
+        *,
+        conn: sqlite3.Connection,
+    ) -> None:
+        """Delete provenance rows for orphaned chunks in caller transaction."""
+        if not chunk_ids:
+            return
+        table = f"chunk_source_provenance_{strategy}"
+        placeholders = ",".join("?" for _ in chunk_ids)
+        conn.execute(
+            f"DELETE FROM {table} WHERE chunk_id IN ({placeholders})",
+            list(chunk_ids),
+        )
 
     # -- chunks (Phase 16 M2M surface) --------------------------------------
 
