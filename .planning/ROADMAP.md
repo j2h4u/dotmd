@@ -751,9 +751,16 @@ Phase context:
   a minimal slice into this phase.
 
 Plans:
+**Wave 1**
 - [ ] 25-01-domain-models-and-filesystem-adapter-PLAN.md — Define source-aware domain models and the in-process filesystem Markdown adapter contract
+
+**Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 25-02-ingestion-routing-and-chunk-provenance-PLAN.md — Route current Markdown ingestion through source documents and preserve chunk/fingerprint behavior
+
+**Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 25-03-provenance-persistence-and-read-search-compatibility-PLAN.md — Persist minimal source provenance while preserving `file_paths` and MCP read/search compatibility
+
+**Wave 4** *(blocked on Wave 3 completion)*
 - [ ] 25-04-regression-docs-and-phase-verification-PLAN.md — Add cross-surface regression coverage, docs, and final phase verification
 
 ---

@@ -20,7 +20,7 @@ autonomous: true
 requirements: []
 must_haves:
   truths:
-    - "D-02: Persistent chunk provenance includes namespace, document_ref, source_unit_refs, chunk_strategy, and parser_name"
+    - "D-02: Persistent chunk provenance includes namespace, document_ref, source_unit_refs, chunk_strategy, and parser_name; filesystem Markdown uses source_unit_refs=[] in Phase 25"
     - "D-09: Existing SearchResult.file_paths and MCP read(file_path, start, end) remain valid"
     - "D-10: Frontmatter metadata remains accessible to FTS, metadata embeddings, and graph behavior"
     - "D-11: New source provenance persistence does not break delete or metadata-only fast-path behavior"
@@ -40,6 +40,12 @@ strategy-independent table because source document metadata does not vary by
 chunking strategy or embedding model. Chunk-to-source provenance remains
 strategy-scoped as `chunk_source_provenance_<strategy>` because chunk IDs and
 source-unit refs are produced by a chunking strategy.
+
+Filesystem source-unit semantics are intentionally minimal in Phase 25:
+`SourceUnit` is a model-only scaffold and the filesystem Markdown adapter does
+not emit source units. Persist `source_unit_refs` as the JSON text `[]` for
+filesystem chunks. Do not invent path/chunk pseudo-unit refs before a real
+source-unit emission contract exists.
 </objective>
 
 <threat_model>
@@ -51,6 +57,7 @@ source-unit refs are produced by a chunking strategy.
 | Search clients lose `file_paths` while refs are introduced | HIGH | Keep `SearchResult.file_paths` and MCP `SearchHit.file_paths` unchanged; any `ref` metadata is additive. |
 | Strategy-scoped source_documents duplicates document metadata and changes helper APIs later | HIGH | Use one global `source_documents` table keyed by `(namespace, document_ref)`; keep only chunk provenance strategy-scoped. |
 | Trickle `index_file()` saves chunks without provenance rows | HIGH | Persist source documents and chunk provenance in both bulk `_save_and_embed_chunks()` and single-file `index_file()` save paths. |
+| New schema stores undefined source-unit refs | HIGH | For filesystem Markdown in Phase 25, persist `source_unit_refs` exactly as JSON `[]`; no query surface or pseudo-unit format is defined until a later source-unit emission phase. |
 | New schema stores raw private source-unit text unnecessarily | MEDIUM | Persist provenance refs and metadata only; no durable raw source-unit mirror in Phase 25. |
 | Storage migration breaks existing index databases | HIGH | Use idempotent `CREATE TABLE IF NOT EXISTS` and additive columns/tables only. |
 </threat_model>
@@ -98,23 +105,33 @@ Concrete target state:
   - `source_unit_refs` as JSON text
   - `chunk_strategy`
   - `parser_name`
+- Filesystem Markdown Phase 25 semantics for `source_unit_refs` are fixed:
+  store exactly the JSON text `[]` for every filesystem chunk. This declares
+  source units empty for the shim phase rather than defining a premature unit
+  identifier format.
 - Add an index on `chunk_source_provenance_<strategy>(chunk_id)` for batch
   hydration.
 - Add helper methods with concrete names chosen by implementation, for example:
   - `ensure_source_document_table()`
   - `ensure_chunk_source_provenance_table(strategy)`
-  - `upsert_source_document(document, conn=None)`
+  - `upsert_source_document(document, conn)`
   - `get_source_document(namespace, document_ref, conn=None)`
-  - `delete_source_document(namespace, document_ref, conn=None)`
-  - `delete_source_document_for_file(file_path, conn=None)`, implemented by
+  - `delete_source_document(namespace, document_ref, conn)`
+  - `delete_source_document_for_file(file_path, conn)`, implemented by
     deriving `document_ref=str(Path(file_path).resolve())`
-  - `add_chunk_provenance(strategy, provenance, chunk_id, conn=None)`
+  - `add_chunk_provenance(strategy, provenance, chunk_id, conn)`
   - `get_chunk_provenance_for_chunk_ids(strategy, chunk_ids)`
-  - `delete_chunk_provenance(strategy, chunk_ids, conn=...)`
+  - `delete_chunk_provenance(strategy, chunk_ids, conn)`
+- Transaction rule: write/delete helpers called from pipeline save or purge
+  paths require explicit `conn`; only read helpers may default to `self._conn`.
+  This preserves existing caller-owned transaction boundaries.
 - Use `CREATE TABLE IF NOT EXISTS`.
 - Use idempotent insert/upsert semantics.
 - Keep `chunk_file_paths_<strategy>` as the compatibility source for
   `file_paths`.
+Addresses review concern: Plan 25-03 now defines filesystem
+`source_unit_refs` semantics before persistence; they are intentionally empty
+for Phase 25.
 </action>
 <acceptance_criteria>
 - `backend/src/dotmd/storage/metadata.py` contains `source_documents`.
@@ -122,6 +139,7 @@ Concrete target state:
 - `backend/src/dotmd/storage/metadata.py` contains `chunk_source_provenance`.
 - `backend/src/dotmd/storage/metadata.py` contains `CREATE INDEX IF NOT EXISTS`.
 - `backend/src/dotmd/storage/metadata.py` contains `source_unit_refs`.
+- `backend/tests/storage/test_metadata_m2m.py` asserts filesystem chunk provenance stores and reads `source_unit_refs == []`.
 - `backend/src/dotmd/storage/metadata.py` still contains `chunk_file_paths_`.
 - `backend/src/dotmd/storage/metadata.py` contains `CREATE TABLE IF NOT EXISTS`.
 - `backend/tests/storage/test_metadata_m2m.py` contains a test for source document persistence.
@@ -155,15 +173,22 @@ Concrete behavior:
   `source_documents`.
 - Persist one chunk provenance row per chunk into
   `chunk_source_provenance_<strategy>` with `namespace="filesystem"`,
-  the source document `document_ref`, `source_unit_refs`, strategy, and
+  the source document `document_ref`, `source_unit_refs=[]`, strategy, and
   `parser_name="markdown"`.
+- Treat `source_unit_refs=[]` as the only valid filesystem value in this phase.
+  If a filesystem chunk arrives with non-empty `source_unit_refs`, fail the
+  local test or raise/log a clear implementation error rather than silently
+  persisting an ad hoc format.
 - Write provenance in every chunk save path:
   - bulk `_save_and_embed_chunks(...)`
   - trickle/single-file `index_file(...)`
   - any `save_chunks(...)` helper if that is the common storage boundary
 - `reindex_vectors(...)` must not create duplicate source document rows and
-  must not drop existing provenance; if it rewrites chunks, it must use the
-  same provenance helper as `_save_and_embed_chunks(...)`.
+  must not drop existing provenance. Because `reindex_vectors(...)` rebuilds
+  vector stores from existing metadata chunks and M2M file paths, it must not
+  attempt to synthesize missing provenance for legacy rows in Phase 25. If a
+  chunk lacks provenance, leave it absent and continue vector rebuild; newly
+  indexed chunks receive provenance through the save path.
 - Do not persist raw source-unit text in the provenance table.
 - Keep FTS5, vector, and graph write behavior equivalent.
 </action>
@@ -174,7 +199,8 @@ Concrete behavior:
 - `backend/src/dotmd/ingestion/pipeline.py` contains provenance write calls or helper calls reachable from `index_file`.
 - `backend/src/dotmd/storage/metadata.py` still contains `add_file_path`.
 - `backend/tests/storage/test_metadata_m2m.py` asserts `file_paths` are still returned for a chunk with provenance.
-- `backend/tests/storage/test_metadata_m2m.py` asserts stored `source_unit_refs` round-trip as a list.
+- `backend/tests/storage/test_metadata_m2m.py` asserts stored filesystem `source_unit_refs` round-trip as `[]`.
+- `backend/tests/ingestion/test_source_filesystem.py` or a storage test asserts `reindex_vectors()` leaves existing provenance unchanged and does not create provenance for legacy chunks that lack it.
 </acceptance_criteria>
 </task>
 
@@ -283,6 +309,9 @@ cd backend && uv run pyright
 
 <success_criteria>
 - Source document and chunk provenance are persisted additively.
+- Filesystem Markdown `source_unit_refs` are explicitly persisted as `[]` in
+  Phase 25; no source-unit query surface or pseudo-unit identifier format is
+  introduced.
 - Existing `chunk_file_paths_*` remains the compatibility read/search path.
 - Deleted filesystem files clean their source provenance.
 - `SearchResult.file_paths`, MCP `search`, and MCP `read(file_path)` remain
