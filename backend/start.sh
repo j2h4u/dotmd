@@ -1,34 +1,35 @@
 #!/bin/sh
 # Container entrypoint.
 #
-# When ENVIRONMENT=dev (set in docker-compose.override.yml on the dev host),
-# run a pre-flight gate before serving:
+# When DOTMD_RUN_STARTUP_CHECKS=true, run a restart-time pre-flight gate
+# before serving:
 #   1. ruff check (lint clean)
 #   2. pyright ratchet (no new type errors vs baseline)
 #   3. start MCP server in background, wait for /health
 #   4. pytest tests/e2e/ (live integration smoke)
 #   5. if all green, keep the already-running server; else kill and exit 1
 #
-# Any other ENVIRONMENT value (incl. unset, empty, "prod") skips the gate
-# and execs the server directly — production deploys never pay the cost.
+# ENVIRONMENT=dev is a temporary compatibility alias for existing compose
+# overrides. It is not an environment profile system.
 set -e
 
 SRC_ROOT=/mnt/home/repos/j2h4u/dotmd/backend
 SERVE_CMD="dotmd mcp --transport streamable-http --host 0.0.0.0 --port 8080"
 
-# Anything other than ENVIRONMENT=dev (unset, empty, "prod", "staging", …)
-# skips the gate and execs the server directly.  Two reasons this is the
-# safe default:
-#   1. Production never pays the gate's CPU cost (~2 min of e2e tests).
+# Anything other than DOTMD_RUN_STARTUP_CHECKS=true skips the gate and execs
+# the server directly, unless the legacy ENVIRONMENT=dev alias is set.
+# Two reasons this is the safe default:
+#   1. Normal restarts do not pay the gate's CPU cost (~2 min of e2e tests).
 #   2. Any deploy without the dev bind-mounts (src/, tests/, devtools/)
-#      can't even run the gate — its tools and source aren't available.
-# Opt INTO the gate by setting ENVIRONMENT=dev in the compose override.
-if [ "${ENVIRONMENT}" != "dev" ]; then
+#      can't even run the gate because its tools and source aren't available.
+# Opt into the gate by setting DOTMD_RUN_STARTUP_CHECKS=true.
+if [ "${DOTMD_RUN_STARTUP_CHECKS}" != "true" ] && [ "${ENVIRONMENT}" != "dev" ]; then
     exec $SERVE_CMD
 fi
 
 if [ ! -d "$SRC_ROOT" ]; then
-    echo "ENVIRONMENT=dev but $SRC_ROOT not bind-mounted — refusing to start" >&2
+    echo "DOTMD_RUN_STARTUP_CHECKS=true but $SRC_ROOT not bind-mounted — refusing to start" >&2
+    echo "ENVIRONMENT=dev is accepted only as a temporary compatibility alias" >&2
     exit 1
 fi
 
