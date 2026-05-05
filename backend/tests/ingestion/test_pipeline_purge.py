@@ -491,7 +491,7 @@ class TestGraphCleanupFailureDoesNotRollbackDB:
         # Inject graph failure AFTER DB commit
         with patch.object(
             pipeline._graph_store,
-            "delete_file_subgraph",
+            "delete_chunks_from_graph",
             side_effect=RuntimeError("Simulated graph failure"),
         ):
             # Should NOT raise (graph failure is best-effort)
