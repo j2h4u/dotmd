@@ -144,6 +144,12 @@ class FTS5SearchEngine:
         if not chunks:
             return
         file_meta = file_meta or {}
+        chunk_ids = [c.chunk_id for c in chunks]
+        placeholders = ",".join("?" for _ in chunk_ids)
+        self._conn.execute(
+            f"DELETE FROM {self._table} WHERE chunk_id IN ({placeholders})",
+            chunk_ids,
+        )
         rows = []
         for c in chunks:
             # Phase 16: Chunk.file_path → Chunk.file_paths (list). Use first
@@ -152,7 +158,7 @@ class FTS5SearchEngine:
             title, tags_csv = file_meta.get(_fp_key, ("", ""))
             rows.append((c.chunk_id, _expand_compounds(c.text), title, tags_csv))
         self._conn.executemany(
-            f"INSERT OR REPLACE INTO {self._table}(chunk_id, text, title, tags) "
+            f"INSERT INTO {self._table}(chunk_id, text, title, tags) "
             f"VALUES (?, ?, ?, ?)",
             rows,
         )

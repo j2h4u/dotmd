@@ -287,6 +287,17 @@ class LadybugDBGraphStore:
                 parameters={"fp": file_path},
             )
 
+    def delete_frontmatter_edges(self, file_path: str) -> None:
+        """Delete frontmatter-derived File edges while preserving chunks."""
+        with self._connection() as conn:
+            for rel_table in ("FILE_TAG", "FILE_ENTITY"):
+                conn.execute(
+                    f"MATCH (:File {{id: $fp}})-[r:{rel_table}]->() "
+                    "WHERE r.rel_type IN ['HAS_TAG', 'HAS_PARTICIPANT'] "
+                    "DELETE r",
+                    parameters={"fp": file_path},
+                )
+
     def delete_isolated_nodes(self) -> int:
         """Delete nodes with no edges. Returns the number of nodes removed."""
         removed = 0

@@ -50,6 +50,15 @@ def _vector_blob_for_chunk(pipeline, chunk_id: str) -> bytes:  # type: ignore[no
     return row[0]
 
 
+def _fts_meta_for_chunk(pipeline, chunk_id: str) -> tuple[str, str]:  # type: ignore[no-untyped-def]
+    row = pipeline._conn.execute(
+        f"SELECT title, tags FROM {pipeline._fts_table} WHERE chunk_id = ?",
+        (chunk_id,),
+    ).fetchone()
+    assert row is not None
+    return row[0], row[1]
+
+
 def _make_pipeline_with_directional_vectors(settings):  # type: ignore[no-untyped-def]
     from dotmd.ingestion.pipeline import IndexingPipeline
 
@@ -220,6 +229,11 @@ def test_metadata_only_bulk_index_retains_vectors_for_unchanged_files(
     pipeline.index(pipeline_settings.data_dir)
 
     assert _vector_chunk_ids(pipeline) == doc_a_chunk_ids | doc_b_chunk_ids
+    doc_a_chunk_id = next(iter(doc_a_chunk_ids))
+    assert _fts_meta_for_chunk(pipeline, doc_a_chunk_id) == (
+        "Updated A",
+        "alpha, beta",
+    )
     source_document = pipeline._metadata_store.get_source_document(
         "filesystem",
         str(doc_a.resolve()),
@@ -248,6 +262,7 @@ def test_metadata_only_index_file_replaces_existing_fused_vector(
     after = _vector_blob_for_chunk(pipeline, chunk_id)
     assert after != before
     assert _vector_chunk_ids(pipeline) == {chunk_id}
+    assert _fts_meta_for_chunk(pipeline, chunk_id) == ("Updated", "alpha, beta")
 
     source_document = pipeline._metadata_store.get_source_document(
         "filesystem",

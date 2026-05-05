@@ -171,6 +171,16 @@ def _count(db_path: Path, table: str) -> int:
     return n
 
 
+def _table_exists(db_path: Path, table: str) -> bool:
+    conn = sqlite3.connect(str(db_path))
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (table,),
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
 def _get_pipeline(db_path: Path):  # type: ignore[no-untyped-def]
     """Deferred import of IndexingPipeline — raises ImportError until P3/P4 ships."""
     from dotmd.core.config import Settings
@@ -201,6 +211,31 @@ class TestPurgeSingleHolder:
         assert _count(db_path, f"chunk_file_paths_{strategy}") == 0
         assert _count(db_path, "source_documents") == 0
         assert _count(db_path, f"chunk_source_provenance_{strategy}") == 0
+
+
+class TestDropChunksClearsSourceAwareTables:
+    """drop_chunks removes Phase 25 source-aware derived state."""
+
+    def test_drop_chunks_clears_m2m_provenance_and_source_documents(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        db_path = _build_post_v16_db(tmp_path)
+        strategy = STRATEGIES[0]
+        chunk_id = "h" * 64
+
+        _insert_chunk(db_path, strategy, chunk_id, "content")
+        _add_m2m(db_path, strategy, chunk_id, "/file_A.md")
+        _add_source_document(db_path, "/file_A.md")
+        _add_chunk_provenance(db_path, strategy, chunk_id, "/file_A.md")
+
+        pipeline = _get_pipeline(db_path)
+        pipeline.drop_chunks()
+
+        assert not _table_exists(db_path, f"chunks_{strategy}")
+        assert not _table_exists(db_path, f"chunk_file_paths_{strategy}")
+        assert not _table_exists(db_path, f"chunk_source_provenance_{strategy}")
+        assert _count(db_path, "source_documents") == 0
 
 
 class TestPurgeSharedHolder:

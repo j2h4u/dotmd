@@ -515,10 +515,15 @@ class IndexingPipeline:
         chunks_table = f"chunks_{strategy}"
         fts_table = f"chunks_fts_{strategy}"
         chunk_fp_table = f"chunk_fingerprints_{strategy}"
+        m2m_table = f"chunk_file_paths_{strategy}"
+        provenance_table = f"chunk_source_provenance_{strategy}"
 
         # 1. Drop chunks and FTS5
         self._conn.execute(f"DROP TABLE IF EXISTS {chunks_table}")
         self._conn.execute(f"DROP TABLE IF EXISTS {fts_table}")
+        self._conn.execute(f"DROP TABLE IF EXISTS {m2m_table}")
+        self._conn.execute(f"DROP TABLE IF EXISTS {provenance_table}")
+        self._conn.execute("DELETE FROM source_documents WHERE namespace = 'filesystem'")
 
         # 2. Clear chunk fingerprints
         with contextlib.suppress(sqlite3.OperationalError):  # table may not exist
@@ -731,6 +736,24 @@ class IndexingPipeline:
             )
         else:
             self._vector_store.delete_vectors_by_chunk_ids(chunk_ids)
+
+    def _chunks_for_file_with_paths(self, file_info: FileInfo) -> list[Chunk]:
+        """Load stored chunks for one file with path fields restored for FTS/graph."""
+        path_str = str(file_info.path)
+        chunk_ids = self._metadata_store.get_chunk_ids_by_file(
+            self._strategy,
+            path_str,
+        ) or []
+        chunks = self._metadata_store.get_chunks(chunk_ids) if chunk_ids else []
+        return [
+            chunk.model_copy(
+                update={
+                    "file_paths": [file_info.path],
+                    "chunk_index": index,
+                }
+            )
+            for index, chunk in enumerate(chunks)
+        ]
 
     def _source_document_for_file_info(
         self,
@@ -1847,9 +1870,10 @@ class IndexingPipeline:
             t_embed = time.perf_counter() - t0
 
             if metadata_only:
+                file_chunks = self._chunks_for_file_with_paths(file_info)
                 file_meta = self._build_file_meta_from_fileinfo([file_info])
                 self._keyword_engine.add_chunks(
-                    chunks if chunks else self._metadata_store.get_chunks(self._metadata_store.get_chunk_ids_by_file(self._strategy, path_str) or []),
+                    file_chunks,
                     file_meta=file_meta,
                 )
                 self._frontmatter_to_graph([file_info])
@@ -2199,6 +2223,8 @@ class IndexingPipeline:
             if not fi.frontmatter:
                 continue
             file_path_str = str(fi.path)
+            if hasattr(self._graph_store, "delete_frontmatter_edges"):
+                self._graph_store.delete_frontmatter_edges(file_path_str)  # type: ignore[attr-defined]
 
             # --- Tags with optional namespace ---------------------------
             tags = fi.frontmatter.get("tags", [])
@@ -2472,6 +2498,10 @@ class IndexingPipeline:
                 conn=self._conn,
             )
             self._conn.commit()
+            file_chunks = self._chunks_for_file_with_paths(fi)
+            file_meta = self._build_file_meta_from_fileinfo([fi])
+            self._keyword_engine.add_chunks(file_chunks, file_meta=file_meta)
+            self._frontmatter_to_graph([fi])
             self._save_meta_fingerprint(fi)
 
         logger.info(

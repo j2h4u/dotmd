@@ -347,6 +347,15 @@ class FalkorDBGraphStore:
             params={"fp": file_path},
         )
 
+    def delete_frontmatter_edges(self, file_path: str) -> None:
+        """Delete frontmatter-derived File edges while preserving chunks."""
+        self._graph.query(
+            "MATCH (:File {id: $fp})-[r:REL]->() "
+            "WHERE r.rel_type IN ['HAS_TAG', 'HAS_PARTICIPANT'] "
+            "DELETE r",
+            params={"fp": file_path},
+        )
+
     def get_all_entity_names(self) -> list[str]:
         """Return all entity names in the graph."""
         result = self._graph.ro_query(

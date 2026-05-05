@@ -341,6 +341,10 @@ class GraphStoreProtocol(Protocol):
         """
         ...
 
+    def delete_frontmatter_edges(self, file_path: str) -> None:
+        """Delete frontmatter-derived File edges before metadata refresh."""
+        ...
+
     def node_count(self) -> int:
         """Return the total number of nodes in the graph."""
         ...
