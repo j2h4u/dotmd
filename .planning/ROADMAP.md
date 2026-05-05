@@ -735,7 +735,7 @@ model.
 **Requirements:** TBD
 **Backlog source:** 999.22
 **Depends on:** Phase 24
-**Plans:** 4 plans
+**Plans:** 1/4 plans executed
 
 Phase context:
 - Use the architecture docs linked from backlog `999.22` as the source of
@@ -752,7 +752,7 @@ Phase context:
 
 Plans:
 **Wave 1**
-- [ ] 25-01-domain-models-and-filesystem-adapter-PLAN.md — Define source-aware domain models and the in-process filesystem Markdown adapter contract
+- [x] 25-01-domain-models-and-filesystem-adapter-PLAN.md — Define source-aware domain models and the in-process filesystem Markdown adapter contract
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 25-02-ingestion-routing-and-chunk-provenance-PLAN.md — Route current Markdown ingestion through source documents and preserve chunk/fingerprint behavior
