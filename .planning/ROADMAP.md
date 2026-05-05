@@ -118,6 +118,8 @@ See: `.planning/milestones/v1.3-ROADMAP.md`
 | 20. Reranker Latency Benchmark | 1/1 | Complete | 2026-05-01 |
 | 21. Reranker Quality Benchmark | 1/1 | Complete | 2026-05-02 |
 | 22. Improve Search Snippet Boundaries | 1/1 | Complete    | 2026-05-02 |
+| 23. Fix dotMD test contract | 1/1 | Complete | 2026-05-03 |
+| 24. Config separation | 0/0 | Ready to plan | — |
 
 ### Phase 17: MCP OAuth 2.0 — Claude Desktop remote connector support
 
@@ -234,36 +236,6 @@ _Below is the original backlog description, kept for history:_
 - Apply in `discover_files()` before yielding FileInfo
 - Purge existing chunks for files matching new ignore patterns on next startup
 - Document in CLAUDE.md/AGENTS.md that copy-reflection patterns should not be under `data_dir`
-
-**Plans:**
-- [ ] TBD (promote with /gsd-review-backlog when ready)
-
-### Backlog 999.6: Config separation — user-facing settings vs internal constants
-
-**Goal:** Split `core/config.py` into two layers: user-facing configuration (paths,
-models, URLs, strategy — must be explicit in config.toml, no defaults, fails on
-missing) vs internal tuning constants (fusion_k, snippet_length, poll intervals —
-reasonable defaults, rarely changed, can live in a module constant).
-
-**Context 2026-04-24:** Current `Settings` has ~20 fields with Python defaults. When
-TOML overrides them, defaults are silently ignored — which hid for 5 minutes why
-our just-added `indexing_exclude` changes had no effect (config.toml had its own
-list). Defaults on environment-specific settings (URLs, paths, model names) are an
-anti-pattern for a production service — they let misconfiguration ship.
-
-**Scope:**
-- Audit every field in `Settings`: user config vs internal constant
-- User config (no default, pydantic `Field(...)` required):
-  `indexing_paths`, `indexing_exclude`, `data_dir`, `index_dir`,
-  `embedding_url`, `falkordb_url`, `embedding_model`, `ner_model_name`,
-  `reranker_model`, `chunk_strategy`
-- Internal constants (move to module-level or a separate `Constants` class):
-  `max_chunk_tokens`, `chunk_overlap_tokens`, `fusion_k`, `rerank_pool_size`,
-  `snippet_length`, `default_top_k`, `poll_interval_seconds`, `tei_batch_size`,
-  tuning thresholds etc.
-- Feature flags stay as Settings booleans: `profile_indexing`, `read_only`
-- Update config.toml template & docs with the full user-facing surface
-- Adopt "fail loud at startup" — missing required field = service exits
 
 **Plans:**
 - [ ] TBD (promote with /gsd-review-backlog when ready)
@@ -485,6 +457,65 @@ Plans:
 
 ---
 
+### Backlog 999.22: Document Source Abstraction — index non-filesystem sources
+
+**Goal:** Rework dotMD ingestion from file-centric markdown indexing into a
+source/document/source-unit/chunk model so non-filesystem sources can be
+indexed through the same search stack. The near-term MVP should stay small:
+introduce the minimal source model, then integrate Telegram read-only as the
+first real non-filesystem source and harden from real usage.
+
+**Architecture context:**
+- [`docs/source-adapter-architecture.md`](../docs/source-adapter-architecture.md)
+  — source/document/unit/chunk vocabulary, source assets, metadata layers,
+  source entity catalogs, cross-source identity resolution, parser/content
+  format axis, and phased MVP proposal.
+- [`docs/source-adapter-architecture-panel-review.md`](../docs/source-adapter-architecture-panel-review.md)
+  — expert-panel review covering product scope, retrieval/indexing, integration
+  contracts, metadata, file-like assets, entity catalogs, security/privacy,
+  QA, and MVP phase shape.
+- [`docs/architecture.md`](../docs/architecture.md)
+  — top-level architecture index linking to the source-adapter context.
+
+**Context captured 2026-05-04:**
+- Current dotMD discovery is `.md`-only; `.txt` is not a supported parser today.
+- Markdown frontmatter is already document metadata: `title`, `kind`, `tags`,
+  and `participants` influence chunking, metadata embeddings, FTS, and graph.
+- Source and content format are separate axes: filesystem can discover Markdown,
+  PDF, HTML, DOCX, etc.; the parser/chunking strategy should depend on
+  `media_type`/`parser_name`, not on the source alone.
+- File-like assets can come from any source: PDF from filesystem, Telegram,
+  Slack, Notion, or Google Drive should share parser infrastructure while
+  preserving provenance.
+- Sources may emit entity catalogs such as Telegram users, Google contacts, or
+  Gmail addresses. These are not corpus documents by default; they should feed
+  graph identity resolution, alias expansion, keyword lookup, and display
+  metadata.
+- Cross-source identity resolution must keep `SourceEntity`, `Mention`, and
+  `CanonicalEntity` separate and record confidence/evidence; string equality is
+  not enough for automatic person merges.
+
+**MVP phase shape proposed by the docs:**
+1. Minimal Source Model Shim — canonical `namespace`, `document_ref`, `ref`,
+   `media_type`, `parser_name`, current markdown/frontmatter metadata, and
+   filesystem compatibility.
+2. Telegram Read-Only MVP — minimal export surface in `mcp-telegram`, Telegram
+   adapter in dotMD, dialog-as-document, message-as-source-unit, message-window
+   chunks, and read context around Telegram hits.
+3. Telegram Hardening From Real Usage — improve chunking, snippets/read,
+   delete/edit propagation, observability, and tests based on real searches.
+4. Minimal Entity Catalog Layer — Telegram users/entities as `SourceEntity`,
+   conservative exact-ID graph links, no fuzzy name merging by default.
+5. Second Source Validation — Perplexity exporter, Notion, or Google Docs after
+   Telegram lessons refine the contract.
+
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+---
+
 ### Future ideas:
 - Semantic chunking (split by topic similarity, not just structure)
 - Doc-level chunks (whole-document embeddings for broad queries)
@@ -584,7 +615,46 @@ Phase boundary:
 Plans:
 - [x] 23-01-test-contract-cleanup-PLAN.md — Clean up test tiers, stale smoke, e2e fixtures, low-signal tests, and docs
 
+### Phase 24: Config separation — user-facing settings vs internal constants
+
+**Goal:** Split `core/config.py` into explicit user-facing configuration versus
+internal tuning constants so production misconfiguration fails loudly instead
+of being hidden by Python defaults.
+**Requirements**: TBD
+**Depends on:** Phase 23
+**Backlog source:** 999.6
+**Plans:** 0 plans
+
+Phase context:
+- Current `Settings` has many Python defaults. When TOML overrides exist,
+  defaults are silently ignored, which previously hid why new
+  `indexing_exclude` defaults had no effect.
+- Defaults on environment-specific settings such as URLs, paths, model names,
+  and index locations are unsafe for production because they let missing config
+  ship.
+- Internal tuning values such as fusion sizes, snippet lengths, polling
+  intervals, and thresholds should remain defaults/constants, not required
+  operator config.
+
+Initial scope from backlog 999.6:
+- Audit every field in `Settings`: user config vs internal constant.
+- User config should be explicit and fail loudly when missing where appropriate:
+  `indexing_paths`, `indexing_exclude`, `data_dir`, `index_dir`,
+  `embedding_url`, `falkordb_url`, `embedding_model`, `ner_model_name`,
+  `reranker_model`, `chunk_strategy`.
+- Internal constants should move to module-level constants or a dedicated
+  constants structure where that improves clarity: `max_chunk_tokens`,
+  `chunk_overlap_tokens`, `fusion_k`, `rerank_pool_size`, `snippet_length`,
+  `default_top_k`, `poll_interval_seconds`, `tei_batch_size`, and tuning
+  thresholds.
+- Feature flags can remain settings booleans, for example `profile_indexing`
+  and `read_only`.
+- Update config templates and docs with the full user-facing surface.
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 24 to break down)
+
 ---
 
 *Roadmap created: 2026-03-26*
-*Last updated: 2026-05-02*
+*Last updated: 2026-05-05*

@@ -181,3 +181,14 @@ MCP currently exposes:
 - Do not run `dotmd index --force` while the production container is running; trickle holds the indexing lock.
 - Source is bind-mounted in production, so code changes take effect after container restart. Rebuild only when dependencies or entrypoint files change.
 - Batch small production changes and restart once.
+
+## Future Source Adapters
+
+dotMD currently indexes filesystem markdown, but the intended future direction
+is source/document/unit ingestion where filesystem files are only one source
+adapter. The design context and open questions for Telegram, Notion, Google
+Docs, Perplexity, ChatGPT/Claude exports, source state, and source-aware
+chunking are captured in
+[Source Adapter Architecture Context](source-adapter-architecture.md). The
+follow-up expert-panel review is captured in
+[Source Adapter Architecture Expert Panel Review](source-adapter-architecture-panel-review.md).

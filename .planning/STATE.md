@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
-status: complete
-last_updated: "2026-05-03T12:01:32.699Z"
-last_activity: 2026-05-03
+status: active
+last_updated: "2026-05-05T14:56:43.963Z"
+last_activity: 2026-05-05
 progress:
-  total_phases: 9
+  total_phases: 10
   completed_phases: 9
   total_plans: 21
   completed_plans: 21
-  percent: 100
+  percent: 90
 ---
 
 # GSD State
@@ -20,18 +20,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 23 complete — Fix dotMD test contract
+**Current focus:** Phase 24 ready to plan — Config separation, promoted from backlog 999.6
 
 ## Current Milestone
 
 **v1.4 — Search Quality & Architecture**
 
-Phase: 23
-Plan: 1/1 complete
-Status: Phase 23 complete
-Last activity: 2026-05-03
+Phase: 24
+Plan: 0/0 planned
+Status: Ready to plan
+Last activity: 2026-05-05
 
-Progress: [██████████] 100%
+Progress: [█████████░] 90%
 
 ## Performance Metrics
 
@@ -62,6 +62,11 @@ Progress: [██████████] 100%
 - Phase 20 added: Reranker Latency Benchmark
 - Phase 21 added: Reranker Quality Benchmark
 - Phase 23 added: Fix dotMD test contract
+- Phase 24 added: Config separation — user-facing settings vs internal constants
+  (promoted from backlog 999.6)
+- Backlog 999.22 added: Document Source Abstraction — index non-filesystem
+  sources. Architecture context is captured in `docs/source-adapter-architecture.md`
+  and expert-panel review in `docs/source-adapter-architecture-panel-review.md`.
 - Backlog `999.x` entries are documentation backlog items, not active phases;
   they should be promoted explicitly before planning/execution.
 
@@ -107,6 +112,17 @@ id=19 as source context. Planning should decide whether to improve default
 snippet boundaries only, add optional context controls, or include match
 marking.
 
+Backlog 999.22 captured on 2026-05-04. It preserves the architecture context for
+moving dotMD from file-centric markdown indexing to a source/document/source-unit
+model with Telegram as the first intended MVP source. See
+`docs/source-adapter-architecture.md` and
+`docs/source-adapter-architecture-panel-review.md`.
+
+Phase 24 promoted from backlog item `999.6` on 2026-05-05. It targets explicit
+configuration separation: production/user-facing settings should fail loudly
+when missing, while internal tuning constants should stop masquerading as
+operator config. Next GSD step: plan Phase 24.
+
 2026-05-02 housekeeping: active `.planning/phases/` now contains current
 milestone phase artifacts only. Shipped v1.2/v1.3 phase artifacts were moved
 under `.planning/milestones/`, and completed backlog implementation `999.12`
@@ -125,4 +141,4 @@ None for current local GSD state.
 | 260502-scv | Normalize dotMD .planning docs: separate active roadmap from backlog/done 999.x items, fix progress/health warnings where safe, keep historical phase artifacts intact | 2026-05-02 | this commit | [260502-scv-normalize-dotmd-planning-docs-separate-a](./quick/260502-scv-normalize-dotmd-planning-docs-separate-a/) |
 
 ---
-*Last updated: 2026-05-02*
+*Last updated: 2026-05-05*
