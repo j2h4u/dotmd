@@ -8,7 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from dotmd.core.models import FileInfo, SourceDocument
+from dotmd.core.models import ExtractDepth, FileInfo, SourceDocument
+from dotmd.ingestion.chunker import chunk_file
 from dotmd.ingestion.file_tracker import FileDiff
 from dotmd.ingestion.reader import chunk_checksum, meta_checksum
 from dotmd.ingestion.source import (
@@ -192,7 +193,7 @@ def test_pipeline_helper_builds_filesystem_chunk_provenance(
             embedding_url="http://localhost:18088",
             vector_backend="sqlite-vec",
             graph_backend="ladybugdb",
-            extract_depth="structural",
+            extract_depth=ExtractDepth.STRUCTURAL,
         )
     )
     normalized = pipeline._file_info_and_source_document(md_path)
@@ -221,7 +222,7 @@ def _pipeline_with_mock_embedding(data_dir: Path, index_dir: Path):
             embedding_url="http://localhost:18088",
             vector_backend="sqlite-vec",
             graph_backend="ladybugdb",
-            extract_depth="structural",
+            extract_depth=ExtractDepth.STRUCTURAL,
         )
     )
     mock_engine = MagicMock()
@@ -297,6 +298,112 @@ def test_bulk_and_index_file_use_identical_filesystem_provenance(
     assert bulk_chunks[0].provenance.ref == f"filesystem:{document_ref}"
     assert bulk_chunks[0].provenance.parser_name == "markdown"
     assert bulk_chunks[0].provenance.source_unit_refs == []
+
+
+def test_adapter_routed_chunks_preserve_markdown_chunk_payload(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    md_path = data_dir / "structured.md"
+    content = (
+        "---\n"
+        "title: Structured\n"
+        "kind: document\n"
+        "tags:\n"
+        "  - source\n"
+        "---\n"
+        "# Project\n\n"
+        "Intro body.\n\n"
+        "## Decision\n\n"
+        "Keep chunk text compatibility.\n"
+    )
+    md_path.write_text(content, encoding="utf-8")
+    pipeline = _pipeline_with_mock_embedding(data_dir, tmp_path / "index")
+    documents = pipeline._discover_documents(data_dir)
+    files, documents_by_path = pipeline._file_infos_by_source_document(documents)
+
+    adapter_chunks = pipeline._chunk_files(
+        files,
+        "test",
+        documents_by_path=documents_by_path,
+    )
+    direct_chunks = chunk_file(
+        md_path,
+        content,
+        kind="document",
+        chunk_strategy=pipeline._strategy,
+    )
+
+    assert adapter_chunks
+    assert [
+        (
+            chunk.text,
+            chunk.heading_hierarchy,
+            chunk.level,
+            chunk.chunk_index,
+            chunk.file_paths,
+        )
+        for chunk in adapter_chunks
+    ] == [
+        (
+            chunk.text,
+            chunk.heading_hierarchy,
+            chunk.level,
+            chunk.chunk_index,
+            chunk.file_paths,
+        )
+        for chunk in direct_chunks
+    ]
+    assert adapter_chunks[1].heading_hierarchy == ["Project", "Decision"]
+    assert adapter_chunks[0].file_paths == [md_path]
+    assert adapter_chunks[0].provenance is not None
+    assert adapter_chunks[0].provenance.namespace == "filesystem"
+    assert adapter_chunks[0].provenance.document_ref == str(md_path.resolve())
+    assert adapter_chunks[0].provenance.source_unit_refs == []
+
+
+def test_adapter_routed_meeting_transcript_uses_kind_handler(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    md_path = data_dir / "meeting.md"
+    content = (
+        "---\n"
+        "title: Meeting\n"
+        "kind: meeting_transcript\n"
+        "tags:\n"
+        "  - sync\n"
+        "---\n"
+        "# Standup\n\n"
+        "Alice: First update.\n"
+        "Bob: Second update.\n"
+    )
+    md_path.write_text(content, encoding="utf-8")
+    pipeline = _pipeline_with_mock_embedding(data_dir, tmp_path / "index")
+    documents = pipeline._discover_documents(data_dir)
+    files, documents_by_path = pipeline._file_infos_by_source_document(documents)
+
+    adapter_chunks = pipeline._chunk_files(
+        files,
+        "test",
+        documents_by_path=documents_by_path,
+    )
+    direct_chunks = chunk_file(
+        md_path,
+        content,
+        kind="meeting_transcript",
+        chunk_strategy=pipeline._strategy,
+    )
+
+    assert files[0].kind == "meeting_transcript"
+    assert [chunk.text for chunk in adapter_chunks] == [
+        chunk.text for chunk in direct_chunks
+    ]
+    assert adapter_chunks[0].kind == "meeting_transcript"
+    assert adapter_chunks[0].provenance is not None
+    assert adapter_chunks[0].provenance.source_unit_refs == []
 
 
 def test_index_file_trackers_receive_file_info_objects(tmp_path: Path) -> None:
