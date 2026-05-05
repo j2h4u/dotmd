@@ -730,7 +730,8 @@ Plans:
 
 **Goal:** Start the move from file-centric Markdown indexing toward a
 source/document/source-unit/chunk model by defining the minimal source adapter
-contract and shaping the first Telegram read-only MVP.
+contract and reproducing current filesystem Markdown behavior through that
+model.
 **Requirements:** TBD
 **Backlog source:** 999.22
 **Depends on:** Phase 24
@@ -740,9 +741,9 @@ Phase context:
 - Use the architecture docs linked from backlog `999.22` as the source of
   truth: `docs/source-adapter-architecture.md` and
   `docs/source-adapter-architecture-panel-review.md`.
-- Keep the first implementation path MVP-first: minimal source model shim,
-  filesystem compatibility, then Telegram read-only as the first real
-  non-filesystem source.
+- Keep the first implementation path MVP-first: minimal source model shim and
+  filesystem Markdown compatibility. Telegram read-only is the intended first
+  non-filesystem validation source after this phase, not part of Phase 25.
 - Preserve the source-vs-parser distinction: source adapters discover assets
   and units; parser/chunking behavior follows media type and parser metadata.
 - Keep entity catalogs, fuzzy identity resolution, delete/edit propagation, and
