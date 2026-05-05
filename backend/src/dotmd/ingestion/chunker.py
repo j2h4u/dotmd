@@ -9,7 +9,7 @@ from pathlib import Path
 
 import blake3 as _blake3
 
-from dotmd.core.models import Chunk, DocKind
+from dotmd.core.models import Chunk, ChunkProvenance, DocKind
 from dotmd.ingestion.content_handlers import get_handler, split_default
 from dotmd.ingestion.reader import parse_frontmatter
 from dotmd.utils.text import estimate_tokens, split_sentences
@@ -135,6 +135,7 @@ def chunk_file(
     overlap_tokens: int = 50,
     kind: str = DocKind.DOCUMENT,
     chunk_strategy: str = "heading_512_50",
+    provenance: ChunkProvenance | None = None,
 ) -> list[Chunk]:
     """Split a markdown document into semantically meaningful chunks.
 
@@ -161,6 +162,9 @@ def chunk_file(
     chunk_strategy:
         Strategy name used in chunk_id derivation — prevents ID collisions
         between heading_512_50 and contextual_512_50 chunks with identical body.
+    provenance:
+        Optional caller-owned source provenance to attach to each returned
+        chunk. When omitted, chunks remain unannotated.
 
     Returns
     -------
@@ -226,6 +230,7 @@ def chunk_file(
                     text=section_text,
                     chunk_index=chunk_index,
                     kind=kind,
+                    provenance=provenance,
                 )
             )
             chunk_index += 1
@@ -245,6 +250,7 @@ def chunk_file(
                         text=sub_text,
                         chunk_index=chunk_index,
                         kind=kind,
+                        provenance=provenance,
                     )
                 )
                 chunk_index += 1

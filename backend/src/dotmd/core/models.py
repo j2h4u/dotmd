@@ -136,6 +136,7 @@ class ChunkProvenance(BaseModel):
 
     namespace: str
     document_ref: str
+    ref: str
     source_unit_refs: list[str] = Field(default_factory=list)
     chunk_strategy: str
     parser_name: str | None = None
@@ -159,6 +160,7 @@ class Chunk(BaseModel):
     text: str
     chunk_index: int
     kind: str = DocKind.DOCUMENT
+    provenance: ChunkProvenance | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from dotmd.core.models import Chunk
+from dotmd.core.models import Chunk, ChunkProvenance
 from dotmd.ingestion.chunker import chunk_file
 
 
@@ -74,3 +74,68 @@ class TestChunkerEmitsFilePaths:
             assert chunk.file_paths[0] == md_file, (
                 f"file_paths[0] must be the source file, got {chunk.file_paths[0]!r}"
             )
+
+
+class TestChunkerProvenance:
+    """Chunk provenance is caller-owned and does not alter chunk payloads."""
+
+    def test_chunk_file_without_provenance_returns_none(
+        self, tmp_path: Path
+    ) -> None:
+        md_file = tmp_path / "plain.md"
+        md_file.write_text("# Plain\n\nBody text.\n", encoding="utf-8")
+
+        chunks = chunk_file(md_file)
+
+        assert chunks
+        assert all(chunk.provenance is None for chunk in chunks)
+
+    def test_chunk_file_attaches_explicit_provenance(
+        self, tmp_path: Path
+    ) -> None:
+        md_file = tmp_path / "annotated.md"
+        md_file.write_text("# Annotated\n\nBody text.\n", encoding="utf-8")
+        document_ref = str(md_file.resolve())
+        provenance = ChunkProvenance(
+            namespace="filesystem",
+            document_ref=document_ref,
+            ref=f"filesystem:{document_ref}",
+            source_unit_refs=[],
+            chunk_strategy="heading_512_50",
+            parser_name="markdown",
+        )
+
+        chunks = chunk_file(md_file, provenance=provenance)
+
+        assert chunks
+        assert all(chunk.provenance is provenance for chunk in chunks)
+
+    def test_chunk_text_unchanged_when_provenance_is_attached(
+        self, tmp_path: Path
+    ) -> None:
+        md_file = tmp_path / "stable.md"
+        content = (
+            "---\n"
+            "title: Stable\n"
+            "kind: document\n"
+            "---\n"
+            "# Stable\n\n"
+            "The chunk text should not change.\n"
+        )
+        md_file.write_text(content, encoding="utf-8")
+        document_ref = str(md_file.resolve())
+        provenance = ChunkProvenance(
+            namespace="filesystem",
+            document_ref=document_ref,
+            ref=f"filesystem:{document_ref}",
+            source_unit_refs=[],
+            chunk_strategy="heading_512_50",
+            parser_name="markdown",
+        )
+
+        unannotated = chunk_file(md_file, content)
+        annotated = chunk_file(md_file, content, provenance=provenance)
+
+        assert [chunk.text for chunk in annotated] == [
+            chunk.text for chunk in unannotated
+        ]
