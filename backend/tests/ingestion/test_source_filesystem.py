@@ -16,6 +16,20 @@ from dotmd.ingestion.source import (
 )
 
 
+def _write_markdown(
+    path: Path,
+    title: str,
+    tags: list[str],
+    body: str,
+    kind: str = "document",
+) -> None:
+    tags_yaml = "\n".join(f"  - {tag}" for tag in tags)
+    path.write_text(
+        f"---\ntitle: {title}\nkind: {kind}\ntags:\n{tags_yaml}\n---\n{body}",
+        encoding="utf-8",
+    )
+
+
 def _source_document(path: Path, document_ref: str | None = None) -> SourceDocument:
     ref_document = document_ref or str(path.resolve())
     return SourceDocument(
@@ -125,3 +139,62 @@ def test_source_document_converts_to_file_info_with_compatibility_fields(
     assert file_info.size_bytes == md_path.stat().st_size
     assert file_info.last_modified == document.updated_at
     assert document.document_ref == str(file_info.path.resolve())
+
+
+def test_body_only_change_updates_content_fingerprint_only(
+    tmp_path: Path,
+) -> None:
+    md_path = tmp_path / "note.md"
+    _write_markdown(md_path, "Stable", ["alpha"], "Original body.")
+    adapter = FilesystemMarkdownSourceAdapter()
+    original = adapter.discover(tmp_path)[0]
+
+    _write_markdown(md_path, "Stable", ["alpha"], "Changed body.")
+    changed = adapter.discover(tmp_path)[0]
+
+    assert changed.content_fingerprint != original.content_fingerprint
+    assert changed.metadata_fingerprint == original.metadata_fingerprint
+
+
+def test_title_and_tags_change_updates_metadata_fingerprint_only(
+    tmp_path: Path,
+) -> None:
+    md_path = tmp_path / "note.md"
+    _write_markdown(md_path, "Original", ["alpha"], "Stable body.")
+    adapter = FilesystemMarkdownSourceAdapter()
+    original = adapter.discover(tmp_path)[0]
+
+    _write_markdown(md_path, "Renamed", ["alpha", "beta"], "Stable body.")
+    changed = adapter.discover(tmp_path)[0]
+
+    assert changed.metadata_fingerprint != original.metadata_fingerprint
+    assert changed.content_fingerprint == original.content_fingerprint
+
+
+def test_discover_multi_excludes_empty_and_non_markdown_files(
+    tmp_path: Path,
+) -> None:
+    markdown_path = tmp_path / "note.md"
+    markdown_path.write_text("# Included\n", encoding="utf-8")
+    (tmp_path / "empty.md").write_text("", encoding="utf-8")
+    (tmp_path / "note.txt").write_text("# Excluded\n", encoding="utf-8")
+
+    documents = FilesystemMarkdownSourceAdapter().discover_multi([str(tmp_path)])
+
+    assert [document.file_path for document in documents] == [markdown_path]
+
+
+def test_source_module_keeps_future_runtime_concepts_deferred() -> None:
+    source_text = Path("src/dotmd/ingestion/source.py").read_text(encoding="utf-8")
+
+    deferred_terms = [
+        "tele" + "gram",
+        "Source" + "Asset",
+        "Source" + "Entity",
+        "socket",
+        "requests",
+        "TTL",
+        "second-source",
+    ]
+    for term in deferred_terms:
+        assert term not in source_text
