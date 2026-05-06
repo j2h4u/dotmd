@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
 status: milestone_complete
-last_updated: "2026-05-05T21:04:45.744Z"
-last_activity: 2026-05-05
+last_updated: "2026-05-06T14:54:00+05:00"
+last_activity: 2026-05-06
 progress:
-  total_phases: 11
+  total_phases: 12
   completed_phases: 11
   total_plans: 27
   completed_plans: 27
-  percent: 100
+  percent: 92
 ---
 
 # GSD State
@@ -20,18 +20,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 25 — document-source-abstraction-source-adapter-mvp
+**Current focus:** Phase 26 — source-ref-first-read-search-contract-cleanup
 
 ## Current Milestone
 
 **v1.4 — Search Quality & Architecture**
 
-Phase: 25
-Plan: Complete
-Status: Milestone complete
-Last activity: 2026-05-05
+Phase: 26
+Plan: Not planned yet
+Status: Ready for discussion
+Last activity: 2026-05-06
 
-Progress: [██████████] 100%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
@@ -59,6 +59,7 @@ Progress: [██████████] 100%
 | Phase 25 P02 | 7 min | 5 tasks | 6 files |
 | Phase 25 P04 | 6min | 4 tasks | 4 files |
 | 25 | 4 | - | - |
+| 26 | 0 | - | - |
 
 ## Accumulated Context
 
@@ -78,6 +79,14 @@ Progress: [██████████] 100%
 - Phase 25 context gathered: reproduce current filesystem Markdown behavior
   through the new source-aware model first; run an architecture panel on the
   domain model and contracts before implementation planning.
+
+- Phase 26 added: Source-ref-first read/search contract cleanup
+  (promoted from backlog 999.24)
+
+- Phase 26 context gathered: remove the Phase 25 path-first compatibility layer
+  before Telegram/non-filesystem source work; make `ref` / `(namespace,
+  document_ref)` the primary public read/search identity; avoid full reindex
+  whenever possible.
 
 - Backlog 999.22 added: Document Source Abstraction — index non-filesystem
   sources. Architecture context is captured in `docs/source-adapter-architecture.md`
@@ -180,7 +189,7 @@ was moved under `.planning/notes/completed-backlog/`.
 
 ### Blockers/Concerns
 
-None for current local GSD state.
+Phase 26 is not discussed or planned yet. Next step: `$gsd-discuss-phase 26`.
 
 ### Quick Tasks Completed
 
@@ -191,4 +200,4 @@ None for current local GSD state.
 | 260502-scv | Normalize dotMD .planning docs: separate active roadmap from backlog/done 999.x items, fix progress/health warnings where safe, keep historical phase artifacts intact | 2026-05-02 | this commit | [260502-scv-normalize-dotmd-planning-docs-separate-a](./quick/260502-scv-normalize-dotmd-planning-docs-separate-a/) |
 
 ---
-*Last updated: 2026-05-05*
+*Last updated: 2026-05-06*

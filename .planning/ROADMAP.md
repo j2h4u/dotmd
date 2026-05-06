@@ -844,7 +844,55 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 - [x] 25-04-regression-docs-and-phase-verification-PLAN.md — Add cross-surface regression coverage, docs, and final phase verification
 
+### Phase 26: Source-ref-first read/search contract cleanup
+
+**Goal:** Remove the Phase 25 filesystem-path-first compatibility layer from
+dotMD's public read/search contract before adding Telegram or other
+non-filesystem sources. Make `ref` / `(namespace, document_ref)` the primary
+identity for search hits and read/drill-style APIs, while keeping filesystem
+paths only where they are still needed for discovery, local file reads, display,
+delete detection, or content-dedup holder semantics.
+**Requirements**: TBD
+**Depends on:** Phase 25
+**Backlog source:** 999.24
+**Plans:** 0 plans
+
+Phase context:
+- Phase 25 shipped `SourceDocument`, `ChunkProvenance`, `source_documents`, and
+  `chunk_source_provenance_<strategy>`, but deliberately preserved
+  `SearchResult.file_paths`, MCP `SearchHit.file_paths`, MCP
+  `read(file_path, start, end)`, and `chunk_file_paths_<strategy>` as
+  compatibility-authoritative.
+- dotMD has no external users or third-party MCP clients to protect. The only
+  current consumers are our own agents and service workflows, so a deliberate
+  breaking change is acceptable if it simplifies the next source-adapter phases.
+- Telegram read-only must not inherit a filesystem-shaped API. This phase should
+  clean the contract before Telegram/non-filesystem source implementation.
+- Every refactor, feature, and bugfix must first be evaluated through the
+  operational question: will this require a full reindex or not?
+- Avoid full reindex whenever possible. Do not require `dotmd index --force`,
+  full TEI re-embedding, full metadata-vector recomputation, or full graph
+  rebuild unless planning proves there is no practical incremental path and asks
+  for an explicit user decision. Current full rebuild cost is about three days.
+- Prefer deriving source refs from existing Phase 25 data:
+  `source_documents`, `chunk_source_provenance_<strategy>`, and filesystem
+  document refs. Backfill only missing lightweight metadata/reference rows if
+  needed.
+
+Phase boundary:
+- In scope: source-ref-first search/read/drill contract, MCP/API/test/docs
+  updates, and a live MCP smoke against the local container after implementation.
+- In scope: reassess whether `chunk_file_paths_<strategy>` remains an internal
+  holder table for dedup, but stop treating it as the public read contract.
+- Out of scope: Telegram adapter implementation, source-unit emission for
+  non-filesystem sources, entity catalogs, canonical identity resolution, TTL,
+  second-source validation, and removing filesystem paths needed internally for
+  filesystem source operation.
+
+Plans:
+- [ ] TBD (run /gsd-discuss-phase 26 before planning)
+
 ---
 
 *Roadmap created: 2026-03-26*
-*Last updated: 2026-05-05*
+*Last updated: 2026-05-06*
