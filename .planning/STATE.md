@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
 status: executing
-last_updated: "2026-05-06T11:19:09.336Z"
+last_updated: "2026-05-06T11:55:41.764Z"
 last_activity: 2026-05-06
 progress:
   total_phases: 12
   completed_phases: 11
   total_plans: 30
-  completed_plans: 27
-  percent: 90
+  completed_plans: 28
+  percent: 93
 ---
 
 # GSD State
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 
 Phase: 26
 Plan: 3 plans ready
-Status: Ready to execute
+Status: Executing Phase 26
 Last activity: 2026-05-06
 
-Progress: [█████████░] 92%
+Progress: [█████████░] 93%
 
 ## Performance Metrics
 
@@ -60,6 +60,7 @@ Progress: [█████████░] 92%
 | Phase 25 P04 | 6min | 4 tasks | 4 files |
 | 25 | 4 | - | - |
 | 26 | 3 | - | - |
+| Phase 26 P01 | 13min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -122,6 +123,9 @@ Recent decisions affecting current work:
 - [Phase 18]: Reranker replacement will use public benchmark evidence instead of local eval-set preparation. Publication age is now a hard gate; license is metadata-only for this personal-use project; `Qwen/Qwen3-Reranker-0.6B` is selected as the first implementation target because the top fresh rerankers are close enough in quality that text-only operational fit wins. ContextualAI rerank-v2 and Jina v3 remain real alternates if Qwen integration or latency fails.
 - [Phase 25]: Canonical filesystem ref is document_ref = str(Path(file_path).resolve()) and ref = filesystem:<document_ref>. — Plans 25-01 through 25-04 use this invariant for SourceDocument identity and documentation.
 - [Phase 25]: Phase 25 keeps MCP read(file_path, start, end) as the public filesystem read contract. — Plan 25-04 regression coverage and docs preserve user-visible filesystem compatibility.
+- [Phase 26]: [Phase 26 Plan 01]: SearchResult exposes ref as the only public search-to-read key; Chunk.file_paths remains internal. — Core source-ref public contract for Phase 26.
+- [Phase 26]: [Phase 26 Plan 01]: Missing search provenance is a hard ValueError after the count/dry-run/write safety gate. — Prevents silent fallback to internal holder paths.
+- [Phase 26]: [Phase 26 Plan 01]: Service read(ref) is active-strategy-only for Phase 26. — Avoids scanning all chunk_file_paths strategy tables per request.
 
 ### Pending Todos
 
