@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
 status: executing
-last_updated: "2026-05-06T11:55:41.764Z"
+last_updated: "2026-05-06T12:23:30.372Z"
 last_activity: 2026-05-06
 progress:
   total_phases: 12
   completed_phases: 11
   total_plans: 30
-  completed_plans: 28
-  percent: 93
+  completed_plans: 29
+  percent: 97
 ---
 
 # GSD State
@@ -31,7 +31,7 @@ Plan: 3 plans ready
 Status: Executing Phase 26
 Last activity: 2026-05-06
 
-Progress: [█████████░] 93%
+Progress: [██████████] 97%
 
 ## Performance Metrics
 
@@ -61,6 +61,7 @@ Progress: [█████████░] 93%
 | 25 | 4 | - | - |
 | 26 | 3 | - | - |
 | Phase 26 P01 | 13min | 3 tasks | 12 files |
+| Phase 26 P02 | 20min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -126,6 +127,9 @@ Recent decisions affecting current work:
 - [Phase 26]: [Phase 26 Plan 01]: SearchResult exposes ref as the only public search-to-read key; Chunk.file_paths remains internal. — Core source-ref public contract for Phase 26.
 - [Phase 26]: [Phase 26 Plan 01]: Missing search provenance is a hard ValueError after the count/dry-run/write safety gate. — Prevents silent fallback to internal holder paths.
 - [Phase 26]: [Phase 26 Plan 01]: Service read(ref) is active-strategy-only for Phase 26. — Avoids scanning all chunk_file_paths strategy tables per request.
+- [Phase 26]: [Phase 26 Plan 02]: MCP read/drill convert service ValueError into tool-level errors containing Action: pass a ref returned by search. — Keeps service errors domain-level while giving agents actionable MCP tool errors.
+- [Phase 26]: [Phase 26 Plan 02]: FastAPI Plan 02 scope is /search only; no read route exists and no new drill route was invented. — Route enumeration found no FastAPI read route and the plan forbade inventing a new drill route without an existing facade pattern.
+- [Phase 26]: [Phase 26 Plan 02]: Filesystem refs from live backfilled provenance may resolve from an existing file path when source_documents lacks the row. — Needed for search -> ref -> read to remain round-trippable on live backfilled provenance without a full reindex.
 
 ### Pending Todos
 
