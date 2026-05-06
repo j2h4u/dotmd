@@ -1,3 +1,25 @@
+---
+phase: 21-reranker-quality-benchmark
+plan: 01-quality-benchmark
+subsystem: reranker
+tags: [reranker, benchmark, quality, live-index]
+
+requires:
+  - phase: 20-reranker-latency-benchmark
+    provides: latency-surviving reranker candidates
+provides:
+  - Canonical live-index reranker quality benchmark
+  - Human-approved Russian and mixed-language label set
+  - Shared candidate-pool comparison across candidate rerankers
+  - Production default recommendation for the reranker model
+affects: [reranker, search, evaluation]
+
+requirements-completed: [RERANK-QUALITY-01, RERANK-QUALITY-02, RERANK-QUALITY-03]
+
+duration: 1h
+completed: 2026-05-02
+---
+
 # Phase 21 Plan 01 Summary: Reranker Quality Benchmark
 
 ## Result

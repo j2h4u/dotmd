@@ -25,9 +25,9 @@
 
 - [x] **SCORE-01**: Cross-encoder relevance threshold calibrated on real corpus queries
 - [ ] **SCORE-02**: Semantic score floor recalibrated after embedding model swap
-- [ ] **RERANK-QUALITY-01**: Reranker quality benchmark uses the live dotMD index and a human-labeled Russian query set
-- [ ] **RERANK-QUALITY-02**: Quality comparison reranks one shared retrieval candidate pool per query across all candidate models
-- [ ] **RERANK-QUALITY-03**: Benchmark summary reports Hit@1/3/5, MRR@10, nDCG@10, per-query failures, and hot rerank latency
+- [x] **RERANK-QUALITY-01**: Reranker quality benchmark uses the live dotMD index and a human-labeled Russian query set
+- [x] **RERANK-QUALITY-02**: Quality comparison reranks one shared retrieval candidate pool per query across all candidate models
+- [x] **RERANK-QUALITY-03**: Benchmark summary reports Hit@1/3/5, MRR@10, nDCG@10, per-query failures, and hot rerank latency
 - [x] **SNIPPET-BOUNDARY-01**: Search snippets should avoid starting or ending mid-sentence when the surrounding chunk text provides nearby sentence, paragraph, or speaker-turn boundaries
 - [x] **SNIPPET-CONTEXT-01**: Search snippets should provide enough local context around the matched/relevant span for agents to decide whether to call `read`
 - [x] **SNIPPET-VERIFY-01**: Snippet behavior must be covered by focused tests and verified through the MCP `search` surface
@@ -91,4 +91,4 @@
 
 ---
 *Requirements defined: 2026-03-30*
-*Last updated: 2026-05-03 after Phase 23 test contract requirements*
+*Last updated: 2026-05-06 after Phase 21 verification traceability repair*
