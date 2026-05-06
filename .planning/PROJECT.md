@@ -41,7 +41,7 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 
 ### Active
 
-(none — v1.4 is closed. Next active requirements should be defined by the next milestone.)
+(drafting v1.5 requirements — Telegram source adapter with incremental search + sync)
 
 ### Out of Scope
 
@@ -125,13 +125,31 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 - **v1.3** — Production Packaging & Background Indexing (Phases 7-10, shipped 2026-03-28)
 - **v1.4** — Search Quality & Architecture (Phases 15-26, shipped 2026-05-06)
 
-## Current Milestone
+## Current Milestone: v1.5 Telegram Source Adapter
 
-No active milestone. v1.4 shipped on 2026-05-06; the next milestone should start with `/gsd-new-milestone`.
+**Goal:** Add Telegram as a first-class dotMD source with incremental search +
+sync through the existing `mcp-telegram` runtime, while avoiding recomputation
+of already-processed content and derived artifacts.
+
+**Target features:**
+- Content-addressed resource bindings and retained derived artifacts as the
+  first infrastructure phase before Telegram.
+- Telegram source discovery through existing `mcp-telegram`, not a new direct
+  Telegram API client inside dotMD.
+- Telegram search results return source refs that round-trip through
+  `drill(ref)` / `read(ref, start, end)`.
+- Repeated Telegram sync/refresh is incremental and reuses unchanged
+  messages/chunks/derived artifacts.
+- Telegram adapter hardening is scoped to what is needed for reliable read-only
+  search + sync; full lifecycle edits/deletes/TTL can follow after real usage.
 
 ## Current State
 
-v1.4 shipped and archived. Production packaging remains live, local/live test tiers are explicit, reranking has benchmark-backed comparison surfaces, config has a clearer operator/runtime boundary, and the public MCP search/read flow is now source-ref-first.
+v1.5 is being initialized around Telegram source integration. v1.4 shipped and
+archived the source-ref-first read/search contract, which is now the public
+identity surface for this work. Backlog `999.25` and `SEED-002` are selected as
+milestone context so Telegram does not inherit path-shaped holder semantics or
+force wasted TEI/NER/FTS/graph recomputation for already-processed content.
 
 Phase 999.12 complete (2026-04-27): Dual-encoder unified embedding shipped. Metadata-only changes (tag updates, title renames) now require 1 TEI call per document instead of N calls per chunk. VecComponentStore stores raw e_text/e_meta BLOBs; meta_tracker (title+tags checksum) triggers fast path when only metadata changes. search_log table added. 189 tests pass.
 
@@ -180,4 +198,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-06 after v1.4 milestone completion*
+*Last updated: 2026-05-06 after v1.5 milestone initialization*

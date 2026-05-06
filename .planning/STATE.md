@@ -1,37 +1,37 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.4
-milestone_name: Search Quality & Architecture
-status: completed
-last_updated: "2026-05-06T17:19:00.730Z"
+milestone: v1.5
+milestone_name: Telegram Source Adapter
+status: planning
+last_updated: "2026-05-06T18:41:50.207Z"
 last_activity: 2026-05-06
 progress:
-  total_phases: 12
-  completed_phases: 12
-  total_plans: 30
-  completed_plans: 30
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # GSD State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-06 after v1.4 archived)
+See: .planning/PROJECT.md (updated 2026-05-06 after v1.5 milestone initialization)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Planning next milestone
+**Current focus:** v1.5 Telegram Source Adapter — defining requirements
 
 ## Current Milestone
 
-**v1.4 — Search Quality & Architecture**
+**v1.5 — Telegram Source Adapter**
 
-Phase: 26
+Phase: Not started
 Plan: Not started
-Status: Milestone complete
+Status: Defining requirements
 Last activity: 2026-05-06
 
-Progress: [██████████] 100%
+Progress: [----------] 0%
 
 ## Deferred Items
 
@@ -233,10 +233,10 @@ No blockers. Phase 26 is complete and verified; v1.4 is milestone-complete.
 
 ## Current Position
 
-Phase: Milestone v1.4 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-05-06 — Milestone v1.4 completed and archived
+Status: Defining requirements
+Last activity: 2026-05-06 — Milestone v1.5 started
 
 ## Operator Next Steps
 
