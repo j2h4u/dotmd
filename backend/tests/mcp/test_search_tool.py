@@ -12,10 +12,9 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
-
-from dotmd.core.models import SearchResult
 
 
 def _import_mcp():  # type: ignore[no-untyped-def]
@@ -47,7 +46,7 @@ class TestFilePathsIsJsonArray:
     def test_tool_call_output_has_file_paths_array(self, tmp_path: Path) -> None:
         """Stubbed tools/call output contains file_paths list, not file_path."""
         mcp = _import_mcp()
-        stub_result = SearchResult(
+        stub_result = SimpleNamespace(
             chunk_id="a" * 64,
             file_paths=[Path("/path/to/file.md"), Path("/other/file.md")],
             heading_path="# Test",

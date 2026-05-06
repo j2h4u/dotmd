@@ -1,12 +1,8 @@
-"""RED test skeletons for DotMDService.search returning file_paths (P5 — Task 1).
-
-These tests verify the service facade returns SearchResult with file_paths list.
-They FAIL until P5 (wave 5) updates the service.
-Imports are deferred so --collect-only works before P5 ships.
-"""
+"""Tests for DotMDService search/read behavior."""
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -30,16 +26,16 @@ def test_format_elapsed_ms_for_human_diagnostics() -> None:
 
 
 class TestSearchReturnsFilePaths:
-    """DotMDService.search returns SearchResult instances with file_paths list."""
+    """DotMDService.search returns SearchResult instances with public refs."""
 
     def test_search_returns_file_paths_list(self, tmp_path: Path) -> None:
-        """search() forwards contract args and returns results with file_paths."""
+        """search() forwards contract args and returns results with ref."""
         service = _get_service(tmp_path)
 
         from dotmd.core.models import SearchMode, SearchResult
         stub_result = SearchResult(
             chunk_id="a" * 64,
-            file_paths=[Path(tmp_path / "test.md")],
+            ref="filesystem:/mnt/test.md",
             heading_path="# Test",
             snippet="test snippet",
             fused_score=0.9,
@@ -59,12 +55,7 @@ class TestSearchReturnsFilePaths:
         )
         assert results == [stub_result]
         for r in results:
-            assert hasattr(r, "file_paths"), (
-                "SearchResult must have file_paths attribute (P5 Decision #2)"
-            )
-            assert isinstance(r.file_paths, list), (
-                f"file_paths must be list, got {type(r.file_paths)!r}"
-            )
+            assert r.ref == "filesystem:/mnt/test.md"
 
 
 class TestSearchRespectsTopK:
@@ -78,7 +69,7 @@ class TestSearchRespectsTopK:
         stub_results = [
             SearchResult(
                 chunk_id=str(i) * 64,
-                file_paths=[Path(tmp_path / f"test_{i}.md")],
+                ref=f"filesystem:/mnt/test_{i}.md",
                 heading_path=f"# Test {i}",
                 snippet=f"snippet {i}",
                 fused_score=float(i) / 10,
@@ -94,6 +85,160 @@ class TestSearchRespectsTopK:
         assert kwargs["top_k"] == 3
         assert kwargs["pool_size"] == service._settings.rerank_pool_size
         assert kwargs["rerank"] is True
+
+
+def _source_document(file_path: Path, *, namespace: str = "filesystem"):
+    from dotmd.core.models import SourceDocument
+
+    document_ref = str(file_path.resolve()) if namespace == "filesystem" else "doc:1"
+    return SourceDocument(
+        namespace=namespace,
+        document_ref=document_ref,
+        ref=f"{namespace}:{document_ref}",
+        source_uri=str(file_path),
+        file_path=file_path if namespace == "filesystem" else None,
+        media_type="text/markdown",
+        parser_name="markdown",
+        document_type="document",
+        title="Service Note",
+        updated_at=datetime(2026, 5, 6),
+        content_fingerprint="content",
+        metadata_fingerprint="metadata",
+        metadata_json={},
+    )
+
+
+class TestReadRefContract:
+    """DotMDService.read resolves source refs and keeps paths internal."""
+
+    def test_read_ref_returns_ref_not_file_path_and_uses_active_strategy(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = _get_service(tmp_path)
+        note_path = tmp_path / "note.md"
+        note_path.write_text("---\ntitle: Service Note\n---\nBody", encoding="utf-8")
+        document = _source_document(note_path)
+        metadata = MagicMock()
+        metadata.get_source_document.return_value = document
+        metadata.get_chunk_count_for_file.return_value = 2
+        metadata.get_chunks_for_file_range.return_value = [
+            {"index": 0, "heading_hierarchy": ["H"], "text": "Body"},
+        ]
+        service._pipeline._metadata_store = metadata
+
+        payload = service.read(document.ref, 0, 1)
+
+        assert payload["ref"] == document.ref
+        assert "file_path" not in payload
+        assert payload["frontmatter"]["title"] == "Service Note"
+        assert payload["total_chunks"] == 2
+        assert payload["chunks"] == [
+            {"index": 0, "heading_hierarchy": ["H"], "text": "Body"}
+        ]
+        metadata.get_chunk_count_for_file.assert_called_once_with(
+            service._settings.chunk_strategy,
+            str(note_path.resolve()),
+        )
+        metadata.get_chunks_for_file_range.assert_called_once_with(
+            service._settings.chunk_strategy,
+            str(note_path.resolve()),
+            0,
+            1,
+        )
+
+    def test_read_ref_rejects_unknown_and_malformed_refs(self, tmp_path: Path) -> None:
+        service = _get_service(tmp_path)
+        metadata = MagicMock()
+        metadata.get_source_document.return_value = None
+        service._pipeline._metadata_store = metadata
+
+        for ref in ["not-a-ref", "filesystem:/missing.md"]:
+            try:
+                service.read(ref)
+            except ValueError as exc:
+                assert "Unknown source ref" in str(exc)
+            else:
+                raise AssertionError("read() should reject unknown refs")
+
+    def test_read_ref_rejects_unsupported_namespace(self, tmp_path: Path) -> None:
+        service = _get_service(tmp_path)
+        document = _source_document(tmp_path / "telegram.md", namespace="telegram")
+        metadata = MagicMock()
+        metadata.get_source_document.return_value = document
+        service._pipeline._metadata_store = metadata
+
+        try:
+            service.read(document.ref)
+        except ValueError as exc:
+            assert "Unsupported source namespace" in str(exc)
+        else:
+            raise AssertionError("read() should reject unsupported namespaces")
+
+    def test_read_ref_rejects_source_with_no_active_strategy_chunks(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = _get_service(tmp_path)
+        note_path = tmp_path / "note.md"
+        note_path.write_text("Body", encoding="utf-8")
+        document = _source_document(note_path)
+        metadata = MagicMock()
+        metadata.get_source_document.return_value = document
+        metadata.get_chunk_count_for_file.return_value = 0
+        service._pipeline._metadata_store = metadata
+
+        try:
+            service.read(document.ref)
+        except ValueError as exc:
+            assert "No chunks for source ref in active strategy" in str(exc)
+        else:
+            raise AssertionError("read() should reject inactive-strategy refs")
+
+    def test_read_ref_frontmatter_parse_failure_is_non_fatal(
+        self,
+        tmp_path: Path,
+        caplog,
+    ) -> None:
+        service = _get_service(tmp_path)
+        note_path = tmp_path / "note.md"
+        note_path.write_text("Body", encoding="utf-8")
+        document = _source_document(note_path)
+        metadata = MagicMock()
+        metadata.get_source_document.return_value = document
+        metadata.get_chunk_count_for_file.return_value = 1
+        metadata.get_chunks_for_file_range.return_value = []
+        service._pipeline._metadata_store = metadata
+
+        with patch("dotmd.api.service.parse_frontmatter", side_effect=ValueError("bad")):
+            payload = service.read(document.ref)
+
+        assert payload["frontmatter"] == {}
+        assert "frontmatter parse failed" in caplog.text
+
+
+class TestDrillRefContract:
+    """DotMDService.drill returns metadata for a source ref."""
+
+    def test_drill_ref_returns_metadata_payload(self, tmp_path: Path) -> None:
+        service = _get_service(tmp_path)
+        note_path = tmp_path / "note.md"
+        note_path.write_text("---\ntitle: Service Note\n---\nBody", encoding="utf-8")
+        document = _source_document(note_path)
+        metadata = MagicMock()
+        metadata.get_source_document.return_value = document
+        metadata.get_chunk_count_for_file.return_value = 3
+        service._pipeline._metadata_store = metadata
+
+        payload = service.drill(document.ref)
+
+        assert payload["ref"] == document.ref
+        assert payload["title"] == "Service Note"
+        assert payload["source_uri"] == str(note_path)
+        assert payload["document_type"] == "document"
+        assert payload["parser_name"] == "markdown"
+        assert payload["frontmatter"]["title"] == "Service Note"
+        assert payload["total_chunks"] == 3
 
 
 class TestCompareRerankers:
