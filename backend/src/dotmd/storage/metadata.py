@@ -421,6 +421,7 @@ class SQLiteMetadataStore:
         """Batch-hydrate canonical chunk provenance rows by chunk_id."""
         if not chunk_ids:
             return {}
+        self.ensure_chunk_source_provenance_table(strategy)
         table = f"chunk_source_provenance_{strategy}"
         placeholders = ",".join("?" for _ in chunk_ids)
         rows = self._conn.execute(
@@ -435,13 +436,13 @@ class SQLiteMetadataStore:
             chunk_id = row[0]
             if chunk_id not in result:
                 result[chunk_id] = ChunkProvenance(
-                namespace=row[1],
-                document_ref=row[2],
-                ref=f"{row[1]}:{row[2]}",
-                source_unit_refs=json.loads(row[3]),
-                chunk_strategy=row[4],
-                parser_name=row[5],
-            )
+                    namespace=row[1],
+                    document_ref=row[2],
+                    ref=f"{row[1]}:{row[2]}",
+                    source_unit_refs=json.loads(row[3]),
+                    chunk_strategy=row[4],
+                    parser_name=row[5],
+                )
         return result
 
     def count_missing_source_provenance(self, strategy: str) -> int:

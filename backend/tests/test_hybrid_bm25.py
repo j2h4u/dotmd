@@ -33,6 +33,31 @@ def _make_service(tmp_path: Path) -> DotMDService:
     return service
 
 
+def _seed_chunk_provenance(service: DotMDService, chunk_ids: list[str]) -> None:
+    """Seed source provenance for synthetic chunks returned by mocked engines."""
+    from dotmd.core.models import ChunkProvenance
+
+    strategy = service._settings.chunk_strategy
+    store = service._pipeline.metadata_store
+    store.ensure_chunk_source_provenance_table(strategy)
+    for chunk_id in chunk_ids:
+        document_ref = f"/test/{chunk_id}.md"
+        store.add_chunk_provenance(
+            strategy,
+            ChunkProvenance(
+                namespace="filesystem",
+                document_ref=document_ref,
+                ref=f"filesystem:{document_ref}",
+                source_unit_refs=[],
+                chunk_strategy=strategy,
+                parser_name="test",
+            ),
+            chunk_id,
+            conn=store._conn,
+        )
+    store._conn.commit()
+
+
 class TestMergeBackBeyondPoolSize:
     """Fusion candidates beyond pool_size are preserved via merge-back."""
 
@@ -256,6 +281,7 @@ class TestKeywordSurvivalThroughReranking:
         service._pipeline.metadata_store.get_chunks = MagicMock(
             side_effect=lambda ids: [chunks[cid] for cid in ids if cid in chunks]
         )
+        _seed_chunk_provenance(service, ["s1", "b1"])
         service._pipeline.log_search = MagicMock()
 
         results = service.search("test query", top_k=10, mode="hybrid", rerank=True)
@@ -297,6 +323,7 @@ class TestRerankerFactorySearchWiring:
             chunk_index=0,
         )
         service._pipeline.metadata_store.get_chunks = MagicMock(return_value=[chunk])
+        _seed_chunk_provenance(service, ["s1"])
         service._pipeline.log_search = MagicMock()
 
         results = service.search(
@@ -339,6 +366,7 @@ class TestRerankerFactorySearchWiring:
             chunk_index=0,
         )
         service._pipeline.metadata_store.get_chunks = MagicMock(return_value=[chunk])
+        _seed_chunk_provenance(service, ["s1"])
         service._pipeline.log_search = MagicMock()
 
         service.search("test query", top_k=10, mode="hybrid", rerank=True)
@@ -375,6 +403,7 @@ class TestRerankerFactorySearchWiring:
         service._pipeline.metadata_store.get_chunks = MagicMock(
             side_effect=lambda ids: [chunks[cid] for cid in ids if cid in chunks]
         )
+        _seed_chunk_provenance(service, ["s1", "gx1"])
         service._pipeline.log_search = MagicMock()
 
         results = service.search(
@@ -456,6 +485,7 @@ class TestSearchResultContracts:
             chunk_index=0,
         )
         service._pipeline.metadata_store.get_chunks = MagicMock(return_value=[chunk])
+        _seed_chunk_provenance(service, ["s1"])
         service._pipeline.log_search = MagicMock()
 
         service.search("test query", top_k=10, mode="hybrid", rerank=True)
