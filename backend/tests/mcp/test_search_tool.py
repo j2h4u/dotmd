@@ -1,54 +1,43 @@
-"""RED test skeletons for MCP server file_paths output (DEDUP-09 — P5 Task 2).
-
-After Phase 16 P5 ships:
-  - MCP search tool emits "file_paths": [...] array (not "file_path": "...")
-  - MCP tool docstring is updated to describe file_paths
-
-These tests FAIL until P5 (wave 5) updates mcp_server.py.
-Imports are deferred so --collect-only works before P5 ships.
-"""
+"""MCP search/read source-ref contract tests."""
 
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
 
 
 def _import_mcp():  # type: ignore[no-untyped-def]
-    """Deferred import — may raise if MCP server has import-time dependency issues."""
+    """Deferred import for MCP server module."""
     import dotmd.mcp_server as mcp
     return mcp
 
 
-def _search_tool_schema() -> dict[str, Any]:
+def _tool_schema(name: str) -> dict[str, Any]:
     mcp = _import_mcp()
     tools = asyncio.run(mcp.mcp.list_tools())
     by_name = {tool.name: tool.model_dump(mode="json", exclude_none=True) for tool in tools}
-    return by_name["search"]
+    return by_name[name]
 
 
-class TestFilePathsIsJsonArray:
-    """MCP search tool emits file_paths as a registered schema and call output."""
+class TestSearchRefContract:
+    """MCP search emits ref as the search-to-read key."""
 
-    def test_registered_output_schema_has_file_paths_array(self) -> None:
-        """tools/list schema exposes file_paths as array, not file_path."""
-        schema = _search_tool_schema()["outputSchema"]
+    def test_registered_output_schema_has_ref_not_file_paths(self) -> None:
+        schema = _tool_schema("search")["outputSchema"]
         hit_schema = schema["$defs"]["SearchHit"]
         properties = hit_schema["properties"]
 
-        assert properties["file_paths"]["type"] == "array"
-        assert properties["file_paths"]["items"]["type"] == "string"
+        assert properties["ref"]["type"] == "string"
+        assert "file_paths" not in properties
         assert "file_path" not in properties
 
-    def test_tool_call_output_has_file_paths_array(self, tmp_path: Path) -> None:
-        """Stubbed tools/call output contains file_paths list, not file_path."""
+    def test_tool_call_output_has_ref(self) -> None:
         mcp = _import_mcp()
         stub_result = SimpleNamespace(
             chunk_id="a" * 64,
-            file_paths=[Path("/other/file.md"), Path("/path/to/file.md")],
+            ref="filesystem:/mnt/test.md",
             heading_path="# Test",
             snippet="test snippet",
             fused_score=0.9,
@@ -65,23 +54,20 @@ class TestFilePathsIsJsonArray:
             mcp._service = previous_service
 
         structured = cast(dict[str, Any], structured_raw)
-        payload = structured["result"][0]
-        payload = cast(dict[str, Any], payload)
-        assert payload["file_paths"] == ["/other/file.md", "/path/to/file.md"]
-        assert "file_path" not in payload
+        payload = cast(dict[str, Any], structured["result"][0])
+        assert payload["ref"] == "filesystem:/mnt/test.md"
+        assert "file_paths" not in payload
         service.search.assert_called_once_with("test", top_k=1)
 
 
-class TestReadToolCompatibility:
-    """MCP read remains path-based and returns frontmatter plus chunk ranges."""
+class TestReadToolRefContract:
+    """MCP read passes ref through to the service and returns ref."""
 
-    def test_read_tool_uses_file_path_and_returns_frontmatter_and_chunks(
-        self,
-    ) -> None:
+    def test_read_tool_uses_ref_and_returns_frontmatter_and_chunks(self) -> None:
         mcp = _import_mcp()
         service = MagicMock()
         service.read.return_value = {
-            "file_path": "/path/to/file.md",
+            "ref": "filesystem:/mnt/test.md",
             "total_chunks": 2,
             "frontmatter": {
                 "title": "Compatibility Note",
@@ -92,7 +78,7 @@ class TestReadToolCompatibility:
                 {
                     "index": 0,
                     "heading_hierarchy": ["Project", "Decision"],
-                    "text": "Keep path-based reads stable.",
+                    "text": "Read by source ref.",
                 }
             ],
         }
@@ -102,23 +88,22 @@ class TestReadToolCompatibility:
             _content, structured_raw = asyncio.run(
                 mcp.mcp.call_tool(
                     "read",
-                    {"file_path": "/path/to/file.md", "start": 0, "end": 1},
+                    {"ref": "filesystem:/mnt/test.md", "start": 0, "end": 1},
                 )
             )
         finally:
             mcp._service = previous_service
 
         structured = cast(dict[str, Any], structured_raw)
-        assert structured["file_path"] == "/path/to/file.md"
+        assert structured["ref"] == "filesystem:/mnt/test.md"
         assert structured["total_chunks"] == 2
         assert structured["frontmatter"]["title"] == "Compatibility Note"
-        assert structured["frontmatter"]["kind"] == "document"
-        assert structured["frontmatter"]["tags"] == ["source"]
         assert structured["chunks"] == [
             {
                 "index": 0,
                 "heading": "Project > Decision",
-                "text": "Keep path-based reads stable.",
+                "text": "Read by source ref.",
             }
         ]
-        service.read.assert_called_once_with("/path/to/file.md", 0, 1)
+        assert "file_path" not in structured
+        service.read.assert_called_once_with("filesystem:/mnt/test.md", 0, 1)

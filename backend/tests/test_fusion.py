@@ -375,7 +375,7 @@ def test_format_result_keeps_clean_visible_snippet_after_cleanup() -> None:
     """MCP formatting strips metadata while leaving a coherent visible sentence."""
     result = SimpleNamespace(
         chunk_id="chunk-1",
-        file_paths=[Path("/notes/transcript.md")],
+        ref="filesystem:/notes/transcript.md",
         heading_path="Meeting",
         snippet=(
             "---\ntitle: Hidden\n---\n"

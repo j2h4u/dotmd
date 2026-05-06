@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
+from typing import Any
 
 
-def _search_result_kwargs(ref: str) -> dict[str, object]:
+def _search_result_kwargs(ref: str) -> dict[str, Any]:
     return {
         "chunk_id": "a" * 64,
         "ref": ref,

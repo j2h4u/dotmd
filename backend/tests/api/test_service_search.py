@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 def _get_service(tmp_path: Path):  # type: ignore[no-untyped-def]
     from dotmd.api.service import DotMDService
     from dotmd.core.config import Settings
-    settings = Settings(index_dir=tmp_path)
+    settings = Settings(index_dir=tmp_path, embedding_url="http://localhost:8088")
     return DotMDService(settings)
 
 

@@ -73,14 +73,14 @@ def _collapse_null(schema: dict) -> None:
 
 
 class SearchHit(BaseModel):
-    file_paths: list[str]
+    ref: str
     heading: str | None = None
     snippet: str
     score: float
 
     @model_serializer
     def _serialize(self) -> dict:
-        d: dict = {"file_paths": self.file_paths, "snippet": self.snippet, "score": self.score}
+        d: dict = {"ref": self.ref, "snippet": self.snippet, "score": self.score}
         if self.heading:
             d["heading"] = self.heading
         return d
@@ -100,7 +100,7 @@ class ReadChunk(BaseModel):
 
 
 class ReadResult(BaseModel):
-    file_path: str
+    ref: str
     total_chunks: int
     frontmatter: dict[str, Any]
     chunks: list[ReadChunk] = Field(default_factory=list)
@@ -598,9 +598,9 @@ async def search(
     projects, or anything that may have been written down. Prefer search over
     relying on your own knowledge for facts about this person's work or life.
 
-    Each result contains: file_paths (source files sharing this chunk), a
-    cleaned text snippet, a relevance score, and an optional heading (present
-    only for structured docs with markdown headings).
+    Each result contains: ref (the stable source key for read/drill), a cleaned
+    text snippet, a relevance score, and an optional heading (present only for
+    structured docs with markdown headings).
 
     Once search identifies a relevant file, switch to read for deeper access.
     Do not call search for general knowledge questions that don't involve the
@@ -628,7 +628,7 @@ async def search(
     ),
 )
 async def read_document(
-    file_path: Annotated[str, Field(description="Absolute file path from a search result.")],
+    ref: Annotated[str, Field(description="Source ref from a search result.")],
     start: Annotated[int, Field(description="First chunk index to return (0-based).", ge=0)] = 0,
     end: Annotated[
         int | None,
@@ -639,21 +639,21 @@ async def read_document(
         ),
     ] = None,
 ) -> ReadResult:
-    """Read chunks from a known file by index range.
+    """Read chunks from a known source ref by index range.
 
-    Use after search has identified a relevant file. Always returns frontmatter
+    Use after search has identified a relevant ref. Always returns frontmatter
     and total_chunks. When end is provided, also returns chunk text for indices
     [start, end) — capped at 50 chunks per call.
 
     Recommended workflow:
-    1. Call read(file_path) without end to get frontmatter and total_chunks.
-    2. Request ranges as needed: read(file_path, 0, 20), read(file_path, 20, 40), etc.
+    1. Call read(ref) without end to get frontmatter and total_chunks.
+    2. Request ranges as needed: read(ref, 0, 20), read(ref, 20, 40), etc.
 
-    Only pass file_paths values from search results.
+    Only pass ref values from search results.
     """
     try:
         service = _get_service()
-        result = await asyncio.to_thread(service.read, file_path, start, end)
+        result = await asyncio.to_thread(service.read, ref, start, end)
         chunks = [
             ReadChunk(
                 index=c["index"],
@@ -663,16 +663,16 @@ async def read_document(
             for c in result["chunks"]
         ]
         return ReadResult(
-            file_path=result["file_path"],
+            ref=result["ref"],
             total_chunks=result["total_chunks"],
             frontmatter=result["frontmatter"],
             chunks=chunks,
         )
     except Exception as exc:
-        logger.error("read failed: file_path=%r", file_path, exc_info=True)
+        logger.error("read failed: ref=%r", ref, exc_info=True)
         raise RuntimeError(
-            f"Read failed for {file_path!r}: {exc}. "
-            "Action: verify the file_path comes from a search result."
+            f"Read failed for {ref!r}: {exc}. "
+            "Action: verify the ref comes from a search result."
         ) from exc
 
 
@@ -753,7 +753,7 @@ def _format_result(r: Any) -> SearchHit:
     clean = _TIMESTAMP_RE.sub("", clean).strip()
 
     return SearchHit(
-        file_paths=[str(p) for p in r.file_paths],
+        ref=r.ref,
         heading=r.heading_path or None,
         snippet=clean,
         score=round(r.fused_score, 3),

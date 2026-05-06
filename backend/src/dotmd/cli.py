@@ -143,18 +143,7 @@ def search(
 
     for i, r in enumerate(results, 1):
         click.echo(f"\n{'─' * 60}")
-        # Phase 16 P5: render file_paths list (locked format — Review-LOW-11)
-        # Single holder: [i] path
-        # Multi holder:  [i] path_0  (+N-1 more: path_1, path_2, …)
-        paths = sorted(r.file_paths)  # validator already sorts, defensive re-sort
-        if len(paths) == 0:
-            path_line = f"  [{i}] (no path)"
-        elif len(paths) == 1:
-            path_line = f"  [{i}] {paths[0]}"
-        else:
-            rest = ", ".join(str(p) for p in paths[1:])
-            path_line = f"  [{i}] {paths[0]}  (+{len(paths) - 1} more: {rest})"
-        click.echo(path_line)
+        click.echo(f"  [{i}] {r.ref}")
         if r.heading_path:
             click.echo(f"      {r.heading_path}")
         click.echo(f"      Score: {r.fused_score:.4f}  Engines: {', '.join(r.matched_engines)}")
