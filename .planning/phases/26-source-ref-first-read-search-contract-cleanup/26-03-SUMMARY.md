@@ -101,7 +101,7 @@ WHERE p.chunk_id IS NULL;
 1. **Task 1: Run and update focused regression suite** - `d2a7f5e` (test)
 2. **Task 2: Update source-adapter and MCP documentation** - `8865189` (docs)
 3. **Task 3: Run live MCP smoke after batched restart if needed** - `3e82727` (test)
-4. **Task 4: Write final phase summary and deferred-scope audit** - committed with plan metadata
+4. **Task 4: Write final phase summary and deferred-scope audit** - `498da41` (docs)
 
 ## Files Created/Modified
 
@@ -197,7 +197,7 @@ Phase 26 is complete. Future Telegram/non-filesystem work can build on a public 
 ## Self-Check: PASSED
 
 - Verified summary and key files exist on disk.
-- Verified task commits `d2a7f5e`, `8865189`, and `3e82727` exist in git history.
+- Verified task commits `d2a7f5e`, `8865189`, `3e82727`, and `498da41` exist in git history.
 - Verified final local pytest, typecheck, live e2e, docs grep, provenance safety, active strategy behavior, and tool-level invalid-ref errors.
 
 ---

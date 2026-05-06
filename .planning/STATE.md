@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
 status: executing
-last_updated: "2026-05-06T12:23:30.372Z"
+last_updated: "2026-05-06T12:39:44.888Z"
 last_activity: 2026-05-06
 progress:
   total_phases: 12
-  completed_phases: 11
+  completed_phases: 12
   total_plans: 30
-  completed_plans: 29
-  percent: 97
+  completed_plans: 30
+  percent: 100
 ---
 
 # GSD State
@@ -31,7 +31,7 @@ Plan: 3 plans ready
 Status: Executing Phase 26
 Last activity: 2026-05-06
 
-Progress: [██████████] 97%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -62,6 +62,7 @@ Progress: [██████████] 97%
 | 26 | 3 | - | - |
 | Phase 26 P01 | 13min | 3 tasks | 12 files |
 | Phase 26 P02 | 20min | 3 tasks | 11 files |
+| Phase 26 P03 | 11min | 4 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -130,6 +131,9 @@ Recent decisions affecting current work:
 - [Phase 26]: [Phase 26 Plan 02]: MCP read/drill convert service ValueError into tool-level errors containing Action: pass a ref returned by search. — Keeps service errors domain-level while giving agents actionable MCP tool errors.
 - [Phase 26]: [Phase 26 Plan 02]: FastAPI Plan 02 scope is /search only; no read route exists and no new drill route was invented. — Route enumeration found no FastAPI read route and the plan forbade inventing a new drill route without an existing facade pattern.
 - [Phase 26]: [Phase 26 Plan 02]: Filesystem refs from live backfilled provenance may resolve from an existing file path when source_documents lacks the row. — Needed for search -> ref -> read to remain round-trippable on live backfilled provenance without a full reindex.
+- [Phase 26]: [Phase 26 Plan 03]: Public MCP/docs contract is source-ref-first: search hits are { ref, heading?, snippet, score } and agents use drill(ref) plus read(ref, start, end). — Regression docs and live smoke closure.
+- [Phase 26]: [Phase 26 Plan 03]: Optional graph/entity enrichment remains deferred from drill(ref) until a stable non-filesystem shape exists. — Avoids making filesystem graph internals part of the new public source contract.
+- [Phase 26]: [Phase 26 Plan 03]: The first post-restart smoke failure was a startup/pre-flight reachability race, not a contract regression. — The same restart completed pre-flight and the final explicit live smoke passed without a second restart.
 
 ### Pending Todos
 
