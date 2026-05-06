@@ -446,6 +446,7 @@ class SQLiteMetadataStore:
 
     def count_missing_source_provenance(self, strategy: str) -> int:
         """Count active chunks without source provenance for one strategy."""
+        self.ensure_chunk_source_provenance_table(strategy)
         chunk_table = f"chunks_{strategy}"
         provenance_table = f"chunk_source_provenance_{strategy}"
         row = self._conn.execute(
@@ -466,6 +467,7 @@ class SQLiteMetadataStore:
         chunk_file_paths_<strategy> is an internal filesystem/content-dedup
         holder table, not the public read/search identity; see Phase 26.
         """
+        self.ensure_chunk_source_provenance_table(strategy)
         chunk_table = f"chunks_{strategy}"
         holder_table = f"chunk_file_paths_{strategy}"
         provenance_table = f"chunk_source_provenance_{strategy}"
