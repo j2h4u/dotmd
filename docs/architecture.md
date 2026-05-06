@@ -23,7 +23,7 @@ flowchart TD
 
     subgraph SQLite["Unified SQLite index.db"]
         D --> META[chunk metadata]
-        D --> M2M[chunk_file_paths M2M]
+        D --> M2M[Internal filesystem holder paths]
         D --> FTS[FTS5 keyword index]
         FP --> TRACK[file and embed fingerprints]
         VEC --> VMETA[vector metadata]
@@ -51,7 +51,7 @@ flowchart TD
         KW --> RRF
         GD --> RRF
         RRF --> RR[Cross-encoder reranker]
-        RR --> OUT[Top-K search results]
+        RR --> OUT[Top-K source-ref-first search results]
     end
 
     VEC -.-> SEM
@@ -117,7 +117,9 @@ The schema is two-dimensional where needed: `(chunk_strategy, embedding_model)`.
    - graph-direct entity retrieval
 3. Reciprocal Rank Fusion combines candidate lists.
 4. Cross-encoder reranking rescores the fused candidate pool.
-5. Results return chunk IDs, snippets, fused scores, engine matches, heading paths, and all file paths attached to the content-addressed chunk.
+5. Results return public source refs, snippets, fused scores, engine matches,
+   and optional heading paths. Filesystem holder paths are internal provenance
+   mechanics, not the public read/search identity.
 
 ### Reranker Adapter Layer
 
@@ -171,8 +173,9 @@ MCP currently exposes:
 
 | Tool | Description |
 |------|-------------|
-| `search` | Query the indexed knowledgebase |
-| `read` | Read indexed file content by chunk range |
+| `search` | Query the indexed knowledgebase; each hit has `{ ref, heading?, snippet, score }` |
+| `read` | Read indexed source content by `read(ref, start, end)` |
+| `drill` | Inspect source metadata with `drill(ref)` |
 | `feedback` | Submit agent feedback |
 
 ## Operational Constraints
@@ -185,13 +188,25 @@ MCP currently exposes:
 ## Future Source Adapters
 
 Phase 25 introduced a filesystem Markdown compatibility shim as the first
-source-aware slice. Internally, filesystem documents now map to
-`namespace = filesystem`, `document_ref = str(Path(file_path).resolve())`,
-`ref = filesystem:<document_ref>`, `media_type = text/markdown`, and
-`parser_name = markdown`; source provenance is persisted additively in
-`source_documents` and `chunk_source_provenance_<strategy>`. Public
-filesystem behavior remains path-compatible: search results expose `file_paths`
-and MCP `read(file_path, start, end)` remains the read contract.
+source-aware slice. Phase 26 made the public contract source-ref-first:
+filesystem documents map to `namespace = filesystem`,
+`document_ref = str(Path(file_path).resolve())`, and
+`ref = filesystem:<document_ref>`. Public MCP search hits now expose
+`{ ref, heading?, snippet, score }`; agents call `drill(ref)` for source
+metadata and `read(ref, start, end)` for chunk text.
+
+`source_documents` and `chunk_source_provenance_<strategy>` provide the public
+ref provenance. `Chunk.file_paths` and `chunk_file_paths_<strategy>` remain
+internal filesystem/content-dedup holder mechanics for discovery, local file
+reads, delete detection, and content-addressed chunk sharing. They are not the
+public search/read identity.
+
+Current graph `File` nodes are filesystem-only legacy internals. Future
+Telegram dialogs/messages must not be modeled as `File`; new non-filesystem
+sources should use `SourceDocument` and `SourceUnit` semantics instead.
+
+No Phase 26 step required `dotmd index --force`. A full rebuild remains a
+three-day cost/risk item that requires an explicit user decision.
 
 The intended future direction is source/document/unit ingestion where
 filesystem files are only one source adapter. The design context and open

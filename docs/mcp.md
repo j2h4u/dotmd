@@ -44,6 +44,21 @@ uv run dotmd mcp --transport streamable-http --host 0.0.0.0 --port 8080
 
 The Docker entrypoint runs the same command. Health is available at `GET /health`.
 
+## Agent Workflow
+
+The public MCP workflow is source-ref-first:
+
+```text
+search(query) -> ref
+drill(ref) -> source metadata
+read(ref, start, end) -> chunk text
+```
+
+Search returns refs that are safe to pass back to `drill` and `read`. For
+filesystem documents, refs use `filesystem:<document_ref>`, where
+`document_ref = str(Path(file_path).resolve())`. The filesystem path is readable
+inside that ref, but it is not exposed as a separate public search identity.
+
 ## Tools
 
 ### `search`
@@ -55,19 +70,43 @@ Search the indexed markdown knowledgebase.
 | `query` | string | required | Natural-language search query |
 | `top_k` | integer | `10` | Maximum results to return, 1-100 |
 
-Returns ranked hits with source `file_paths`, cleaned snippet text, relevance score, and optional heading.
+Returns ranked hits with this public shape:
+
+```text
+{ ref, heading?, snippet, score }
+```
+
+`heading` is optional because not every source or chunk has markdown headings.
+Do not look for public `file_path` or `file_paths` fields in search results.
 
 ### `read`
 
-Read chunks from a file returned by `search`.
+Read chunks from a source ref returned by `search`.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `file_path` | string | required | Absolute file path from a search result |
+| `ref` | string | required | Source ref from a search result |
 | `start` | integer | `0` | First chunk index to return |
 | `end` | integer or null | `null` | Exclusive end chunk index; omitted means metadata only |
 
-Use `read(file_path)` first to inspect `frontmatter` and `total_chunks`, then request chunk ranges such as `read(file_path, 0, 20)`.
+Use `read(ref)` first to inspect `frontmatter` and `total_chunks`, then request
+chunk ranges such as `read(ref, 0, 20)`.
+
+Invalid refs are reported as tool-level errors with an actionable hint:
+`Action: pass a ref returned by search.`
+
+### `drill`
+
+Inspect source metadata for a ref returned by `search`.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `ref` | string | required | Source ref from a search result |
+
+Use `drill(ref)` when an agent needs frontmatter, source metadata, document
+type, parser name, source URI, or chunk count before deciding which ranges to
+read. `drill` is intentionally separate from `read`; `read` stays focused on
+content chunks.
 
 ### `feedback`
 

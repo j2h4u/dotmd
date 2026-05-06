@@ -114,7 +114,7 @@ Quality labels live in JSONL. Each row has:
 - `relevant`: chunk labels that should rank highly
 - `maybe`: optional acceptable-but-weaker labels
 
-Labels can use direct chunk ids or `file_path + contains` selectors. Direct
+Labels can use direct chunk ids or historical path-plus-text selectors. Direct
 chunk ids are preferred for canonical reruns because they are unambiguous.
 
 The 2026-05-02 label set contains 30 Russian/mixed queries. It was reviewed via

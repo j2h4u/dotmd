@@ -72,16 +72,17 @@ can decide whether to call `read`?
 
 ### Power User: Agent Client
 
-**Assessment:** Agents need stable tool contracts more than rich UI. The shift
-from `read(file_path)` to `read(ref)` is necessary, but migration must be
-careful because current agents already know file-path semantics.
+**Assessment:** Agents need stable tool contracts more than rich UI. Phase 26
+completed the shift to `read(ref)`, and future source work should preserve that
+single search-to-read key.
 
-**Risks:** If search returns mixed `file_path`, `document_ref`, `chunk_ref`, and
-`unit_ref` without a clear rule, agents will call the wrong read path.
+**Risks:** If search returns mixed filesystem-path, document, chunk, and unit
+identities without a clear rule, agents will call the wrong read path.
 
-**Recommendation:** Introduce a single canonical `ref` field in search results
-before adding multiple source types. Keep `file_path` as compatibility metadata
-for filesystem hits, not as the contract center.
+**Recommendation:** Keep a single canonical `ref` field in search results
+before adding multiple source types. Filesystem paths may remain internal
+compatibility metadata for local reads and holder mechanics, not the contract
+center.
 
 **Open question:** Should MCP expose a new `read_ref` tool first, or evolve the
 existing `read` schema?
@@ -304,7 +305,7 @@ the first validation source?
 | Metadata shape | Metadata Architect: explicit source/document/asset/unit/chunk levels | Kaizen: do not design columns for every future source | Normalize only common fields now; keep source-specific data in `metadata_json`. |
 | Source unit storage | Data: store source units for reproducible chunking | Security: storing raw units increases privacy risk | Start with fingerprints and chunk provenance; add durable raw source units only if read/rechunk requirements demand it. |
 | Entity catalogs | Graph: contacts/users should be first-class source output | Retrieval/Kaizen: do not turn every contact into searchable corpus text | Model entity catalogs separately from documents; use them for graph, aliases, and display metadata, not default embeddings. |
-| `read` migration | Agent user: add clear `read_ref` to avoid breaking current agents | Product: one tool is simpler for users | Prefer one canonical `read(ref=...)` eventually, but introduce compatibility carefully. |
+| `read` migration | Agent user: add clear ref-first guidance | Product: one tool is simpler for users | Phase 26 settled on one canonical `read(ref=...)` tool. |
 | Native source search | Integration: native search can help candidate generation | Retrieval: global ranking should stay centralized | Native search may be optional candidate provider, never the primary architecture. |
 | Full mirror support | Data/Ops: mirrors improve reliability | Kaizen/Security: mirrors increase scope and data exposure | Treat mirrors as adapter capability, not baseline requirement. |
 
@@ -520,7 +521,8 @@ with one non-filesystem adapter.
   exporter, or cloud API client.
 - Add a "Testing Strategy" section with fake source adapters and delete/edit
   cases.
-- Add a migration note for current `read(file_path)` clients.
+- Keep historical migration notes explicit: the old path-shaped read contract
+  is superseded by `read(ref)`.
 
 ## Risk Register
 
@@ -554,7 +556,7 @@ Deliver:
   only the markdown parser exists initially;
 - normalized markdown/frontmatter document metadata: `title`, `kind`, `tags`,
   and raw `metadata_json`;
-- compatibility with current `read(file_path)`;
+- compatibility with current filesystem reads through `read(ref)`;
 - only the tests needed to prove old filesystem behavior still works.
 
 Do not deliver:

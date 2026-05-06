@@ -8,15 +8,15 @@ examples discussed before a future planning phase.
 An expert-panel review of this context lives in
 [Source Adapter Architecture Expert Panel Review](source-adapter-architecture-panel-review.md).
 
-## Phase 25 Delivered State
+## Phase 26 Delivered State
 
 Phase 25 shipped the first internal source-aware slice as a filesystem Markdown
-compatibility shim. Current users still index Markdown files from the local
-filesystem, search results still expose `file_paths`, and MCP
-`read(file_path, start, end)` remains the public compatibility contract for
-filesystem hits. The change is internal: filesystem Markdown now enters the
-pipeline through `SourceDocument` identity and chunk provenance before being
-bridged back to the existing file-path surfaces.
+compatibility shim. Phase 26 removed the public path-first compatibility layer:
+current users still index Markdown files from the local filesystem, but public
+search results now expose `ref` and MCP reads use `read(ref, start, end)` for
+filesystem hits. Filesystem Markdown enters the pipeline through
+`SourceDocument` identity and chunk provenance before any internal filesystem
+holder path is used for local reads or content-dedup mechanics.
 
 Canonical filesystem Markdown mapping:
 
@@ -28,13 +28,14 @@ media_type = text/markdown
 parser_name = markdown
 ```
 
-`SourceDocument.file_path` is a compatibility field for filesystem sources.
-When `namespace = filesystem` and `file_path` is present, it must resolve to
-`document_ref`; `file_path` is not the general source identity for future
-sources. Frontmatter fields that dotMD already depends on remain document
-metadata: `title`, `kind`, `tags`, and `participants` live on the source
-document metadata layer and continue to feed chunking, metadata embeddings,
-FTS metadata, and graph extraction.
+`SourceDocument.file_path` is an internal compatibility field for filesystem
+sources. When `namespace = filesystem` and `file_path` is present, it must
+resolve to `document_ref`; `file_path` is not the general source identity for
+future sources and is not the public search/read contract. Frontmatter fields
+that dotMD already depends on remain document metadata: `title`, `kind`,
+`tags`, and `participants` live on the source document metadata layer and
+continue to feed chunking, metadata embeddings, FTS metadata, and graph
+extraction.
 
 The Phase 25 storage split is intentionally additive:
 
@@ -42,8 +43,10 @@ The Phase 25 storage split is intentionally additive:
   `(namespace, document_ref)`.
 - `chunk_source_provenance_<strategy>` is strategy-scoped because chunk IDs,
   chunk strategy, and source-unit refs belong to a chunking strategy.
-- `chunk_file_paths_<strategy>` remains the authoritative compatibility table
-  for filesystem search hydration and MCP `read(file_path, start, end)`.
+- `chunk_file_paths_<strategy>` remains an internal filesystem/content-dedup
+  holder table for filesystem discovery, local file reads, delete detection,
+  and content-addressed chunk sharing. It is not the public search/read
+  identity.
 
 Filesystem Markdown chunks currently carry empty source-unit refs because Phase
 25 did not add durable parser-emitted units. This keeps the shim minimal while
@@ -51,11 +54,20 @@ leaving `source_unit_refs[]` in the provenance contract for later source
 slices.
 
 Deferred scope remains explicit: Telegram read-only indexing, the
-`mcp-telegram` export API, source assets, entity catalogs, out-of-process
-adapter transports, TTL retention policy, and second-source validation are not
-implemented by Phase 25. PDF/DOCX/HTML parser support is also future work; it
-will still be `namespace = filesystem` when it arrives, but with different
-`media_type`, `parser_name`, parser output, and chunking behavior.
+`mcp-telegram` export API, source-unit emission for non-filesystem sources,
+source assets, entity catalogs, out-of-process adapter transports, TTL
+retention policy, and second-source validation are not implemented by Phase 26.
+PDF/DOCX/HTML parser support is also future work; it will still be
+`namespace = filesystem` when it arrives, but with different `media_type`,
+`parser_name`, parser output, and chunking behavior.
+
+Current graph `File` nodes are filesystem-only legacy internals. Telegram
+dialogs/messages must not be modeled as File; future Telegram work should use
+`SourceDocument`/`SourceUnit` semantics rather than fitting chats into
+filesystem nodes or path-shaped APIs.
+
+No Phase 26 step requires `dotmd index --force`; full rebuild remains a
+three-day cost/risk item requiring an explicit user decision.
 
 ## Problem
 
@@ -897,29 +909,35 @@ metadata so the user can see why a Telegram chat, transcript, or note matched.
 
 ## Read Semantics
 
-The current MCP `read(file_path, start, end)` API is file-shaped. Future source
-support needs a more general reference model:
+The current MCP API is source-ref-first. Agents should follow:
 
 ```text
-read(ref=...)
-read(unit_ref=..., before=..., after=...)
+search(query) -> ref
+drill(ref) -> source metadata
+read(ref, start, end) -> chunk text
 ```
 
 Search results should return:
 
 ```text
-namespace
-document_ref
-chunk_ref
-source_unit_refs
-title
-source_uri
+ref
+heading?
 snippet
-metadata
+score
 ```
 
-This lets clients read context from a Telegram message, Notion block, Google Doc
-paragraph, Perplexity turn, or filesystem file through one surface.
+For filesystem hits, `ref` is `filesystem:<document_ref>`, with
+`document_ref = str(Path(file_path).resolve())`. This lets clients read context
+from a Telegram message, Notion block, Google Doc paragraph, Perplexity turn,
+or filesystem document through one surface once those sources exist.
+
+`drill(ref)` is the metadata follow-up. It returns source metadata such as
+frontmatter, title, source URI, document type, parser name, and chunk count.
+Optional graph/entity enrichment is intentionally deferred until that shape is
+stable for non-filesystem sources.
+
+`read(ref)` uses the active configured chunk strategy only. Phase 26 does not
+scan alternate `chunk_file_paths_<strategy>` holder tables per request.
 
 ## Non-Goals and Rejected Directions
 
@@ -956,8 +974,8 @@ tight coupling. Prefer a stable export contract owned by the source service.
 - Should source adapters run in-process, as local daemon clients, or both?
 - What is the first non-filesystem adapter to implement: Telegram or
   Perplexity?
-- How should old `file_path`-based MCP `read` remain compatible during the
-  transition?
+- Which migration note, if any, should be kept for historical clients that used
+  the old Phase 25 path-shaped read contract?
 - How should deletes be represented in `export_changes`?
 - Should dotMD store source-unit raw text permanently, or only the produced
   chunks plus fingerprints?
@@ -1012,7 +1030,8 @@ Deliver:
 - document metadata fields for the current markdown/frontmatter case:
   `media_type=text/markdown`, `parser_name=markdown`, `document_type/kind`,
   `title`, `tags`, and raw `metadata_json`;
-- compatibility with current filesystem indexing and `read(file_path)`;
+- compatibility with current filesystem indexing through `search(query) ->
+  ref`, `drill(ref)`, and `read(ref, start, end)`;
 - a filesystem adapter shim that preserves current behavior;
 - no Telegram integration yet;
 - no entity resolution implementation;
@@ -1035,7 +1054,7 @@ Deliver:
 - conservative chunking: message-window chunks with message ID provenance;
 - search results that show source label, dialog title, date, sender, and
   message range;
-- `read(ref)` or compatibility read path for Telegram context windows;
+- `read(ref)` for Telegram context windows;
 - delete handling for tombstoned messages if available in `sync.db`.
 
 Do not deliver:
