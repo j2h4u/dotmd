@@ -77,7 +77,7 @@ def _format_rate(per_hour: float, unit: str) -> str:
 
 
 class _MarkdownEventHandler(PatternMatchingEventHandler):
-    """Watches for new/modified .md files and enqueues them."""
+    """Watches for markdown file changes and enqueues them."""
 
     def __init__(
         self,
@@ -99,6 +99,22 @@ class _MarkdownEventHandler(PatternMatchingEventHandler):
 
     def on_deleted(self, event):
         self._enqueue(event.src_path)
+
+    def on_moved(self, event):
+        if getattr(event, "is_directory", False):
+            return
+
+        src_path = getattr(event, "src_path", "")
+        dest_path = getattr(event, "dest_path", "")
+
+        if self._is_markdown_path(src_path):
+            self._enqueue(src_path)
+        if self._is_markdown_path(dest_path):
+            self._enqueue(dest_path)
+
+    @staticmethod
+    def _is_markdown_path(path_str: str) -> bool:
+        return Path(path_str).suffix.lower() == ".md"
 
     def _enqueue(self, path_str: str) -> None:
         now = time.monotonic()
