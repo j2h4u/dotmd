@@ -159,10 +159,12 @@ from Phase 25: replace path-first public contracts like `SearchResult.file_paths
 and MCP `read(file_path)` with a source-ref-first read/search contract before
 implementing Telegram read-only. Compatibility should be kept only where it
 serves internal filesystem discovery, local file reads, display, delete
-detection, or content-dedup holder semantics. Planning must avoid making full
-reindex the default path: no `dotmd index --force`, full TEI re-embedding,
-metadata-vector recomputation, or graph rebuild unless a plan proves it is
-unavoidable and asks for an explicit user decision. Existing Phase 25
+detection, or content-dedup holder semantics. Every dotMD refactor, new feature,
+and bugfix should first be evaluated through the operational question: will
+this require a full reindex or not? Planning should avoid full reindex whenever
+possible: no `dotmd index --force`, full TEI re-embedding, metadata-vector
+recomputation, or graph rebuild unless the plan proves there is no practical
+incremental path and asks for an explicit user decision. Existing Phase 25
 `source_documents` and `chunk_source_provenance_<strategy>` rows should be used
 for source-ref migration wherever possible.
 

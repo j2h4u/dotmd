@@ -625,20 +625,23 @@ contract change if it simplifies the next source-adapter phases.
 - Run a live MCP smoke against the local container after the breaking contract
   change, because our own agents are the real consumer.
 
-**Migration constraint: avoid full reindex by default**
+**Migration constraint: avoid full reindex whenever possible**
+- Every refactor, new feature, and bugfix in dotMD should first be evaluated
+  through one operational question: will this require a full reindex or not?
 - The phase should be planned as an API/schema-contract migration over the
-  existing index, not as a rebuild of all chunks, vectors, metadata embeddings,
-  FTS rows, or graph state.
-- Do not require `dotmd index --force`, full TEI re-embedding, full metadata
-  vector recomputation, or full graph rebuild as the normal success path.
+  existing index wherever possible, not as a rebuild of all chunks, vectors,
+  metadata embeddings, FTS rows, or graph state.
+- Avoid requiring `dotmd index --force`, full TEI re-embedding, full metadata
+  vector recomputation, or full graph rebuild unless the plan proves there is
+  no practical incremental path.
 - Prefer deriving source refs from already persisted Phase 25 data:
   `source_documents`, `chunk_source_provenance_<strategy>`, and existing
   filesystem document refs. Backfill only missing lightweight rows if needed.
 - Any unavoidable data migration must be idempotent, resumable, and scoped to
   metadata/reference rows, with a dry-run/count report before writes.
-- A plan that proposes full reindex must treat it as a blocker requiring an
-  explicit user decision, because current full rebuild cost is about three
-  days.
+- A plan that proposes full reindex must treat it as a major cost/risk item
+  requiring an explicit user decision, because current full rebuild cost is
+  about three days.
 
 **Out of scope:**
 - Telegram adapter implementation.
