@@ -48,7 +48,7 @@ class TestFilePathsIsJsonArray:
         mcp = _import_mcp()
         stub_result = SimpleNamespace(
             chunk_id="a" * 64,
-            file_paths=[Path("/path/to/file.md"), Path("/other/file.md")],
+            file_paths=[Path("/other/file.md"), Path("/path/to/file.md")],
             heading_path="# Test",
             snippet="test snippet",
             fused_score=0.9,

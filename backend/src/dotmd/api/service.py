@@ -12,8 +12,9 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from dotmd.core.config import Settings, load_settings
-from dotmd.core.models import IndexStats, SearchMode, SearchResult
+from dotmd.core.models import IndexStats, SearchMode, SearchResult, SourceDocument
 from dotmd.ingestion.pipeline import IndexingPipeline
+from dotmd.ingestion.reader import parse_frontmatter, read_file
 from dotmd.ingestion.trickle import TrickleIndexer
 from dotmd.search.fusion import build_search_results, fuse_results
 from dotmd.search.graph_direct import GraphDirectEngine
@@ -26,10 +27,20 @@ logger = logging.getLogger(__name__)
 
 
 class ReadPayload(TypedDict):
-    file_path: str
+    ref: str
     total_chunks: int
     frontmatter: dict[str, Any]
     chunks: list[dict[str, Any]]  # each: {index: int, heading_hierarchy: list[str], text: str}
+
+
+class DrillPayload(TypedDict):
+    ref: str
+    title: str
+    source_uri: str
+    document_type: str
+    parser_name: str
+    frontmatter: dict[str, Any]
+    total_chunks: int
 
 
 class RerankCandidatePool(TypedDict):
@@ -635,37 +646,101 @@ class DotMDService:
             "pool_size": pool_size,
         }
 
-    def read(self, file_path: str, start: int = 0, end: int | None = None) -> ReadPayload:
-        """Return frontmatter and optionally a chunk range for a known file.
+    def _parse_ref(self, ref: str) -> tuple[str, str]:
+        """Split a public source ref into namespace and document_ref."""
+        namespace, separator, document_ref = ref.partition(":")
+        if not separator or not namespace or not document_ref:
+            raise ValueError(f"Unknown source ref: {ref}")
+        return namespace, document_ref
+
+    def _resolve_source_document(self, ref: str) -> SourceDocument:
+        """Resolve a public ref to its source document row."""
+        namespace, document_ref = self._parse_ref(ref)
+        document = self._pipeline.metadata_store.get_source_document(
+            namespace,
+            document_ref,
+        )
+        if document is None:
+            raise ValueError(f"Unknown source ref: {ref}")
+        return document
+
+    def _filesystem_path_for_source(
+        self,
+        document: SourceDocument,
+        ref: str,
+    ) -> str:
+        if document.namespace != "filesystem":
+            raise ValueError(f"Unsupported source namespace: {document.namespace}")
+        if document.file_path is None:
+            raise ValueError(f"Unknown source ref: {ref}")
+        path = document.file_path
+        if not path.exists():
+            raise ValueError(f"Unknown source ref: {ref}")
+        return str(path.resolve())
+
+    def _read_frontmatter(self, path: Path) -> dict[str, Any]:
+        try:
+            frontmatter, _ = parse_frontmatter(read_file(path))
+        except Exception:
+            logger.warning("frontmatter parse failed: %s", path, exc_info=True)
+            return {}
+        return frontmatter
+
+    def read(self, ref: str, start: int = 0, end: int | None = None) -> ReadPayload:
+        """Return frontmatter and optionally a chunk range for a source ref.
 
         When end is None, returns only frontmatter and total_chunks (metadata
         mode — cheap, useful for planning a subsequent ranged call).
         When end is provided, also returns chunks[start:end], capped at 50.
         """
-        from dotmd.ingestion.reader import parse_frontmatter, read_file
-
+        document = self._resolve_source_document(ref)
+        file_path = self._filesystem_path_for_source(document, ref)
         path = Path(file_path)
-        try:
-            frontmatter, _ = parse_frontmatter(read_file(path))
-        except Exception:
-            frontmatter = {}
+        frontmatter = self._read_frontmatter(path)
 
+        # Phase 26 read(ref) is active-strategy-only; future source adapters may add explicit strategy discovery.
+        strategy = self._settings.chunk_strategy
         total_chunks = self._pipeline.metadata_store.get_chunk_count_for_file(
-            self._settings.chunk_strategy, file_path
+            strategy,
+            file_path,
         )
+        if total_chunks == 0:
+            raise ValueError("No chunks for source ref in active strategy")
 
         chunks: list[dict] = []
         if end is not None:
             end = min(end, start + 50)
             chunks = self._pipeline.metadata_store.get_chunks_for_file_range(
-                self._settings.chunk_strategy, file_path, start, end
+                strategy,
+                file_path,
+                start,
+                end,
             )
 
         return {
-            "file_path": file_path,
+            "ref": document.ref,
             "total_chunks": total_chunks,
             "frontmatter": frontmatter,
             "chunks": chunks,
+        }
+
+    def drill(self, ref: str) -> DrillPayload:
+        """Return structured source metadata for a source ref."""
+        document = self._resolve_source_document(ref)
+        file_path = self._filesystem_path_for_source(document, ref)
+        frontmatter = self._read_frontmatter(Path(file_path))
+        total_chunks = self._pipeline.metadata_store.get_chunk_count_for_file(
+            self._settings.chunk_strategy,
+            file_path,
+        )
+        return {
+            "ref": document.ref,
+            "title": document.title,
+            "source_uri": document.source_uri,
+            "document_type": document.document_type,
+            "parser_name": document.parser_name,
+            "frontmatter": frontmatter,
+            "total_chunks": total_chunks,
         }
 
     def status(self, live_diff: bool = True) -> IndexStats:
