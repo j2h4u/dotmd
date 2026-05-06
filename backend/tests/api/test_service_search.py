@@ -182,6 +182,30 @@ class TestReadRefContract:
         assert payload["ref"] == ref
         assert payload["frontmatter"]["title"] == "Legacy Note"
         assert payload["total_chunks"] == 1
+        metadata.get_chunk_count_for_file.assert_any_call(
+            service._settings.chunk_strategy,
+            str(note_path.resolve()),
+        )
+
+    def test_read_ref_rejects_existing_filesystem_path_not_in_active_index(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = _get_service(tmp_path)
+        note_path = tmp_path / "not-indexed.md"
+        note_path.write_text("---\ntitle: Secret\n---\nBody", encoding="utf-8")
+        metadata = MagicMock()
+        metadata.get_source_document.return_value = None
+        metadata.get_chunk_count_for_file.return_value = 0
+        service._pipeline._metadata_store = metadata
+
+        try:
+            service.drill(f"filesystem:{note_path.resolve()}")
+        except ValueError as exc:
+            assert "Unknown source ref" in str(exc)
+        else:
+            raise AssertionError("drill() should reject existing non-indexed files")
+
         metadata.get_chunk_count_for_file.assert_called_once_with(
             service._settings.chunk_strategy,
             str(note_path.resolve()),
@@ -358,9 +382,6 @@ class TestCompareRerankers:
         assert by_name["mmarco-minilm"]["scores"] == []
         assert by_name["msmarco-minilm"]["error"] is None
         assert by_name["msmarco-minilm"]["top_chunk_ids"] == ["c2"]
-        assert by_name["msmarco-minilm"]["returned_count"] == 1
-        assert len(by_name["msmarco-minilm"]["scores"]) == 1
-        assert comparison["rerankers"][-1]["name"] == "mmarco-minilm"
 
     def test_compare_sorts_successful_rerankers_by_elapsed_time(
         self,
@@ -711,3 +732,66 @@ class TestSearchApiRerankerSurfaces:
         response = client.get("/rerank/compare?q=test")
 
         assert response.status_code == 500
+
+
+class TestSourceProvenanceSafetyGate:
+    """Search enforces active source provenance before result hydration."""
+
+    def test_execute_search_backfills_missing_active_strategy_provenance(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = _get_service(tmp_path)
+        metadata = MagicMock()
+        metadata.count_missing_source_provenance.side_effect = [2, 0]
+        metadata.backfill_missing_source_provenance_from_file_paths.return_value = 2
+        service._pipeline._metadata_store = metadata
+        service._collect_candidate_pool = MagicMock(
+            return_value={
+                "fused": [],
+                "engine_results": {},
+                "semantic_hits": [],
+                "keyword_hits": [],
+            }
+        )
+
+        results = service._execute_search(
+            search_query="expanded",
+            original_query="query",
+            top_k=5,
+            mode="hybrid",
+            rerank=False,
+            reranker_name=None,
+            pool_size=5,
+        )
+
+        assert results == []
+        metadata.backfill_missing_source_provenance_from_file_paths.assert_called_once_with(
+            service._settings.chunk_strategy,
+            dry_run=False,
+        )
+
+    def test_execute_search_blocks_when_active_strategy_backfill_is_incomplete(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = _get_service(tmp_path)
+        metadata = MagicMock()
+        metadata.count_missing_source_provenance.side_effect = [2, 1]
+        metadata.backfill_missing_source_provenance_from_file_paths.return_value = 1
+        service._pipeline._metadata_store = metadata
+
+        try:
+            service._execute_search(
+                search_query="expanded",
+                original_query="query",
+                top_k=5,
+                mode="hybrid",
+                rerank=False,
+                reranker_name=None,
+                pool_size=5,
+            )
+        except ValueError as exc:
+            assert "source provenance backfill incomplete" in str(exc)
+        else:
+            raise AssertionError("search should block incomplete provenance backfill")

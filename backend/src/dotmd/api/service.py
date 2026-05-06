@@ -148,6 +148,7 @@ class DotMDService:
 
         # Background trickle indexer
         self._trickle_indexer = TrickleIndexer(self._settings, self._pipeline)
+        self._source_provenance_ready_strategies: set[str] = set()
 
     # ------------------------------------------------------------------
     # Public API
@@ -342,8 +343,9 @@ class DotMDService:
         original_query:
             The original (unexpanded) query used for snippet extraction.
         top_k, mode, rerank, reranker_name, pool_size:
-            Same as :meth:`search`.
+        Same as :meth:`search`.
         """
+        self._ensure_source_provenance_ready()
         pool = self._collect_candidate_pool(
             search_query=search_query,
             original_query=original_query,
@@ -647,6 +649,45 @@ class DotMDService:
             "pool_size": pool_size,
         }
 
+    def _ensure_source_provenance_ready(self) -> None:
+        """Ensure the active strategy can hydrate public source refs before search."""
+        strategy = self._settings.chunk_strategy
+        if strategy in self._source_provenance_ready_strategies:
+            return
+
+        store = self._pipeline.metadata_store
+        try:
+            missing = store.count_missing_source_provenance(strategy)
+        except AttributeError:
+            logger.debug("metadata store has no source provenance safety helpers")
+            self._source_provenance_ready_strategies.add(strategy)
+            return
+
+        if not isinstance(missing, int):
+            logger.debug("metadata store returned non-integer provenance count: %r", missing)
+            self._source_provenance_ready_strategies.add(strategy)
+            return
+
+        if missing > 0:
+            inserted = store.backfill_missing_source_provenance_from_file_paths(
+                strategy,
+                dry_run=False,
+            )
+            remaining = store.count_missing_source_provenance(strategy)
+            if remaining > 0:
+                raise ValueError(
+                    "source provenance backfill incomplete: "
+                    f"missing={missing} inserted={inserted} remaining={remaining}"
+                )
+            logger.info(
+                "source provenance backfilled: strategy=%s missing=%d inserted=%d",
+                strategy,
+                missing,
+                inserted,
+            )
+
+        self._source_provenance_ready_strategies.add(strategy)
+
     def _parse_ref(self, ref: str) -> tuple[str, str]:
         """Split a public source ref into namespace and document_ref."""
         namespace, separator, document_ref = ref.partition(":")
@@ -664,24 +705,30 @@ class DotMDService:
         if document is not None:
             return document
         if namespace == "filesystem":
-            path = Path(document_ref)
-            if path.exists():
-                resolved = path.resolve()
-                return SourceDocument(
-                    namespace="filesystem",
-                    document_ref=str(resolved),
-                    ref=f"filesystem:{resolved}",
-                    source_uri=resolved.as_uri(),
-                    file_path=resolved,
-                    media_type="text/markdown",
-                    parser_name="markdown",
-                    document_type="document",
-                    title=resolved.stem,
-                    updated_at=datetime.fromtimestamp(resolved.stat().st_mtime),
-                    content_fingerprint="",
-                    metadata_fingerprint="",
-                    metadata_json={},
-                )
+            resolved = Path(document_ref).resolve()
+            active_chunk_count = self._pipeline.metadata_store.get_chunk_count_for_file(
+                self._settings.chunk_strategy,
+                str(resolved),
+            )
+            if not isinstance(active_chunk_count, int) or active_chunk_count <= 0:
+                raise ValueError(f"Unknown source ref: {ref}")
+            if not resolved.exists():
+                raise ValueError(f"Unknown source ref: {ref}")
+            return SourceDocument(
+                namespace="filesystem",
+                document_ref=str(resolved),
+                ref=f"filesystem:{resolved}",
+                source_uri=resolved.as_uri(),
+                file_path=resolved,
+                media_type="text/markdown",
+                parser_name="markdown",
+                document_type="document",
+                title=resolved.stem,
+                updated_at=datetime.fromtimestamp(resolved.stat().st_mtime),
+                content_fingerprint="",
+                metadata_fingerprint="",
+                metadata_json={},
+            )
         raise ValueError(f"Unknown source ref: {ref}")
 
     def _filesystem_path_for_source(
