@@ -855,7 +855,7 @@ delete detection, or content-dedup holder semantics.
 **Requirements**: TBD
 **Depends on:** Phase 25
 **Backlog source:** 999.24
-**Plans:** 0 plans
+**Plans:** 3 plans
 
 Phase context:
 - Phase 25 shipped `SourceDocument`, `ChunkProvenance`, `source_documents`, and
@@ -890,7 +890,14 @@ Phase boundary:
   filesystem source operation.
 
 Plans:
-- [ ] TBD (run /gsd-discuss-phase 26 before planning)
+**Wave 1**
+- [ ] 26-01-core-ref-model-and-service-resolution-PLAN.md — Core ref model and service resolution
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 26-02-mcp-api-cli-ref-contract-PLAN.md — MCP/API/CLI ref contract
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 26-03-regression-docs-and-live-smoke-PLAN.md — Regression, documentation, and live smoke
 
 ---
 
