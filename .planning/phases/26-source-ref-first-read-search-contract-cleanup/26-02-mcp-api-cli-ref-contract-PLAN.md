@@ -96,6 +96,7 @@ Concrete target state:
 - Update `backend/tests/mcp/test_search_tool.py` to assert:
   - search output schema has `ref` and no `file_paths`;
   - search tool output has `ref`;
+  - search tool output has no `file_paths` and no `file_path`;
   - read input uses `ref`;
   - read output has `ref` and no `file_path`;
   - drill tool exists and returns metadata for `ref`.
@@ -107,6 +108,8 @@ Concrete target state:
 - `backend/src/dotmd/mcp_server.py` contains `search(query) -> ref`.
 - `backend/src/dotmd/mcp_server.py` does not contain `Only pass file_paths values from search results`.
 - `backend/tests/mcp/test_search_tool.py` contains `payload["ref"]`.
+- `backend/tests/mcp/test_search_tool.py` contains `assert "file_paths" not in payload`.
+- `backend/tests/mcp/test_search_tool.py` contains `assert "file_path" not in payload`.
 - `backend/tests/mcp/test_search_tool.py` contains `"drill"`.
 - `cd backend && uv run pytest tests/mcp/test_search_tool.py -q` exits 0.
 </acceptance_criteria>
@@ -130,9 +133,17 @@ Concrete target state:
 Update non-MCP public surfaces so they do not preserve path-first identity.
 
 Concrete target state:
-- Inspect `backend/src/dotmd/api/server.py` for search/read routes. If routes
-  exist, their response/input shape must use `ref`, not `file_path` or
-  `file_paths`.
+- Enumerate `backend/src/dotmd/api/server.py` route decorators with:
+  `rg -n "@app\\.(get|post|put|delete)|@router\\.(get|post|put|delete)" backend/src/dotmd/api/server.py`.
+- Current Phase 26 API scope is:
+  - search route, if present: response items must use `ref`, not `file_path` or
+    `file_paths`;
+  - read route, if present: request parameter/body key must be `ref`, not
+    `file_path`;
+  - no new FastAPI route should be invented solely for `drill` unless
+    `api/server.py` already exposes a matching service facade pattern.
+- If no FastAPI read/search routes exist, record that finding in the Plan 02
+  implementation summary and leave FastAPI unchanged.
 - CLI `dotmd search` prints the ref on the result header line:
   `[{i}] {r.ref}`.
 - CLI search no longer formats `(+N more: ...)` holder paths in public output.
@@ -148,6 +159,7 @@ Concrete target state:
 - `backend/src/dotmd/cli.py` does not contain `(+{len(paths) - 1} more`.
 - `backend/tests/cli/test_search_output.py` contains `ref=`.
 - `backend/tests/cli/test_search_output.py` does not construct `SearchResult(file_paths=`.
+- Plan 02 implementation summary contains the output or finding from `rg -n "@app\\.(get|post|put|delete)|@router\\.(get|post|put|delete)" backend/src/dotmd/api/server.py`.
 - `rg "file_paths|file_path" backend/src/dotmd/api/server.py backend/src/dotmd/cli.py backend/tests/cli/test_search_output.py` shows no public search/read contract uses, except comments explicitly saying internal holder paths are not public.
 - `cd backend && uv run pytest tests/cli/test_search_output.py -q` exits 0.
 </acceptance_criteria>
@@ -182,15 +194,23 @@ Concrete target state:
   - structured result is a dict;
   - keys include `ref`, `frontmatter`, and `total_chunks`;
   - returned `ref` equals the input ref.
-- Remove the nonexistent path smoke or rewrite it to invalid ref semantics:
-  `read(ref="filesystem:/nonexistent/file.md")` should not be a protocol-level
-  error, but may return a tool error if the service reports an unknown source
-  ref. Pin whichever behavior implementation chooses.
+- Invalid/nonexistent ref smoke is deterministic:
+  - `read(ref="filesystem:/nonexistent/file.md")` returns a tool-level error,
+    not a JSON-RPC/protocol-level error;
+  - the tool-level error text contains `Unknown source ref`;
+  - the tool-level error text contains
+    `Action: pass a ref returned by search.`;
+  - malformed `read(ref="not-a-ref")` follows the same tool-level error
+    contract and contains `Unknown source ref`.
 </action>
 <acceptance_criteria>
 - `backend/tests/e2e/test_mcp_smoke.py` contains `"drill"`.
 - `backend/tests/e2e/test_mcp_smoke.py` contains `REQUIRED_SEARCH_RESULT_FIELDS: frozenset[str] = frozenset({"ref", "snippet", "score"})`.
 - `backend/tests/e2e/test_mcp_smoke.py` contains `{"ref": ref`.
+- `backend/tests/e2e/test_mcp_smoke.py` contains `filesystem:/nonexistent/file.md`.
+- `backend/tests/e2e/test_mcp_smoke.py` contains `not-a-ref`.
+- `backend/tests/e2e/test_mcp_smoke.py` contains `Unknown source ref`.
+- `backend/tests/e2e/test_mcp_smoke.py` contains `Action: pass a ref returned by search.`
 - `backend/tests/e2e/test_mcp_smoke.py` does not contain `results[0]["file_paths"]`.
 - `backend/tests/e2e/test_mcp_smoke.py` does not contain `"file_path": file_path`.
 - `cd backend && uv run pytest tests/e2e/test_mcp_smoke.py -q -p no:cacheprovider` exits 0 when run against a live container/test harness.

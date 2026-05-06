@@ -81,6 +81,7 @@ Required commands:
 
 ```bash
 cd backend && uv run pytest tests/api/test_search_result_shape.py tests/api/test_service_search.py tests/test_fusion.py tests/mcp/test_search_tool.py tests/cli/test_search_output.py -q
+cd backend && uv run pytest -q --ignore=tests/e2e
 just typecheck
 ```
 
@@ -89,12 +90,13 @@ ref-first contract unless it is explicitly testing internal `Chunk.file_paths`
 or `chunk_file_paths_<strategy>` holder behavior.
 
 Add `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md`
-with the command outputs and `Self-Check: PASSED` only after focused tests and
-typecheck pass.
+with the command outputs and `Self-Check: PASSED` only after focused tests,
+non-e2e full suite, and typecheck pass.
 </action>
 <acceptance_criteria>
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `tests/api/test_search_result_shape.py`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `tests/mcp/test_search_tool.py`.
+- `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `uv run pytest -q --ignore=tests/e2e`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `just typecheck`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `Self-Check: PASSED` if all required commands pass.
 </acceptance_criteria>
@@ -137,12 +139,15 @@ Required doc content:
 Run doc grep checks:
 
 ```bash
-rg "read\\(file_path|Only pass file_paths|Returns ranked hits with source `file_paths`" docs backend/src/dotmd/mcp_server.py
+rg "file_paths|file_path\\b" docs/ backend/src/dotmd/mcp_server.py
 rg "chunk_file_paths|Chunk.file_paths" docs/source-adapter-architecture.md docs/architecture.md
 ```
 
-The first command should return no public-contract hits. The second command
-should return internal-holder wording.
+The first command should return no public-contract hits. Allowed hits must be
+explicit internal-holder wording for `Chunk.file_paths`,
+`chunk_file_paths_<strategy>`, filesystem discovery/local file reads, or
+historical migration notes that clearly say they are not the public search/read
+identity. The second command should return internal-holder wording.
 </action>
 <acceptance_criteria>
 - `docs/mcp.md` contains `read(ref`.
@@ -151,7 +156,7 @@ should return internal-holder wording.
 - `docs/source-adapter-architecture.md` contains `filesystem:<document_ref>`.
 - `docs/source-adapter-architecture.md` contains `Telegram dialogs/messages must not be modeled as File` or equivalent wording.
 - `docs/architecture.md` contains `source-ref-first`.
-- `rg "read\\(file_path|Only pass file_paths|Returns ranked hits with source `file_paths`" docs backend/src/dotmd/mcp_server.py` returns no public-contract hits.
+- `rg "file_paths|file_path\\b" docs/ backend/src/dotmd/mcp_server.py` returns only explicitly allowed internal-holder, filesystem discovery/local file read, or historical migration hits.
 </acceptance_criteria>
 </task>
 
@@ -168,33 +173,43 @@ should return internal-holder wording.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md`
 </files>
 <action>
-Run the live MCP smoke against the local container after implementation.
+Run the live MCP smoke against the running streamable-http MCP server in the
+local `dotmd` container. This smoke validates the production-style process, not
+a fresh stdio subprocess.
 
-First try without restarting if code is already loaded:
+Because source code is bind-mounted but Python does not hot-reload the running
+process, restart the container exactly once after all Phase 26 implementation
+changes are complete and before this smoke. Do not restart production repeatedly
+for individual tasks. Then run:
 
 ```bash
+docker restart dotmd
 docker exec dotmd sh -c "cd /mnt/home/repos/j2h4u/dotmd/backend && python -m pytest tests/e2e/ -v -p no:cacheprovider"
 ```
 
-If the smoke still sees the old tool schema because the running process has not
-loaded the bind-mounted code, restart once after all Phase 26 changes are
-complete, then rerun the same command. Do not restart production repeatedly for
-individual tasks.
-
 Record in `26-03-SUMMARY.md`:
-- whether a restart was needed;
+- that the smoke targeted the running streamable-http MCP server after a single
+  batched `docker restart dotmd`;
 - exact smoke command;
 - pass/fail output summary;
 - evidence that `search` returned `ref`;
 - evidence that `drill(ref)` returned metadata;
 - evidence that `read(ref, 0, 3)` returned chunks;
+- evidence that invalid `read(ref="filesystem:/nonexistent/file.md")` and
+  malformed `read(ref="not-a-ref")` returned tool-level errors containing
+  `Unknown source ref` and `Action: pass a ref returned by search.`;
 - no-full-reindex audit: `dotmd index --force` was not run.
 </action>
 <acceptance_criteria>
+- `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `docker restart dotmd`.
+- `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `streamable-http MCP server`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `python -m pytest tests/e2e/ -v -p no:cacheprovider`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `search -> ref`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `drill(ref)`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `read(ref`.
+- `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `filesystem:/nonexistent/file.md`.
+- `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `not-a-ref`.
+- `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `Unknown source ref`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `dotmd index --force was not run`.
 </acceptance_criteria>
 </task>
@@ -215,6 +230,12 @@ Record in `26-03-SUMMARY.md`:
 Finish `26-03-SUMMARY.md` with:
 
 - the final public search hit shape;
+- the canonical multi-holder source rule:
+  lexicographically first `(namespace, document_ref)` provenance row wins for
+  public `SearchResult.ref`;
+- the missing-provenance behavior:
+  `ValueError("missing source provenance for chunk_id=...")`;
+- the active-strategy missing-provenance count query result;
 - the final `read(ref, start, end)` behavior;
 - the final `drill(ref)` behavior;
 - where filesystem paths remain internal;
@@ -230,6 +251,9 @@ Finish `26-03-SUMMARY.md` with:
 </action>
 <acceptance_criteria>
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `SearchResult.ref`.
+- `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `lexicographically first`.
+- `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `missing source provenance for chunk_id=`.
+- `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `missing-provenance count`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `read(ref`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `drill(ref)`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `Telegram adapter implementation remains deferred`.

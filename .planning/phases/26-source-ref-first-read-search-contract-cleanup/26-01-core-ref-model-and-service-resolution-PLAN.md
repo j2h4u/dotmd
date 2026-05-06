@@ -47,7 +47,8 @@ No vectors, FTS5 rows, chunk text, graph data, or holder tables are rebuilt.
 | Threat | Severity | Mitigation |
 |---|---:|---|
 | Search results still expose holder paths as public identity | HIGH | Replace `SearchResult.file_paths` with `SearchResult.ref` and update search hydration tests to assert `file_paths` is not a public field. |
-| Legacy chunks without provenance silently fall back to public `file_paths` | HIGH | Add explicit missing-provenance behavior: raise/skip with a clear error or derive a filesystem ref only through a named bounded compatibility helper with tests. |
+| Legacy chunks without provenance silently fall back to public `file_paths` | HIGH | Treat missing provenance as an invariant violation: raise `ValueError("missing source provenance for chunk_id=...")`; add tests and a count query so execution can prove whether a scoped backfill is needed before merge. |
+| Deduped multi-holder chunks expose arbitrary source refs | HIGH | Define the canonical public source as the lexicographically first `(namespace, document_ref)` provenance row for a `chunk_id`; update batch hydration and tests to pin first-wins behavior without consulting holder paths. |
 | `read(ref)` reloads indexes or scans all metadata per request | HIGH | Resolve the ref through existing metadata tables and reuse initialized stores; do not call `load_index()` in read/search methods. |
 | Ref parsing mishandles filesystem paths containing colons | MEDIUM | Split only on the first colon and reject empty namespace/document_ref. |
 | Internal holder mechanics break while removing public paths | HIGH | Preserve `Chunk.file_paths`, `chunk_file_paths_<strategy>`, and existing file-range helpers as internal implementation details. |
@@ -128,19 +129,48 @@ Concrete target state:
   - for each chunk result, set `ref=provenance.ref`;
   - do not pass `file_paths` to `SearchResult`;
   - preserve heading/snippet/fused/per-engine score behavior.
-- Missing provenance behavior must be explicit:
-  - preferred: skip the chunk and log a warning containing `missing source provenance`;
-  - acceptable alternative: raise a `ValueError` containing `missing source provenance`.
-  - Do not silently return public `file_paths`.
-- Add tests proving a graph-direct hit and a semantic hit both produce `ref`
-  from provenance.
+- Missing provenance behavior is deterministic and blocking:
+  - if a top chunk lacks a `chunk_source_provenance_<strategy>` row, raise
+    `ValueError(f"missing source provenance for chunk_id={chunk_id}")`;
+  - do not skip the chunk;
+  - do not silently return public `file_paths`;
+  - do not derive a fallback filesystem ref from `chunk_file_paths_<strategy>`.
+- Multi-holder/deduped chunk behavior is deterministic:
+  - a single `chunk_id` may have multiple provenance rows because
+    `chunk_source_provenance_<strategy>` is keyed by
+    `(chunk_id, namespace, document_ref)`;
+  - the public `SearchResult.ref` for that `chunk_id` is exactly one canonical
+    source ref;
+  - canonical means the lexicographically first tuple
+    `(namespace, document_ref)` among existing provenance rows;
+  - update `MetadataStore.get_chunk_provenance_for_chunk_ids()` to query
+    `ORDER BY chunk_id, namespace, document_ref` and populate the return dict
+    with first-wins logic (`if chunk_id not in result: result[chunk_id] = ...`);
+  - holder paths in `chunk_file_paths_<strategy>` are internal dedup holders and
+    must not affect canonical public ref selection.
+- Add tests proving:
+  - a graph-direct hit and a semantic hit both produce `ref` from provenance;
+  - missing provenance raises `ValueError` containing
+    `missing source provenance for chunk_id=`;
+  - a deduped chunk with two provenance rows, for example
+    `filesystem:/mnt/b.md` and `filesystem:/mnt/a.md`, returns
+    `filesystem:/mnt/a.md` as the canonical public ref even if holder paths are
+    ordered differently.
+- Add an internal-holder comment/docstring in `backend/src/dotmd/storage/metadata.py`
+  near `chunk_file_paths_<strategy>` helpers:
+  `chunk_file_paths_<strategy> is an internal filesystem/content-dedup holder table, not the public read/search identity; see Phase 26.`
 </action>
 <acceptance_criteria>
 - `backend/src/dotmd/search/fusion.py` contains `get_chunk_provenance_for_chunk_ids`.
 - `backend/src/dotmd/search/fusion.py` contains `ref=`.
 - `backend/src/dotmd/search/fusion.py` does not contain `SearchResult(` followed by `file_paths=` in the same construction block.
+- `backend/src/dotmd/storage/metadata.py` contains `ORDER BY chunk_id, namespace, document_ref`.
+- `backend/src/dotmd/storage/metadata.py` contains `if chunk_id not in result` or equivalent first-wins canonical selection.
+- `backend/src/dotmd/storage/metadata.py` contains `not the public read/search identity; see Phase 26`.
 - `backend/tests/test_fusion.py` or `backend/tests/api/test_search_result_shape.py` contains `filesystem:/graph/file.md` or another concrete `filesystem:` ref fixture.
-- `backend/tests/test_fusion.py` or `backend/tests/api/test_search_result_shape.py` contains `missing source provenance`.
+- `backend/tests/test_fusion.py` or `backend/tests/api/test_search_result_shape.py` contains `missing source provenance for chunk_id=`.
+- `backend/tests/test_fusion.py` or `backend/tests/api/test_search_result_shape.py` contains `filesystem:/mnt/a.md`.
+- `backend/tests/test_fusion.py` or `backend/tests/api/test_search_result_shape.py` contains `filesystem:/mnt/b.md`.
 - `cd backend && uv run pytest tests/api/test_search_result_shape.py tests/test_fusion.py -q` exits 0.
 </acceptance_criteria>
 </task>
@@ -192,6 +222,13 @@ Concrete target state:
   and does not require a graph rebuild. If included, failures must be
   non-fatal.
 - Missing source documents should raise `ValueError` with `Unknown source ref`.
+- Malformed refs and refs that parse but have no matching `source_documents` row
+  both raise `ValueError` containing `Unknown source ref`.
+- If the `source_documents` row exists but the backing filesystem file is gone,
+  raise `ValueError` containing `Unknown source ref` rather than returning an
+  empty read.
+- Frontmatter parse failures are non-fatal: return `frontmatter: {}` and log a
+  warning containing `frontmatter parse failed`.
 - Unsupported non-filesystem namespaces should raise `ValueError` with
   `Unsupported source namespace` until future source adapters implement reads.
 </action>
@@ -201,6 +238,7 @@ Concrete target state:
 - `backend/src/dotmd/api/service.py` contains `get_source_document`.
 - `backend/src/dotmd/api/service.py` contains `Unknown source ref`.
 - `backend/src/dotmd/api/service.py` contains `Unsupported source namespace`.
+- `backend/src/dotmd/api/service.py` contains `frontmatter parse failed`.
 - `backend/src/dotmd/api/service.py` does not contain `def read(self, file_path: str`.
 - `backend/tests/api/test_service_search.py` or `backend/tests/mcp/test_search_tool.py` asserts read payload contains `ref`.
 - `backend/tests/api/test_service_search.py` or `backend/tests/mcp/test_search_tool.py` asserts read payload does not contain `file_path`.
@@ -217,12 +255,28 @@ cd backend && uv run pytest tests/api/test_search_result_shape.py tests/api/test
 cd backend && uv run pyright
 ```
 
+Before marking Plan 01 complete, run a count query for the active strategy and
+record the result in the implementation summary:
+
+```sql
+SELECT COUNT(*) FROM chunk_metadata_<strategy> c
+LEFT JOIN chunk_source_provenance_<strategy> p ON c.chunk_id = p.chunk_id
+WHERE p.chunk_id IS NULL;
+```
+
+If the count is greater than zero, stop before merging Plan 01 and implement or
+plan the D-20 scoped backfill path with dry-run/count-first behavior. Do not
+mask the count by falling back to holder paths.
+
 Do not run `dotmd index --force`. Do not restart production for this plan alone.
 </verification>
 
 <success_criteria>
 - `SearchResult` is ref-first and has no public `file_paths`.
 - Search hydration uses `chunk_source_provenance_<strategy>`.
+- Missing provenance raises `ValueError("missing source provenance for chunk_id=...")`.
+- Deduped multi-holder chunks return the canonical lexicographic provenance ref,
+  not a holder-path-derived ref.
 - `DotMDService.read(ref)` and `DotMDService.drill(ref)` exist and resolve
   filesystem refs without reindexing.
 - Internal filesystem holder mechanics remain available.
