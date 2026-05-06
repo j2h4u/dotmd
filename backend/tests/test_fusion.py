@@ -1,15 +1,19 @@
 """Tests for fusion math and weight validation (Phase 999.12)."""
+from datetime import datetime
 import math
 import os
 from pathlib import Path
+import sqlite3
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 
-from dotmd.core.models import Chunk, SearchResult
+from dotmd.core.models import Chunk, ChunkProvenance, SourceDocument
 from dotmd.mcp_server import _format_result
 from dotmd.search.fusion import _extract_best_snippet, build_search_results
 from dotmd.storage.base import MetadataStoreProtocol
+from dotmd.storage.metadata import SQLiteMetadataStore
 
 
 def _normalize(v):
@@ -127,6 +131,25 @@ class _SnippetMetadataStore:
             if chunk_id in self._chunks
         }
 
+    def get_chunk_provenance_for_chunk_ids(
+        self,
+        strategy: str,
+        chunk_ids: list[str],
+    ) -> dict[str, ChunkProvenance]:
+        assert strategy == "default"
+        return {
+            chunk_id: ChunkProvenance(
+                namespace="filesystem",
+                document_ref=f"/mnt/{chunk_id}.md",
+                ref=f"filesystem:/mnt/{chunk_id}.md",
+                source_unit_refs=[],
+                chunk_strategy=strategy,
+                parser_name="markdown",
+            )
+            for chunk_id in chunk_ids
+            if chunk_id in self._chunks
+        }
+
 
 def test_build_search_results_uses_boundary_aware_snippet() -> None:
     """Normal result construction exposes the boundary-aware snippet."""
@@ -154,11 +177,203 @@ def test_build_search_results_uses_boundary_aware_snippet() -> None:
     assert len(results) == 1
     assert results[0].snippet.startswith("...The search target")
     assert "target appears" in results[0].snippet
+    assert results[0].ref == "filesystem:/mnt/chunk-1.md"
+
+
+def test_build_search_results_hydrates_graph_direct_ref_from_provenance() -> None:
+    """Graph-direct hits use source provenance, not holder paths, for public refs."""
+    graph_chunk_id = "graph-chunk"
+    chunk = Chunk(
+        chunk_id=graph_chunk_id,
+        file_paths=[Path("/fallback/file.md")],
+        heading_hierarchy=["Graph"],
+        level=1,
+        text="filesystem:/graph/file.md graph snippet",
+        chunk_index=0,
+    )
+
+    class HydratingStore:
+        _table = "chunks_heading_512_50"
+
+        def get_chunks(self, chunk_ids: list[str]) -> list[Chunk]:
+            assert chunk_ids == [graph_chunk_id]
+            return [chunk]
+
+        def get_chunk_provenance_for_chunk_ids(
+            self,
+            strategy: str,
+            chunk_ids: list[str],
+        ) -> dict[str, ChunkProvenance]:
+            assert strategy == "heading_512_50"
+            assert chunk_ids == [graph_chunk_id]
+            return {
+                graph_chunk_id: ChunkProvenance(
+                    namespace="filesystem",
+                    document_ref="/graph/file.md",
+                    ref="filesystem:/graph/file.md",
+                    source_unit_refs=[],
+                    chunk_strategy=strategy,
+                    parser_name="markdown",
+                )
+            }
+
+    results = build_search_results(
+        [(graph_chunk_id, 0.7)],
+        per_engine={"graph_direct": [(graph_chunk_id, 0.95)]},
+        metadata_store=cast(Any, HydratingStore()),
+        query="graph",
+        top_k=1,
+    )
+
+    assert len(results) == 1
+    assert results[0].ref == "filesystem:/graph/file.md"
+    assert results[0].graph_direct_score == 0.95
+    assert results[0].matched_engines == ["graph_direct"]
+
+
+def test_build_search_results_missing_provenance_raises() -> None:
+    """Top chunks with no source provenance are hard invariant failures."""
+    chunk = Chunk(
+        chunk_id="missing-provenance",
+        file_paths=[Path("/fallback/file.md")],
+        heading_hierarchy=["Missing"],
+        level=1,
+        text="missing provenance snippet",
+        chunk_index=0,
+    )
+
+    class MissingProvenanceStore:
+        _table = "chunks_heading_512_50"
+
+        def get_chunks(self, chunk_ids: list[str]) -> list[Chunk]:
+            return [chunk]
+
+        def get_chunk_provenance_for_chunk_ids(
+            self,
+            strategy: str,
+            chunk_ids: list[str],
+        ) -> dict[str, ChunkProvenance]:
+            return {}
+
+    with pytest.raises(ValueError, match="missing source provenance for chunk_id="):
+        build_search_results(
+            [("missing-provenance", 0.7)],
+            per_engine={"semantic": [("missing-provenance", 0.95)]},
+            metadata_store=cast(Any, MissingProvenanceStore()),
+            query="missing",
+            top_k=1,
+        )
+
+
+def _source_document(file_path: str) -> SourceDocument:
+    now = datetime(2026, 5, 6)
+    return SourceDocument(
+        namespace="filesystem",
+        document_ref=file_path,
+        ref=f"filesystem:{file_path}",
+        source_uri=file_path,
+        file_path=Path(file_path),
+        media_type="text/markdown",
+        parser_name="markdown",
+        document_type="document",
+        title=Path(file_path).name,
+        updated_at=now,
+        content_fingerprint="content",
+        metadata_fingerprint="metadata",
+        metadata_json={},
+    )
+
+
+def _store_with_provenance_schema(tmp_path: Path) -> SQLiteMetadataStore:
+    db_path = tmp_path / "test.db"
+    strategy = "heading_512_50"
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(f"""
+        CREATE TABLE chunks_{strategy} (
+            chunk_id TEXT PRIMARY KEY,
+            heading_hierarchy TEXT NOT NULL DEFAULT '[]',
+            level INTEGER NOT NULL DEFAULT 0,
+            text TEXT NOT NULL DEFAULT ''
+        );
+    """)
+    conn.commit()
+    store = SQLiteMetadataStore(
+        db_path=db_path,
+        table_name=f"chunks_{strategy}",
+        conn=conn,
+    )
+    store.ensure_m2m_table(strategy)
+    store.ensure_chunk_source_provenance_table(strategy)
+    return store
+
+
+def test_metadata_provenance_canonical_ref_uses_sql_ordering(tmp_path: Path) -> None:
+    """Reverse insertion order still returns lexicographically canonical ref."""
+    strategy = "heading_512_50"
+    chunk_id = "canonical"
+    store = _store_with_provenance_schema(tmp_path)
+    raw_conn = object.__getattribute__(store._conn, "_real_conn")
+    store.insert_chunk(strategy, chunk_id, ["H"], 1, "text")
+
+    for file_path in ["/mnt/b.md", "/mnt/a.md"]:
+        document = _source_document(file_path)
+        store.upsert_source_document(document, conn=raw_conn)
+        store.add_chunk_provenance(
+            strategy,
+            ChunkProvenance(
+                namespace="filesystem",
+                document_ref=file_path,
+                ref=f"filesystem:{file_path}",
+                source_unit_refs=[],
+                chunk_strategy=strategy,
+                parser_name="markdown",
+            ),
+            chunk_id,
+            conn=raw_conn,
+        )
+    raw_conn.commit()
+
+    result = store.get_chunk_provenance_for_chunk_ids(strategy, [chunk_id])
+
+    assert result[chunk_id].ref == "filesystem:/mnt/a.md"
+
+
+def test_missing_provenance_count_and_backfill_safety(tmp_path: Path) -> None:
+    """Missing-provenance backfill is count-first, dry-run-safe, and idempotent."""
+    strategy = "heading_512_50"
+    chunk_id = "missing"
+    store = _store_with_provenance_schema(tmp_path)
+    raw_conn = object.__getattribute__(store._conn, "_real_conn")
+    document = _source_document("/mnt/a.md")
+
+    store.upsert_source_document(document, conn=raw_conn)
+    store.insert_chunk(strategy, chunk_id, ["H"], 1, "text")
+    store.add_file_path(strategy, chunk_id, "/mnt/a.md", chunk_index=0)
+    raw_conn.commit()
+
+    assert store.count_missing_source_provenance(strategy) == 1
+    assert store.backfill_missing_source_provenance_from_file_paths(
+        strategy,
+        dry_run=True,
+    ) == 1
+    assert store.count_missing_source_provenance(strategy) == 1
+
+    assert store.backfill_missing_source_provenance_from_file_paths(
+        strategy,
+        dry_run=False,
+    ) == 1
+    assert store.backfill_missing_source_provenance_from_file_paths(
+        strategy,
+        dry_run=False,
+    ) == 0
+    assert store.count_missing_source_provenance(strategy) == 0
+    provenance = store.get_chunk_provenance_for_chunk_ids(strategy, [chunk_id])
+    assert provenance[chunk_id].ref == "filesystem:/mnt/a.md"
 
 
 def test_format_result_keeps_clean_visible_snippet_after_cleanup() -> None:
     """MCP formatting strips metadata while leaving a coherent visible sentence."""
-    result = SearchResult(
+    result = SimpleNamespace(
         chunk_id="chunk-1",
         file_paths=[Path("/notes/transcript.md")],
         heading_path="Meeting",
