@@ -1,5 +1,22 @@
 # Milestones
 
+## v1.4 Search Quality & Architecture (Shipped: 2026-05-06)
+
+**Phases completed:** 12 phases, 30 plans, 61 tasks
+
+**Key accomplishments:**
+
+- Search quality evaluation infrastructure and reranker selection/refactor work completed, including Qwen3 candidate support, shared-pool comparison, latency diagnostics, and benchmark methodology cleanup.
+- Test contract and live smoke behavior tightened so local tests stay local, MCP e2e failures are honest, and stale smoke coverage no longer hides integration problems.
+- Configuration boundary clarified: operator-facing settings are explicit and validated, while internal tuning constants are named defaults rather than public config.
+- Filesystem source abstraction introduced as the source-adapter MVP, with SourceDocument identity, ingestion routing, provenance persistence, and metadata-only refresh behavior preserved.
+- Public read/search contract moved to source refs: search returns ref-first results, MCP/CLI use drill(ref) and read(ref), and docs keep filesystem paths internal.
+- Milestone boundary documented as a bridge: Phase 25/26 enable the next source-adapter milestone, while Telegram and other non-filesystem sources remain future work.
+
+**Known deferred items at close:** 10 (see STATE.md Deferred Items)
+
+---
+
 ## v1.3 Production Packaging & Background Indexing (Shipped: 2026-03-28)
 
 **Phases completed:** 4 phases, 8 plans, 16 tasks

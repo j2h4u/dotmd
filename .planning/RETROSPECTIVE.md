@@ -130,6 +130,44 @@
 - Sessions: 3 (packaging, benchmarks, trickle indexer)
 - Notable: Phase 10 (4 plans) executed with worktree parallelization — fastest multi-plan phase yet
 
+## Milestone: v1.4 — Search Quality & Architecture
+
+**Shipped:** 2026-05-06
+**Phases:** 12 | **Plans:** 30 | **Tasks:** 61
+
+### What Was Built
+- Content-addressed caching and M2M content-dedup schema groundwork
+- Reranker selection, adapter/factory boundary, comparison surfaces, latency and quality benchmarks
+- Honest local/live test contract and cleaned smoke behavior
+- Operator config boundary with runtime validation and explicit internal defaults
+- Filesystem source abstraction MVP with persisted source provenance
+- Source-ref-first public MCP search/read contract, with filesystem paths kept internal
+
+### What Worked
+- Benchmark-first reranker work prevented CPU-unusable candidates from becoming production defaults.
+- The Phase 25 then Phase 26 bridge was the right order: first preserve filesystem behavior through source models, then remove the public path-first contract before non-filesystem sources.
+- Nyquist validation surfaced mostly documentation/artifact debt after implementation, not major product gaps.
+
+### What Was Inefficient
+- ROADMAP and milestone prose drifted while phases continued; milestone close needed manual cleanup to avoid stale phase boundaries.
+- Some GSD health info entries are naming-shape noise (`25-01-SUMMARY.md` vs `SUMMARY.md`) and should not be treated as blocking.
+- Plan summaries sometimes leaked review noise into generated milestone accomplishments, requiring human cleanup.
+
+### Patterns Established
+- Treat `999.x` as backlog until explicitly promoted.
+- For source-adapter work, separate source identity, parser/content behavior, and layered metadata.
+- Every source/refactor plan should answer whether it requires full reindex; default to incremental/backfill paths.
+
+### Key Lessons
+- Milestone boundaries can be product boundaries even when the last phases are bridge work for the next milestone; document the bridge explicitly instead of reopening shipped scope.
+- Source refs are now the public contract. Future Telegram/source phases should build on `search -> ref -> drill/read`, not path-shaped compatibility.
+- Closing a milestone should run open-artifact audit first, then record acknowledged deferred items in STATE.md so backlog noise does not masquerade as unfinished phase work.
+
+### Cost Observations
+- Model mix: mixed Codex/OpenCode/GSD review tooling
+- Sessions: multiple phase execution, validation, security, and audit sessions
+- Notable: Late milestone validation paid down artifact confidence without requiring broad implementation rewrites.
+
 ## Cross-Milestone Trends
 
 | Milestone | Phases | Plans | Duration | Key Metric |
@@ -137,3 +175,4 @@
 | v1.1 | 3 | 5 | 2 days | Incremental index: <1s (was 50min) |
 | v1.2 | 3 | 4 | 2 days | FalkorDB: concurrent CLI+API, 3520 entities |
 | v1.3 | 4 | 8 | 2 days | Production deploy, trickle indexer live |
+| v1.4 | 12 | 30 | 13 days | Source-ref-first MCP contract, reranker benchmarks, source-adapter bridge |

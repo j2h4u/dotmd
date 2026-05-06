@@ -41,7 +41,7 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 
 ### Active
 
-(none — all v1.3 requirements validated or closed)
+(none — v1.4 is closed. Next active requirements should be defined by the next milestone.)
 
 ### Out of Scope
 
@@ -114,26 +114,24 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 | Concurrent TEI — no gain | Benchmarked 1/2/3 workers, TEI saturates all cores on single request | ✓ Good — closed optimization path |
 | GLiNER batch — slower + OOM | Sequential 0.72 t/s vs batch 0.53-0.61 t/s, bs=8 OOM | ✓ Good — closed optimization path |
 | Watchdog + polling for trickle indexer | inotify for immediate, hourly poll as fallback | ✓ Good |
+| Source refs as public read/search identity | Non-filesystem sources should not inherit a path-shaped public API | ✓ Good — shipped in Phase 26 |
+| Filesystem paths remain internal holder mechanics | Local discovery, reads, delete detection, and content-dedup still need paths | ✓ Good |
+| Avoid full reindex for source-ref migration | Existing Phase 25 provenance was enough for lightweight backfill | ✓ Good |
 
 ## Shipped Milestones
 
 - **v1.1** — Incremental Indexing (Phases 1-3, shipped 2026-03-26)
 - **v1.2** — FalkorDB Migration & Search Fix (Phases 4-6, shipped 2026-03-27)
 - **v1.3** — Production Packaging & Background Indexing (Phases 7-10, shipped 2026-03-28)
+- **v1.4** — Search Quality & Architecture (Phases 15-26, shipped 2026-05-06)
 
-## Current Milestone: v1.4 Search Quality Evaluations
+## Current Milestone
 
-**Goal:** Measurably improve retrieval quality on Russian voicenotes corpus through empirical evaluation of embedding models, chunking strategies, and scoring pipeline.
-
-**Target features:**
-- A/B evaluation of pplx-embed-context-v1 vs current E5-large (separate branch)
-- Semantic/adaptive chunking for topic-switching transcripts
-- Cross-encoder relevance tuning on real corpus data
-- Reproducible evaluation framework (test queries + expected results)
+No active milestone. v1.4 shipped on 2026-05-06; the next milestone should start with `/gsd-new-milestone`.
 
 ## Current State
 
-v1.3 shipped and archived. Production packaging complete: parameterized docker-compose with bundled profiles, health endpoint, WAL mode, production include-based overlay. External smoke tests (5 tests). TEI/GLiNER benchmarks closed out concurrent optimization paths. FTS5 replaced rank_bm25+pickle for incremental BM25. Background trickle indexer live with watchdog+polling, per-file pipeline, TOML config, progress reporting. Quality sweep shipped: error handling, naming, enums, observability. Search pipeline fixed: graph→post-fusion enrichment, cosine distance metric, E5 prefixes, cross-encoder quality gate, auto-calibrating score floor. Granular reindex command. Embedding model mismatch detection via TEI /info. TEI serves multilingual-e5-large (1024-dim). pplx-embed-context-v1-0.6B researched as candidate replacement for v1.4.
+v1.4 shipped and archived. Production packaging remains live, local/live test tiers are explicit, reranking has benchmark-backed comparison surfaces, config has a clearer operator/runtime boundary, and the public MCP search/read flow is now source-ref-first.
 
 Phase 999.12 complete (2026-04-27): Dual-encoder unified embedding shipped. Metadata-only changes (tag updates, title renames) now require 1 TEI call per document instead of N calls per chunk. VecComponentStore stores raw e_text/e_meta BLOBs; meta_tracker (title+tags checksum) triggers fast path when only metadata changes. search_log table added. 189 tests pass.
 
@@ -182,4 +180,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-06 after Phase 26 complete*
+*Last updated: 2026-05-06 after v1.4 milestone completion*

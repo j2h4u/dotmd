@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
-status: milestone_complete
-last_updated: "2026-05-06T12:39:44.888Z"
+status: completed
+last_updated: "2026-05-06T17:19:00.730Z"
 last_activity: 2026-05-06
 progress:
   total_phases: 12
@@ -17,10 +17,10 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
+See: .planning/PROJECT.md (updated 2026-05-06 after v1.4 archived)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 26 — source-ref-first-read-search-contract-cleanup
+**Current focus:** Planning next milestone
 
 ## Current Milestone
 
@@ -32,6 +32,23 @@ Status: Milestone complete
 Last activity: 2026-05-06
 
 Progress: [██████████] 100%
+
+## Deferred Items
+
+Items acknowledged and deferred at milestone close on 2026-05-06:
+
+| Category | Item | Status |
+|----------|------|--------|
+| quick_task | 260402-vua-phase-14-frontmatter-driven-indexing | missing |
+| quick_task | 260425-m79-log-clarity-kaizen-6-point-cleanup-of-do | missing |
+| quick_task | 260425-rel-serve-start-sh-trickle-lifespan-mcp-serv | missing |
+| quick_task | 260502-scv-normalize-dotmd-planning-docs-separate-a | missing |
+| todo | 2026-03-23-scout-other-dotmd-forks-for-ideas.md | pending |
+| todo | 2026-03-24-migrate-graph-store-from-ladybugdb-to-falkordb.md | pending |
+| todo | 2026-03-27-background-trickle-indexer.md | pending |
+| todo | 2026-03-27-smoke-tests.md | pending |
+| todo | 2026-03-28-soft-delete-with-ttl-for-removed-source-files.md | pending |
+| seed | SEED-001-safe-migration-architecture | dormant |
 
 ## Performance Metrics
 
@@ -213,3 +230,14 @@ No blockers. Phase 26 is complete and verified; v1.4 is milestone-complete.
 
 ---
 *Last updated: 2026-05-06*
+
+## Current Position
+
+Phase: Milestone v1.4 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-05-06 — Milestone v1.4 completed and archived
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone
