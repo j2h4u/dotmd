@@ -660,6 +660,116 @@ Plans:
 
 ---
 
+### Backlog 999.25: Content-addressed resource bindings and retained derived artifacts
+
+**Goal:** Before adding Telegram or any other non-filesystem source, make
+dotMD's indexing model reuse already-processed content and derived artifacts
+whenever possible. Resource changes such as file rename, atomic write,
+delete-then-readd, export refresh, or Telegram chat append should not force
+TEI embedding, NER/extraction, FTS, or graph work for chunks that were already
+processed.
+
+**Context captured 2026-05-06:**
+- Phase 16 already separated `chunks_*` from `chunk_file_paths_<strategy>` M2M
+  holder rows, so chunks can be shared by multiple filesystem paths.
+- Phase 25 added `SourceDocument`, `source_documents`, and
+  `chunk_source_provenance_<strategy>`, but filesystem `document_ref` is still
+  derived from the resolved path.
+- Phase 26 made source refs the public read/search contract, which means the
+  next source work can stop treating filesystem paths as the universal identity.
+- Current `_purge_file` is holder-aware, but if holder count drops to zero it
+  physically deletes chunks/vectors/FTS/provenance immediately. That is correct
+  for consistency but too eager for rename/move/reimport scenarios.
+- The practical invariant for future source adapters is: if dotMD already spent
+  CPU on a content unit or chunk, a later resource reshuffle should reuse that
+  work instead of recomputing it.
+
+**Current asset inventory:**
+- Existing useful pieces:
+  - `SourceDocument` with `namespace`, `document_ref`, `ref`,
+    `content_fingerprint`, and `metadata_fingerprint`.
+  - `chunks_*` keyed by `chunk_id`, no direct `file_path` column.
+  - `chunk_file_paths_<strategy>` as a filesystem-specific holder table.
+  - `chunk_source_provenance_<strategy>` as the first source provenance layer.
+  - `FileTracker` split between body/chunk fingerprint and metadata fingerprint.
+  - INSERT OR IGNORE chunk writes and existing text-hash embedding reuse.
+- Missing or incomplete pieces:
+  - universal active/inactive resource binding rows independent of filesystem
+    path shape;
+  - retained unreferenced content/artifacts with `unreferenced_since` /
+    `retained_until` instead of immediate cascade delete;
+  - source-unit identity below document level, e.g. Telegram message id,
+    edited-message version, paragraph, heading section, or speaker turn;
+  - search/read filtering through active bindings so retained inactive content
+    stays physically available but invisible to users;
+  - GC as an explicit or deferred cleanup step that deletes retained artifacts
+    only after a grace period.
+
+**Proposed scope:**
+- Introduce a resource binding model that generalizes
+  `chunk_file_paths_<strategy>` beyond filesystem paths. A binding should tie
+  `{namespace, document_ref/resource_ref, source_unit_ref?, chunk_id,
+  chunk_index}` to an active/inactive state.
+- Preserve current filesystem behavior through an incremental migration or
+  compatibility view; do not require a full reindex.
+- Change deletion/orphan handling from immediate physical cascade to:
+  1. deactivate/remove the public resource binding immediately;
+  2. make search/read ignore inactive bindings immediately;
+  3. retain unreferenced chunks/vectors/FTS/graph artifacts for a grace period;
+  4. let GC physically delete expired unreferenced artifacts later.
+- Make content/chunk reuse explicit: if a new active binding points at an
+  existing chunk hash, attach the binding/provenance without recomputing
+  embeddings, extraction, FTS, or graph unless the derived-artifact key changed.
+- Treat watcher events (`created`, `modified`, `deleted`, `moved`) as wake-up
+  signals for reconciliation, not as business logic for rename semantics.
+- Keep resource identity and content identity separate:
+  - source sync fingerprint: did the external resource change?
+  - document metadata fingerprint: title/tags/path/source metadata;
+  - content-unit fingerprint: message/paragraph/speaker-turn identity;
+  - chunk fingerprint: normalized chunk text + strategy/parser version;
+  - derived-artifact fingerprint: chunk/input + model/extractor/config version.
+
+**Acceptance criteria ideas:**
+- Atomic write `tmp -> file.md` indexes the destination without waiting for the
+  hourly poll.
+- Rename or delete-then-readd with identical content reuses existing chunks and
+  derived artifacts, while the old public ref stops working immediately.
+- Appending to a document reuses unchanged chunk/source-unit artifacts and
+  processes only genuinely new or changed chunks.
+- Metadata-only changes update only metadata-derived surfaces.
+- Inactive retained content is not returned by search and cannot be read through
+  stale refs.
+- GC removes expired unreferenced artifacts without touching chunks that have
+  active bindings.
+- The phase includes a dry-run/count report before any migration that touches
+  existing production index rows.
+
+**Out of scope:**
+- Telegram adapter implementation.
+- Full historical reindex of the production corpus.
+- Fuzzy identity resolution, contact/entity catalogs, or second-source
+  validation.
+- Perfect paragraph-level diffing for every markdown shape if an MVP source-unit
+  model can preserve current behavior and unlock Telegram safely.
+
+**Open design questions:**
+- Should the first binding table be strategy-specific, global, or a compatibility
+  layer over existing `chunk_file_paths_<strategy>`?
+- What grace period is appropriate for retained unreferenced artifacts: fixed
+  time, N poll cycles, explicit admin GC only, or configurable?
+- Which source-unit granularity should filesystem Markdown use first: whole
+  file, heading section, paragraph, speaker turn, or parser-specific units?
+- Which derived artifacts can be safely retained without graph drift, and which
+  graph edges need active-binding filtering?
+- How should status/debug commands show active vs retained vs GC-pending rows?
+
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote before Telegram/non-filesystem source work)
+
+---
+
 ### Future ideas:
 - Semantic chunking (split by topic similarity, not just structure)
 - Doc-level chunks (whole-document embeddings for broad queries)
