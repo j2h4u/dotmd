@@ -89,6 +89,13 @@ Progress: [██████████] 100%
   transcript chunks so important договорённости remain discoverable without
   remembering exact words like `65 на 35`.
 
+- Backlog 999.24 added: Source-ref-first read/search contract — remove
+  filesystem path compatibility layer. Captures the post-Phase 25 decision that
+  dotMD has no external clients to protect, so the next source-adapter cleanup
+  should make `ref` / `(namespace, document_ref)` the primary read/search
+  contract before Telegram or other non-filesystem sources inherit a
+  path-shaped API.
+
 - Backlog `999.x` entries are documentation backlog items, not active phases;
   they should be promoted explicitly before planning/execution.
 
@@ -146,6 +153,18 @@ Backlog 999.23 captured on 2026-05-05. It preserves the commitment/agreement
 extraction idea from the Николай Сенин search failure and the `gpt-5.4-mini`
 PoC: chunk-level extraction with overlap, followed by wider-window validation
 and document-level consolidation into a structured semantic-enrichment layer.
+
+Backlog 999.24 captured on 2026-05-06. It preserves the legacy cleanup follow-up
+from Phase 25: replace path-first public contracts like `SearchResult.file_paths`
+and MCP `read(file_path)` with a source-ref-first read/search contract before
+implementing Telegram read-only. Compatibility should be kept only where it
+serves internal filesystem discovery, local file reads, display, delete
+detection, or content-dedup holder semantics. Planning must avoid making full
+reindex the default path: no `dotmd index --force`, full TEI re-embedding,
+metadata-vector recomputation, or graph rebuild unless a plan proves it is
+unavoidable and asks for an explicit user decision. Existing Phase 25
+`source_documents` and `chunk_source_provenance_<strategy>` rows should be used
+for source-ref migration wherever possible.
 
 Phase 24 complete. It promoted backlog item `999.6` and delivered explicit
 configuration separation: production/user-facing settings fail loudly when

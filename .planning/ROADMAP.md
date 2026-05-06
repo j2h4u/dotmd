@@ -587,6 +587,84 @@ Plans:
 
 ---
 
+### Backlog 999.24: Source-ref-first read/search contract — remove filesystem path compatibility layer
+
+**Goal:** Before adding Telegram or any other non-filesystem source, make
+dotMD's read/search contract source-ref-first instead of filesystem-path-first.
+Phase 25 intentionally preserved `file_paths` and `read(file_path)` while the
+source model was introduced. In hindsight this compatibility was mostly useful
+as a migration safety rail, not as a real external-client requirement: dotMD is
+currently a single-user/single-runtime service and can tolerate a breaking
+contract change if it simplifies the next source-adapter phases.
+
+**Context captured 2026-05-06:**
+- Phase 25 shipped `SourceDocument`, `ChunkProvenance`, `source_documents`, and
+  `chunk_source_provenance_<strategy>`, but kept `SearchResult.file_paths`, MCP
+  `SearchHit.file_paths`, MCP `read(file_path, start, end)`, and
+  `chunk_file_paths_<strategy>` as the compatibility-authoritative path.
+- That shape is still filesystem-centric. If Telegram read-only is implemented
+  next without cleanup, the Telegram adapter will likely inherit path-shaped
+  APIs and require another compatibility bridge.
+- There are no external dotMD users or third-party MCP clients to protect. The
+  only current consumers are our own agents and service workflows, so an
+  intentional breaking change is acceptable if it is planned and tested.
+
+**Proposed scope:**
+- Make `ref` / `(namespace, document_ref)` the primary identity returned from
+  search results and used by read/drill-style APIs.
+- Replace or supersede MCP `read(file_path, start, end)` with source-aware
+  `read(ref, start, end)` or an equivalent `SourceRef` input contract.
+- Keep filesystem path as source metadata (`source_uri` / display path) for
+  filesystem documents, not as the universal public identity.
+- Decide whether `SearchResult.file_paths` becomes optional display metadata,
+  `source_refs`, or is removed from the public MCP/API shape.
+- Reassess `chunk_file_paths_<strategy>`: keep it only if it remains needed as
+  an internal holder table for content-addressed dedup, not as the public read
+  contract.
+- Update `drill(file_path)` and any docs/tests that assume path-first lookup.
+- Run a live MCP smoke against the local container after the breaking contract
+  change, because our own agents are the real consumer.
+
+**Migration constraint: avoid full reindex by default**
+- The phase should be planned as an API/schema-contract migration over the
+  existing index, not as a rebuild of all chunks, vectors, metadata embeddings,
+  FTS rows, or graph state.
+- Do not require `dotmd index --force`, full TEI re-embedding, full metadata
+  vector recomputation, or full graph rebuild as the normal success path.
+- Prefer deriving source refs from already persisted Phase 25 data:
+  `source_documents`, `chunk_source_provenance_<strategy>`, and existing
+  filesystem document refs. Backfill only missing lightweight rows if needed.
+- Any unavoidable data migration must be idempotent, resumable, and scoped to
+  metadata/reference rows, with a dry-run/count report before writes.
+- A plan that proposes full reindex must treat it as a blocker requiring an
+  explicit user decision, because current full rebuild cost is about three
+  days.
+
+**Out of scope:**
+- Telegram adapter implementation.
+- Source-unit emission for non-filesystem sources.
+- Entity catalogs, canonical identity resolution, TTL, and second-source
+  validation.
+- Removing every internal filesystem path. Filesystem sources still need paths
+  for discovery, local file reads, display, and delete detection.
+
+**Open design questions:**
+- Should the new public input be a plain `ref` string like
+  `filesystem:/abs/path.md`, or a structured `{namespace, document_ref}` object?
+- Should filesystem search still expose display paths for convenience while
+  making `ref` the only stable read key?
+- Should `drill` merge into `read(ref)` or remain a separate source-aware
+  metadata tool?
+- How much of `chunk_file_paths_<strategy>` is still required for
+  content-dedup holder semantics after the public path contract is removed?
+
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote before Telegram/non-filesystem source work)
+
+---
+
 ### Future ideas:
 - Semantic chunking (split by topic similarity, not just structure)
 - Doc-level chunks (whole-document embeddings for broad queries)
