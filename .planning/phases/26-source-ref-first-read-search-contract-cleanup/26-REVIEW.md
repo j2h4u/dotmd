@@ -1,6 +1,6 @@
 ---
 phase: 26-source-ref-first-read-search-contract-cleanup
-reviewed: 2026-05-06T12:46:02Z
+reviewed: 2026-05-06T12:54:29Z
 depth: standard
 files_reviewed: 19
 files_reviewed_list:
@@ -24,92 +24,41 @@ files_reviewed_list:
   - docs/source-adapter-architecture-panel-review.md
   - docs/source-adapter-architecture.md
 findings:
-  critical: 2
+  critical: 0
   warning: 0
   info: 0
-  total: 2
-status: issues_found
+  total: 0
+status: clean
 ---
 
 # Phase 26: Code Review Report
 
-**Reviewed:** 2026-05-06T12:46:02Z
+**Reviewed:** 2026-05-06T12:54:29Z
 **Depth:** standard
 **Files Reviewed:** 19
-**Status:** issues_found
+**Status:** clean
 
 ## Summary
 
-Reviewed the Phase 26 ref-first search/read contract changes across service, MCP, fusion, metadata storage, tests, and architecture docs. The main defects are in the new public `ref` boundary: `filesystem:` refs are trusted based on filesystem existence instead of index provenance, and search now hard-fails when old or partially migrated chunks lack source provenance.
+Re-reviewed Phase 26 after commit `841bce8` against the configured service, MCP, fusion, metadata, tests, and documentation scope. The previous blockers are resolved:
 
-## Critical Issues
+- `filesystem:` fallback refs now require active-index membership before any existing path is accepted.
+- Search now runs an active-strategy source-provenance safety gate and backfills missing provenance before result hydration treats missing provenance as fatal.
 
-### CR-01: Arbitrary Existing Filesystem Paths Are Accepted As Source Refs
+All reviewed files meet quality standards. No issues found.
 
-**Classification:** BLOCKER
+## Verification
 
-**File:** `backend/src/dotmd/api/service.py:666`
+Targeted regression checks passed:
 
-**Issue:** `_resolve_source_document()` fabricates a `SourceDocument` for any `filesystem:<path>` ref when `Path(document_ref).exists()` is true. `read()` and `drill()` then call `_read_frontmatter()` on that path before proving the ref came from `source_documents` or any indexed `chunk_file_paths_<strategy>` row. In the MCP/HTTP path, a caller can probe arbitrary files visible to the dotMD process with refs like `filesystem:/etc/passwd`; `drill()` returns metadata for existing non-indexed files, and any file that begins with YAML frontmatter can disclose that frontmatter. This violates the documented contract that `read`/`drill` only accept refs returned by `search`.
-
-**Fix:**
-
-Do not use raw filesystem existence as authorization. Resolve refs only through `source_documents`; if a legacy fallback is still required, first prove the resolved path is present in the active index holder table before reading the file or returning metadata.
-
-```python
-def _resolve_source_document(self, ref: str) -> SourceDocument:
-    namespace, document_ref = self._parse_ref(ref)
-    document = self._pipeline.metadata_store.get_source_document(namespace, document_ref)
-    if document is not None:
-        return document
-    raise ValueError(f"Unknown source ref: {ref}")
+```bash
+just test tests/api/test_service_search.py::TestSourceProvenanceSafetyGate tests/test_fusion.py::test_missing_provenance_count_and_backfill_safety tests/test_fusion.py::test_build_search_results_missing_provenance_raises tests/api/test_service_search.py::TestReadRefContract
 ```
 
-If keeping a temporary legacy fallback, gate it on indexed rows, not `path.exists()`:
-
-```python
-resolved = Path(document_ref).resolve()
-count = self._pipeline.metadata_store.get_chunk_count_for_file(
-    self._settings.chunk_strategy,
-    str(resolved),
-)
-if count <= 0:
-    raise ValueError(f"Unknown source ref: {ref}")
-```
-
-### CR-02: Search Crashes On Chunks Without New Source Provenance
-
-**Classification:** BLOCKER
-
-**File:** `backend/src/dotmd/search/fusion.py:296`
-
-**Issue:** `build_search_results()` now raises `ValueError` whenever a top chunk has no `chunk_source_provenance_<strategy>` row. Phase 26 docs explicitly say no full rebuild was required, but unchanged chunks in an existing index can still lack this new provenance table/rows unless they were re-chunked after the source-aware migration. Those chunks can still be returned by semantic, FTS5, or graph retrieval, causing the whole `search()` call to fail instead of returning results. MCP wraps that as `Search failed`, so one unbackfilled top hit can break normal search.
-
-**Fix:**
-
-Add an explicit migration/backfill before enforcing this invariant, and run it at startup or before first search for the active strategy. The existing `backfill_missing_source_provenance_from_file_paths()` helper is the right direction, but it must be invoked and verified before `build_search_results()` treats missing provenance as fatal.
-
-```python
-strategy = self._settings.chunk_strategy
-store = self._pipeline.metadata_store
-missing = store.count_missing_source_provenance(strategy)
-if missing:
-    inserted = store.backfill_missing_source_provenance_from_file_paths(
-        strategy,
-        dry_run=False,
-    )
-    if inserted != missing:
-        logger.warning(
-            "source provenance backfill incomplete: missing=%d inserted=%d",
-            missing,
-            inserted,
-        )
-```
-
-Keep the hard failure after the migration has run, or degrade per-result by skipping only the malformed chunk and logging the invariant violation.
+Result: 11 passed.
 
 ---
 
-_Reviewed: 2026-05-06T12:46:02Z_
+_Reviewed: 2026-05-06T12:54:29Z_
 _Reviewer: the agent (gsd-code-reviewer)_
 _Depth: standard_
