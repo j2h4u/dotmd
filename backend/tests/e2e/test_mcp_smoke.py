@@ -86,34 +86,39 @@ class TestSearchSmoke:
         data = mcp_call("tools/call", {"name": "search", "arguments": {"query": "тест"}})
         results = _tool_result_structured(data)
         assert results, "search returned no results for canonical query 'тест'"
-        actual_keys = frozenset(results[0].keys())
         allowed = REQUIRED_SEARCH_RESULT_FIELDS | OPTIONAL_SEARCH_RESULT_FIELDS
-        assert actual_keys >= REQUIRED_SEARCH_RESULT_FIELDS, (
-            f"search result missing required fields!\n"
-            f"  Required: {sorted(REQUIRED_SEARCH_RESULT_FIELDS)}\n"
-            f"  Actual  : {sorted(actual_keys)}"
-        )
-        assert actual_keys <= allowed, (
-            f"search result contains unexpected fields!\n"
-            f"  Allowed: {sorted(allowed)}\n"
-            f"  Actual : {sorted(actual_keys)}\n"
-            f"  Unknown: {sorted(actual_keys - allowed)}"
-        )
+        for index, result in enumerate(results):
+            actual_keys = frozenset(result.keys())
+            assert actual_keys >= REQUIRED_SEARCH_RESULT_FIELDS, (
+                f"search result {index} missing required fields!\n"
+                f"  Required: {sorted(REQUIRED_SEARCH_RESULT_FIELDS)}\n"
+                f"  Actual  : {sorted(actual_keys)}"
+            )
+            assert actual_keys <= allowed, (
+                f"search result {index} contains unexpected fields!\n"
+                f"  Allowed: {sorted(allowed)}\n"
+                f"  Actual : {sorted(actual_keys)}\n"
+                f"  Unknown: {sorted(actual_keys - allowed)}"
+            )
 
     def test_ref_is_filesystem_source_ref(self, mcp_call: Callable):
         data = mcp_call("tools/call", {"name": "search", "arguments": {"query": "тест"}})
         results = _tool_result_structured(data)
         assert results, "search returned no results for canonical query 'тест'"
-        assert isinstance(results[0]["ref"], str)
-        assert results[0]["ref"].startswith("filesystem:")
+        for index, result in enumerate(results):
+            assert isinstance(result["ref"], str), f"result {index} ref must be string"
+            assert result["ref"].startswith("filesystem:"), (
+                f"result {index} ref must be filesystem source ref: {result['ref']}"
+            )
 
     def test_score_is_float_in_range(self, mcp_call: Callable):
         data = mcp_call("tools/call", {"name": "search", "arguments": {"query": "тест"}})
         results = _tool_result_structured(data)
         assert results, "search returned no results for canonical query 'тест'"
-        score = results[0]["score"]
-        assert isinstance(score, float), f"score must be float, got {type(score)}"
-        assert 0.0 <= score <= 1.0, f"score out of range: {score}"
+        for index, result in enumerate(results):
+            score = result["score"]
+            assert isinstance(score, float), f"result {index} score must be float, got {type(score)}"
+            assert 0.0 <= score <= 1.0, f"result {index} score out of range: {score}"
 
     def test_top_k_respected(self, mcp_call: Callable):
         data = mcp_call("tools/call", {"name": "search", "arguments": {"query": "тест", "top_k": 2}})
