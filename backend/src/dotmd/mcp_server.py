@@ -106,6 +106,16 @@ class ReadResult(BaseModel):
     chunks: list[ReadChunk] = Field(default_factory=list)
 
 
+class DrillResult(BaseModel):
+    ref: str
+    title: str | None = None
+    source_uri: str | None = None
+    document_type: str | None = None
+    parser_name: str | None = None
+    frontmatter: dict[str, Any]
+    total_chunks: int
+
+
 # ---------------------------------------------------------------------------
 # Server
 # ---------------------------------------------------------------------------
@@ -114,8 +124,8 @@ _INSTRUCTIONS = """\
 Search a personal markdown knowledgebase — notes, meeting transcripts, voice notes, documentation, project files.
 
 Key workflows:
-SEARCH THEN READ: Use search to locate relevant chunks by topic. Once you know which file matters, use read to consume its content by chunk range — don't keep spinning search queries against a file you've already identified.
-READ IN STEPS: Call read without an end parameter first to get frontmatter and total_chunks, then request ranges. Long transcripts won't fit in one call — plan your ranges.
+SEARCH THEN DRILL/READ: Use search(query) -> ref to locate relevant chunks by topic. Use drill(ref) for metadata and read(ref, start, end) for chunk text — don't keep spinning search queries against a source you've already identified.
+READ IN STEPS: Call read(ref) without an end parameter first to get frontmatter and total_chunks, then request ranges. Long transcripts won't fit in one call — plan your ranges.
 
 Use feedback immediately when a tool response is wrong, surprising, or missing a useful capability — don't wait until end of session.\
 """
@@ -454,6 +464,13 @@ def _get_feedback() -> FeedbackStore:
     return _feedback
 
 
+def _ref_tool_error(tool_name: str, ref: str, exc: ValueError) -> RuntimeError:
+    return RuntimeError(
+        f"{tool_name} failed for ref {ref!r}: {exc}. "
+        "Action: pass a ref returned by search."
+    )
+
+
 def init_service() -> None:
     """Initialize service for the stdio transport path (no trickle, no warmup).
 
@@ -649,6 +666,7 @@ async def read_document(
     1. Call read(ref) without end to get frontmatter and total_chunks.
     2. Request ranges as needed: read(ref, 0, 20), read(ref, 20, 40), etc.
 
+    Agent workflow: search(query) -> ref, drill(ref), read(ref, start, end).
     Only pass ref values from search results.
     """
     try:
@@ -668,12 +686,51 @@ async def read_document(
             frontmatter=result["frontmatter"],
             chunks=chunks,
         )
+    except ValueError as exc:
+        logger.warning("read ref rejected: ref=%r error=%s", ref, exc)
+        raise _ref_tool_error("read", ref, exc) from exc
     except Exception as exc:
         logger.error("read failed: ref=%r", ref, exc_info=True)
-        raise RuntimeError(
-            f"Read failed for {ref!r}: {exc}. "
-            "Action: verify the ref comes from a search result."
-        ) from exc
+        raise RuntimeError("Read failed. Action: retry later or submit feedback with the ref.") from exc
+
+
+@mcp.tool(
+    name="drill",
+    annotations=ToolAnnotations(
+        title="Drill Source Metadata",
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    ),
+)
+async def drill(
+    ref: Annotated[str, Field(description="Source ref from a search result.")],
+) -> DrillResult:
+    """Return source metadata for a search result ref.
+
+    Agent workflow: search(query) -> ref, drill(ref), read(ref, start, end).
+    Use drill(ref) after search when you need frontmatter, source metadata, or
+    total chunk count before deciding which chunk ranges to read.
+    """
+    try:
+        service = _get_service()
+        result = await asyncio.to_thread(service.drill, ref)
+        return DrillResult(
+            ref=result["ref"],
+            title=result.get("title"),
+            source_uri=result.get("source_uri"),
+            document_type=result.get("document_type"),
+            parser_name=result.get("parser_name"),
+            frontmatter=result["frontmatter"],
+            total_chunks=result["total_chunks"],
+        )
+    except ValueError as exc:
+        logger.warning("drill ref rejected: ref=%r error=%s", ref, exc)
+        raise _ref_tool_error("drill", ref, exc) from exc
+    except Exception as exc:
+        logger.error("drill failed: ref=%r", ref, exc_info=True)
+        raise RuntimeError("Drill failed. Action: retry later or submit feedback with the ref.") from exc
 
 
 @mcp.tool(

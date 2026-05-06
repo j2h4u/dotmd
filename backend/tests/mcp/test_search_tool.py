@@ -7,6 +7,8 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
 
+import pytest
+
 
 def _import_mcp():  # type: ignore[no-untyped-def]
     """Deferred import for MCP server module."""
@@ -57,6 +59,7 @@ class TestSearchRefContract:
         payload = cast(dict[str, Any], structured["result"][0])
         assert payload["ref"] == "filesystem:/mnt/test.md"
         assert "file_paths" not in payload
+        assert "file_path" not in payload
         service.search.assert_called_once_with("test", top_k=1)
 
 
@@ -107,3 +110,87 @@ class TestReadToolRefContract:
         ]
         assert "file_path" not in structured
         service.read.assert_called_once_with("filesystem:/mnt/test.md", 0, 1)
+
+    def test_read_schema_uses_ref_input(self) -> None:
+        schema = _tool_schema("read")["inputSchema"]
+        properties = schema["properties"]
+
+        assert "ref" in properties
+        assert properties["ref"]["description"] == "Source ref from a search result."
+        assert "file_path" not in properties
+
+    def test_read_value_error_becomes_actionable_tool_error(self) -> None:
+        mcp = _import_mcp()
+        service = MagicMock()
+        service.read.side_effect = ValueError("Unknown source ref")
+        previous_service = mcp._service
+        mcp._service = service
+        try:
+            with pytest.raises(Exception) as exc_info:
+                asyncio.run(
+                    mcp.mcp.call_tool(
+                        "read",
+                        {"ref": "not-a-ref", "start": 0, "end": 1},
+                    )
+                )
+        finally:
+            mcp._service = previous_service
+
+        message = str(exc_info.value)
+        assert "Unknown source ref" in message
+        assert "not-a-ref" in message
+        assert "Action: pass a ref returned by search." in message
+
+
+class TestDrillToolRefContract:
+    """MCP drill exposes source metadata for a ref."""
+
+    def test_drill_tool_exists_and_returns_metadata(self) -> None:
+        assert _tool_schema("drill")["name"] == "drill"
+
+        mcp = _import_mcp()
+        service = MagicMock()
+        service.drill.return_value = {
+            "ref": "filesystem:/mnt/test.md",
+            "title": "Compatibility Note",
+            "source_uri": "file:///mnt/test.md",
+            "document_type": "markdown",
+            "parser_name": "markdown",
+            "frontmatter": {"title": "Compatibility Note"},
+            "total_chunks": 2,
+        }
+        previous_service = mcp._service
+        mcp._service = service
+        try:
+            _content, structured_raw = asyncio.run(
+                mcp.mcp.call_tool("drill", {"ref": "filesystem:/mnt/test.md"})
+            )
+        finally:
+            mcp._service = previous_service
+
+        structured = cast(dict[str, Any], structured_raw)
+        assert structured["ref"] == "filesystem:/mnt/test.md"
+        assert structured["title"] == "Compatibility Note"
+        assert structured["source_uri"] == "file:///mnt/test.md"
+        assert structured["document_type"] == "markdown"
+        assert structured["parser_name"] == "markdown"
+        assert structured["frontmatter"] == {"title": "Compatibility Note"}
+        assert structured["total_chunks"] == 2
+        service.drill.assert_called_once_with("filesystem:/mnt/test.md")
+
+    def test_drill_value_error_becomes_actionable_tool_error(self) -> None:
+        mcp = _import_mcp()
+        service = MagicMock()
+        service.drill.side_effect = ValueError("Unsupported source namespace")
+        previous_service = mcp._service
+        mcp._service = service
+        try:
+            with pytest.raises(Exception) as exc_info:
+                asyncio.run(mcp.mcp.call_tool("drill", {"ref": "telegram:1"}))
+        finally:
+            mcp._service = previous_service
+
+        message = str(exc_info.value)
+        assert "Unsupported source namespace" in message
+        assert "telegram:1" in message
+        assert "Action: pass a ref returned by search." in message
