@@ -49,3 +49,4 @@ class TestRefRendering:
         )
         assert ref in result.output
         assert "file_paths" not in result.output
+        assert "file_path" not in result.output
