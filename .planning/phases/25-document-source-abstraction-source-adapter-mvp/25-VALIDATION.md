@@ -5,7 +5,7 @@ status: complete
 nyquist_compliant: true
 wave_0_complete: true
 created: 2026-05-06
-updated: 2026-05-06T13:11:55+05:00
+updated: 2026-05-06T21:57:38+05:00
 validation_state: reconstructed-from-summaries
 gaps_found: 0
 gaps_resolved: 0
@@ -93,13 +93,27 @@ All phase behaviors have automated verification.
 | Escalated | 0 |
 | Manual-only | 0 |
 
+## Validation Re-Audit 2026-05-06T21:57:38+05:00
+
+| Metric | Count |
+|--------|-------|
+| Existing VALIDATION.md audited | 1 |
+| Plans rechecked | 4 |
+| Task rows rechecked | 16 |
+| Gaps found | 0 |
+| Resolved | 0 |
+| Escalated | 0 |
+| Manual-only | 0 |
+
 ## Commands Run
 
 | Command | Result |
 |---------|--------|
 | `gsd-sdk query config-get workflow.nyquist_validation --raw` | `true` |
-| `cd backend && uv run pytest tests/ingestion/test_source_filesystem.py tests/ingestion/test_chunker.py tests/ingestion/test_metadata_only_reindex.py tests/ingestion/test_pipeline_purge.py tests/storage/test_metadata_m2m.py tests/api/test_search_result_shape.py tests/mcp/test_search_tool.py tests/test_graph_delete.py -q` | 71 passed, 24 warnings |
-| `just typecheck` | passed; pyright ratchet: 70 errors, baseline 76, improvement -6 across 2 files |
+| `cd backend && uv run pytest tests/ingestion/test_source_filesystem.py tests/ingestion/test_chunker.py tests/ingestion/test_metadata_only_reindex.py tests/ingestion/test_pipeline_purge.py tests/storage/test_metadata_m2m.py tests/api/test_search_result_shape.py tests/mcp/test_search_tool.py tests/test_graph_delete.py -q` | PASS: 74 passed, 24 warnings |
+| `just typecheck` | PASS: pyright ratchet 69 errors, baseline 69 |
+| `rg --no-heading "filesystem:<document_ref>\|source_documents\|read\\(file_path\|Telegram read-only adapter not implemented\|Source assets not implemented\|TTL policy not implemented" docs/source-adapter-architecture.md docs/architecture.md .planning/phases/25-document-source-abstraction-source-adapter-mvp/25-04-SUMMARY.md` | PASS |
+| `cd backend && uv run ruff check src/dotmd/core/models.py src/dotmd/ingestion/source.py src/dotmd/ingestion/chunker.py src/dotmd/ingestion/pipeline.py src/dotmd/storage/metadata.py tests/ingestion/test_source_filesystem.py tests/ingestion/test_chunker.py tests/ingestion/test_metadata_only_reindex.py tests/ingestion/test_pipeline_purge.py tests/storage/test_metadata_m2m.py tests/api/test_search_result_shape.py tests/mcp/test_search_tool.py tests/test_graph_delete.py` | PASS |
 
 ## Validation Sign-Off
 
