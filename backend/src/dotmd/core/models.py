@@ -203,14 +203,10 @@ class ExpandedQuery(BaseModel):
 
 
 class SearchResult(BaseModel):
-    """A single search result after fusion and optional reranking.
-
-    Phase 16 (Decision #1, #2): file_path replaced by file_paths: list[Path]
-    sorted lexicographically (clean break — no backward-compat alias).
-    """
+    """A single search result after fusion and optional reranking."""
 
     chunk_id: str
-    file_paths: list[Path] = Field(default_factory=list)
+    ref: str
     heading_path: str
     snippet: str
     fused_score: float
@@ -220,13 +216,15 @@ class SearchResult(BaseModel):
     graph_direct_score: float | None = None
     matched_engines: list[str] = Field(default_factory=list)
 
-    @field_validator("file_paths", mode="before")
+    @field_validator("ref")
     @classmethod
-    def _sort_file_paths(cls, v: object) -> list[Path]:
-        """Enforce lexicographic sort on file_paths (Decision #1)."""
-        if not isinstance(v, list):
-            return v  # type: ignore[return-value]
-        return sorted(Path(p) for p in v)
+    def _validate_ref(cls, value: str) -> str:
+        namespace, separator, document_ref = value.partition(":")
+        if not separator or not namespace or not document_ref:
+            raise ValueError(
+                "ref must be formatted as '<namespace>:<document_ref>'"
+            )
+        return value
 
 
 class IndexStats(BaseModel):
