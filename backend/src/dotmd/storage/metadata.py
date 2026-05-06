@@ -418,7 +418,7 @@ class SQLiteMetadataStore:
         strategy: str,
         chunk_ids: Sequence[str],
     ) -> dict[str, ChunkProvenance]:
-        """Batch-hydrate chunk provenance rows by chunk_id."""
+        """Batch-hydrate canonical chunk provenance rows by chunk_id."""
         if not chunk_ids:
             return {}
         table = f"chunk_source_provenance_{strategy}"
@@ -426,11 +426,15 @@ class SQLiteMetadataStore:
         rows = self._conn.execute(
             f"SELECT chunk_id, namespace, document_ref, source_unit_refs, "
             f"chunk_strategy, parser_name FROM {table} "
-            f"WHERE chunk_id IN ({placeholders}) ORDER BY chunk_id",
+            f"WHERE chunk_id IN ({placeholders}) "
+            f"ORDER BY chunk_id, namespace, document_ref",
             list(chunk_ids),
         ).fetchall()
-        return {
-            row[0]: ChunkProvenance(
+        result: dict[str, ChunkProvenance] = {}
+        for row in rows:
+            chunk_id = row[0]
+            if chunk_id not in result:
+                result[chunk_id] = ChunkProvenance(
                 namespace=row[1],
                 document_ref=row[2],
                 ref=f"{row[1]}:{row[2]}",
@@ -438,8 +442,67 @@ class SQLiteMetadataStore:
                 chunk_strategy=row[4],
                 parser_name=row[5],
             )
-            for row in rows
-        }
+        return result
+
+    def count_missing_source_provenance(self, strategy: str) -> int:
+        """Count active chunks without source provenance for one strategy."""
+        chunk_table = f"chunks_{strategy}"
+        provenance_table = f"chunk_source_provenance_{strategy}"
+        row = self._conn.execute(
+            f"SELECT COUNT(*) FROM {chunk_table} c "
+            f"LEFT JOIN {provenance_table} p ON c.chunk_id = p.chunk_id "
+            f"WHERE p.chunk_id IS NULL"
+        ).fetchone()
+        return int(row[0]) if row else 0
+
+    def backfill_missing_source_provenance_from_file_paths(
+        self,
+        strategy: str,
+        *,
+        dry_run: bool = True,
+    ) -> int:
+        """Backfill missing filesystem provenance from internal holder paths.
+
+        chunk_file_paths_<strategy> is an internal filesystem/content-dedup
+        holder table, not the public read/search identity; see Phase 26.
+        """
+        chunk_table = f"chunks_{strategy}"
+        holder_table = f"chunk_file_paths_{strategy}"
+        provenance_table = f"chunk_source_provenance_{strategy}"
+        rows = self._conn.execute(
+            f"SELECT c.chunk_id, MIN(h.file_path), sd.parser_name "
+            f"FROM {chunk_table} c "
+            f"JOIN {holder_table} h ON h.chunk_id = c.chunk_id "
+            f"LEFT JOIN {provenance_table} p ON p.chunk_id = c.chunk_id "
+            f"LEFT JOIN source_documents sd "
+            f"  ON sd.namespace = 'filesystem' "
+            f" AND sd.document_ref = h.file_path "
+            f"WHERE p.chunk_id IS NULL "
+            f"GROUP BY c.chunk_id"
+        ).fetchall()
+        if dry_run or not rows:
+            return len(rows)
+
+        inserted = 0
+        for chunk_id, file_path, parser_name in rows:
+            before = self._conn.total_changes
+            self._conn.execute(
+                f"INSERT OR IGNORE INTO {provenance_table} ("
+                f"chunk_id, namespace, document_ref, source_unit_refs, "
+                f"chunk_strategy, parser_name"
+                f") VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    chunk_id,
+                    "filesystem",
+                    file_path,
+                    "[]",
+                    strategy,
+                    parser_name,
+                ),
+            )
+            inserted += self._conn.total_changes - before
+        self._conn.commit()
+        return inserted
 
     def delete_chunk_provenance(
         self,
@@ -522,6 +585,9 @@ class SQLiteMetadataStore:
         _commit: bool = True,
     ) -> None:
         """Record (chunk_id, file_path, chunk_index) in the M2M table.
+
+        chunk_file_paths_<strategy> is an internal filesystem/content-dedup
+        holder table, not the public read/search identity; see Phase 26.
 
         Uses INSERT OR IGNORE — duplicate (chunk_id, file_path, chunk_index)
         tuples are silently skipped (idempotent).
