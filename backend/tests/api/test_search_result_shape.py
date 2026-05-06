@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
-from typing import Any
 
 
 def _search_result_kwargs(ref: str) -> dict[str, Any]:

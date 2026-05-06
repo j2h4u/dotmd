@@ -161,6 +161,32 @@ class TestReadRefContract:
             else:
                 raise AssertionError("read() should reject unknown refs")
 
+    def test_read_ref_falls_back_for_existing_filesystem_provenance_without_source_document(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = _get_service(tmp_path)
+        note_path = tmp_path / "legacy.md"
+        note_path.write_text("---\ntitle: Legacy Note\n---\nBody", encoding="utf-8")
+        ref = f"filesystem:{note_path.resolve()}"
+        metadata = MagicMock()
+        metadata.get_source_document.return_value = None
+        metadata.get_chunk_count_for_file.return_value = 1
+        metadata.get_chunks_for_file_range.return_value = [
+            {"index": 0, "heading_hierarchy": [], "text": "Body"},
+        ]
+        service._pipeline._metadata_store = metadata
+
+        payload = service.read(ref, 0, 1)
+
+        assert payload["ref"] == ref
+        assert payload["frontmatter"]["title"] == "Legacy Note"
+        assert payload["total_chunks"] == 1
+        metadata.get_chunk_count_for_file.assert_called_once_with(
+            service._settings.chunk_strategy,
+            str(note_path.resolve()),
+        )
+
     def test_read_ref_rejects_unsupported_namespace(self, tmp_path: Path) -> None:
         service = _get_service(tmp_path)
         document = _source_document(tmp_path / "telegram.md", namespace="telegram")

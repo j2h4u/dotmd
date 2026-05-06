@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -660,9 +661,28 @@ class DotMDService:
             namespace,
             document_ref,
         )
-        if document is None:
-            raise ValueError(f"Unknown source ref: {ref}")
-        return document
+        if document is not None:
+            return document
+        if namespace == "filesystem":
+            path = Path(document_ref)
+            if path.exists():
+                resolved = path.resolve()
+                return SourceDocument(
+                    namespace="filesystem",
+                    document_ref=str(resolved),
+                    ref=f"filesystem:{resolved}",
+                    source_uri=resolved.as_uri(),
+                    file_path=resolved,
+                    media_type="text/markdown",
+                    parser_name="markdown",
+                    document_type="document",
+                    title=resolved.stem,
+                    updated_at=datetime.fromtimestamp(resolved.stat().st_mtime),
+                    content_fingerprint="",
+                    metadata_fingerprint="",
+                    metadata_json={},
+                )
+        raise ValueError(f"Unknown source ref: {ref}")
 
     def _filesystem_path_for_source(
         self,

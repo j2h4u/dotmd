@@ -140,6 +140,8 @@ def _http_access_token() -> str | None:
         },
         timeout=60.0,
     )
+    if register.status_code == 404:
+        return None
     register.raise_for_status()
     registration = register.json()
     client_id = registration["client_id"]

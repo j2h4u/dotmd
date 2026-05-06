@@ -35,15 +35,15 @@ pytestmark = pytest.mark.e2e
 
 # KEEP IN SYNC WITH mcp_server.py.
 # Exact match — test_tool_surface will fail if actual != expected.
-EXPECTED_TOOLS: frozenset[str] = frozenset({"search", "read", "feedback"})
+EXPECTED_TOOLS: frozenset[str] = frozenset({"search", "read", "drill", "feedback"})
 
 # Fields always present in every search result dict.
-REQUIRED_SEARCH_RESULT_FIELDS: frozenset[str] = frozenset({"file_paths", "snippet", "score"})
+REQUIRED_SEARCH_RESULT_FIELDS: frozenset[str] = frozenset({"ref", "snippet", "score"})
 # heading is optional — present only for docs with markdown headings.
 OPTIONAL_SEARCH_RESULT_FIELDS: frozenset[str] = frozenset({"heading"})
 
 # Top-level keys returned by read().
-EXPECTED_READ_KEYS: frozenset[str] = frozenset({"file_path", "total_chunks", "frontmatter", "chunks"})
+EXPECTED_READ_KEYS: frozenset[str] = frozenset({"ref", "total_chunks", "frontmatter", "chunks"})
 
 
 # ---------------------------------------------------------------------------
@@ -100,12 +100,12 @@ class TestSearchSmoke:
             f"  Unknown: {sorted(actual_keys - allowed)}"
         )
 
-    def test_file_paths_is_list(self, mcp_call: Callable):
+    def test_ref_is_filesystem_source_ref(self, mcp_call: Callable):
         data = mcp_call("tools/call", {"name": "search", "arguments": {"query": "тест"}})
         results = _tool_result_structured(data)
         assert results, "search returned no results for canonical query 'тест'"
-        assert isinstance(results[0]["file_paths"], list)
-        assert all(isinstance(p, str) for p in results[0]["file_paths"])
+        assert isinstance(results[0]["ref"], str)
+        assert results[0]["ref"].startswith("filesystem:")
 
     def test_score_is_float_in_range(self, mcp_call: Callable):
         data = mcp_call("tools/call", {"name": "search", "arguments": {"query": "тест"}})
@@ -133,9 +133,9 @@ class TestReadSmoke:
         results = _tool_result_structured(search)
         assert results, "search returned no results for canonical query 'встреча'"
 
-        file_path = results[0]["file_paths"][0]
-        data = mcp_call("tools/call", {"name": "read", "arguments": {"file_path": file_path}})
-        assert not _is_tool_error(data), f"read errored on {file_path}: {_tool_result_text(data)}"
+        ref = results[0]["ref"]
+        data = mcp_call("tools/call", {"name": "read", "arguments": {"ref": ref}})
+        assert not _is_tool_error(data), f"read errored on {ref}: {_tool_result_text(data)}"
 
         payload = _tool_result_structured(data)
         assert isinstance(payload, dict)
@@ -156,8 +156,8 @@ class TestReadSmoke:
         results = _tool_result_structured(search)
         assert results, "search returned no results for canonical query 'встреча'"
 
-        file_path = results[0]["file_paths"][0]
-        data = mcp_call("tools/call", {"name": "read", "arguments": {"file_path": file_path, "start": 0, "end": 3}})
+        ref = results[0]["ref"]
+        data = mcp_call("tools/call", {"name": "read", "arguments": {"ref": ref, "start": 0, "end": 3}})
         assert not _is_tool_error(data), f"read errored: {_tool_result_text(data)}"
 
         payload = _tool_result_structured(data)
@@ -168,14 +168,31 @@ class TestReadSmoke:
             assert isinstance(chunk["text"], str)
             assert len(chunk["text"]) > 0
 
-    def test_nonexistent_path_returns_empty(self, mcp_call: Callable):
-        """read on a missing file returns empty frontmatter and zero chunks, not a crash."""
-        data = mcp_call("tools/call", {"name": "read", "arguments": {"file_path": "/nonexistent/file.md"}})
+    def test_nonexistent_ref_returns_tool_error(self, mcp_call: Callable):
+        """read on a missing ref returns a tool-level error, not a JSON-RPC protocol error."""
+        data = mcp_call(
+            "tools/call",
+            {"name": "read", "arguments": {"ref": "filesystem:/nonexistent/file.md"}},
+        )
         assert not data.get("error"), f"protocol-level error: {data.get('error')}"
         assert "result" in data
-        payload = _tool_result_structured(data)
-        assert payload["total_chunks"] == 0
-        assert payload["chunks"] == []
+        assert _is_tool_error(data), f"expected tool-level error, got: {data}"
+        text = _tool_result_text(data)
+        assert "Unknown source ref" in text
+        assert "Action: pass a ref returned by search." in text
+
+    def test_malformed_ref_returns_tool_error(self, mcp_call: Callable):
+        """read on a malformed ref follows the same actionable tool-error contract."""
+        data = mcp_call(
+            "tools/call",
+            {"name": "read", "arguments": {"ref": "not-a-ref"}},
+        )
+        assert not data.get("error"), f"protocol-level error: {data.get('error')}"
+        assert "result" in data
+        assert _is_tool_error(data), f"expected tool-level error, got: {data}"
+        text = _tool_result_text(data)
+        assert "Unknown source ref" in text
+        assert "Action: pass a ref returned by search." in text
 
     def test_cap_at_50_chunks(self, mcp_call: Callable):
         """end - start > 50 is capped server-side."""
@@ -183,10 +200,46 @@ class TestReadSmoke:
         results = _tool_result_structured(search)
         assert results, "search returned no results for canonical query 'встреча'"
 
-        file_path = results[0]["file_paths"][0]
-        data = mcp_call("tools/call", {"name": "read", "arguments": {"file_path": file_path, "start": 0, "end": 200}})
+        ref = results[0]["ref"]
+        data = mcp_call("tools/call", {"name": "read", "arguments": {"ref": ref, "start": 0, "end": 200}})
         payload = _tool_result_structured(data)
         assert len(payload["chunks"]) <= 50, f"cap not enforced: got {len(payload['chunks'])} chunks"
+
+
+# ---------------------------------------------------------------------------
+# drill
+# ---------------------------------------------------------------------------
+
+
+class TestDrillSmoke:
+    def test_drill_returns_source_metadata(self, mcp_call: Callable):
+        search = mcp_call("tools/call", {"name": "search", "arguments": {"query": "встреча", "top_k": 1}})
+        results = _tool_result_structured(search)
+        assert results, "search returned no results for canonical query 'встреча'"
+
+        ref = results[0]["ref"]
+        data = mcp_call("tools/call", {"name": "drill", "arguments": {"ref": ref}})
+        assert not _is_tool_error(data), f"drill errored on {ref}: {_tool_result_text(data)}"
+
+        payload = _tool_result_structured(data)
+        assert isinstance(payload, dict)
+        assert payload["ref"] == ref
+        assert "frontmatter" in payload
+        assert "total_chunks" in payload
+        assert isinstance(payload["frontmatter"], dict)
+        assert isinstance(payload["total_chunks"], int)
+
+    def test_malformed_ref_returns_tool_error(self, mcp_call: Callable):
+        data = mcp_call(
+            "tools/call",
+            {"name": "drill", "arguments": {"ref": "not-a-ref"}},
+        )
+        assert not data.get("error"), f"protocol-level error: {data.get('error')}"
+        assert "result" in data
+        assert _is_tool_error(data), f"expected tool-level error, got: {data}"
+        text = _tool_result_text(data)
+        assert "Unknown source ref" in text
+        assert "Action: pass a ref returned by search." in text
 
 
 # ---------------------------------------------------------------------------

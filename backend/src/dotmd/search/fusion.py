@@ -12,9 +12,8 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING, Protocol, cast
-
 from collections.abc import Sequence
+from typing import TYPE_CHECKING, Protocol, cast
 
 from dotmd.core.models import ChunkProvenance, SearchResult
 

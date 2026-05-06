@@ -1,9 +1,9 @@
 """Tests for fusion math and weight validation (Phase 999.12)."""
-from datetime import datetime
 import math
 import os
-from pathlib import Path
 import sqlite3
+from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 

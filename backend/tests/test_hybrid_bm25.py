@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from sqlite3 import Connection
+from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -53,7 +54,7 @@ def _seed_chunk_provenance(service: DotMDService, chunk_ids: list[str]) -> None:
                 parser_name="test",
             ),
             chunk_id,
-            conn=store._conn,
+            conn=cast(Connection, store._conn),
         )
     store._conn.commit()
 
