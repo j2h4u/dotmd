@@ -1,10 +1,11 @@
 ---
 phase: 26
 slug: source-ref-first-read-search-contract-cleanup
-status: draft
+status: validated
 nyquist_compliant: true
 wave_0_complete: true
 created: 2026-05-06
+updated: 2026-05-06
 ---
 
 # Phase 26 — Validation Strategy
@@ -19,8 +20,8 @@ created: 2026-05-06
 |----------|-------|
 | **Framework** | pytest + pyright |
 | **Config file** | `backend/pyproject.toml` |
-| **Quick run command** | `cd backend && uv run pytest tests/api/test_search_result_shape.py tests/mcp/test_search_tool.py -q` |
-| **Full suite command** | `just typecheck && cd backend && uv run pytest tests/e2e/ -q -p no:cacheprovider` |
+| **Quick run command** | `cd backend && uv run pytest tests/api/test_search_result_shape.py tests/test_fusion.py tests/api/test_service_search.py tests/mcp/test_search_tool.py tests/cli/test_search_output.py -q` |
+| **Full suite command** | `cd backend && uv run pytest -q --ignore=tests/e2e && just typecheck && docker exec dotmd sh -c 'cd /mnt/home/repos/j2h4u/dotmd/backend && python -m pytest tests/e2e/test_mcp_smoke.py -q -p no:cacheprovider'` |
 | **Estimated runtime** | ~120 seconds local focused tests; live e2e depends on container/model state |
 
 ---
@@ -40,11 +41,11 @@ created: 2026-05-06
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 26-01-01 | 01 | 1 | D-01/D-02/D-04/D-11/D-12/D-17/D-19 | T-26-01 | Public search identity comes from provenance refs, not holder paths | unit | `cd backend && uv run pytest tests/api/test_search_result_shape.py tests/test_fusion.py -q` | ✅ | pending |
-| 26-01-02 | 01 | 1 | D-07/D-08/D-09/D-10/D-13/D-18/D-20 | T-26-02 | Read/drill resolve refs without full reindex or per-request index reload | unit/service | `cd backend && uv run pytest tests/api/test_service_search.py tests/mcp/test_search_tool.py -q` | ✅ | pending |
-| 26-02-01 | 02 | 2 | D-02/D-03/D-04/D-05/D-06/D-07/D-08/D-09 | T-26-03 | MCP/API/CLI expose refs and reject path-first public arguments | api/mcp/cli | `cd backend && uv run pytest tests/mcp/test_search_tool.py tests/cli/test_search_output.py -q` | ✅ | pending |
-| 26-03-01 | 03 | 3 | D-14/D-15/D-16/D-17/D-18/D-21 | T-26-04 | Docs/tests prevent Telegram from inheriting File/path-shaped contract | docs/e2e | `rg "read\\(file_path|file_paths" docs backend/tests/e2e/test_mcp_smoke.py` | ✅ | pending |
-| 26-03-02 | 03 | 3 | phase smoke | T-26-05 | Live MCP consumer sees `search -> ref -> drill/read` | e2e | `docker exec dotmd sh -c "cd /mnt/home/repos/j2h4u/dotmd/backend && python -m pytest tests/e2e/ -v -p no:cacheprovider"` | ✅ | pending |
+| 26-01-01 | 01 | 1 | D-01/D-02/D-04/D-11/D-12/D-17/D-19 | T-26-01 | Public search identity comes from provenance refs, not holder paths | unit | `cd backend && uv run pytest tests/api/test_search_result_shape.py tests/test_fusion.py -q` | ✅ | COVERED |
+| 26-01-02 | 01 | 1 | D-07/D-08/D-09/D-10/D-13/D-18/D-20 | T-26-02 | Read/drill resolve refs without full reindex or per-request index reload | unit/service | `cd backend && uv run pytest tests/api/test_service_search.py tests/mcp/test_search_tool.py -q` | ✅ | COVERED |
+| 26-02-01 | 02 | 2 | D-02/D-03/D-04/D-05/D-06/D-07/D-08/D-09 | T-26-03 | MCP/API/CLI expose refs and reject path-first public arguments | api/mcp/cli | `cd backend && uv run pytest tests/mcp/test_search_tool.py tests/cli/test_search_output.py -q` | ✅ | COVERED |
+| 26-03-01 | 03 | 3 | D-14/D-15/D-16/D-17/D-18/D-21 | T-26-04 | Docs/tests prevent Telegram from inheriting File/path-shaped contract | docs/e2e | `rg -n 'read\\(file_path\|Only pass file_paths\|Returns ranked hits with source file_paths' docs backend/src/dotmd/mcp_server.py backend/tests/e2e/test_mcp_smoke.py` and `rg -n 'chunk_file_paths\|Chunk\\.file_paths' docs/source-adapter-architecture.md docs/architecture.md` | ✅ | COVERED |
+| 26-03-02 | 03 | 3 | phase smoke | T-26-05 | Live MCP consumer sees `search -> ref -> drill/read` | e2e | `docker exec dotmd sh -c 'cd /mnt/home/repos/j2h4u/dotmd/backend && python -m pytest tests/e2e/test_mcp_smoke.py -q -p no:cacheprovider'` | ✅ | COVERED |
 
 ---
 
@@ -72,4 +73,26 @@ or new shared fixture is required before implementation.
 - [x] Feedback latency is one task.
 - [x] `nyquist_compliant: true` set in frontmatter.
 
-**Approval:** pending execution
+**Approval:** validated after execution
+
+## Validation Audit 2026-05-06
+
+| Metric | Count |
+|--------|-------|
+| Requirements/tasks audited | 5 |
+| Gaps found | 0 |
+| Resolved with new tests | 0 |
+| Escalated to manual-only | 0 |
+
+## Audit Evidence 2026-05-06
+
+| Command | Result |
+|---------|--------|
+| `cd backend && uv run pytest tests/api/test_search_result_shape.py tests/test_fusion.py -q` | PASS: 28 passed |
+| `cd backend && uv run pytest tests/api/test_service_search.py tests/mcp/test_search_tool.py -q` | PASS: 33 passed |
+| `cd backend && uv run pytest tests/mcp/test_search_tool.py tests/cli/test_search_output.py -q` | PASS: 8 passed |
+| `rg -n 'read\\(file_path\|Only pass file_paths\|Returns ranked hits with source file_paths' docs backend/src/dotmd/mcp_server.py backend/tests/e2e/test_mcp_smoke.py` | PASS: no matches |
+| `rg -n 'chunk_file_paths\|Chunk\\.file_paths' docs/source-adapter-architecture.md docs/architecture.md` | PASS: internal-holder mentions present |
+| `cd backend && uv run pytest -q --ignore=tests/e2e` | PASS: 327 passed |
+| `just typecheck` | PASS: pyright ratchet 69 errors, baseline 76 |
+| `docker exec dotmd sh -c 'cd /mnt/home/repos/j2h4u/dotmd/backend && python -m pytest tests/e2e/test_mcp_smoke.py -q -p no:cacheprovider'` | PASS: 36 passed |
