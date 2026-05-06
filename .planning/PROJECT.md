@@ -154,6 +154,16 @@ preserved through `effective_indexing_exclude`, with additive
 is now named `DOTMD_RUN_STARTUP_CHECKS`, while `ENVIRONMENT=dev` remains a
 temporary compatibility alias.
 
+Phase 26 complete (2026-05-06): The public search/read contract is now
+source-ref-first. Search hits expose `ref` instead of public `file_paths`, MCP
+agents use `search(query) -> ref -> drill(ref) / read(ref, start, end)`, and
+CLI/API search surfaces no longer treat filesystem holder paths as public
+identity. Filesystem paths remain only as internal discovery/read/delete/dedup
+holder mechanics (`Chunk.file_paths` and `chunk_file_paths_<strategy>`).
+The active strategy provenance gate backfilled missing lightweight
+`chunk_source_provenance_contextual_512_50` rows without a full reindex and now
+blocks incomplete provenance before search hydration.
+
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
@@ -172,4 +182,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-05 after Phase 24 complete*
+*Last updated: 2026-05-06 after Phase 26 complete*
