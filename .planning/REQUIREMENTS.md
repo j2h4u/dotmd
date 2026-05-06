@@ -76,9 +76,9 @@
 | RERANK-QUALITY-01 | Phase 21 | Complete |
 | RERANK-QUALITY-02 | Phase 21 | Complete |
 | RERANK-QUALITY-03 | Phase 21 | Complete |
-| SNIPPET-BOUNDARY-01 | Phase 22 | Planned |
-| SNIPPET-CONTEXT-01 | Phase 22 | Planned |
-| SNIPPET-VERIFY-01 | Phase 22 | Planned |
+| SNIPPET-BOUNDARY-01 | Phase 22 | Complete |
+| SNIPPET-CONTEXT-01 | Phase 22 | Complete |
+| SNIPPET-VERIFY-01 | Phase 22 | Complete |
 | TEST-CONTRACT-01 | Phase 23 | Complete |
 | TEST-CONTRACT-02 | Phase 23 | Complete |
 | TEST-CONTRACT-03 | Phase 23 | Complete |
@@ -91,4 +91,4 @@
 
 ---
 *Requirements defined: 2026-03-30*
-*Last updated: 2026-05-06 after Phase 21 verification traceability repair*
+*Last updated: 2026-05-06 after Phase 22 verification traceability repair*

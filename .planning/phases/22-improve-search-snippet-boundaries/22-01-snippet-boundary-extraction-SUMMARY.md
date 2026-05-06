@@ -11,6 +11,10 @@ requirements:
   - SNIPPET-BOUNDARY-01
   - SNIPPET-CONTEXT-01
   - SNIPPET-VERIFY-01
+requirements-completed:
+  - SNIPPET-BOUNDARY-01
+  - SNIPPET-CONTEXT-01
+  - SNIPPET-VERIFY-01
 ---
 
 # Phase 22 Plan 01 Summary: Snippet Boundary Extraction
