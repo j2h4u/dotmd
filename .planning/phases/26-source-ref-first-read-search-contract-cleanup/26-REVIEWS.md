@@ -1,9 +1,11 @@
 ---
 phase: 26
+review_cycle: 2
+replan_commit: 7e094fc
 reviewers: [claude]
 requested_reviewers: [opencode, claude]
 unavailable_reviewers: [opencode]
-reviewed_at: 2026-05-06T15:40:45+05:00
+reviewed_at: 2026-05-06T15:50:27+05:00
 plans_reviewed:
   - .planning/phases/26-source-ref-first-read-search-contract-cleanup/26-01-core-ref-model-and-service-resolution-PLAN.md
   - .planning/phases/26-source-ref-first-read-search-contract-cleanup/26-02-mcp-api-cli-ref-contract-PLAN.md
@@ -19,135 +21,58 @@ plans_reviewed:
 
 ## Claude Review
 
-I'll review the three Phase 26 plans against the goal of removing the Phase 25 filesystem-path-first compatibility layer without requiring a full reindex.
+# Phase 26 Plan Review - Convergence Cycle 2
 
-## Review
+## Summary
 
-### Summary
+The replan commit `7e094fc` substantively resolves all three HIGH concerns from cycle 1. Missing-provenance is locked to a hard `ValueError` (no skip-and-warn fallback), the invalid-ref smoke pins exact tool-level error text in both Plan 02 acceptance criteria and Plan 03 evidence, and the multi-holder canonical-source rule is now `ORDER BY chunk_id, namespace, document_ref` first-wins with concrete `filesystem:/mnt/a.md` vs `filesystem:/mnt/b.md` test fixtures. The plans hold the no-full-reindex constraint and stay disciplined within the source-ref-first cleanup boundary; deferred items (Telegram, graph rewrite, holder-table replacement) are explicitly listed for the phase audit.
 
-The three-plan decomposition (domain/service -> public surfaces -> regression/docs/smoke) is sound and correctly aligned with the Phase 26 goal. The reindex constraint (D-17, D-18) is honored - refs are derived from existing `source_documents` and `chunk_source_provenance_<strategy>` rows, no embeddings/FTS/graph rebuild. Acceptance criteria are concrete and grep-checkable, and the deferred-scope audit (graph `File`, `chunk_file_paths_*` holder tables, Telegram, pretty labels) matches the phase boundary. The main risks are unresolved behavioral ambiguities at error/edge boundaries - particularly missing-provenance handling - and a few weakly specified verification gates.
+## Strengths
 
-### Strengths
+- **Determinism upgrades**: `missing source provenance for chunk_id=` is both raised in code (Plan 01) and asserted as a regression gate (Plan 03 task 4). Same for the canonical-ref rule and the `Action: pass a ref returned by search.` error suffix.
+- **No-full-reindex audit is now first-class**: Plan 01 verification adds an explicit count query for chunks lacking provenance, with a stop-before-merge gate if count > 0. Plan 03 task 4 records the result.
+- **Single batched container restart**: Plan 03 task 3 explicitly limits to one `docker restart dotmd` after all implementation, respecting the `feedback_no_prod_restarts.md` memory.
+- **Clean break, no compat shims**: No `display_path`/`source_uri`/path-fallback hedging in public search hits - D-03 is enforced by acceptance grep.
+- **FastAPI escape clause**: Plan 02 task 2 enumerates routes via `rg` and records "no read/search routes" as a valid finding rather than inventing API surface.
 
-- **Reindex avoidance is structural, not just stated.** Plan 01 hydrates from existing provenance tables; no plan touches vectors, FTS5, or graph data. The summary in Plan 03 explicitly audits this.
-- **Wave ordering is correct.** Plan 01 lands `DotMDService.drill(ref)` and `read(ref)` before Plan 02 wires MCP tools that call them. Plan 03 only verifies after both ship.
-- **Acceptance criteria are mostly verifiable.** Concrete `rg`/pytest invocations with required strings make automated checking feasible.
-- **Internal vs public boundary is preserved correctly.** `Chunk.file_paths` and `chunk_file_paths_<strategy>` stay as internal holder mechanics (D-13), avoiding scope creep into a storage rewrite (D-14).
-- **Live smoke in Plan 03 task 3 matches the agent reality.** Running `tests/e2e/` inside the container after a single batched restart reflects "our agents are the consumer," not abstract local mocks.
-- **Error guidance is user-facing.** "Action: pass a ref returned by search." gives breaking-change recovery instructions.
+## Concerns
 
-### Concerns
+### MEDIUM
 
-#### HIGH: Missing-provenance behavior is ambiguous (Plan 01, task 2)
+1. **Path-with-colon edge case lacks test coverage.** Threat model lists "ref parsing mishandles filesystem paths containing colons" with mitigation "split only on the first colon," but neither Plan 01 task 1 nor task 3 acceptance criteria require a test for `filesystem:/mnt/foo:bar.md` resolving to `("filesystem", "/mnt/foo:bar.md")`. Real voicenote/transcript filenames sometimes contain colons (timestamps, "Title: Subtitle" exports). Add an acceptance criterion: a `_parse_ref` test or `SearchResult.ref` validation test asserting first-colon-only split for a path containing additional colons.
 
-The action says missing provenance handling is *"preferred: skip the chunk and log a warning... acceptable alternative: raise a ValueError"*. These two behaviors produce materially different system contracts:
+2. **Audit of all `SearchResult.file_paths`/`SearchHit.file_paths` consumers is implicit, not explicit.** Plan 01 only lists `test_fusion.py` and `test_search_result_shape.py`; Plan 03 task 1 catches stragglers via the full non-e2e pytest run, but there's no upfront `rg "SearchResult\(.*file_paths|\.file_paths" backend/` audit. If, say, `test_pipeline_metadata.py` or any ingestion test constructs `SearchResult(file_paths=...)` for fixtures, the failure surfaces only at Plan 03. Recommend adding the audit `rg` to Plan 01 task 1 read_first or as a pre-task step.
 
-- **Skip+warn**: search results silently shrink from N->M; agents see incomplete results with no signal at the API surface.
-- **Raise**: a single bad row breaks search entirely.
+3. **`get_chunk_provenance_for_chunk_ids()` semantics change isn't sized for existing callers.** Plan 01 task 2 changes the helper to first-wins canonical dedup. If any existing caller relied on receiving every `(chunk_id, namespace, document_ref)` row (e.g., for invariant checks or holder reconciliation), this silently drops data. Recommend a one-line `rg "get_chunk_provenance_for_chunk_ids"` in read_first to confirm callers, or explicitly state in Plan 01 acceptance that the helper is currently called only from search hydration.
 
-Phase 25 was supposed to populate provenance for every chunk, so this should be an invariant ("invariant by construction" per recorded user feedback) - `raise` is the right choice. Either way, the plan must lock this down before execution. Leaving it as a coin flip means Plan 03's regression tests cannot deterministically pin the contract.
+4. **Trickle activity during `docker restart dotmd` is not addressed.** Phase memory notes trickle uses fcntl exclusive lock and runs continuously. A restart mid-indexing could leave a stale lock or partial transaction. Plan 03 task 3 doesn't suggest checking `docker logs dotmd` for in-flight indexing before the restart, or mention WAL/lock recovery on first start. Minor since SQLite WAL handles crashes, but worth a one-line guard ("verify no active indexing run before restart").
 
-#### HIGH: Invalid-ref smoke behavior is also left open (Plan 02, task 3)
+### LOW
 
-> "Pin whichever behavior implementation chooses."
+5. **`drill(ref)` entity enrichment was promised but quietly dropped.** Phase context D-09 says `drill(ref) -> frontmatter/entities/chunk_count`. Plan 01 task 3 makes entities optional and Plan 02 task 1 omits them from `DrillResult`. This is a defensible scope reduction (graph internals shouldn't block contract), but the deferred-scope audit in Plan 03 task 4 doesn't list "entity enrichment in drill" as deferred. Add it to the deferred audit or note the scope reduction.
 
-The smoke test is the contract. Letting implementation choose means the smoke can't be a regression gate - it just records whatever happened. Lock this: `read(ref="filesystem:/nonexistent/file.md")` should return a tool-level error (not a protocol error) with `Unknown source ref` (matching Plan 01 task 3's error string).
+6. **Container internal path `/mnt/home/repos/j2h4u/dotmd/backend` is unverified.** Plan 03 task 3 hardcodes this path inside `docker exec`. AGENTS.md confirms `DOTMD_DATA_DIR=/mnt` is locked, but the bind-mount layout for the source code is implicit. Worth confirming during execution rather than at smoke-test time.
 
-#### HIGH: Multi-holder chunk semantics are not specified (Plan 01, task 2)
+7. **Plan 03 task 1 mixes two test commands but only checks `Self-Check: PASSED` once.** The acceptance "`Self-Check: PASSED` if all required commands pass" is a conditional in the criterion; in practice executors sometimes record PASSED on the first command and skip the second. Recommend separate evidence lines per command.
 
-Content-addressed dedup means one `chunk_id` can be referenced by multiple files (`chunk_file_paths_<strategy>` is M2M for exactly this reason). Provenance is one row per chunk, so the public `ref` is unique - but this means a chunk physically present in 3 files surfaces as ref to only ONE of them. The plan should:
+## Suggestions
 
-- explicitly state this is intentional (single canonical source per chunk),
-- add a test that proves a deduped chunk returns the canonical provenance ref, not a holder-path ref,
-- decide what "canonical" means when the same content was indexed from multiple sources (e.g., earliest-indexed wins).
+- Add this acceptance criterion to Plan 01 task 1 or task 3: `_parse_ref("filesystem:/mnt/foo:bar.md")` returns `("filesystem", "/mnt/foo:bar.md")` covered by a unit test.
+- Add to Plan 01 task 2 read_first: `rg -n "get_chunk_provenance_for_chunk_ids" backend/src` to confirm the helper signature change is safe.
+- Add to Plan 03 task 3 action: "verify `docker logs dotmd --tail 50` shows no active indexing run before restart; if active, wait for current run to drain."
+- Add to Plan 03 task 4 deferred-scope list: "drill graph/entity enrichment remains deferred; current `drill(ref)` returns metadata only."
 
-Without this, real corpus search may surface refs that don't match the file the agent expects.
+## Risk Assessment
 
-#### MEDIUM: FastAPI scope is undefined (Plan 02, task 2)
+**LOW**.
 
-The plan says *"If routes exist, their response/input shape must use `ref`"* but does not enumerate the routes. Per AGENTS.md, the deployed entrypoint is MCP-only (streamable-http on 8080); FastAPI may exist but be unused in production. The plan should either:
+Justification: All cycle 1 HIGHs are resolved with concrete, gate-checkable behavior. The remaining concerns are MEDIUM/LOW edge-case test coverage, refactor-safety audits, and operational guardrails - none block the public-contract change or invite full reindex. The plans correctly derive `ref` from existing Phase 25 provenance tables, leave holder mechanics intact, and stage the breaking change behind a single batched container restart.
 
-- list the actual `@router` decorations in `api/server.py`, or
-- explicitly mark FastAPI as out-of-scope-if-unmounted with a confirming `rg` check.
-
-Otherwise this task is "go look and decide what to do" - not a plan.
-
-#### MEDIUM: Live smoke execution model is underspecified (Plan 03, task 3)
-
-`docker exec dotmd sh -c "cd /mnt/.../backend && python -m pytest tests/e2e/"` - does this:
-
-(a) connect to the running MCP server inside the container (the streamable-http process), or
-(b) spawn a fresh MCP subprocess via stdio inside the container?
-
-These test entirely different things. (a) requires the bind-mounted code to have been reloaded by the running process - which it hasn't, because Python doesn't reload. So a restart is *always* needed before (a) can work, not "if needed." If (b), the smoke doesn't validate that the running production process serves the new contract. Plan 03 should pick one and justify it.
-
-#### MEDIUM: Doc grep gates are brittle (Plan 03, task 2)
-
-The patterns:
-```bash
-rg "read\(file_path|Only pass file_paths|Returns ranked hits with source `file_paths`"
-```
-will miss many variants: `read(file_path=...)`, `file_paths field`, `result.file_paths`, prose like "the file_paths array", etc. A stronger gate: `rg "file_paths|file_path\b" docs/` with an explicit allow-list for files documenting internal holder mechanics. Otherwise stale public-contract docs can survive.
-
-#### MEDIUM: `drill(ref)` performance/safety not specified (Plan 01, task 3)
-
-`drill` reads frontmatter from `SourceDocument.file_path` on each call. What happens if:
-
-- the file was deleted but the source_documents row remains (delete detection runs in trickle, may lag)?
-- the file is large or the directory is on slow storage?
-- frontmatter parsing fails?
-
-The plan says graph/entity enrichment failure must be non-fatal - it should extend the same to frontmatter failure (return `frontmatter: {}` with a warning) and missing-file (raise `Unknown source ref` to match the resolver behavior, since the SourceDocument exists but its target is gone).
-
-#### MEDIUM: No fallback path for legacy chunks indexed pre-Phase-25 (Plan 01)
-
-Research says Phase 25 shipped provenance, but were existing v1.3-era chunks backfilled? If not, the missing-provenance branch is the *normal* case for older data, not exceptional. Plan should include a one-shot count query in Plan 01 verification:
-```sql
-SELECT COUNT(*) FROM chunk_metadata_<strategy> c
-LEFT JOIN chunk_source_provenance_<strategy> p ON c.chunk_id = p.chunk_id
-WHERE p.chunk_id IS NULL;
-```
-If this returns >0, the missing-provenance handler is hot path, not an edge case, and the lightweight backfill mentioned in D-20 may actually be required.
-
-#### LOW: SearchHit field exclusivity not asserted negatively in MCP test (Plan 02, task 1)
-
-Acceptance criteria assert `payload["ref"]` exists but don't assert `"file_paths" not in payload`. Easy to add and locks down D-03/D-04 against accidental field carryover.
-
-#### LOW: Plan 03 task 1 runs only focused tests, not full suite
-
-The risk is that ref-first changes ripple into unrelated tests (anything that touches `SearchResult` construction, fixtures, or `read()`). Suggest adding `cd backend && uv run pytest -q --ignore=tests/e2e` as a sanity check before declaring `Self-Check: PASSED`.
-
-#### LOW: `chunk_file_paths_<strategy>` rename/comment deferral could leak
-
-The plan defers any rename of this table but expects future readers to know it's now internal-only. A single-line comment or docstring update in `storage/metadata.py` flagging "internal dedup holder; not the public read identity, see Phase 26" is cheap insurance against the next refactor reintroducing path-first behavior.
-
-### Suggestions
-
-1. **Lock missing-provenance behavior to `raise ValueError("missing source provenance for chunk_id=...")`** in Plan 01 task 2. Pair with a count-check verification before merging Plan 01 to confirm zero rows lack provenance in the production index.
-2. **Pin invalid-ref smoke** in Plan 02 task 3 to: `read(ref="filesystem:/nonexistent/file.md")` -> tool error containing `Unknown source ref`. Same for malformed refs (`read(ref="not-a-ref")`).
-3. **Enumerate FastAPI scope** in Plan 02 task 2 by listing `api/server.py` route decorators, then either updating them or explicitly marking out-of-scope.
-4. **Specify the live smoke execution model** in Plan 03 task 3: state explicitly whether the e2e tests connect to the running streamable-http MCP server (requires restart-then-test) or spawn stdio subprocesses (no restart needed). Match `.mcp.json` semantics.
-5. **Add a multi-holder/dedup test** to Plan 01 task 2 that indexes the same content from two filesystem paths and asserts search returns the canonical provenance ref.
-6. **Add a negative MCP assertion** to Plan 02 task 1: `assert "file_paths" not in payload and "file_path" not in payload`.
-7. **Add a single internal-holder docstring** in `storage/metadata.py` near `chunk_file_paths_<strategy>` clarifying it is an internal dedup holder and not the public read identity, citing Phase 26.
-8. **Strengthen doc grep gate** in Plan 03 task 2 to `rg "file_paths|file_path\b" docs/` with an allow-list, not a 3-pattern union.
-9. **Add `pyright`/full-suite sanity** to Plan 03 task 1 verification before `Self-Check: PASSED`.
-
-### Risk Assessment
-
-**Overall: MEDIUM**
-
-The architectural decisions are correct and the reindex constraint is structurally honored. Wave ordering and dependency tracking are clean. However, three behavioral contracts are left underspecified (missing-provenance handling, invalid-ref behavior, multi-holder semantics), and one verification gate (live smoke execution model) is ambiguous. None of these block the phase, but each can produce a contract that drifts from intent or a regression test that doesn't actually regress. Tightening these in the plans (rather than discovering them in execution) avoids replans.
-
-The phase boundary itself is solid - no creep into Telegram, graph rewrite, or holder-table replacement - and the deferred-scope audit in Plan 03 task 4 keeps that boundary explicit.
-
-CYCLE_SUMMARY: current_high=3
+CYCLE_SUMMARY: current_high=0
 
 ## Current HIGH Concerns
 
-- Plan 01 task 2: missing-provenance behavior is left as either-or (skip+warn vs raise); must be locked to one before execution so Plan 03 can pin it as a regression gate.
-- Plan 02 task 3: invalid/nonexistent-ref smoke behavior says "pin whichever behavior implementation chooses" - the smoke is the contract and must specify the expected tool error and message.
-- Plan 01 task 2: multi-holder/deduped chunk semantics are not specified - the public `ref` is one source per chunk, but the canonical-source rule and a covering test are missing, risking surprising production results.
+None.
 
 ---
 
@@ -157,24 +82,21 @@ Only one requested external reviewer produced output because OpenCode is not ins
 
 ### Agreed Strengths
 
-- The phase split is coherent: service/domain changes land before public MCP/API/CLI contract changes, with regression/docs/smoke last.
-- The plans preserve the hard no-full-reindex constraint by deriving refs from Phase 25 provenance tables instead of touching embeddings, FTS5, or graph rebuild paths.
-- The scope boundary is mostly disciplined: Telegram, source-unit emission, graph rewrite, and holder-table replacement stay deferred.
+- The cycle 1 HIGH concerns are resolved in the current plans with deterministic, testable behavior.
+- The no-full-reindex constraint is preserved through source ref derivation from Phase 25 provenance.
+- The breaking public contract remains scoped to source-ref-first search/read/drill behavior, with holder tables and Telegram deferred.
 
 ### Agreed Concerns
 
-- Missing-provenance behavior must be deterministic before execution; the current skip-versus-raise choice changes the public search contract.
-- Invalid or nonexistent ref handling must be pinned as an expected tool-level error rather than captured after implementation.
-- Multi-holder/dedup semantics need an explicit canonical-source rule and regression coverage.
+- No HIGH concerns remain unresolved.
+- Medium-priority polish remains around first-colon ref parsing tests, explicit `file_paths` consumer audits, helper caller sizing, and restart guardrails.
 
 ### Divergent Views
 
 - No divergent reviewer views were available. OpenCode could not be invoked because `opencode` was missing from `PATH`.
 
-CYCLE_SUMMARY: current_high=3
+CYCLE_SUMMARY: current_high=0
 
 ## Current HIGH Concerns
 
-- Plan 01 task 2: missing-provenance behavior is left as either-or (skip+warn vs raise); must be locked to one before execution so Plan 03 can pin it as a regression gate.
-- Plan 02 task 3: invalid/nonexistent-ref smoke behavior says "pin whichever behavior implementation chooses" - the smoke is the contract and must specify the expected tool error and message.
-- Plan 01 task 2: multi-holder/deduped chunk semantics are not specified - the public `ref` is one source per chunk, but the canonical-source rule and a covering test are missing, risking surprising production results.
+None.
