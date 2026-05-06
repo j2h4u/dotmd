@@ -47,8 +47,8 @@ No vectors, FTS5 rows, chunk text, graph data, or holder tables are rebuilt.
 | Threat | Severity | Mitigation |
 |---|---:|---|
 | Search results still expose holder paths as public identity | HIGH | Replace `SearchResult.file_paths` with `SearchResult.ref` and update search hydration tests to assert `file_paths` is not a public field. |
-| Legacy chunks without provenance silently fall back to public `file_paths` | HIGH | Treat missing provenance as an invariant violation: raise `ValueError("missing source provenance for chunk_id=...")`; add tests and a count query so execution can prove whether a scoped backfill is needed before merge. |
-| Deduped multi-holder chunks expose arbitrary source refs | HIGH | Define the canonical public source as the lexicographically first `(namespace, document_ref)` provenance row for a `chunk_id`; update batch hydration and tests to pin first-wins behavior without consulting holder paths. |
+| Legacy chunks without provenance silently fall back to public `file_paths` | HIGH | Treat missing provenance as an invariant violation only after a mandatory deployment safety gate: count every active provenance gap and, when count > 0, run an idempotent dry-run/count-first backfill from filesystem holder rows before enabling the hard error. |
+| Deduped multi-holder chunks expose arbitrary source refs | HIGH | Define the canonical public source as the lexicographically first `(namespace, document_ref)` provenance row for a `chunk_id`; update SQL to `ORDER BY chunk_id, namespace, document_ref` with first-wins dict population and add an adversarial reverse-insertion test that fails if row insertion order wins. |
 | `read(ref)` reloads indexes or scans all metadata per request | HIGH | Resolve the ref through existing metadata tables and reuse initialized stores; do not call `load_index()` in read/search methods. |
 | Ref parsing mishandles filesystem paths containing colons | MEDIUM | Split only on the first colon and reject empty namespace/document_ref. |
 | Internal holder mechanics break while removing public paths | HIGH | Preserve `Chunk.file_paths`, `chunk_file_paths_<strategy>`, and existing file-range helpers as internal implementation details. |
@@ -146,8 +146,35 @@ Concrete target state:
   - update `MetadataStore.get_chunk_provenance_for_chunk_ids()` to query
     `ORDER BY chunk_id, namespace, document_ref` and populate the return dict
     with first-wins logic (`if chunk_id not in result: result[chunk_id] = ...`);
+  - the test fixture must insert provenance rows in reverse canonical order
+    (`filesystem:/mnt/b.md` before `filesystem:/mnt/a.md`) and assert the
+    returned ref is `filesystem:/mnt/a.md`; this verifies SQL ordering and
+    first-wins behavior, not accidental SQLite insertion order;
   - holder paths in `chunk_file_paths_<strategy>` are internal dedup holders and
     must not affect canonical public ref selection.
+- Add a mandatory provenance safety helper in `backend/src/dotmd/storage/metadata.py`:
+  - `count_missing_source_provenance(strategy: str) -> int` runs the concrete
+    active-table query:
+    `SELECT COUNT(*) FROM chunks_{strategy} c LEFT JOIN chunk_source_provenance_{strategy} p ON c.chunk_id = p.chunk_id WHERE p.chunk_id IS NULL`;
+  - `backfill_missing_source_provenance_from_file_paths(strategy: str, *, dry_run: bool = True) -> int`
+    derives missing filesystem provenance from `chunk_file_paths_{strategy}`
+    by selecting the lexicographically first `file_path` per missing chunk,
+    using `namespace='filesystem'`, `document_ref=file_path`, `ref='filesystem:' || file_path`,
+    `source_unit_refs='[]'`, `chunk_strategy=strategy`, and parser metadata
+    copied from the matching `source_documents` row when available;
+  - dry-run mode reports the count and performs no writes;
+  - write mode is idempotent through `INSERT OR IGNORE`/primary-key semantics
+    and commits only the scoped provenance rows;
+  - this helper must not rebuild vectors, FTS, graph data, chunk text, or
+    `chunk_file_paths_<strategy>`.
+- Add tests proving the safety helper behavior:
+  - `count_missing_source_provenance(strategy)` returns `1` for a chunk with a
+    holder path and no provenance row;
+  - dry-run backfill returns `1` and leaves the provenance count unchanged;
+  - write backfill inserts `filesystem:/mnt/a.md` provenance for the missing
+    chunk and a second write run returns/inserts `0`;
+  - after write backfill, `count_missing_source_provenance(strategy)` returns
+    `0`.
 - Add tests proving:
   - a graph-direct hit and a semantic hit both produce `ref` from provenance;
   - missing provenance raises `ValueError` containing
@@ -166,7 +193,10 @@ Concrete target state:
 - `backend/src/dotmd/search/fusion.py` does not contain `SearchResult(` followed by `file_paths=` in the same construction block.
 - `backend/src/dotmd/storage/metadata.py` contains `ORDER BY chunk_id, namespace, document_ref`.
 - `backend/src/dotmd/storage/metadata.py` contains `if chunk_id not in result` or equivalent first-wins canonical selection.
+- `backend/src/dotmd/storage/metadata.py` contains `def count_missing_source_provenance`.
+- `backend/src/dotmd/storage/metadata.py` contains `def backfill_missing_source_provenance_from_file_paths`.
 - `backend/src/dotmd/storage/metadata.py` contains `not the public read/search identity; see Phase 26`.
+- `backend/tests/test_fusion.py` or another storage/search regression test inserts `filesystem:/mnt/b.md` before `filesystem:/mnt/a.md` for the same chunk and asserts the selected public ref is `filesystem:/mnt/a.md`.
 - `backend/tests/test_fusion.py` or `backend/tests/api/test_search_result_shape.py` contains `filesystem:/graph/file.md` or another concrete `filesystem:` ref fixture.
 - `backend/tests/test_fusion.py` or `backend/tests/api/test_search_result_shape.py` contains `missing source provenance for chunk_id=`.
 - `backend/tests/test_fusion.py` or `backend/tests/api/test_search_result_shape.py` contains `filesystem:/mnt/a.md`.
@@ -203,6 +233,13 @@ Concrete target state:
 - `DotMDService.read(ref: str, start: int = 0, end: int | None = None)`:
   - accepts `ref`, not `file_path`;
   - resolves the source document;
+  - is explicitly active-strategy-only for Phase 26: it uses
+    `self._settings.chunk_strategy` exactly as current `read(file_path)` does
+    and does not scan all `chunk_file_paths_*` tables to discover other
+    strategies;
+  - if a resolved filesystem source has zero chunks in the active strategy,
+    raise `ValueError` containing
+    `No chunks for source ref in active strategy`;
   - for `namespace == "filesystem"`, requires `SourceDocument.file_path`;
   - parses frontmatter by reading `SourceDocument.file_path`;
   - calls existing internal file-range helpers with the resolved file path:
@@ -231,10 +268,15 @@ Concrete target state:
   warning containing `frontmatter parse failed`.
 - Unsupported non-filesystem namespaces should raise `ValueError` with
   `Unsupported source namespace` until future source adapters implement reads.
+- Add a code comment near the strategy choice:
+  `Phase 26 read(ref) is active-strategy-only; future source adapters may add explicit strategy discovery.`
 </action>
 <acceptance_criteria>
 - `backend/src/dotmd/api/service.py` contains `def read(self, ref: str`.
 - `backend/src/dotmd/api/service.py` contains `def drill(self, ref: str`.
+- `backend/src/dotmd/api/service.py` contains `Phase 26 read(ref) is active-strategy-only`.
+- `backend/src/dotmd/api/service.py` contains `self._settings.chunk_strategy`.
+- `backend/src/dotmd/api/service.py` contains `No chunks for source ref in active strategy`.
 - `backend/src/dotmd/api/service.py` contains `get_source_document`.
 - `backend/src/dotmd/api/service.py` contains `Unknown source ref`.
 - `backend/src/dotmd/api/service.py` contains `Unsupported source namespace`.
@@ -255,18 +297,24 @@ cd backend && uv run pytest tests/api/test_search_result_shape.py tests/api/test
 cd backend && uv run pyright
 ```
 
-Before marking Plan 01 complete, run a count query for the active strategy and
-record the result in the implementation summary:
+Before marking Plan 01 complete, run the mandatory active-strategy provenance
+safety gate and record the result in the implementation summary. The executor
+must derive the real active suffix from `self._settings.chunk_strategy` or the
+pipeline chunk table; do not leave a literal `<strategy>` placeholder in
+commands or summaries.
 
 ```sql
-SELECT COUNT(*) FROM chunk_metadata_<strategy> c
+SELECT COUNT(*) FROM chunks_<strategy> c
 LEFT JOIN chunk_source_provenance_<strategy> p ON c.chunk_id = p.chunk_id
 WHERE p.chunk_id IS NULL;
 ```
 
-If the count is greater than zero, stop before merging Plan 01 and implement or
-plan the D-20 scoped backfill path with dry-run/count-first behavior. Do not
-mask the count by falling back to holder paths.
+If the count is greater than zero, this plan is not complete until the executor
+runs `backfill_missing_source_provenance_from_file_paths(strategy, dry_run=True)`,
+records the dry-run count, runs the write backfill, reruns the count query, and
+records `0` missing rows. If the backfill cannot reduce the count to `0`, stop
+and report the blocker before any deployment/restart. Do not mask the count by
+falling back to holder paths.
 
 Do not run `dotmd index --force`. Do not restart production for this plan alone.
 </verification>
@@ -276,8 +324,13 @@ Do not run `dotmd index --force`. Do not restart production for this plan alone.
 - Search hydration uses `chunk_source_provenance_<strategy>`.
 - Missing provenance raises `ValueError("missing source provenance for chunk_id=...")`.
 - Deduped multi-holder chunks return the canonical lexicographic provenance ref,
-  not a holder-path-derived ref.
+  not a holder-path-derived ref, verified by reverse-insertion SQL-ordering
+  coverage.
+- Missing provenance has a mandatory dry-run/count-first backfill safety path
+  before the hard `ValueError` invariant can reach deployment.
 - `DotMDService.read(ref)` and `DotMDService.drill(ref)` exist and resolve
   filesystem refs without reindexing.
+- `read(ref)` is explicitly active-strategy-only in Phase 26 and raises a clear
+  error when the resolved source has no chunks in `self._settings.chunk_strategy`.
 - Internal filesystem holder mechanics remain available.
 </success_criteria>

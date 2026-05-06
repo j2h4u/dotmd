@@ -49,7 +49,7 @@ touch indexed data or require reindexing.
 | `read` becomes overloaded with metadata and chunk content | MEDIUM | Keep `read(ref,start,end)` for content ranges and add `drill(ref)` for metadata. |
 | API/CLI lag behind MCP and preserve path-first public behavior | MEDIUM | Update FastAPI and CLI outputs in the same wave unless inspection proves a surface is private/internal. |
 | Existing e2e smoke fails due pinned tool list drift | HIGH | Update `EXPECTED_TOOLS`, required result fields, read keys, and add drill smoke coverage. |
-| Error messages leave callers stuck after breaking change | MEDIUM | Error text should say to pass `ref` from a search result. |
+| Error messages leave callers stuck after breaking change | HIGH | Add a single MCP wrapper that catches service `ValueError` from `read` and `drill`, appends `Action: pass a ref returned by search.`, and raises a tool-level error so invalid refs do not become protocol-level failures. |
 </threat_model>
 
 <tasks>
@@ -93,6 +93,22 @@ Concrete target state:
 - Rewrite `_INSTRUCTIONS` and tool docstrings so they explicitly say:
   `search(query) -> ref`, `drill(ref)`, and `read(ref, start, end)`.
 - Error messages for read/drill say: `Action: pass a ref returned by search.`
+- Add one local MCP error helper, for example
+  `_ref_tool_error(tool_name: str, ref: str, exc: ValueError) -> RuntimeError`,
+  or an equivalent small wrapper around service calls.
+- `read_document` and `drill` must catch service `ValueError` separately from
+  unexpected exceptions:
+  - for `ValueError`, log at warning level and raise `RuntimeError` whose text
+    contains the original service message, the target `ref`, and exactly
+    `Action: pass a ref returned by search.`;
+  - for unexpected exceptions, preserve the existing error path with
+    `logger.error(..., exc_info=True)` and a generic tool failure.
+- The wrapper must be implemented in `backend/src/dotmd/mcp_server.py`, not in
+  `DotMDService`; Plan 01 service errors remain domain/service errors and Plan
+  02 is responsible for converting them into agent-facing MCP tool errors.
+- The e2e smoke must observe the invalid-ref response as a tool-level error
+  payload from the `tools/call` result (`isError`/tool error content depending
+  on the current MCP test helper), not as a JSON-RPC protocol error.
 - Update `backend/tests/mcp/test_search_tool.py` to assert:
   - search output schema has `ref` and no `file_paths`;
   - search tool output has `ref`;
@@ -100,17 +116,29 @@ Concrete target state:
   - read input uses `ref`;
   - read output has `ref` and no `file_path`;
   - drill tool exists and returns metadata for `ref`.
+  - mocked `service.read` raising `ValueError("Unknown source ref")` produces
+    a tool error containing both `Unknown source ref` and
+    `Action: pass a ref returned by search.`;
+  - mocked `service.drill` raising `ValueError("Unsupported source namespace")`
+    produces a tool error containing both `Unsupported source namespace` and
+    `Action: pass a ref returned by search.`.
 </action>
 <acceptance_criteria>
 - `backend/src/dotmd/mcp_server.py` contains `class SearchHit` and `ref: str`.
 - `backend/src/dotmd/mcp_server.py` contains `name="drill"`.
 - `backend/src/dotmd/mcp_server.py` contains `service.drill`.
 - `backend/src/dotmd/mcp_server.py` contains `search(query) -> ref`.
+- `backend/src/dotmd/mcp_server.py` contains `except ValueError as exc`.
+- `backend/src/dotmd/mcp_server.py` contains `Action: pass a ref returned by search.`
+- `backend/src/dotmd/mcp_server.py` contains `logger.warning`.
 - `backend/src/dotmd/mcp_server.py` does not contain `Only pass file_paths values from search results`.
 - `backend/tests/mcp/test_search_tool.py` contains `payload["ref"]`.
 - `backend/tests/mcp/test_search_tool.py` contains `assert "file_paths" not in payload`.
 - `backend/tests/mcp/test_search_tool.py` contains `assert "file_path" not in payload`.
 - `backend/tests/mcp/test_search_tool.py` contains `"drill"`.
+- `backend/tests/mcp/test_search_tool.py` contains `Unknown source ref`.
+- `backend/tests/mcp/test_search_tool.py` contains `Unsupported source namespace`.
+- `backend/tests/mcp/test_search_tool.py` contains `Action: pass a ref returned by search.`
 - `cd backend && uv run pytest tests/mcp/test_search_tool.py -q` exits 0.
 </acceptance_criteria>
 </task>
@@ -202,6 +230,9 @@ Concrete target state:
     `Action: pass a ref returned by search.`;
   - malformed `read(ref="not-a-ref")` follows the same tool-level error
     contract and contains `Unknown source ref`.
+  - `drill(ref="not-a-ref")` follows the same tool-level error contract and
+    contains `Unknown source ref` plus
+    `Action: pass a ref returned by search.`.
 </action>
 <acceptance_criteria>
 - `backend/tests/e2e/test_mcp_smoke.py` contains `"drill"`.
@@ -211,6 +242,7 @@ Concrete target state:
 - `backend/tests/e2e/test_mcp_smoke.py` contains `not-a-ref`.
 - `backend/tests/e2e/test_mcp_smoke.py` contains `Unknown source ref`.
 - `backend/tests/e2e/test_mcp_smoke.py` contains `Action: pass a ref returned by search.`
+- `backend/tests/e2e/test_mcp_smoke.py` asserts invalid refs are tool-level errors, not JSON-RPC protocol errors.
 - `backend/tests/e2e/test_mcp_smoke.py` does not contain `results[0]["file_paths"]`.
 - `backend/tests/e2e/test_mcp_smoke.py` does not contain `"file_path": file_path`.
 - `cd backend && uv run pytest tests/e2e/test_mcp_smoke.py -q -p no:cacheprovider` exits 0 when run against a live container/test harness.

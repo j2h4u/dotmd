@@ -53,7 +53,8 @@ It only verifies code/docs/runtime behavior after the contract change.
 | Docs still teach `read(file_path)` or `file_paths` as public APIs | HIGH | Use `rg` gates over docs and e2e tests, with explicit allowed internal-holder exceptions. |
 | Cleanup accidentally erases the internal holder-path invariants | HIGH | Keep internal holder references documented as internal and preserve ingestion/storage tests for `Chunk.file_paths` and `chunk_file_paths_*`. |
 | Future Telegram work inherits graph `File` terminology | MEDIUM | Docs must state Telegram/non-filesystem sources use SourceDocument/SourceUnit semantics and must not be modeled as `File`. |
-| A hidden full-reindex requirement is discovered too late | HIGH | Summary must include a no-full-reindex audit and any migration/backfill count evidence. |
+| A hidden full-reindex requirement is discovered too late | HIGH | Summary must include a no-full-reindex audit, active-strategy provenance count evidence, and any mandatory dry-run/write backfill evidence before deployment. |
+| Invalid refs fail as protocol errors instead of recoverable tool errors | HIGH | Live smoke must prove malformed/nonexistent `read(ref)` and `drill(ref)` responses are tool-level errors containing `Unknown source ref` and `Action: pass a ref returned by search.` |
 </threat_model>
 
 <tasks>
@@ -85,6 +86,20 @@ cd backend && uv run pytest -q --ignore=tests/e2e
 just typecheck
 ```
 
+Before `Self-Check: PASSED`, also record the active-strategy provenance safety
+evidence from Plan 01:
+
+```sql
+SELECT COUNT(*) FROM chunks_<active_strategy> c
+LEFT JOIN chunk_source_provenance_<active_strategy> p ON c.chunk_id = p.chunk_id
+WHERE p.chunk_id IS NULL;
+```
+
+If the count was nonzero before implementation, the summary must include the
+dry-run count, write-backfill result from
+`backfill_missing_source_provenance_from_file_paths(active_strategy, dry_run=False)`,
+and the final `0` missing-provenance count.
+
 If any test still asserts public `file_paths`/`file_path`, update it to the
 ref-first contract unless it is explicitly testing internal `Chunk.file_paths`
 or `chunk_file_paths_<strategy>` holder behavior.
@@ -98,6 +113,8 @@ non-e2e full suite, and typecheck pass.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `tests/mcp/test_search_tool.py`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `uv run pytest -q --ignore=tests/e2e`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `just typecheck`.
+- `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `missing-provenance count`.
+- `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `chunks_<active_strategy>` or the real active `chunks_` table name used for the count.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `Self-Check: PASSED` if all required commands pass.
 </acceptance_criteria>
 </task>
@@ -180,12 +197,29 @@ a fresh stdio subprocess.
 Because source code is bind-mounted but Python does not hot-reload the running
 process, restart the container exactly once after all Phase 26 implementation
 changes are complete and before this smoke. Do not restart production repeatedly
-for individual tasks. Then run:
+for individual tasks. Before restart, verify pytest is available in the
+container so a missing test dependency is reported as an environment blocker,
+not a contract failure:
+
+```bash
+docker exec dotmd python -c "import pytest, sys; print(sys.executable)"
+```
+
+Then run:
 
 ```bash
 docker restart dotmd
 docker exec dotmd sh -c "cd /mnt/home/repos/j2h4u/dotmd/backend && python -m pytest tests/e2e/ -v -p no:cacheprovider"
 ```
+
+If live smoke fails after the single batched restart:
+- do not run additional restarts in a loop;
+- capture the failing test name and MCP response/error payload in
+  `26-03-SUMMARY.md`;
+- inspect whether the failure is stale container code, missing pytest/imports,
+  or a contract regression;
+- apply any code/test fix, then run at most one additional batched restart and
+  rerun the same smoke command, recording both attempts.
 
 Record in `26-03-SUMMARY.md`:
 - that the smoke targeted the running streamable-http MCP server after a single
@@ -198,9 +232,13 @@ Record in `26-03-SUMMARY.md`:
 - evidence that invalid `read(ref="filesystem:/nonexistent/file.md")` and
   malformed `read(ref="not-a-ref")` returned tool-level errors containing
   `Unknown source ref` and `Action: pass a ref returned by search.`;
+- evidence that invalid `drill(ref="not-a-ref")` returned a tool-level error
+  containing `Unknown source ref` and
+  `Action: pass a ref returned by search.`;
 - no-full-reindex audit: `dotmd index --force` was not run.
 </action>
 <acceptance_criteria>
+- `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `import pytest, sys`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `docker restart dotmd`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `streamable-http MCP server`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `python -m pytest tests/e2e/ -v -p no:cacheprovider`.
@@ -210,6 +248,7 @@ Record in `26-03-SUMMARY.md`:
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `filesystem:/nonexistent/file.md`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `not-a-ref`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `Unknown source ref`.
+- `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `Action: pass a ref returned by search.`
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `dotmd index --force was not run`.
 </acceptance_criteria>
 </task>
@@ -236,8 +275,15 @@ Finish `26-03-SUMMARY.md` with:
 - the missing-provenance behavior:
   `ValueError("missing source provenance for chunk_id=...")`;
 - the active-strategy missing-provenance count query result;
+- if the count was nonzero, the mandatory dry-run/write backfill evidence and
+  final `0` missing-provenance count before deployment;
 - the final `read(ref, start, end)` behavior;
+- the Phase 26 strategy rule: `read(ref)` uses the active
+  `self._settings.chunk_strategy` and does not discover alternate strategies;
 - the final `drill(ref)` behavior;
+- the MCP error wrapper location and proof that service `ValueError`s are
+  converted to tool-level errors with
+  `Action: pass a ref returned by search.`;
 - where filesystem paths remain internal;
 - which tests and type checks ran;
 - live MCP smoke outcome;
@@ -254,6 +300,8 @@ Finish `26-03-SUMMARY.md` with:
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `lexicographically first`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `missing source provenance for chunk_id=`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `missing-provenance count`.
+- `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `active self._settings.chunk_strategy` or equivalent wording.
+- `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `Action: pass a ref returned by search.`
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `read(ref`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `drill(ref)`.
 - `.planning/phases/26-source-ref-first-read-search-contract-cleanup/26-03-SUMMARY.md` contains `Telegram adapter implementation remains deferred`.
