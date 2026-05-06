@@ -2,7 +2,7 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Search Quality & Architecture
-status: executing
+status: milestone_complete
 last_updated: "2026-05-06T12:39:44.888Z"
 last_activity: 2026-05-06
 progress:
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-03-30 after v1.3 archived)
 **v1.4 — Search Quality & Architecture**
 
 Phase: 26
-Plan: 3 plans ready
-Status: Executing Phase 26
+Plan: Not started
+Status: Milestone complete
 Last activity: 2026-05-06
 
 Progress: [██████████] 100%
@@ -37,7 +37,7 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 33 (across all milestones)
+- Total plans completed: 36 (across all milestones)
 - Average duration: ~3 min
 - Total execution time: —
 
@@ -201,8 +201,7 @@ was moved under `.planning/notes/completed-backlog/`.
 
 ### Blockers/Concerns
 
-No blockers. Phase 26 is planned and review-converged; next step:
-`$gsd-execute-phase 26`.
+No blockers. Phase 26 is complete and verified; v1.4 is milestone-complete.
 
 ### Quick Tasks Completed
 
