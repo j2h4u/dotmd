@@ -41,7 +41,8 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 
 ### Active
 
-(drafting v1.5 requirements — Telegram source adapter with incremental search + sync)
+- v1.5 Telegram Source Adapter — requirements and roadmap created. Next step:
+  Phase 27 discussion for resource bindings and retained artifacts foundation.
 
 ### Out of Scope
 
@@ -145,11 +146,18 @@ of already-processed content and derived artifacts.
 
 ## Current State
 
-v1.5 is being initialized around Telegram source integration. v1.4 shipped and
-archived the source-ref-first read/search contract, which is now the public
-identity surface for this work. Backlog `999.25` and `SEED-002` are selected as
+v1.5 is active around Telegram source integration. v1.4 shipped and archived
+the source-ref-first read/search contract, which is now the public identity
+surface for this work. Backlog `999.25` and `SEED-002` are selected as
 milestone context so Telegram does not inherit path-shaped holder semantics or
 force wasted TEI/NER/FTS/graph recomputation for already-processed content.
+
+The v1.5 roadmap has five phases:
+1. Resource bindings and retained artifacts foundation.
+2. Application source provider contract.
+3. Telegram adapter MVP ingestion.
+4. Incremental Telegram sync and reuse.
+5. Telegram search/read/drill smoke.
 
 Phase 999.12 complete (2026-04-27): Dual-encoder unified embedding shipped. Metadata-only changes (tag updates, title renames) now require 1 TEI call per document instead of N calls per chunk. VecComponentStore stores raw e_text/e_meta BLOBs; meta_tracker (title+tags checksum) triggers fast path when only metadata changes. search_log table added. 189 tests pass.
 
@@ -198,4 +206,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-06 after v1.5 milestone initialization*
+*Last updated: 2026-05-07 after v1.5 roadmap creation*

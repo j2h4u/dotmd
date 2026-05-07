@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Telegram Source Adapter
 status: planning
-last_updated: "2026-05-06T18:41:50.207Z"
-last_activity: 2026-05-06
+last_updated: "2026-05-07T00:00:00+06:00"
+last_activity: 2026-05-07
 progress:
-  total_phases: 0
+  total_phases: 5
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,19 +17,19 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-06 after v1.5 milestone initialization)
+See: .planning/PROJECT.md (updated 2026-05-07 after v1.5 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** v1.5 Telegram Source Adapter — defining requirements
+**Current focus:** v1.5 Telegram Source Adapter — roadmap ready, next phase discussion
 
 ## Current Milestone
 
 **v1.5 — Telegram Source Adapter**
 
-Phase: Not started
+Phase: 27 — Resource bindings and retained artifacts foundation
 Plan: Not started
-Status: Defining requirements
-Last activity: 2026-05-06
+Status: Ready for phase discussion
+Last activity: 2026-05-07
 
 Progress: [----------] 0%
 
@@ -218,7 +218,7 @@ was moved under `.planning/notes/completed-backlog/`.
 
 ### Blockers/Concerns
 
-No blockers. Phase 26 is complete and verified; v1.4 is milestone-complete.
+No blockers. v1.5 requirements and roadmap are ready; Phase 27 is next.
 
 ### Quick Tasks Completed
 
@@ -229,15 +229,15 @@ No blockers. Phase 26 is complete and verified; v1.4 is milestone-complete.
 | 260502-scv | Normalize dotMD .planning docs: separate active roadmap from backlog/done 999.x items, fix progress/health warnings where safe, keep historical phase artifacts intact | 2026-05-02 | this commit | [260502-scv-normalize-dotmd-planning-docs-separate-a](./quick/260502-scv-normalize-dotmd-planning-docs-separate-a/) |
 
 ---
-*Last updated: 2026-05-06*
+*Last updated: 2026-05-07*
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 27 — Resource bindings and retained artifacts foundation
 Plan: —
-Status: Defining requirements
-Last activity: 2026-05-06 — Milestone v1.5 started
+Status: Ready for phase discussion
+Last activity: 2026-05-07 — v1.5 roadmap created
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Run `$gsd-discuss-phase 27` to gather implementation context before planning.
