@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+
 from dotmd.storage.metadata import SQLiteMetadataStore
 
 
@@ -695,7 +696,11 @@ class TestBindingDiagnostics:
         }
         metadata.count_retained_inactive_chunks.return_value = 4
         service._pipeline._metadata_store = metadata
-        setattr(service._pipeline, "_last_rebind_diagnostic", {"reused_chunks": 7})
+        object.__setattr__(
+            service._pipeline,
+            "_last_rebind_diagnostic",
+            {"reused_chunks": 7},
+        )
 
         diagnostics = service.binding_diagnostics()
 
