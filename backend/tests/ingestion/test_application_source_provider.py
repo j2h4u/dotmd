@@ -23,7 +23,6 @@ from .application_source_fixtures import (
     make_implicit_root_unit,
 )
 
-
 NOW = datetime(2026, 5, 7, 12, 0, tzinfo=UTC)
 
 
@@ -66,18 +65,20 @@ def _telegram_unit(
 
 
 def test_source_unit_requires_updated_at() -> None:
+    payload = {
+        "namespace": "telegram",
+        "document_ref": "dialog:123",
+        "unit_ref": "dialog:123:message:456",
+        "unit_type": "message",
+        "text": "hello",
+        "order_key": "0000000456",
+        "fingerprint": "unit-fingerprint",
+        "metadata_json": {},
+        "chunking_hints": {},
+    }
+
     with pytest.raises(ValidationError):
-        SourceUnit(
-            namespace="telegram",
-            document_ref="dialog:123",
-            unit_ref="dialog:123:message:456",
-            unit_type="message",
-            text="hello",
-            order_key="0000000456",
-            fingerprint="unit-fingerprint",
-            metadata_json={},
-            chunking_hints={},
-        )
+        SourceUnit(**payload)
 
 
 def test_application_source_change_batch_carries_document_unit_and_cursors() -> None:
