@@ -363,11 +363,14 @@ class DotMDService:
         """
         self._ensure_source_provenance_ready()
         active_pool_size = self._active_filter_pool_size(top_k, pool_size)
-        pool = self._collect_candidate_pool(
-            search_query=search_query,
-            original_query=original_query,
-            mode=mode,
-            pool_size=active_pool_size,
+        pool, filtered_fused, active_provenance_map, inactive_count = (
+            self._collect_active_candidate_pool(
+                search_query=search_query,
+                original_query=original_query,
+                mode=mode,
+                top_k=top_k,
+                pool_size=active_pool_size,
+            )
         )
         fused = pool["fused"]
         if not fused:
@@ -375,9 +378,6 @@ class DotMDService:
         engine_results = pool["engine_results"]
         semantic_hits = pool["semantic_hits"]
         keyword_hits = pool["keyword_hits"]
-        filtered_fused, active_provenance_map, inactive_count = (
-            self._filter_active_fused_candidates(fused)
-        )
         if len(filtered_fused) < top_k:
             logger.warning(
                 "active filter underfilled: requested=%d active=%d inactive=%d candidates=%d",
@@ -490,6 +490,51 @@ class DotMDService:
             top_k * ACTIVE_FILTER_OVERFETCH_FACTOR,
             top_k + 50,
         )
+
+    def _collect_active_candidate_pool(
+        self,
+        *,
+        search_query: str,
+        original_query: str,
+        mode: SearchMode | str,
+        top_k: int,
+        pool_size: int,
+    ) -> tuple[
+        RerankCandidatePool,
+        list[tuple[str, float]],
+        dict[str, ChunkProvenance],
+        int,
+    ]:
+        """Expand retrieval until active candidates are filled or engines exhaust."""
+        active_pool_size = self._active_filter_pool_size(top_k, pool_size)
+        previous_count = -1
+        inactive_count = 0
+        active_provenance_map: dict[str, ChunkProvenance] = {}
+        filtered_fused: list[tuple[str, float]] = []
+
+        while True:
+            pool = self._collect_candidate_pool(
+                search_query=search_query,
+                original_query=original_query,
+                mode=mode,
+                pool_size=active_pool_size,
+            )
+            fused = pool["fused"]
+            if not fused:
+                return pool, [], {}, 0
+
+            filtered_fused, active_provenance_map, inactive_count = (
+                self._filter_active_fused_candidates(fused)
+            )
+            if len(filtered_fused) >= top_k:
+                return pool, filtered_fused, active_provenance_map, inactive_count
+            if len(fused) < active_pool_size:
+                return pool, filtered_fused, active_provenance_map, inactive_count
+            if len(fused) <= previous_count:
+                return pool, filtered_fused, active_provenance_map, inactive_count
+
+            previous_count = len(fused)
+            active_pool_size *= 2
 
     def _filter_active_fused_candidates(
         self,

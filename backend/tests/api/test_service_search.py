@@ -342,6 +342,51 @@ class TestActiveSearchFiltering:
         assert [result.ref for result in results] == ["filesystem:/mnt/active-1.md"]
         assert "active filter underfilled" in caplog.text
 
+    def test_active_filter_expands_pool_until_visible_results_are_found(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = _get_service(tmp_path)
+        inactive = [f"inactive-{i}" for i in range(55)]
+        active = ["active-1", "active-2"]
+        metadata = _SearchMetadataStore(inactive + active, set(active))
+        service._pipeline._metadata_store = cast(SQLiteMetadataStore, metadata)
+        service._pipeline.log_search = MagicMock()
+        service._collect_candidate_pool = MagicMock(
+            side_effect=[
+                {
+                    "fused": [(chunk_id, 1.0 - i / 100) for i, chunk_id in enumerate(inactive)],
+                    "engine_results": {},
+                    "semantic_hits": [],
+                    "keyword_hits": [],
+                    "graph_direct_hits": [],
+                    "pool_size": 55,
+                },
+                {
+                    "fused": [
+                        (chunk_id, 1.0 - i / 100)
+                        for i, chunk_id in enumerate(inactive + active)
+                    ],
+                    "engine_results": {},
+                    "semantic_hits": [],
+                    "keyword_hits": [],
+                    "graph_direct_hits": [],
+                    "pool_size": 110,
+                },
+            ]
+        )
+
+        results = service.search("target", top_k=2, rerank=False, expand=False)
+
+        assert [result.ref for result in results] == [
+            "filesystem:/mnt/active-1.md",
+            "filesystem:/mnt/active-2.md",
+        ]
+        assert [call.kwargs["pool_size"] for call in service._collect_candidate_pool.call_args_list] == [
+            52,
+            104,
+        ]
+
     def test_reranker_receives_only_active_chunk_ids(self, tmp_path: Path) -> None:
         service = _get_service(tmp_path)
         metadata = _SearchMetadataStore(

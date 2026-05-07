@@ -1330,6 +1330,7 @@ class SQLiteMetadataStore:
         self._conn.execute(f"DELETE FROM {self._table}")
         self._conn.execute("DELETE FROM stats")
         self._conn.execute("DELETE FROM source_documents")
+        self._conn.execute("DELETE FROM resource_bindings")
         provenance_tables = self._conn.execute(
             "SELECT name FROM sqlite_master "
             "WHERE type='table' AND name LIKE 'chunk_source_provenance_%'"

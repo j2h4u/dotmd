@@ -143,6 +143,12 @@ class IndexingPipeline:
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
+        self._last_rebind_diagnostic = {
+            "rebound": 0,
+            "reused_chunks": 0,
+            "reused_embeddings": 0,
+            "retained_hidden": 0,
+        }
 
         # Ensure the index directory exists.
         settings.index_dir.mkdir(parents=True, exist_ok=True)
@@ -963,6 +969,7 @@ class IndexingPipeline:
         self._save_chunk_fingerprint(file_info)
         self._save_meta_fingerprint(file_info)
         diagnostic["rebound"] = 1
+        self._last_rebind_diagnostic = diagnostic
         logger.info("filesystem_rebind: %s", diagnostic)
         return diagnostic
 
@@ -981,6 +988,7 @@ class IndexingPipeline:
             diagnostic = self._rebind_retained_filesystem_document(source_document)
             for key in total:
                 total[key] += diagnostic[key]
+        self._last_rebind_diagnostic = total
         return total
 
     @staticmethod
