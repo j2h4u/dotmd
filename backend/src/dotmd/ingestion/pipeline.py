@@ -44,6 +44,7 @@ from dotmd.core.models import (
     FileInfo,
     IndexStats,
     RelationType,
+    ResourceBinding,
     SourceDocument,
 )
 from dotmd.extraction.acronyms import extract_acronyms_from_chunks
@@ -865,6 +866,30 @@ class IndexingPipeline:
             parser_name="markdown",
         )
 
+    def _upsert_active_filesystem_binding(
+        self,
+        source_document: SourceDocument,
+        *,
+        conn: sqlite3.Connection,
+    ) -> None:
+        """Persist active filesystem binding state from a SourceDocument."""
+        self._metadata_store.upsert_resource_binding(
+            ResourceBinding(
+                namespace=source_document.namespace,
+                resource_ref=source_document.document_ref,
+                document_ref=source_document.document_ref,
+                ref=source_document.ref,
+                active=True,
+                bound_at=source_document.updated_at,
+                unbound_at=None,
+                content_fingerprint=source_document.content_fingerprint,
+                metadata_fingerprint=source_document.metadata_fingerprint,
+                source_unit_refs=[],
+                metadata_json={},
+            ),
+            conn=conn,
+        )
+
     @staticmethod
     def _normalize_vector(v: list[float]) -> list[float]:
         """Normalize vector to unit length. Returns v unchanged if magnitude is 0."""
@@ -1070,6 +1095,10 @@ class IndexingPipeline:
         )
         source_document = self._source_document_for_file_info(file_info)
         self._metadata_store.upsert_source_document(
+            source_document,
+            conn=self._conn,
+        )
+        self._upsert_active_filesystem_binding(
             source_document,
             conn=self._conn,
         )
@@ -1582,6 +1611,13 @@ class IndexingPipeline:
         file_meta = self._build_file_meta_from_fileinfo(files)
         self._keyword_engine.add_chunks(chunks, file_meta=file_meta)
         logger.info("[%s] fts5: %d chunks (%.2fs)", run_id, len(chunks), time.perf_counter() - t0)
+
+        for source_document in source_documents:
+            self._upsert_active_filesystem_binding(
+                source_document,
+                conn=self._conn,
+            )
+        self._conn.commit()
 
     def _build_file_meta_from_fileinfo(
         self, files: list[FileInfo],
@@ -2518,6 +2554,10 @@ class IndexingPipeline:
 
             source_document = self._source_document_for_file_info(fi)
             self._metadata_store.upsert_source_document(
+                source_document,
+                conn=self._conn,
+            )
+            self._upsert_active_filesystem_binding(
                 source_document,
                 conn=self._conn,
             )
