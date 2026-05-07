@@ -1,332 +1,291 @@
 ---
 phase: 27
 reviewers: [claude, opencode]
-reviewed_at: 2026-05-07T17:57:00+05:00
+reviewed_at: 2026-05-07T18:15:39+05:00
+cycle: 2
 plans_reviewed:
   - 27-01-storage-binding-state-PLAN.md
   - 27-02-filesystem-unbind-and-rebind-PLAN.md
   - 27-03-public-active-filtering-PLAN.md
   - 27-04-regression-docs-and-verification-PLAN.md
-current_high: 10
 ---
 
-# Cross-AI Plan Review - Phase 27
-
-## Review Invocation
-
-- Command requested: `Skill(skill="gsd-review", args="--phase 27 --opencode --claude")`
-- Reviewer set preserved: Claude and OpenCode.
-- OpenCode executable used: `/home/j2h4u/.opencode/bin/opencode` because it was installed outside `PATH`.
-- OpenCode model config note: `.planning/config.json` contains `review.models.opencode = "opencode run"`, which is a command string rather than a model id, so the review used OpenCode default/user-configured model selection.
+# Cross-AI Plan Review - Phase 27 Cycle 2
 
 ## Consensus Summary
 
-Both reviewers found the phase direction sound: a generic resource-binding table, filesystem-first validation slice, service-level public filtering, and no full reindex by default all match the Phase 27 boundary. The unresolved risk is integration completeness. As written, the plans can pass narrow fixture tests while breaking existing indexed data or leaking inactive filesystem refs through fallback paths. The review should be fed back into planning before execution.
+Both requested reviewers agreed that the replan in commit `57bfe39` addresses the 10 HIGH concerns from cycle 1. Claude found no unresolved HIGH concerns and classified the remaining issues as MEDIUM/LOW wiring, observability, and edge-case-test refinements. OpenCode also found no unresolved HIGH concerns and classified remaining issues as MEDIUM/LOW implementation clarity or diagnostics.
 
 ### Agreed Strengths
 
-- Wave ordering is coherent: storage primitives, filesystem lifecycle, public filtering, then regression/docs.
-- Scope remains generic and avoids Telegram ingestion, edit/delete TTL policy, attachments, and plugin UI.
-- Service-level active filtering is the right public boundary because search engines can still return retained inactive candidates internally.
-- No-full-reindex intent is explicit and aligns with Phase 26 source-ref-first migration constraints.
+- Backfill is now explicit, idempotent, and runs before binding-aware operations.
+- Successful filesystem indexing now has a symmetric active binding upsert path.
+- Deactivation is separated from purge/delete helpers, preserving retained artifacts.
+- Rebind acceptance is behaviorally pinned to zero TEI encoding calls for unchanged retained chunk text.
+- Public active filtering now happens before reranking and before filesystem fallback paths.
+- Verification now includes end-to-end lifecycle coverage, shared-chunk visibility, TEI call-count evidence, and EXPLAIN evidence.
 
 ### Agreed Concerns
 
-- **HIGH:** Existing `source_documents` rows need an idempotent active-binding backfill before public active filtering lands.
-- **HIGH:** Normal filesystem indexing must explicitly create or upsert active resource bindings; deactivation alone is only half of the lifecycle.
-- **HIGH:** Public read/search fallback paths must not bypass active-binding checks, especially filesystem fallback for present files.
-- **HIGH:** Deactivation must preserve provenance and retained artifacts; shared cleanup primitives that delete provenance cannot be reused blindly.
-- **HIGH:** Fixed over-fetch (`top_k * 3`) can underfill results when inactive candidates dominate the fused pool.
-- **MEDIUM:** Rebind reuse needs behavioral verification, not just summary text saying recomputation remains.
-- **MEDIUM:** Query-plan and performance checks should lock in the new active-binding join behavior.
-
-### Current HIGH Concerns
-
-- Missing backfill from existing `source_documents` into active `resource_bindings` before Plan 03 filtering.
-- Undefined `content_fingerprint` and `metadata_fingerprint` producer despite schema and rebind logic depending on them.
-- Missing active-binding creation/upsert on successful filesystem indexing.
-- Rebind acceptance can pass without proving TEI/chunk/artifact reuse.
-- Modified-file lifecycle and fingerprint update behavior are underspecified.
-- Fixed `top_k * 3` active-filter over-fetch can starve active results under inactive-candidate skew.
-- `resource_bindings` duplicates `source_documents` metadata without a source-of-truth rule.
-- Trickle `index_file()` path and restored-file interaction are not covered enough for the production path.
-- Deactivation path risks deleting provenance if it reuses `_holder_aware_chunk_cleanup`.
-- Filesystem fallback in `read`/source resolution can bypass or confuse active-binding enforcement.
+- MEDIUM: Rebind implementation needs precise attention during execution. Claude wanted the exact insertion point before chunking/embedding pinned more explicitly; OpenCode wanted the M2M/provenance "preserve or re-add" wording tightened.
+- MEDIUM: Active filtering is acceptable but has quality/observability edge cases. Claude noted extreme inactive skew can still underfill; OpenCode noted inactive candidates still influence RRF scores before filtering.
+- LOW/MEDIUM: Additional diagnostics would strengthen execution: EXPLAIN for the fingerprint rebind lookup, warm-start backfill behavior, and clearer documentation of intentional metadata-fingerprint behavior.
 
 ### Divergent Views
 
-- Claude emphasized schema-level fingerprint ownership and hardening the rebind acceptance criterion.
-- OpenCode emphasized current code-path hazards in `_resolve_source_document`, `_filesystem_path_for_source`, `_holder_aware_chunk_cleanup`, and trickle indexing.
-- Claude rated overall risk `MEDIUM-HIGH`; OpenCode rated it `HIGH`. The practical shared recommendation is the same: update the plans before execution.
+- Claude treated the rebind lookup index and warm-start backfill test as MEDIUM improvements; OpenCode considered the current acceptance criteria sufficient and did not raise those above LOW/unstated.
+- OpenCode suggested dropping `source_unit_refs` as premature schema, while Claude did not flag it as a concern.
+
+CYCLE_SUMMARY: current_high=0
+
+## Current HIGH Concerns
+
+None.
 
 ---
 
 ## Claude Review
 
-# Phase 27 Plan Review
+<sef-eval phase="USER-PROMPT">
+<task>Cross-AI plan review - Phase 27 cycle 2 replanned plans, count unresolved HIGH concerns from prior cycle's 10</task>
+<skills>none - this is direct review work, no available skill matches "cross-AI plan review counting"; gsd-review is the orchestrator that spawned this, not a sub-skill to invoke recursively</skills>
+<decision>proceed</decision>
+</sef-eval>
+
+# Phase 27 Plan Review - Cycle 2
 
 ## Summary
 
-The four plans deliver a coherent generic resource-binding foundation that respects the stated phase boundaries: source-agnostic schema, no full reindex, no Telegram ingestion, no recycle-bin UX. Wave ordering is sound (storage primitives → filesystem lifecycle → public filter → regression/docs), and decisions D-01 through D-17 are traceable into concrete tasks. The main weaknesses are two cross-plan gaps that would break a real deployment on first restart, and an acceptance criterion for rebind reuse that is permissive enough to let a thinly delivered Plan 02 pass. The plans are stronger as a research artifact than as a turnkey execution package — a planner reading them today would still need to invent two missing slices.
+The replan substantively addresses all 10 HIGH concerns from cycle 1 with concrete tasks, named helpers, and verifiable acceptance criteria. Plan 01 adds the missing backfill and pins fingerprint ownership/source-of-truth rules. Plan 02 adds the symmetric binding-upsert-on-index, splits deactivation cleanly from `_holder_aware_chunk_cleanup`, hardens rebind acceptance to "TEI encode call count == 0", and explicitly covers the trickle path and modified-file lifecycle. Plan 03 replaces the brittle `top_k * 3` over-fetch with a named `ACTIVE_FILTER_OVERFETCH_FACTOR = 5` plus a `top_k + 50` floor and underfill warning, and routes `_require_active_source_document` ahead of the Phase 26 filesystem fallback. Plan 04 adds the end-to-end lifecycle test, shared-chunk visibility test, EXPLAIN-plan evidence, and TEI-count evidence in the summary. The plans now read as a turnkey execution package rather than a research artifact.
 
----
+## Strengths
 
-## Plan 27-01: Storage Binding State
+- **Backfill is explicit and idempotent.** Plan 01 Task 2 reads from `source_documents`, uses `INSERT ... ON CONFLICT(namespace, resource_ref) DO NOTHING`, and tests both first-run creation and second-run idempotence plus inactive-row preservation.
+- **Source-of-truth rule is documented and tested.** Plan 01 Task 1 truths block names `source_documents` as authoritative; Plan 03 Task 3 asserts `metadata_json` is not duplicated.
+- **Symmetric binding lifecycle.** Plan 02 Task 1 upserts active bindings on every successful index path (incremental, metadata-only, trickle), matching Task 2's deactivation path.
+- **Hard separation of deactivation from purge.** Plan 02 Task 2 explicitly forbids `_holder_aware_chunk_cleanup` and `delete_chunk_provenance_for_document` calls in `_deactivate_filesystem_binding`, with grep-style assertions.
+- **Rebind reuse is behaviorally pinned.** "TEI encoding call count equals 0" replaces the OR-escape clause from cycle 1.
+- **Modified-file lifecycle is named.** Plan 02 Task 1 distinguishes modified (replacement + fingerprint update) from missing (deactivation); Task 2 acceptance asserts modified files do NOT call `_deactivate_filesystem_binding`.
+- **Filesystem fallback bypass is closed.** Plan 03 Task 2 places `_require_active_source_document` before synthetic `SourceDocument` reconstruction and `Path.exists()`; tests cover the inactive-binding-with-present-file scenario explicitly.
+- **Filter-before-rerank ordering.** Plan 03 Task 1 ensures the cross-encoder only sees active candidates, addressing OpenCode's reranker-pool waste concern from cycle 1.
+- **Verification evidence is concrete.** Plan 04 Task 2 requires `EXPLAIN QUERY PLAN`, `TEI encode call count`, pytest tail lines, and `no dotmd index --force` literally in the summary.
+- **Shared-chunk M2M case is now covered** (Plan 04 Task 1) - closes OpenCode's missing edge case from cycle 1.
 
-### Strengths
-- Generic `(namespace, resource_ref, document_ref, ref)` shape genuinely supports both filesystem and Telegram without future migration.
-- Idempotent `CREATE TABLE IF NOT EXISTS` and explicit "no rebuild" preserves the no-full-reindex guardrail.
-- `get_active_chunk_provenance_for_chunk_ids` cleanly routes the visibility join through existing `chunk_source_provenance_<strategy>`, avoiding new joins on hot search paths beyond a single index lookup.
-- Deterministic canonical ref selection (`ORDER BY chunk_id, namespace, document_ref`) preserves Phase 26 behavior under multi-binding chunks.
-- Acceptance criteria are mostly grep-able strings, which makes auto-verification cheap.
+## Concerns
 
-### Concerns
-- **HIGH — No backfill from `source_documents`.** Plan 01 creates the table but never populates it for documents already indexed by Phase 26. After Plan 03 lands, `_require_active_source_document(ref)` will reject every existing ref because no binding row exists. This is a silent foot-gun: tests pass on a fresh fixture DB but production breaks on first container restart. Plan must add: on `ensure_resource_bindings_table`, backfill one `active=1` binding per row in `source_documents` (idempotent, single-transaction, fingerprints can be `''` or backfilled lazily).
-- **HIGH — `content_fingerprint` and `metadata_fingerprint` are `NOT NULL` but undefined.** What computes them, from what input, on what trigger? Plan 02 assumes they exist for rebind matching but the producer is never specified. Either drop the `NOT NULL` (allow `''` and compute lazily on first rebind opportunity) or specify the producer in Plan 01. As written, the schema accepts data Plan 02 cannot supply.
-- **MEDIUM — `ref` is derivable but stored.** Storing `ref == f"{namespace}:{document_ref}"` is redundant and can drift. Either make it a SQLite generated column (`GENERATED ALWAYS AS (... ) STORED`) or drop it from the schema and compute at read time.
-- **MEDIUM — Performance characterization missing.** With ~13,500 documents (full corpus), every search will JOIN provenance against bindings. The `(namespace, document_ref, active)` index helps, but no plan asserts query plan / EXPLAIN output. Cheap to add a smoke assertion in Plan 04.
-- **LOW — `metadata_json` and `source_unit_refs` are unused in Phase 27.** They are Telegram-future scaffolding. Defensible, but worth marking as such in the docstring so future readers don't assume they're load-bearing.
+### MEDIUM - Rebind fingerprint-discovery flow is named but not fully wired in the pipeline
 
-### Suggestions
-- Add a Task 3: **Backfill existing source documents into resource_bindings on first run.** Idempotent, transaction-scoped, no schema migration tool needed.
-- Make `content_fingerprint` / `metadata_fingerprint` nullable in this phase, with the rebind path filling them when it's the producer. Or pin a producer (e.g., `_meta_entity_id` for filesystem).
-- Add an EXPLAIN-based assertion or comment on the helper SQL to lock in the index path.
+**Severity: MEDIUM**
 
----
+Plan 02 Task 3 says "When a filesystem document is discovered and an inactive binding exists with the same namespace, content_fingerprint, and metadata_fingerprint", but doesn't specify where in `_index_file()` / `index_file()` / `_incremental_index()` this lookup is inserted. The lookup must happen *after* fingerprint computation but *before* chunking/embedding for reuse to work. As written, a planner could compute fingerprints, chunk and embed, and then "reactivate" - defeating the purpose. The acceptance criterion ("TEI encode call count == 0") catches this behaviorally, but the wiring location is implicit.
 
-## Plan 27-02: Filesystem Unbind and Rebind
+### MEDIUM - Over-fetch policy is improved but still bounded; no iterative refetch fallback
 
-### Strengths
-- Clean split of `_deactivate_filesystem_binding` from `_purge_file`, with explicit docstring guarding the lifecycle distinction.
-- Routes both `_incremental_index` deleted-file path and `purge_orphaned_files` through the new method — symmetric coverage.
-- Test asserts graph delete helpers are *not* called on normal unbind, which directly enforces D-12.
-- `rebound`, `reused_chunks`, `reused_embeddings`, `retained_hidden` keys are stable and assertable.
+**Severity: MEDIUM**
 
-### Concerns
-- **HIGH — Where is the binding *created*?** Neither plan specifies that normal indexing/reindexing must `upsert_resource_binding(active=True)` for each discovered file. Without this, `_deactivate_filesystem_binding` operates on rows that never existed (or only exist due to backfill from Plan 01, which is also missing). This is the symmetric half of the unbind path.
-- **HIGH — Rebind acceptance has a soft escape hatch.** Acceptance criterion 6 reads: *asserts TEI encoding is not called for unchanged retained chunk text, **or** documents a single remaining recomputation in a summary/gap with a focused follow-up.* The OR allows Plan 02 to ship with no actual reuse, just a paragraph explaining why. R1's acceptance criterion is "Rebinding equivalent content can reuse retained chunks/embeddings/artifacts" — that's a behavior, not a writeup. Tighten to: TEI mock call count == 0 on the unchanged-content rebind fixture, no exceptions.
-- **HIGH — Modified files unaddressed.** Plan says "Do not change modified-file handling unless tests cover the replacement path." But if a file's content changes, the existing active binding's `content_fingerprint` is now stale. Should the binding be updated, deactivated-and-rebound, or left alone? Without specification, modified files will silently retain stale fingerprints, breaking later content-fingerprint-based reuse logic.
-- **MEDIUM — Rebind discovery mechanism is hand-waved.** Plan says "discovered with a `content_fingerprint` and `metadata_fingerprint` matching retained inactive binding/source rows." How? No index on `content_fingerprint` is added in Plan 01, and `chunk_source_provenance_<strategy>` doesn't store fingerprints. Either Plan 01 needs a `content_fingerprint` index or Plan 02 needs to specify lookup via `text_hash` on existing chunk rows.
-- **MEDIUM — `chunk_file_paths_<strategy>` lifecycle is ambiguous.** "Preserve unless a replacement holder mapping exists in the same task" leaves rebind ambiguous. On rebind: does the existing holder row remain, get re-pointed, or get re-inserted? Tests will fix one behavior, but the plan doesn't pre-commit to which.
-- **LOW — Pipeline reentry for previously deleted paths.** Re-discovery of a path that was deactivated within the same session: does `_index_file()` see it as new? Existing diff logic compares against `file_trackers` — which still has the row if Plan 02 preserves source_documents. Worth a test.
+`active_pool_size = max(pool_size, top_k * 5, top_k + 50)` is a real improvement over `top_k * 3`. The `+50` floor handles small `top_k` cases, and the underfill warning makes the failure mode observable. However, under extreme inactive skew (e.g., bulk move/rename of the corpus), even the cushion can be exhausted. The plan accepts this consciously (warn, don't loop) but doesn't document the corpus-state assumption. Worth a docstring noting "expected inactive ratio < ~80% in steady state; bulk-move events trigger the underfill warning by design."
 
-### Suggestions
-- Add an explicit task 0 / sub-step: **on every successful index of a filesystem file, upsert the resource binding active=True with current fingerprints.** This is the symmetric writer paired with the deactivator.
-- Tighten rebind acceptance to a hard "TEI encode call count == 0" assertion on the rebind fixture.
-- Specify modified-file behavior: simplest is "modified file = update binding fingerprints in place, no deactivation, existing reindex path runs."
-- Pin `chunk_file_paths_<strategy>` rebind semantics: most likely "preserve, no change" since chunks are content-addressed.
+### MEDIUM - `idx_resource_bindings_fingerprints` exists but rebind query path is not exercised
 
----
+**Severity: MEDIUM**
 
-## Plan 27-03: Public Active Filtering
+Plan 01 Task 1 adds `idx_resource_bindings_fingerprints` on `(namespace, content_fingerprint, metadata_fingerprint, active)`. Plan 02 Task 3 implies but does not require an EXPLAIN QUERY PLAN check that the rebind lookup actually uses this index. Plan 04 Task 1 only asserts the EXPLAIN check for `idx_resource_bindings_document_active`. With ~13,500 documents and rebind events potentially common during filesystem reorganizations, a missed index could silently degrade rebind from O(log n) to O(n).
 
-### Strengths
-- Filters at hydration boundary (D-11) without forcing engine-level changes — minimal blast radius across semantic/FTS5/graph engines.
-- Over-fetch (`top_k * 3`) is a reasonable first-pass guard against underfill.
-- `_require_active_source_document` correctly placed before filesystem fallback so existing-file leak path from Phase 26 is closed.
-- Memory-aware: explicitly forbids `load_index(` inside search/read/drill (matches feedback memory `feedback_no_redundant_questions`-adjacent reload concern).
-- Diagnostic keys (`active`, `inactive`, `retained`, `reused`) are exact and testable.
+### LOW - `chunk_file_paths_<strategy>` rebind semantics are still "preserve or re-add"
 
-### Concerns
-- **HIGH — `top_k * 3` over-fetch is fragile under skewed inactive distributions.** During a large filesystem reorganization (mass move/rename), a high fraction of fused candidates can be inactive in the window before rebind. With `top_k=10`, fetching 30 candidates can return zero active results even when active candidates exist further down. Recommend either: (a) iterative refetch with doubling until `top_k` active filled or pool exhausted, or (b) filter at the engine candidate level for at least one engine. Document the assumption in code.
-- **HIGH — Same backfill problem as Plan 01.** `_require_active_source_document` rejects refs without active bindings. Without Plan 01 backfill, every Phase 26 ref breaks. Cannot ship Plan 03 without the backfill addressed first.
-- **MEDIUM — RRF ranking computed on inactive candidates.** Inactive chunks influence RRF scores of their cohort before the filter drops them. If two engines both rank an inactive chunk highly, the post-fusion top-K may be dominated by inactive entries even though the true top-K active candidates exist further down. The over-fetch helps but doesn't fully decouple. Note as a known limitation in code.
-- **MEDIUM — Multi-binding chunk semantics.** When a chunk is held by both an active and inactive binding (M2M), `get_active_chunk_provenance_for_chunk_ids` returns the active provenance. Good. But add a test that exercises this: chunk shared across two filesystem paths, one deactivated, expect active path selected.
-- **MEDIUM — graph-direct candidate count.** Graph-direct may return fewer than `top_k * 3` candidates by nature. Filter may starve graph results disproportionately. Either bias the over-fetch per-engine or accept and document.
-- **LOW — Error string coupling.** `Action: pass a ref returned by search.` test asserts verbatim. Fragile but acceptable.
+**Severity: LOW**
 
-### Suggestions
-- Replace fixed `* 3` multiplier with constant `ACTIVE_FILTER_OVERFETCH_FACTOR = 3` and add a TODO/comment about iterative refetch for skewed cases.
-- Add a multi-binding M2M test specifically.
-- Verify `_require_active_source_document` falls back gracefully (not silently) for backfilled refs with empty fingerprints — important if Plan 01 backfill ships with `''` placeholders.
+Plan 02 Task 3 says "preserve or re-add M2M chunk_file_paths_<strategy> holder rows for the restored filesystem path". Since holder rows are preserved on deactivation (Task 2), and resource_ref equals the absolute path, on rebind to the same path the rows already exist. On rebind to a new path with matching content fingerprint, new holder rows are needed. This is decidable but the OR-clause leaves it implicit; a test like "rebind same content to a different path adds new holder rows for the new path" would lock this in.
 
----
+### LOW - Migration test for live database is implicit
 
-## Plan 27-04: Regression, Docs, and Verification
+**Severity: LOW**
 
-### Strengths
-- Concrete `uv run pytest` command lines and grep checks with allowed-hits semantics.
-- Explicit `Self-Check: PASSED` gate tied to verification criteria.
-- `no dotmd index --force` is a verifiable string in the summary.
-- Docs updates correctly limit scope (Phase 27 foundation only, Telegram deferred, GC deferred).
+Plan 01 Task 2 tests backfill via in-memory fixtures with manually-inserted `SourceDocument` rows. There's no test that simulates "real index DB with N existing documents, restart, backfill produces N active bindings, search/read still works." The end-to-end test in Plan 04 Task 1 starts from empty state. A "warm-start" test that pre-populates `source_documents` (without bindings), runs `__init__`, and asserts search/read continues to function would prove the deployment-break risk is fully closed. The acceptance criteria are sufficient to catch it in code review, but a behavioral test is stronger.
 
-### Concerns
-- **MEDIUM — File existence assumptions.** Plan references `tests/ingestion/test_metadata_only_reindex.py` and `tests/ingestion/test_source_filesystem.py` — verify these exist (or list as "create if missing" in Plan 02). If they don't exist, the regression run silently passes by collecting nothing.
-- **MEDIUM — "No full reindex" check is a string match in the summary.** Not a behavioral verification. A stronger check: assert TEI encoder mock call count across the Phase 27 test suite stays at zero on rebind fixtures. This is cheap and enforces D-08.
-- **LOW — Acceptance criteria are keyword-presence only.** A summary file with the right strings but weak narrative passes. Add one criterion that asserts the test command output is captured verbatim (e.g., `passed` count for each file).
-- **LOW — No latency or query-plan check.** With a per-query active filter join, a quick `EXPLAIN QUERY PLAN` snapshot would lock in the index path. Worth ten lines.
-- **LOW — Architecture doc updates risk being terse.** Acceptance is "contains active resource binding" — a single sentence passes. Consider adding a minimum line count or reviewer checkpoint.
+### LOW - `bound_at` source for backfill defaults to `updated_at` or "now"
 
-### Suggestions
-- Add a TEI-call-count assertion across the test suite as the canonical "no rebuild" check.
-- Make pytest output capture mandatory in `27-04-SUMMARY.md` (paste the trailing `N passed in Xs` line per file).
-- Add an EXPLAIN QUERY PLAN check on the active-provenance helper.
+**Severity: LOW**
 
----
+Plan 01 Task 2: `bound_at = source_documents.updated_at if present, otherwise current UTC timestamp`. This is fine, but `updated_at` may not exist on older `source_documents` rows depending on schema history. A defensive fallback chain (`updated_at` -> `created_at` -> `now`) would be more robust. Not a correctness issue, just a clean-data concern for diagnostics.
 
-## Cross-Plan Issues
+### LOW - `Self-Check: PASSED` gate in Plan 04 has soft escape for typecheck/lint
 
-- **HIGH — Backfill gap (Plans 01 + 03).** Detailed above. This is the single biggest deployment risk: a clean test run that breaks production on first restart because `source_documents` rows have no corresponding `resource_bindings` rows.
-- **HIGH — Binding-creation symmetry (Plan 02).** No plan task says "create active binding when indexing a file." Without it, the deactivation path is one half of a missing pair. Plan 01 backfill plus Plan 02 indexing-side upsert close this together.
-- **MEDIUM — Rebind softness (Plan 02 + 04).** The OR-clause acceptance and the string-only "no full reindex" check together let a weak rebind implementation slip through. Tighten both.
-- **MEDIUM — Fingerprint producer ownership.** No plan owns the question of *who computes content_fingerprint/metadata_fingerprint and from what.* Plan 01 stores them, Plan 02 reads them. The writer is unspecified.
-- **LOW — Modified-file binding update.** Quietly out of scope; will become a real bug as soon as anyone edits a file.
+**Severity: LOW**
 
----
+Plan 04 Task 2 says "documented pre-existing ratchet status" allows `Self-Check: PASSED` even on lint/typecheck failures. This was added per OpenCode's cycle-1 suggestion and is reasonable, but it's a softer gate than "all checks green." Worth requiring the summary to enumerate the specific pre-existing failures by file/line so a future reviewer can verify nothing new was introduced.
+
+## Suggestions
+
+1. **Plan 02 Task 3:** Pin the rebind-lookup insertion point in the pipeline. One explicit sentence: "In `_index_file()`, after computing `content_fingerprint` and `metadata_fingerprint` and before invoking the chunker, query `resource_bindings` for an inactive match; on hit, reactivate and skip the chunk/embed path."
+2. **Plan 04 Task 1:** Add an EXPLAIN QUERY PLAN assertion for the rebind lookup using `idx_resource_bindings_fingerprints`, parallel to the existing one for `idx_resource_bindings_document_active`.
+3. **Plan 04 Task 1:** Add a "warm-start" backfill behavioral test - pre-populate `source_documents` without bindings, instantiate `SQLiteMetadataStore`, assert search/read works post-init.
+4. **Plan 02 Task 3:** Add a focused test "rebind same content fingerprint to a different filesystem path" to lock M2M holder semantics.
+5. **Plan 03 Task 1:** Add a one-line code comment near `ACTIVE_FILTER_OVERFETCH_FACTOR` documenting the corpus-state assumption ("steady-state inactive ratio < ~80%; bulk-move events trigger underfill warnings by design").
+6. **Plan 04 Task 2:** Require ratcheted lint/typecheck failures to be enumerated by file in the summary, not just acknowledged.
 
 ## Risk Assessment
 
-**Overall risk: MEDIUM-HIGH** for execution as written.
+**Overall risk: LOW-MEDIUM** - substantial improvement from cycle 1's MEDIUM-HIGH / HIGH split.
 
 Justification:
-- Architectural direction is correct, scope is disciplined, decisions D-01 through D-17 are traceable into tasks. The plans would not produce something embarrassing.
-- However, the **backfill gap and binding-creation symmetry gap together create a deployment break risk that is not visible from green tests.** Both are mechanical fixes (a few lines each) but the plans don't currently assign them to a task. A planner executing Plan 03 first or executing without spotting these gaps will land a CI-green change that breaks every existing search ref on restart.
-- The rebind reuse acceptance criterion is permissive enough to let R1's "rebinding can reuse retained chunks/embeddings" ship without actual reuse, just a writeup.
-- Drop to **MEDIUM-LOW** if: (1) Plan 01 adds explicit backfill task, (2) Plan 02 adds explicit binding-upsert-on-index task, (3) Plan 02 rebind acceptance hardens to "TEI encode call count == 0" with no OR-escape, (4) fingerprint producer is named.
+- All 10 cycle-1 HIGH concerns have concrete mitigations with grep-checkable acceptance criteria.
+- The two structural risks (backfill gap, binding-creation symmetry) that would have caused production-breakage on first restart are closed by Plan 01 Task 2 and Plan 02 Task 1.
+- The behavioral softness in cycle 1 (rebind OR-escape, fixed over-fetch, filesystem fallback bypass) is now hardened with assertable invariants.
+- Remaining concerns are MEDIUM at most and are about wiring clarity, observability, and edge-case test coverage - not deployment risks. They can be addressed inline during execution without replanning.
+- The plans correctly preserve the no-full-reindex guardrail and stay within phase scope (no Telegram, no GC, no recycle bin).
 
-Recommendation: address the four bolded fixes above before execution. They are small in code but large in risk reduction.
+The plans are executable as written. The MEDIUM concerns above are worth addressing during execution (especially the rebind lookup wiring and the rebind-index EXPLAIN check), but none rise to "block execution and replan again."
+
+CYCLE_SUMMARY: current_high=0
+
+## Current HIGH Concerns
+
+None.
 
 ---
 
 ## OpenCode Review
 
-# Cross-AI Plan Review: Phase 27 — Resource Bindings and Retained Artifacts Foundation
+# Cross-AI Plan Review - Phase 27 Cycle 2
 
-## Plan 01: Storage Binding State
+## Consensus Summary
 
-### Summary
-Well-scoped storage-layer plan that introduces the `ResourceBinding` model, `resource_bindings` table, and active-provenance query helpers. The TDD approach and clear acceptance criteria are strong. However, there are significant concerns around data duplication with `source_documents`, missing backfill strategy for existing databases, and a subtle schema conflict that will cause production errors.
-
-### Strengths
-- Clean wave-1 isolation: storage only, no pipeline/service changes
-- TDD with specific acceptance criteria keyed to exact method/table names
-- `CREATE TABLE IF NOT EXISTS` avoids migration risk
-- `get_active_chunk_provenance_for_chunk_ids` preserves Phase 26's deterministic `ORDER BY chunk_id, namespace, document_ref` canonical selection
-- `count_resource_bindings()` keeps diagnostics simple per D-03
-
-### Concerns
-
-- **HIGH — No backfill for existing databases.** After Plan 01 ships, `resource_bindings` is empty. When Plan 03 adds active-binding filtering to `_execute_search`, all existing files become invisible because no binding rows exist. The plan must include a backfill step (likely in `_ensure_source_provenance_ready` or pipeline `__init__`) that creates active bindings for all existing `source_documents` rows. Without this, Plan 03 breaks production search on day one.
-
-- **HIGH — Schema duplication with `source_documents`.** Both tables store `document_ref`, `ref`, `content_fingerprint`, `metadata_fingerprint`, and `metadata_json`. This creates two sources of truth that will diverge on updates. Consider whether `resource_bindings` should hold only binding state (`namespace`, `resource_ref`, `active`, `bound_at`, `unbound_at`) and join to `source_documents` for metadata, or whether the plan must explicitly document why denormalization is intentional (e.g., retained documents may have deleted `source_documents` rows in future GC phases).
-
-- **MEDIUM — `source_unit_refs` is premature.** Filesystem bindings have empty `source_unit_refs` (Phase 25 enforces this). Adding this column now is speculative for Telegram. Per kaizen/YAGNI, add it when Phase 28 needs it.
-
-- **MEDIUM — `metadata_json` on binding duplicates `source_documents.metadata_json`.** Two JSON blobs with the same logical content will drift. If binding metadata is meant to be binding-specific (e.g., `{"deactivation_reason": "file_missing"}`), document this distinction explicitly.
-
-- **LOW — `count_resource_bindings()` returns `active/inactive/total` but Plan 03 expects `active/inactive/retained/reused`.** The count key names should be aligned across plans or the divergence explicitly documented.
-
-### Suggestions
-- Add a backfill helper: `backfill_resource_bindings_from_source_documents() -> int` that creates active bindings for all `source_documents` rows missing bindings. Call it once from `_ensure_source_provenance_ready` or `__init__`. This is the highest-priority fix.
-- Consider reducing `resource_bindings` to binding-state-only columns and joining to `source_documents` for metadata, or explicitly document why denormalization is needed.
-- Drop `source_unit_refs` from the initial schema.
+All 10 HIGH concerns from Cycle 1 have been addressed in the replanned Phase 27 plans. The plans now form a coherent, execution-ready package: Plan 01 includes explicit backfill and source-of-truth rules, Plan 02 adds the symmetric binding-upsert writer and a separate deactivation path, Plan 03 filters before reranking and gates filesystem fallback, and Plan 04 requires end-to-end lifecycle and shared-chunk edge-case tests. No new HIGH concerns were identified.
 
 ---
 
-## Plan 02: Filesystem Unbind and Rebind
+## Plan 27-01: Storage Binding State
 
 ### Summary
-The core behavioral change plan — converting hard purge to deactivation and proving rebind reuse. The split between normal unbind and hard purge is well-designed, and the task decomposition is logical. However, there are critical gaps around the modified-file path, the trickle indexer's `index_file()` path, and the rebind complexity.
+
+Solid storage foundation that correctly addresses the three Cycle 1 HIGHs (backfill, fingerprint producer, source-of-truth). The source-of-truth documentation between `source_documents` and `resource_bindings` is now explicit and testable.
 
 ### Strengths
-- Clear separation of `_deactivate_filesystem_binding` from `_purge_file` with docstring guard
-- Explicitly preserves graph artifacts on unbind (D-12)
-- Rebind task includes TEI-call-count verification
-- Keeps hard purge available for explicit GC/drop contexts
+
+- **Task 2 backfill** is idempotent (`ON CONFLICT DO NOTHING`), transaction-scoped, and runs in `__init__` before any pipeline operation can touch bindings. This eliminates the deployment-break risk.
+- **Source-of-truth rule** is explicit: `source_documents` owns current metadata; `resource_bindings` holds activity state plus fingerprint snapshots for rebind lookup. `metadata_json` is binding-lifecycle-only (`{"deactivation_reason": "file_missing"}`).
+- **Task 3** adds an `EXPLAIN QUERY PLAN` assertion for `idx_resource_bindings_document_active`, locking in the index path early.
+- Deterministic canonical selection (`ORDER BY chunk_id, namespace, document_ref`) preserved from Phase 26.
 
 ### Concerns
 
-- **HIGH — Modified files also call `_purge_file()`.** At `pipeline.py:1366-1368`, `_incremental_index()` calls `_purge_file()` for both `diff.deleted` AND `diff.modified`. The plan correctly routes `diff.deleted` to deactivation but doesn't explicitly address `diff.modified`. Modified files should still be hard-purged (they're being re-indexed with new content, so old chunks/vectors must go). The acceptance criteria should test that modified files still go through full re-index, not deactivation.
-
-- **HIGH — `index_file()` trickle path not addressed.** The trickle indexer calls `index_file()` (line 1684) which calls `_holder_aware_chunk_cleanup()` (line 1733) for modified files. This is the same hard-purge path that deletes source_documents, provenance, and orphans. The plan only addresses `_incremental_index()` and `purge_orphaned_files()` but misses the trickle path. If a file goes missing during trickle, it calls `purge_orphaned_files()` which Plan 02 correctly routes to deactivation, but the trickle's `index_file()` also directly handles the "file disappeared" case at line 815-816 where it returns `None` early. This is fine for now but should be documented.
-
-- **HIGH — `_holder_aware_chunk_cleanup` deletes provenance.** At line 2023-2028, `_holder_aware_chunk_cleanup` calls `delete_chunk_provenance_for_document` which hard-deletes provenance rows. Plan 02 says deactivation preserves provenance, but the implementation path goes through `_holder_aware_chunk_cleanup` which is the shared primitive. The plan must either: (a) create a separate deactivation path that skips provenance deletion, or (b) modify `_holder_aware_chunk_cleanup` to accept a `deactivate=True` flag. Option (a) is cleaner.
-
-- **MEDIUM — Rebind is underspecified for chunk ID stability.** Task 2 says "keep existing retained chunk IDs where the chunk/body strategy is unchanged." Chunk IDs are blake3 hashes of chunk content, so identical content produces identical IDs. But `insert_chunk` uses `INSERT OR IGNORE` — so retained chunks are already present. The rebind path needs to: (1) re-add M2M rows, (2) re-add provenance rows, (3) upsert source_document, (4) reactivate binding, (5) update fingerprints. The plan mentions some of these but the full sequence isn't documented, making it easy to miss a step.
-
-- **MEDIUM — No backfill awareness.** `_deactivate_filesystem_binding` calls `set_resource_binding_active` on a binding that may not exist (pre-Plan-01 database). Must upsert the binding first or the deactivation silently no-ops.
+- **MEDIUM - `source_unit_refs` column is premature.** Filesystem bindings always have empty source_unit_refs. Per YAGNI, add when Phase 28 needs it. Minor schema bloat but not harmful.
+- **LOW - `ref` is derivable.** `ref == f"{namespace}:{document_ref}"` is stored but computable. A generated column would prevent drift, but the upsert helper constructs it consistently, so the risk is low.
 
 ### Suggestions
-- Explicitly state that `diff.modified` files in `_incremental_index()` still call `_purge_file()` — only `diff.deleted` routes to deactivation.
-- Add a separate deactivation path that does NOT go through `_holder_aware_chunk_cleanup`. The shared primitive deletes provenance and orphans, which is wrong for deactivation. A new `_deactivate_filesystem_binding` should: (1) upsert binding as inactive, (2) leave all other rows untouched.
-- Document the exact rebind sequence as a numbered list: upsert binding → add M2M rows → add provenance rows → update fingerprints → verify embedding reuse via text_hash.
-- Add acceptance criteria for the trickle `index_file()` path (file exists → normal re-index; file missing → returns 0, deactivation handled by `purge_orphaned_files`).
+
+- Drop `source_unit_refs` from the initial schema and add it in Phase 28 when Telegram source units are modeled.
+- Consider making `ref` a SQLite `GENERATED ALWAYS AS` column to eliminate any drift possibility.
 
 ---
 
-## Plan 03: Public Active Filtering
+## Plan 27-02: Filesystem Unbind and Rebind
 
 ### Summary
-Implements the service-level visibility gate that makes Plans 01-02 functional from the user's perspective. The over-fetch-and-filter approach is sound but the over-fetch multiplier is brittle. A critical gap exists around the `_resolve_source_document()` filesystem fallback, which can bypass the active-binding gate entirely.
+
+The core behavioral change plan now correctly addresses all five Cycle 1 HIGHs (binding creation, rebind acceptance, modified files, trickle coverage, deactivation path). The three-task decomposition is well-ordered: upsert -> deactivation -> rebind.
 
 ### Strengths
-- Service-level filtering preserves engine independence (D-11, D-12, D-13)
-- Over-fetch strategy addresses the underfill pitfall from research
-- `read`/`drill` rejection tests with retained chunks present prove the right invariant
-- Grep check for `include_inactive` prevents scope creep
+
+- **Task 1** adds the missing symmetric writer - every successful index upserts an active binding with current fingerprints. Trickle `index_file()` is explicitly covered.
+- **Modified-file rule** is explicit: replacement reindex semantics preserved, fingerprints updated after successful reindex, no deactivation. Task 2 acceptance criteria test this.
+- **Task 2** creates a completely separate deactivation path (`_deactivate_filesystem_binding`) that explicitly does NOT call `_holder_aware_chunk_cleanup`, `delete_chunk_provenance_for_document`, or graph delete helpers. The hard purge remains available via `_purge_file` for replacement/GC contexts.
+- **Task 3 rebind** has a hard acceptance criterion: "TEI encoding call count equals 0 for unchanged retained chunk text" - no OR-escape hatch.
+- Trickle coverage in Task 3 covers restored-file reactivation, modified-file fingerprint update, and disappeared-file no-op.
 
 ### Concerns
 
-- **HIGH — `_resolve_source_document()` filesystem fallback bypasses binding check.** At `service.py:707-731`, when no `source_documents` row exists but the file exists on disk, a synthetic `SourceDocument` is created. This completely bypasses any binding check. An inactive binding with a present file would still be readable. The plan mentions this ("Existing Phase 26 fallback... must not bypass active binding state") but the acceptance criteria don't test this specific bypass. Add: "test where binding is inactive, file exists on disk, `service.read(ref)` raises ValueError."
-
-- **HIGH — `_filesystem_path_for_source()` at line 744 checks `Path.exists()`.** Even if `_resolve_source_document` is fixed, the `read()` method calls `_filesystem_path_for_source()` which checks `path.exists()` and raises on missing files. For active bindings with present files this is fine, but the error message "Unknown source ref" would be confusing for inactive bindings. The active-binding check must happen BEFORE filesystem fallback.
-
-- **HIGH — Over-fetch `top_k * 3` may be insufficient.** If 80% of the corpus is inactive (after a bulk deletion), 3x over-fetch yields ~60% active candidates, which may underfill results. A more robust approach: over-fetch, filter, and if results are underfilled, log a warning but don't loop (to avoid performance regressions). Document the expected inactive ratio and why 3x is sufficient for the filesystem use case (most files are active).
-
-- **MEDIUM — `build_search_results()` raises on missing provenance.** At `fusion.py:298`, `ValueError(f"missing source provenance for chunk_id={chunk_id}")` is raised if provenance is absent. If Plan 02 preserves provenance for inactive chunks, the active filter runs before `build_search_results` and this is fine. But if provenance is accidentally deleted (e.g., by a bug in deactivation), the error message should distinguish "inactive binding" from "missing provenance." Consider filtering at the `_execute_search` level before passing to `build_search_results`.
-
-- **MEDIUM — Reranker pool interaction.** Reranking happens on `fused[:pool_size]` candidates BEFORE active filtering. If many top candidates are inactive, the reranker wastes computation on them. Consider filtering before reranking, or at least logging the inactive ratio in the rerank pool.
-
-- **LOW — Plan says "do not add `include_inactive`" but doesn't specify behavior for `_execute_search` internal diagnostics.** If an admin wants to verify inactive results are properly hidden, the only option is direct DB queries. This is acceptable per D-03 but worth documenting.
+- **MEDIUM - Rebind sequence "preserve or re-add" is slightly ambiguous for M2M rows.** Task 3 step 4 says "preserve or re-add M2M chunk_file_paths rows" and step 5 says "preserve or re-add chunk_source_provenance rows." The "or" leaves implementation choice, but the acceptance criteria are concrete enough (rows must exist after restore) that either behavior passes. Consider pre-committing to "preserve" since chunks are content-addressed and already present.
+- **LOW - Rebind discovery depends on fingerprint match across both content AND metadata fingerprints.** If metadata fingerprint changes (e.g., frontmatter edit without content change), rebind won't fire even though chunks are identical. This is correct behavior per D-07 but should be documented as an intentional design choice.
 
 ### Suggestions
-- Fix `_resolve_source_document` to check active binding BEFORE filesystem fallback. The fix should be: (1) check `source_documents`, (2) if found, check active binding, (3) if not found, check active binding for a synthetic ref, (4) only then fall back to filesystem existence. This is the most critical fix in the entire phase.
-- Move active-binding filtering BEFORE reranking to avoid wasting cross-encoder computation on invisible candidates.
-- Increase over-fetch to `top_k * 5` or make it configurable, and add a log warning when >50% of candidates are filtered out.
-- Add explicit acceptance test: inactive binding + file exists on disk → `service.read(ref)` raises `ValueError("Unknown source ref")`.
+
+- Pre-commit to "preserve" for M2M/provenance rows on rebind (since chunks are content-addressed and unchanged), removing the "or re-add" ambiguity.
+- Add a brief comment in the rebind path explaining that both fingerprints must match, and metadata-only changes intentionally trigger re-processing.
 
 ---
 
-## Plan 04: Regression, Docs, and Verification
+## Plan 27-03: Public Active Filtering
 
 ### Summary
-Clean verification and documentation plan. The grep checks for scope-creep terms are a strong pattern. Well-scoped with clear acceptance criteria.
+
+The service-level filtering plan now correctly addresses the two Cycle 1 HIGHs (over-fetch brittleness, filesystem fallback bypass). The over-fetch is no longer a fixed multiplier and active-binding checks happen before all fallback paths.
 
 ### Strengths
-- Grep checks prevent inactive-browsing features from sneaking in
-- Explicit "no `dotmd index --force`" verification
-- `Self-Check: PASSED` gate prevents premature completion
-- Doc updates cover both `source-adapter-architecture.md` and `architecture.md`
+
+- **`ACTIVE_FILTER_OVERFETCH_FACTOR = 5`** with `max(pool_size, top_k * 5, top_k + 50)` is significantly more robust than the previous fixed `top_k * 3`. The floor of `top_k + 50` handles small top_k values.
+- **Filtering before reranking** eliminates wasted cross-encoder computation on inactive candidates.
+- **Underfill logging** (`active filter underfilled` with counts) makes the edge case observable without silent quality degradation.
+- **Task 2** explicitly requires active-binding check before `_resolve_source_document()` synthetic fallback, `_filesystem_path_for_source()` `Path.exists()`, frontmatter reads, and chunk reads. The acceptance criteria include the critical bypass test: inactive binding + present file -> `ValueError`.
+- **Task 2** also covers the case where no `source_documents` row exists but the file is on disk - the missing/inactive binding must prevent synthetic fallback.
 
 ### Concerns
 
-- **MEDIUM — No integration test for the full unbind→search→rebind→search cycle.** Individual plans test each step but Plan 04 should include an end-to-end integration test: index file → verify search returns it → deactivate → verify search hides it → verify read rejects it → rebind → verify search returns it again → verify read works. This is the D-16 acceptance criterion.
-
-- **MEDIUM — No test for shared-chunk visibility edge case.** If file A and file B share a chunk (same content, M2M), and file A is deactivated while file B remains active, the shared chunk should still be visible through file B's ref. This edge case is not tested anywhere in Plans 01-04.
-
-- **LOW — `just typecheck` and `just lint` are run but pre-existing ratchet status is not recorded.** If these commands have known pre-existing failures, the summary should document the baseline so new regressions are distinguishable.
+- **MEDIUM - RRF fusion scores are still computed on mixed active+inactive candidates.** Inactive chunks influence RRF cohort scores before the filter removes them. This is a known quality limitation, not a correctness issue (inactive results never reach the user). The underfill log makes it observable. Worth a brief code comment.
+- **LOW - Graph-direct may return fewer candidates than the over-fetch target.** Graph traversal is inherently bounded by graph structure. The `top_k + 50` floor and underfill log handle this acceptably.
 
 ### Suggestions
-- Add one end-to-end integration test covering: index → search hits → deactivate → search misses → rebind → search hits again. This is the single most important test for the entire phase.
-- Add a test for the shared-chunk visibility edge case.
-- Record baseline typecheck/lint status in the summary.
+
+- Add a code comment in the fusion path noting that RRF scores include inactive candidates and that the filter runs post-fusion, pre-rerank.
+- Consider adding a per-engine inactive-ratio metric to the underfill log for debugging.
 
 ---
 
-## Overall Risk Assessment
+## Plan 27-04: Regression, Docs, and Verification
 
-**Risk: HIGH**
+### Summary
 
-### Justification
+Comprehensive verification plan that closes the Cycle 1 gaps (end-to-end lifecycle test, shared-chunk edge case, TEI call count evidence, EXPLAIN evidence, typecheck/lint ratchet status).
 
-The plans are well-structured individually but have two critical cross-plan gaps:
+### Strengths
 
-1. **Backfill gap (Plans 01 → 03):** Without backfilling `resource_bindings` from existing `source_documents`, Plan 03's active-binding filter makes the entire production index invisible. This is a deployment-breaking bug. The plans should add an explicit backfill step in Plan 01 or early Plan 02, triggered during pipeline initialization.
+- **Task 1** requires an explicit 11-step end-to-end filesystem lifecycle test (index -> search -> read -> deactivate -> search hidden -> read rejected -> rebind -> search -> read -> TEI count 0). This is the D-16 acceptance criterion made concrete.
+- **Shared-chunk test** explicitly covers: A and B share a chunk, deactivate A, B's ref still visible via active provenance. This was a missing edge case in Cycle 1.
+- **Task 2** requires recording TEI encode call count evidence, EXPLAIN QUERY PLAN evidence, and pytest pass lines verbatim in the summary.
+- **Task 3** docs scope is tight: Phase 27 foundation only, Telegram deferred, GC deferred. Grep checks for `include_inactive` and `recycle-bin` language prevent scope creep.
 
-2. **Filesystem fallback bypass (Plan 03):** `_resolve_source_document()` in `service.py:707-731` creates synthetic `SourceDocument` objects for filesystem refs with no `source_documents` row, bypassing any binding check. This is a pre-existing Phase 26 fallback that must be explicitly narrowed or removed in Plan 03, and the current plan text acknowledges the risk but the acceptance criteria don't test the bypass scenario.
+### Concerns
 
-3. **Shared primitive contamination (Plan 02):** `_holder_aware_chunk_cleanup()` deletes provenance rows (line 2023-2028). The deactivation path cannot go through this primitive without modification. Plan 02 needs a completely separate deactivation method, not a conditional branch in the shared primitive.
+- **LOW - No latency regression check.** With a per-search active-binding join, a quick wall-clock comparison before/after would be valuable. Not required for correctness but useful for production confidence.
 
-4. **Trickle indexer coverage:** The trickle path (`index_file()` + `purge_orphaned_files()`) is the primary production code path. Plans address `purge_orphaned_files` but don't test the interaction between trickle deactivation and subsequent trickle re-indexing of a restored file.
+### Suggestions
 
-These gaps are fixable with targeted additions to the plans, but they must be addressed before execution begins. The overall architecture (binding table → deactivation → service filter) is sound; the risks are in the integration details.
+- Consider adding a rough latency sanity check (e.g., search time on a fixture with 100+ documents should not increase by more than 2x).
+
+---
+
+## Cross-Plan Assessment
+
+### Resolved Cycle 1 HIGH Concerns
+
+| # | Original Concern | Resolution Location |
+|---|---|---|
+| 1 | Missing backfill | Plan 01 Task 2: `backfill_resource_bindings_from_source_documents()` in `__init__` |
+| 2 | Undefined fingerprint producer | Plan 01 source-of-truth rule + backfill from `source_documents` columns |
+| 3 | Missing binding upsert on index | Plan 02 Task 1: explicit upsert in successful index path |
+| 4 | Soft rebind acceptance | Plan 02 Task 3: hard `TEI encode call count == 0` |
+| 5 | Modified files underspecified | Plan 02 Task 1 explicit modified-file rule + Task 2 test |
+| 6 | Fixed over-fetch starvation | Plan 03 Task 1: `ACTIVE_FILTER_OVERFETCH_FACTOR = 5` + `top_k + 50` floor + underfill log |
+| 7 | Source-of-truth duplication | Plan 01 explicit documentation + test |
+| 8 | Trickle coverage gap | Plan 02 Task 1 + Task 3 trickle acceptance criteria |
+| 9 | Deactivation reuses purge primitive | Plan 02 Task 2: separate path, explicit prohibition list |
+| 10 | Filesystem fallback bypass | Plan 03 Task 2: active check before all fallback paths + bypass test |
+
+### New Concerns
+
+No new HIGH concerns identified. Remaining MEDIUM/LOW concerns are implementation details that the acceptance criteria and test coverage already constrain sufficiently.
+
+---
+
+## Risk Assessment
+
+**Overall risk: MEDIUM-LOW**
+
+The architectural direction is sound and all deployment-break risks from Cycle 1 have been addressed with specific, testable mitigations. The backfill runs at init before any pipeline operation, binding upsert is paired with deactivation, the active filter gates all public paths before filesystem fallback, and rebind must prove zero recomputation. The remaining risks are quality-edge concerns (RRF score influence from inactive candidates, rebind M2M semantics ambiguity) that do not affect correctness and are observable through logging and diagnostics.
+
+CYCLE_SUMMARY: current_high=0
+
+## Current HIGH Concerns
+
+None.
