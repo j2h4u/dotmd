@@ -550,3 +550,116 @@ class TestGraphHolderAwarePath:
             f"Shared chunk {shared_cid!r} should not be removed from graph (still held by /file_B.md)"
         )
         assert file_node_delete_calls == ["/file_A.md"]
+
+
+class TestNormalFilesystemUnbind:
+    """Normal missing-resource handling deactivates bindings and retains artifacts."""
+
+    def test_normal_unbind_preserves_source_document_and_provenance(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        db_path = _build_post_v16_db(tmp_path)
+        strategy = STRATEGIES[0]
+        chunk_id = "k" * 64
+        file_path = "/file_A.md"
+        document_ref = str(Path(file_path).resolve())
+
+        _insert_chunk(db_path, strategy, chunk_id, "retained content")
+        _add_m2m(db_path, strategy, chunk_id, file_path)
+        _add_source_document(db_path, file_path)
+        _add_chunk_provenance(db_path, strategy, chunk_id, file_path)
+
+        pipeline = _get_pipeline(db_path)
+        pipeline._deactivate_filesystem_binding(file_path)
+
+        conn = sqlite3.connect(str(db_path))
+        source_rows = conn.execute(
+            "SELECT document_ref FROM source_documents WHERE document_ref = ?",
+            (document_ref,),
+        ).fetchall()
+        provenance_rows = conn.execute(
+            f"SELECT chunk_id, document_ref FROM chunk_source_provenance_{strategy} "
+            "WHERE document_ref = ?",
+            (document_ref,),
+        ).fetchall()
+        binding_row = conn.execute(
+            "SELECT active, unbound_at, metadata_json FROM resource_bindings "
+            "WHERE namespace = 'filesystem' AND resource_ref = ?",
+            (document_ref,),
+        ).fetchone()
+        conn.close()
+
+        assert source_rows == [(document_ref,)]
+        assert provenance_rows == [(chunk_id, document_ref)]
+        assert binding_row is not None
+        assert binding_row[0] == 0
+        assert binding_row[1] is not None
+        assert "file_missing" in binding_row[2]
+
+    def test_normal_unbind_preserves_chunks_fts_vectors_and_graph(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        db_path = _build_post_v16_db(tmp_path)
+        strategy = STRATEGIES[0]
+        chunk_id = "l" * 64
+        file_path = "/file_A.md"
+
+        _insert_chunk(db_path, strategy, chunk_id, "retained content")
+        _add_m2m(db_path, strategy, chunk_id, file_path)
+        _add_source_document(db_path, file_path)
+        _add_chunk_provenance(db_path, strategy, chunk_id, file_path)
+
+        pipeline = _get_pipeline(db_path)
+        graph_calls: list[tuple[str, object]] = []
+
+        def record_chunks(chunk_ids, *args, **kwargs):  # type: ignore[no-untyped-def]
+            graph_calls.append(("chunks", list(chunk_ids)))
+
+        def record_file(file_path_arg, *args, **kwargs):  # type: ignore[no-untyped-def]
+            graph_calls.append(("file", file_path_arg))
+
+        def record_subgraph(file_path_arg, *args, **kwargs):  # type: ignore[no-untyped-def]
+            graph_calls.append(("subgraph", file_path_arg))
+
+        pipeline._graph_store.delete_chunks_from_graph = record_chunks
+        pipeline._graph_store.delete_file_node = record_file
+        pipeline._graph_store.delete_file_subgraph = record_subgraph
+
+        pipeline._deactivate_filesystem_binding(file_path)
+
+        assert _count(db_path, f"chunks_{strategy}") == 1
+        assert _count(db_path, f"chunks_fts_{strategy}") == 1
+        assert _count(db_path, f"vec_meta_{strategy}_{MODEL}") == 1
+        assert _count(db_path, f"chunk_file_paths_{strategy}") == 1
+        assert graph_calls == []
+
+    def test_incremental_modified_files_keep_hard_replacement_path(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from dotmd.core.models import IndexStats
+        from dotmd.ingestion.file_tracker import FileDiff
+
+        db_path = _build_post_v16_db(tmp_path)
+        pipeline = _get_pipeline(db_path)
+        calls: list[str] = []
+
+        def record_purge(path: str) -> None:
+            calls.append(path)
+
+        def fail_deactivate(path: str, *, reason: str = "file_missing") -> None:
+            raise AssertionError("modified files must not deactivate bindings")
+
+        pipeline._purge_file = record_purge  # type: ignore[method-assign]
+        pipeline._deactivate_filesystem_binding = fail_deactivate  # type: ignore[method-assign]
+        pipeline._ingest_and_finalize = lambda *args, **kwargs: IndexStats()  # type: ignore[method-assign]
+
+        pipeline._incremental_index(
+            [],
+            FileDiff(modified=["/file_A.md"]),
+            documents_by_path={},
+        )
+
+        assert calls == ["/file_A.md"]

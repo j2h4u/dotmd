@@ -74,7 +74,7 @@ def _get_pipeline(db_path: Path):  # type: ignore[no-untyped-def]
 
 
 class TestOrphanSweepFindsMissingFiles:
-    """purge_orphaned_files calls _purge_file for file_paths not on disk."""
+    """purge_orphaned_files deactivates file_paths not on disk."""
 
     def test_orphan_sweep_finds_missing_files(self, tmp_path: Path) -> None:
         """M2M contains /gone/file.md which doesn't exist on disk; sweep purges it."""
@@ -86,19 +86,19 @@ class TestOrphanSweepFindsMissingFiles:
         _populate(db_path, strategy, chunk_id, missing_file)
 
         pipeline = _get_pipeline(db_path)
-        purge_calls = []
+        deactivate_calls = []
 
-        original_purge = pipeline._purge_file
+        original_deactivate = pipeline._deactivate_filesystem_binding
 
-        def spy_purge(fp: str) -> None:
-            purge_calls.append(fp)
-            original_purge(fp)
+        def spy_deactivate(fp: str, *, reason: str = "file_missing") -> None:
+            deactivate_calls.append(fp)
+            original_deactivate(fp, reason=reason)
 
-        pipeline._purge_file = spy_purge  # type: ignore[method-assign]
+        pipeline._deactivate_filesystem_binding = spy_deactivate  # type: ignore[method-assign]
         pipeline.purge_orphaned_files()
 
-        assert missing_file in purge_calls, (
-            f"Expected {missing_file!r} to be purged, got calls: {purge_calls!r}"
+        assert missing_file in deactivate_calls, (
+            f"Expected {missing_file!r} to be deactivated, got calls: {deactivate_calls!r}"
         )
 
 
@@ -118,18 +118,18 @@ class TestOrphanSweepIgnoresPresentFiles:
         _populate(db_path, strategy, chunk_id, str(existing_file))
 
         pipeline = _get_pipeline(db_path)
-        purge_calls = []
-        original_purge = pipeline._purge_file
+        deactivate_calls = []
+        original_deactivate = pipeline._deactivate_filesystem_binding
 
-        def spy_purge(fp: str) -> None:
-            purge_calls.append(fp)
-            original_purge(fp)
+        def spy_deactivate(fp: str, *, reason: str = "file_missing") -> None:
+            deactivate_calls.append(fp)
+            original_deactivate(fp, reason=reason)
 
-        pipeline._purge_file = spy_purge  # type: ignore[method-assign]
+        pipeline._deactivate_filesystem_binding = spy_deactivate  # type: ignore[method-assign]
         pipeline.purge_orphaned_files()
 
-        assert str(existing_file) not in purge_calls, (
-            f"Present file should not be purged, but was: {purge_calls!r}"
+        assert str(existing_file) not in deactivate_calls, (
+            f"Present file should not be deactivated, but was: {deactivate_calls!r}"
         )
 
 
@@ -169,17 +169,17 @@ class TestOrphanSweepMultiStrategy:
             _populate(db_path, s, cid, fp)
 
         pipeline = _get_pipeline(db_path)
-        purge_calls = []
-        original_purge = pipeline._purge_file
+        deactivate_calls = []
+        original_deactivate = pipeline._deactivate_filesystem_binding
 
-        def spy_purge(fp: str) -> None:
-            purge_calls.append(fp)
-            original_purge(fp)
+        def spy_deactivate(fp: str, *, reason: str = "file_missing") -> None:
+            deactivate_calls.append(fp)
+            original_deactivate(fp, reason=reason)
 
-        pipeline._purge_file = spy_purge  # type: ignore[method-assign]
+        pipeline._deactivate_filesystem_binding = spy_deactivate  # type: ignore[method-assign]
         pipeline.purge_orphaned_files()
 
         for missing_fp in missing_paths:
-            assert missing_fp in purge_calls, (
-                f"Expected {missing_fp!r} to be purged; got: {purge_calls!r}"
+            assert missing_fp in deactivate_calls, (
+                f"Expected {missing_fp!r} to be deactivated; got: {deactivate_calls!r}"
             )
