@@ -128,7 +128,7 @@ See: `.planning/REQUIREMENTS.md`
 | 24. Config separation | 2/2 | Complete    | 2026-05-05 |
 | 25. Document source abstraction MVP | 4/4 | Complete | 2026-05-06 |
 | 26. Source-ref-first read/search contract cleanup | 3/3 | Complete | 2026-05-06 |
-| 27. Resource bindings and retained artifacts foundation | 1/4 | In Progress|  |
+| 27. Resource bindings and retained artifacts foundation | 3/4 | In Progress|  |
 | 28. Application source provider contract | v1.5 | Not started | — |
 | 29. Telegram adapter MVP ingestion | v1.5 | Not started | — |
 | 30. Incremental Telegram sync and reuse | v1.5 | Not started | — |
@@ -1032,7 +1032,7 @@ resource churn does not force recomputation of already processed content.
 **Requirements:** R1, R2, R8
 **Depends on:** Phase 26
 **Backlog source:** 999.25, SEED-002
-**Plans:** 1/4 plans executed
+**Plans:** 3/4 plans executed
 
 Phase context:
 - Telegram is the first validation source, but this phase should be source
@@ -1058,10 +1058,10 @@ Plans:
 - [x] 27-01-storage-binding-state-PLAN.md — Add generic active/inactive resource binding storage state and active provenance helpers
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 27-02-filesystem-unbind-and-rebind-PLAN.md — Convert filesystem missing-resource handling to inactive bindings and retained artifact reuse
+- [x] 27-02-filesystem-unbind-and-rebind-PLAN.md — Convert filesystem missing-resource handling to inactive bindings and retained artifact reuse
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 27-03-public-active-filtering-PLAN.md — Enforce active-binding filtering in public search, read, drill, and diagnostics
+- [x] 27-03-public-active-filtering-PLAN.md — Enforce active-binding filtering in public search, read, drill, and diagnostics
 
 **Wave 4** *(blocked on Wave 3 completion)*
 - [ ] 27-04-regression-docs-and-verification-PLAN.md — Run focused regression, update architecture docs, and record no-full-reindex verification

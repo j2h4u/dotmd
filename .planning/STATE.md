@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Telegram Source Adapter
 status: executing
-last_updated: "2026-05-07T14:43:26.934Z"
+last_updated: "2026-05-07T15:08:29.868Z"
 last_activity: 2026-05-07
 progress:
   total_phases: 21
   completed_phases: 14
   total_plans: 38
-  completed_plans: 35
-  percent: 92
+  completed_plans: 37
+  percent: 97
 ---
 
 # GSD State
@@ -31,7 +31,7 @@ Plan: Not started
 Status: Executing Phase 27
 Last activity: 2026-05-07
 
-Progress: [█████████░] 92%
+Progress: [██████████] 97%
 
 ## Deferred Items
 
@@ -81,6 +81,7 @@ Items acknowledged and deferred at milestone close on 2026-05-06:
 | Phase 26 P02 | 20min | 3 tasks | 11 files |
 | Phase 26 P03 | 11min | 4 tasks | 7 files |
 | Phase 27 P01 | 8min | 3 tasks | 3 files |
+| Phase 27 P03 | 7min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -155,6 +156,9 @@ Recent decisions affecting current work:
 - [Phase 27]: Active public provenance is resolved by joining chunk_source_provenance tables to resource_bindings where active = 1. — Retained inactive provenance stays available for reuse while normal public output can filter it.
 - [Phase 27]: Existing source_documents rows are backfilled into active resource_bindings during SQLiteMetadataStore readiness using non-overwrite conflict handling. — This prevents later active filtering from hiding existing Phase 26 refs on production databases.
 - [Phase 27]: source_documents remains authoritative for active/current document metadata; resource_bindings stores activity state and fingerprint snapshots for retained lookup. — Plan 27-01 keeps metadata source-of-truth separate from binding lifecycle state.
+- [Phase 27]: [Phase 27 Plan 03]: Public search filters inactive retained chunks before reranking and SearchResult hydration. — Internal engines may still return retained candidates, but public output is active-binding gated.
+- [Phase 27]: [Phase 27 Plan 03]: read(ref) and drill(ref) require active resource bindings before source-document resolution, filesystem fallback, frontmatter reads, or chunk range reads. — Prevents retained filesystem artifacts from bypassing the public visibility gate.
+- [Phase 27]: [Phase 27 Plan 03]: Binding diagnostics are count-only with active, inactive, retained, and reused keys. — No include_inactive, recycle-bin search, inactive read, or inactive list surface was added.
 
 ### Pending Todos
 
@@ -238,10 +242,10 @@ No blockers. v1.5 requirements and roadmap are ready; Phase 27 is next.
 ## Current Position
 
 Phase: 27 (resource-bindings-retained-artifacts-foundation) — EXECUTING
-Plan: 1 of 4
+Plan: 3 of 4
 Status: Executing Phase 27
-Last activity: 2026-05-07 -- Phase 27 execution started
+Last activity: 2026-05-07 -- Phase 27 Plan 03 complete
 
 ## Operator Next Steps
 
-- Run `$gsd-execute-phase 27` to execute the reviewed Phase 27 plans.
+- Await orchestrator routing for the remaining Phase 27 plan.
