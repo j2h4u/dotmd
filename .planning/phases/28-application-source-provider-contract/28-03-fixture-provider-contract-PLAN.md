@@ -7,7 +7,7 @@ depends_on:
   - "28-01"
   - "28-02"
 files_modified:
-  - backend/src/dotmd/ingestion/source_provider.py
+  - backend/tests/ingestion/application_source_fixtures.py
   - backend/tests/ingestion/test_application_source_provider.py
 autonomous: true
 requirements: ["R3", "R4", "R8"]
@@ -40,6 +40,7 @@ Telegram adapter against tested behavior instead of prose alone.
 |---|---:|---|
 | Contract looks correct but cannot be exercised end-to-end | HIGH | Add a fixture provider with export and read-window behavior under pytest. |
 | Fixture silently depends on live Telegram or mcp-telegram internals | HIGH | Tests use in-memory fixture records only and grep against forbidden imports/paths. |
+| Fixture code becomes accidental production API | MEDIUM | Keep `FixtureApplicationSourceProvider` and implicit-root helpers under `backend/tests`, while production `source_provider.py` remains protocol-only. |
 | Document-only sources cannot fit the contract | MEDIUM | Add implicit root unit fixture and fallback read window. |
 | Duplicate active batches trigger recomputation expectations | HIGH | Test fingerprint helper or fixture processing identifies duplicate unchanged units. |
 </threat_model>
@@ -51,10 +52,11 @@ Telegram adapter against tested behavior instead of prose alone.
 <read_first>
 - `backend/src/dotmd/core/models.py`
 - `backend/src/dotmd/ingestion/source_provider.py`
+- `backend/tests/ingestion/application_source_fixtures.py`
 - `backend/tests/ingestion/test_application_source_provider.py`
 </read_first>
 <files>
-- `backend/src/dotmd/ingestion/source_provider.py`
+- `backend/tests/ingestion/application_source_fixtures.py`
 - `backend/tests/ingestion/test_application_source_provider.py`
 </files>
 <behavior>
@@ -64,7 +66,7 @@ Telegram adapter against tested behavior instead of prose alone.
 - The fixture has no `mcp_telegram` or `telethon` import.
 </behavior>
 <action>
-Add a test-only-safe fixture provider in `backend/src/dotmd/ingestion/source_provider.py`.
+Add a test-only fixture provider in `backend/tests/ingestion/application_source_fixtures.py`. Do not add fixture classes or implicit-root helpers to production `backend/src/dotmd/ingestion/source_provider.py`; that module stays limited to the protocol and production payload imports from Plan 01.
 
 Concrete target state:
 - Define `FixtureApplicationSourceProvider` that implements `ApplicationSourceProviderProtocol`.
@@ -75,16 +77,21 @@ Concrete target state:
   - `next_cursor="offset:<end>"` when more records exist, otherwise `None`;
   - `checkpoint_cursor="offset:<end>"` after each non-empty batch.
 - Add helper `make_implicit_root_unit(document: SourceDocument, text: str, fingerprint: str, updated_at: datetime) -> SourceUnit`.
+  - The helper must set `unit_type="root"`, `unit_ref=f"{document.document_ref}:root"`, `order_key="0000000000"`, `metadata_json={}`, and `chunking_hints={}` unless a test passes explicit overrides.
 - Keep the fixture provider generic; Telegram-like examples live in tests, not class names.
 </action>
 <verify>
 <automated>cd backend && uv run pytest tests/ingestion/test_application_source_provider.py -q</automated>
+<automated>rg -n "FixtureApplicationSourceProvider|make_implicit_root_unit|telethon|mcp_telegram" backend/src/dotmd/ingestion/source_provider.py backend/tests/ingestion/application_source_fixtures.py</automated>
 </verify>
 <acceptance_criteria>
-- `backend/src/dotmd/ingestion/source_provider.py` contains `class FixtureApplicationSourceProvider`.
-- `backend/src/dotmd/ingestion/source_provider.py` contains `offset:`.
-- `backend/src/dotmd/ingestion/source_provider.py` contains `def make_implicit_root_unit`.
-- `backend/src/dotmd/ingestion/source_provider.py` does not contain `telethon`.
+- `backend/tests/ingestion/application_source_fixtures.py` contains `class FixtureApplicationSourceProvider`.
+- `backend/tests/ingestion/application_source_fixtures.py` contains `offset:`.
+- `backend/tests/ingestion/application_source_fixtures.py` contains `def make_implicit_root_unit`.
+- `backend/tests/ingestion/application_source_fixtures.py` contains `unit_type="root"` or `unit_type='root'`.
+- `backend/src/dotmd/ingestion/source_provider.py` does not contain `FixtureApplicationSourceProvider`.
+- `backend/src/dotmd/ingestion/source_provider.py` does not contain `make_implicit_root_unit`.
+- `backend/tests/ingestion/application_source_fixtures.py` does not contain `telethon`.
 - `backend/tests/ingestion/test_application_source_provider.py` asserts a non-empty batch has `checkpoint_cursor`.
 - `backend/tests/ingestion/test_application_source_provider.py` asserts a later cursor returns deterministic subsequent records or empty records.
 - `cd backend && uv run pytest tests/ingestion/test_application_source_provider.py -q` exits 0.
@@ -96,12 +103,13 @@ Concrete target state:
 <name>Exercise read_unit_window and idempotent fingerprint flow</name>
 <read_first>
 - `backend/src/dotmd/ingestion/source_provider.py`
+- `backend/tests/ingestion/application_source_fixtures.py`
 - `backend/src/dotmd/storage/metadata.py`
 - `backend/tests/ingestion/test_application_source_provider.py`
 - `backend/tests/storage/test_metadata_m2m.py`
 </read_first>
 <files>
-- `backend/src/dotmd/ingestion/source_provider.py`
+- `backend/tests/ingestion/application_source_fixtures.py`
 - `backend/tests/ingestion/test_application_source_provider.py`
 </files>
 <behavior>
@@ -117,14 +125,18 @@ Concrete target state:
 - For ordered message units, it includes up to `before` units before the target and up to `after` units after the target, sorted by `order_key`.
 - For an implicit root unit, it returns exactly one unit even when `before` and `after` are positive.
 - Unknown `unit_ref` raises `ValueError("Unknown source unit: <unit_ref>")`.
+- Malformed fixture cursors such as `"bad"`, `"offset:-1"`, and `"offset:not-an-int"` raise `ValueError("Invalid fixture cursor: <cursor>")`.
+- `export_changes(cursor, limit)` raises `ValueError("limit must be positive")` when `limit <= 0`.
 - Add a test that writes fixture units through `SQLiteMetadataStore.upsert_source_unit_fingerprint` and proves a replay of the same batch returns unchanged (`False`) for each unit.
 </action>
 <verify>
 <automated>cd backend && uv run pytest tests/ingestion/test_application_source_provider.py tests/storage/test_metadata_m2m.py -q</automated>
 </verify>
 <acceptance_criteria>
-- `backend/src/dotmd/ingestion/source_provider.py` contains `def read_unit_window`.
+- `backend/tests/ingestion/application_source_fixtures.py` contains `def read_unit_window`.
 - `backend/tests/ingestion/test_application_source_provider.py` contains `Unknown source unit`.
+- `backend/tests/ingestion/test_application_source_provider.py` contains `Invalid fixture cursor`.
+- `backend/tests/ingestion/test_application_source_provider.py` contains `limit must be positive`.
 - `backend/tests/ingestion/test_application_source_provider.py` asserts a three-unit neighboring message window.
 - `backend/tests/ingestion/test_application_source_provider.py` asserts an implicit root fallback window has length `1`.
 - `backend/tests/ingestion/test_application_source_provider.py` imports or exercises `upsert_source_unit_fingerprint`.

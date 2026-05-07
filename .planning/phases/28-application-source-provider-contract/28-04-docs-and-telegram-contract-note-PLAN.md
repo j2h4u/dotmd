@@ -43,6 +43,7 @@ Close Phase 28 by documenting the minimal provider contract and the structured
 | Docs imply Telegram ingestion shipped in Phase 28 | HIGH | Explicitly say Phase 28 ships contract and fixtures only. |
 | Docs encourage private SQLite coupling | HIGH | State dotMD consumes only structured source/export payloads, never mcp-telegram private tables. |
 | Cursor semantics are ambiguous | HIGH | Include both `next_cursor` and `checkpoint_cursor` example and commit ordering rule. |
+| Examples drift from implemented Pydantic fields | MEDIUM | Keep examples valid JSON and verify they include the implemented `SourceDocument`, `SourceUnit`, and cursor fields from Plans 01-03. |
 | Lifecycle semantics creep in | MEDIUM | Mark delete/hidden/tombstone common lifecycle as deferred. |
 </threat_model>
 
@@ -86,6 +87,7 @@ Required content:
   - `metadata_json` with sender/topic/reply/edit fields where available
   - `next_cursor`
   - `checkpoint_cursor`
+- JSON examples must be strict JSON, not JSONC: no comments, no trailing commas, and quote all keys/strings.
 - Commit-order rule: dotMD persists `checkpoint_cursor` only after local source-document, source-unit fingerprint, binding/provenance, and index persistence succeeds.
 - Example `read_unit_window` JSON with at least three neighboring Telegram messages.
 - Scope exclusions: no full delete/hidden/tombstone lifecycle, no attachments/media, no direct Telegram API client in dotMD, no generic plugin marketplace.
@@ -137,9 +139,11 @@ Required doc updates:
 - Create `.planning/phases/28-application-source-provider-contract/28-04-SUMMARY.md` with:
   - commands run;
   - grep evidence for the contract note;
-  - pytest/typecheck/lint outcomes or documented pre-existing ratchet;
+  - JSON example validation outcome, or an explicit statement that examples are prose-only and not fenced as JSON;
+  - `just typecheck` and `just lint` outcomes before the final pytest suite, with any failures labeled as `pre-existing ratchet` only when the executor can cite the earlier failing command/output;
+  - pytest outcomes from the Plan 01 early regression set and the Plan 03 storage/fixture set;
   - statement `no dotmd index --force`;
-  - `Self-Check: PASSED` only when verification criteria are met.
+  - `Self-Check: PASSED` only when all required grep checks pass, JSON examples are valid or deliberately not marked as JSON, no new type/lint/test failures are introduced, and any pre-existing ratchet is cited with command output.
 </action>
 <verify>
 <automated>rg "Phase 28|checkpoint_cursor|read_unit_window|mcp-telegram-source-contract|no dotmd index --force" docs/source-adapter-architecture.md docs/architecture.md .planning/phases/28-application-source-provider-contract/28-04-SUMMARY.md</automated>
@@ -151,7 +155,8 @@ Required doc updates:
 - `docs/source-adapter-architecture.md` links `mcp-telegram-source-contract.md`.
 - `docs/architecture.md` contains `Phase 28`.
 - `.planning/phases/28-application-source-provider-contract/28-04-SUMMARY.md` contains `no dotmd index --force`.
-- `.planning/phases/28-application-source-provider-contract/28-04-SUMMARY.md` contains `Self-Check: PASSED` only if checks pass or ratchet status is documented.
+- `.planning/phases/28-application-source-provider-contract/28-04-SUMMARY.md` contains `JSON examples`.
+- `.planning/phases/28-application-source-provider-contract/28-04-SUMMARY.md` contains `Self-Check: PASSED` only if grep checks pass, JSON examples are validated or not fenced as JSON, and any typecheck/lint/pytest ratchet is documented with command output.
 </acceptance_criteria>
 </task>
 </tasks>
@@ -162,9 +167,9 @@ Run:
 ```bash
 rg "checkpoint_cursor|read_unit_window|SourceDocument|SourceUnit|private .*SQLite|no direct Telegram API client" docs/mcp-telegram-source-contract.md
 rg "Phase 28|checkpoint_cursor|read_unit_window|mcp-telegram-source-contract|no dotmd index --force" docs/source-adapter-architecture.md docs/architecture.md .planning/phases/28-application-source-provider-contract/28-04-SUMMARY.md
-cd backend && uv run pytest tests/ingestion/test_application_source_provider.py tests/storage/test_metadata_m2m.py tests/ingestion/test_source_filesystem.py tests/api/test_service_search.py -q
 just typecheck
 just lint
+cd backend && uv run pytest tests/ingestion/test_application_source_provider.py tests/storage/test_metadata_m2m.py tests/ingestion/test_source_filesystem.py tests/api/test_service_search.py -q
 ```
 </verification>
 

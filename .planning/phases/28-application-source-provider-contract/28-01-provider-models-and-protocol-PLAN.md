@@ -45,6 +45,7 @@ Phase 29 can implement for Telegram without making Telegram the generic shape.
 | Generic provider classes accidentally become Telegram-specific | HIGH | Use source-neutral class and field names; keep Telegram only in tests/examples. |
 | Cursor export gets split into speculative document/unit methods | HIGH | Protocol exposes only `describe_source`, `export_changes`, and `read_unit_window`. |
 | SourceUnit remains too weak for per-message incremental sync | HIGH | Add `updated_at` and tests requiring all D-14 fields. |
+| Adding required `SourceUnit.updated_at` breaks existing constructors | HIGH | Audit every `SourceUnit(` call site before editing the model, update all non-class constructors in the same task, and run existing filesystem/service regression tests in Plan 01. |
 | Provider input accepts human-rendered output | HIGH | Payload models require `SourceDocument` and `SourceUnit` objects, not formatted text. |
 | Full reindex hidden in model change | HIGH | Add only Pydantic/protocol/test files; no index rebuild command or data rewrite. |
 </threat_model>
@@ -58,7 +59,11 @@ Phase 29 can implement for Telegram without making Telegram the generic shape.
 - `.planning/phases/28-application-source-provider-contract/28-RESEARCH.md`
 - `.planning/phases/28-application-source-provider-contract/28-PATTERNS.md`
 - `backend/src/dotmd/core/models.py`
+- `backend/src/dotmd/ingestion/source.py`
+- `backend/src/dotmd/ingestion/pipeline.py`
 - `backend/tests/storage/test_metadata_m2m.py`
+- `backend/tests/ingestion/test_source_filesystem.py`
+- `backend/tests/api/test_service_search.py`
 </read_first>
 <files>
 - `backend/src/dotmd/core/models.py`
@@ -67,6 +72,8 @@ Phase 29 can implement for Telegram without making Telegram the generic shape.
 <behavior>
 - Constructing `SourceUnit` without `updated_at` fails validation.
 - Constructing `SourceUnit` with D-14 fields succeeds.
+- Existing `SourceUnit(` constructors in `backend/src` and `backend/tests` are audited and either updated with `updated_at` in this task or confirmed to be only the class definition.
+- Existing `SourceUnit` fields `unit_type` and `chunking_hints` stay part of the model contract unless the executor finds a current-code reason to make them optional; all new test constructors set them explicitly.
 - `ApplicationSourceChangeBatch` carries `changes`, `next_cursor`, and `checkpoint_cursor`.
 - `ApplicationSourceChange` carries one `SourceDocument` and one `SourceUnit`.
 </behavior>
@@ -74,8 +81,12 @@ Phase 29 can implement for Telegram without making Telegram the generic shape.
 Create `backend/tests/ingestion/test_application_source_provider.py` first with failing tests, then update `backend/src/dotmd/core/models.py`.
 
 Concrete target state:
+- Before changing `SourceUnit`, run `rg -n "SourceUnit\\(" backend/src backend/tests`.
+  - If the only match is `backend/src/dotmd/core/models.py:class SourceUnit`, record that in the task notes and continue.
+  - If any constructor call exists, update that constructor in the same task with `updated_at=<datetime>`, preserve `unit_type`, `order_key`, `fingerprint`, `metadata_json`, and `chunking_hints`, and include the touched file in verification.
 - Add `updated_at: datetime` to `SourceUnit`.
 - Keep `SourceUnit.model_config = ConfigDict(extra="forbid")`.
+- Keep the existing required `unit_type: str` and `chunking_hints: dict = Field(default_factory=dict)` fields visible in tests. Do not remove or silently weaken them in this phase.
 - Add `ApplicationSourceDescription` with:
   - `namespace: str`
   - `source_kind: str`
@@ -90,12 +101,13 @@ Concrete target state:
   - `next_cursor: str | None = None`
   - `checkpoint_cursor: str | None = None`
 - Use generic names exactly above. Do not introduce `TelegramProvider`, `TelegramChange`, `export_documents`, or `export_units` in generic code.
-- Test a Telegram-like example using:
-  - `SourceDocument(namespace="telegram", document_ref="dialog:123", ref="telegram:dialog:123", ...)`
-  - `SourceUnit(namespace="telegram", document_ref="dialog:123", unit_ref="dialog:123:message:456", ...)`
+- Test a complete Telegram-like example without hiding required fields:
+  - `SourceDocument(namespace="telegram", document_ref="dialog:123", ref="telegram:dialog:123", source_uri="telegram://dialog/123", media_type="text/plain", parser_name="telegram-message", document_type="dialog", title="Telegram dialog 123", updated_at=<datetime>, content_fingerprint="doc-content", metadata_fingerprint="doc-meta", metadata_json={})`
+  - `SourceUnit(namespace="telegram", document_ref="dialog:123", unit_ref="dialog:123:message:456", unit_type="message", text="hello", order_key="0000000456", fingerprint="unit-fingerprint", updated_at=<datetime>, metadata_json={}, chunking_hints={})`
 </action>
 <verify>
-<automated>cd backend && uv run pytest tests/ingestion/test_application_source_provider.py -q</automated>
+<automated>rg -n "SourceUnit\\(" backend/src backend/tests</automated>
+<automated>cd backend && uv run pytest tests/ingestion/test_application_source_provider.py tests/ingestion/test_source_filesystem.py tests/api/test_service_search.py -q</automated>
 </verify>
 <acceptance_criteria>
 - `backend/src/dotmd/core/models.py` contains `class ApplicationSourceDescription`.
@@ -103,9 +115,12 @@ Concrete target state:
 - `backend/src/dotmd/core/models.py` contains `class ApplicationSourceChangeBatch`.
 - `backend/src/dotmd/core/models.py` contains `updated_at: datetime` inside `class SourceUnit`.
 - `backend/tests/ingestion/test_application_source_provider.py` contains `dialog:123:message:456`.
+- `backend/tests/ingestion/test_application_source_provider.py` contains `unit_type="message"` or `unit_type='message'`.
+- `backend/tests/ingestion/test_application_source_provider.py` contains `chunking_hints={}`.
 - `backend/tests/ingestion/test_application_source_provider.py` asserts `checkpoint_cursor == "cursor:456"` or equivalent explicit checkpoint cursor value.
 - `backend/tests/ingestion/test_application_source_provider.py` does not contain `export_documents`.
-- `cd backend && uv run pytest tests/ingestion/test_application_source_provider.py -q` exits 0.
+- `rg -n "SourceUnit\\(" backend/src backend/tests` has no stale constructor that omits `updated_at`.
+- `cd backend && uv run pytest tests/ingestion/test_application_source_provider.py tests/ingestion/test_source_filesystem.py tests/api/test_service_search.py -q` exits 0.
 </acceptance_criteria>
 </task>
 
@@ -164,7 +179,8 @@ Concrete target state:
 Run:
 
 ```bash
-cd backend && uv run pytest tests/ingestion/test_application_source_provider.py -q
+rg -n "SourceUnit\\(" backend/src backend/tests
+cd backend && uv run pytest tests/ingestion/test_application_source_provider.py tests/ingestion/test_source_filesystem.py tests/api/test_service_search.py -q
 ```
 </verification>
 
