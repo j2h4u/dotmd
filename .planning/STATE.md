@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Telegram Source Adapter
 status: executing
-last_updated: "2026-05-07T12:44:07.795Z"
+last_updated: "2026-05-07T13:04:40.929Z"
 last_activity: 2026-05-07
 progress:
   total_phases: 5
@@ -20,7 +20,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-07 after v1.5 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** v1.5 Telegram Source Adapter — roadmap ready, next phase discussion
+**Current focus:** v1.5 Telegram Source Adapter — Phase 27 ready to execute
 
 ## Current Milestone
 
@@ -236,8 +236,8 @@ No blockers. v1.5 requirements and roadmap are ready; Phase 27 is next.
 Phase: 27 — Resource bindings and retained artifacts foundation
 Plan: —
 Status: Ready to execute
-Last activity: 2026-05-07 — Phase 27 planning complete
+Last activity: 2026-05-07 -- Phase 27 planning complete
 
 ## Operator Next Steps
 
-- Run `$gsd-discuss-phase 27` to gather implementation context before planning.
+- Run `$gsd-execute-phase 27` to execute the reviewed Phase 27 plans.

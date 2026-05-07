@@ -20,6 +20,8 @@ must_haves:
     - "D-06: Historical soft-delete TTL behavior is not current product truth."
     - "D-07: Reuse identity is content/source-unit fingerprint based, not path-only."
     - "D-08: Equivalent content can rebind to retained artifacts without recomputation when fingerprints match."
+    - "Review feedback: existing source_documents rows must be backfilled into active resource_bindings before public active filtering lands."
+    - "Review feedback: content_fingerprint and metadata_fingerprint are produced from SourceDocument values; source_documents remains the source of truth for active document metadata."
     - "Full-reindex answer: this plan requires no dotmd index --force, TEI re-embedding, FTS rebuild, vector rebuild, or graph rebuild."
 ---
 
@@ -29,9 +31,9 @@ must_haves:
 Add the generic storage/domain foundation for active and inactive resource
 bindings while preserving existing source documents and derived artifact rows.
 
-This is the enabling slice for R1 and R2: activity becomes a separate state
-from retained content existence. It must be source-agnostic enough for
-filesystem now and Telegram later, but it must not implement Telegram ingestion.
+This plan must be safe on the existing production database: when the table is
+created, existing `source_documents` rows receive active filesystem bindings
+idempotently before any public active-filtering code can reject them.
 </objective>
 
 <threat_model>
@@ -39,11 +41,11 @@ filesystem now and Telegram later, but it must not implement Telegram ingestion.
 
 | Threat | Severity | Mitigation |
 |---|---:|---|
-| Active state is stored only in filesystem holder rows and cannot model Telegram later | HIGH | Add namespace/ref-based binding helpers independent of `chunk_file_paths_<strategy>`. |
-| Unbind deletes the metadata/provenance needed for reuse | HIGH | Storage tests assert inactive binding leaves `source_documents`, `chunk_source_provenance_<strategy>`, `chunks_*`, `chunks_fts_*`, and `vec_meta_*` rows intact. |
-| Public code cannot distinguish inactive retained content from active content | HIGH | Add helpers that answer active binding/provenance queries directly. |
-| Schema migration forces full reindex | HIGH | Use idempotent `CREATE TABLE IF NOT EXISTS` and no rebuild of vectors/FTS/graph/chunks. |
-| Binding table becomes Telegram-specific too early | MEDIUM | Keep fields generic: `namespace`, `resource_ref`, `document_ref`, `ref`, fingerprints, active state, timestamps, metadata JSON. |
+| Existing Phase 26 refs disappear after active filtering because bindings are empty | HIGH | Backfill active bindings from every existing `source_documents` row in the same storage readiness path that creates the table. |
+| `resource_bindings` becomes a second source of truth for document metadata | HIGH | Document and test that `source_documents` is the source of truth for active/current content and metadata fingerprints; binding rows hold activity state plus a fingerprint snapshot for retained lookup. |
+| Fingerprint fields are required but no writer owns them | HIGH | Produce `content_fingerprint` and `metadata_fingerprint` from the already persisted `SourceDocument` values in backfill/upsert helpers. |
+| Unbind deletes metadata/provenance needed for reuse | HIGH | Storage tests assert inactive binding leaves `source_documents`, provenance, chunks, FTS, vector metadata, and graph-owned rows untouched. |
+| Schema migration forces full reindex | HIGH | Use idempotent `CREATE TABLE IF NOT EXISTS`, `INSERT ... ON CONFLICT`, and no rebuild of vectors/FTS/graph/chunks. |
 </threat_model>
 
 <tasks>
@@ -67,8 +69,7 @@ filesystem now and Telegram later, but it must not implement Telegram ingestion.
 Introduce a generic resource binding model and storage helpers.
 
 Concrete target state:
-- Add `ResourceBinding` or an equivalently named Pydantic model in
-  `backend/src/dotmd/core/models.py` with at least:
+- Add `ResourceBinding` in `backend/src/dotmd/core/models.py` with:
   - `namespace: str`
   - `resource_ref: str`
   - `document_ref: str`
@@ -90,26 +91,32 @@ Concrete target state:
   - `active INTEGER NOT NULL DEFAULT 1`
   - `bound_at TEXT NOT NULL`
   - `unbound_at TEXT`
-  - `content_fingerprint TEXT NOT NULL`
-  - `metadata_fingerprint TEXT NOT NULL`
+  - `content_fingerprint TEXT NOT NULL DEFAULT ''`
+  - `metadata_fingerprint TEXT NOT NULL DEFAULT ''`
   - `source_unit_refs TEXT NOT NULL DEFAULT '[]'`
   - `metadata_json TEXT NOT NULL DEFAULT '{}'`
   - primary key `(namespace, resource_ref)`
-  - index on `(namespace, document_ref, active)`
+  - index `idx_resource_bindings_document_active` on `(namespace, document_ref, active)`
+  - index `idx_resource_bindings_fingerprints` on `(namespace, content_fingerprint, metadata_fingerprint, active)`
+- Source-of-truth rule:
+  - `source_documents.content_fingerprint`, `source_documents.metadata_fingerprint`, and `source_documents.metadata_json` are authoritative for active/current document metadata.
+  - `resource_bindings.content_fingerprint` and `resource_bindings.metadata_fingerprint` are copied snapshots used to find retained inactive bindings for rebind.
+  - `resource_bindings.metadata_json` is binding lifecycle metadata only, for example `{"deactivation_reason": "file_missing"}`, not a duplicate of source document metadata.
 - Add `ensure_resource_bindings_table()`.
 - Add `upsert_resource_binding(binding, *, conn)`.
 - Add `get_resource_binding(namespace, resource_ref) -> ResourceBinding | None`.
 - Add `is_resource_binding_active(namespace, resource_ref) -> bool`.
 - Add `set_resource_binding_active(namespace, resource_ref, active: bool, *, conn, unbound_at: datetime | None = None)`.
-- Add `count_resource_bindings() -> dict[str, int]` returning keys exactly:
-  `active`, `inactive`, `total`.
-- Keep helper mutations caller-transaction-owned where they can be used from
-  pipeline paths.
+- Add `count_resource_bindings() -> dict[str, int]` returning keys exactly `active`, `inactive`, `total`.
+- Keep helper mutations caller-transaction-owned where they can be used from pipeline paths.
 </action>
 <acceptance_criteria>
 - `backend/src/dotmd/core/models.py` contains `class ResourceBinding`.
 - `backend/src/dotmd/core/models.py` contains `active: bool`.
 - `backend/src/dotmd/storage/metadata.py` contains `CREATE TABLE IF NOT EXISTS resource_bindings`.
+- `backend/src/dotmd/storage/metadata.py` contains `DEFAULT ''` for both fingerprint columns or an equivalent non-null placeholder strategy.
+- `backend/src/dotmd/storage/metadata.py` contains `idx_resource_bindings_document_active`.
+- `backend/src/dotmd/storage/metadata.py` contains `idx_resource_bindings_fingerprints`.
 - `backend/src/dotmd/storage/metadata.py` contains `def ensure_resource_bindings_table`.
 - `backend/src/dotmd/storage/metadata.py` contains `def upsert_resource_binding`.
 - `backend/src/dotmd/storage/metadata.py` contains `def set_resource_binding_active`.
@@ -121,6 +128,52 @@ Concrete target state:
 </task>
 
 <task id="2" type="tdd">
+<title>Backfill existing source documents into active bindings</title>
+<name>Backfill existing source documents into active bindings</name>
+<read_first>
+- `backend/src/dotmd/storage/metadata.py`
+- `backend/src/dotmd/core/models.py`
+- `backend/tests/storage/test_metadata_m2m.py`
+</read_first>
+<files>
+- `backend/src/dotmd/storage/metadata.py`
+- `backend/tests/storage/test_metadata_m2m.py`
+</files>
+<action>
+Add an idempotent backfill from existing `source_documents` rows into active
+`resource_bindings`.
+
+Concrete target state:
+- Add `backfill_resource_bindings_from_source_documents(*, conn: sqlite3.Connection | None = None) -> int`.
+- It must read every row from `source_documents`.
+- For each row, insert one active binding with:
+  - `namespace = source_documents.namespace`
+  - `resource_ref = source_documents.document_ref`
+  - `document_ref = source_documents.document_ref`
+  - `ref = source_documents.ref`
+  - `active = 1`
+  - `bound_at = source_documents.updated_at` if present, otherwise current UTC timestamp
+  - `unbound_at = NULL`
+  - `content_fingerprint = source_documents.content_fingerprint`
+  - `metadata_fingerprint = source_documents.metadata_fingerprint`
+  - `source_unit_refs = '[]'`
+  - `metadata_json = '{}'`
+- Use `INSERT ... ON CONFLICT(namespace, resource_ref) DO NOTHING` so inactive or already-updated binding rows are not overwritten.
+- Call the backfill from the same metadata readiness path that ensures source provenance tables for service/pipeline startup. If there is no single readiness method, call it immediately after `ensure_resource_bindings_table()` in `SQLiteMetadataStore.__init__`.
+- The backfill must run without reading source files, embedding text, rebuilding FTS, rebuilding vectors, or touching graph storage.
+</action>
+<acceptance_criteria>
+- `backend/src/dotmd/storage/metadata.py` contains `def backfill_resource_bindings_from_source_documents`.
+- `backend/src/dotmd/storage/metadata.py` contains `FROM source_documents`.
+- `backend/src/dotmd/storage/metadata.py` contains `ON CONFLICT(namespace, resource_ref) DO NOTHING` or equivalent non-overwrite upsert.
+- `backend/tests/storage/test_metadata_m2m.py` inserts a `SourceDocument` before any explicit binding upsert and asserts the backfill creates an active binding.
+- `backend/tests/storage/test_metadata_m2m.py` asserts backfill returns `0` on a second run or otherwise proves idempotence.
+- `backend/tests/storage/test_metadata_m2m.py` asserts an inactive binding is not overwritten active by the backfill.
+- `cd backend && uv run pytest tests/storage/test_metadata_m2m.py -q` exits 0.
+</acceptance_criteria>
+</task>
+
+<task id="3" type="tdd">
 <title>Add active provenance query helpers without deleting retained rows</title>
 <name>Add active provenance query helpers without deleting retained rows</name>
 <read_first>
@@ -138,23 +191,20 @@ retained inactive provenance.
 
 Concrete target state:
 - Add `get_active_chunk_provenance_for_chunk_ids(strategy: str, chunk_ids: Sequence[str]) -> dict[str, ChunkProvenance]`.
-- The helper reads `chunk_source_provenance_<strategy>` and joins/checks
-  `resource_bindings` on:
+- The helper reads `chunk_source_provenance_<strategy>` and joins/checks `resource_bindings` on:
   - same `namespace`
   - `resource_bindings.document_ref == chunk_source_provenance.document_ref`
   - `active = 1`
 - Preserve deterministic canonical selection from Phase 26:
   `ORDER BY chunk_id, namespace, document_ref`, first row wins.
-- Add `get_inactive_chunk_count_for_document(strategy, namespace, document_ref) -> int`
-  or equivalent diagnostic helper if needed by pipeline/service tests.
-- Do not delete, update, or rebuild `chunk_source_provenance_<strategy>`,
-  `source_documents`, `chunks_*`, `chunks_fts_*`, `vec_meta_*`, or graph data
-  in these helpers.
-- Add storage tests with one active and one inactive filesystem binding for
-  different chunks:
-  - normal provenance helper returns both chunks;
-  - active provenance helper returns only the active chunk;
-  - inactive binding row remains present;
+- Add `get_inactive_chunk_count_for_document(strategy, namespace, document_ref) -> int` or equivalent diagnostic helper if needed by pipeline/service tests.
+- Add an EXPLAIN-oriented test or assertion that the active helper uses the `(namespace, document_ref, active)` index path. The assertion can be a focused SQLite `EXPLAIN QUERY PLAN` substring check for `idx_resource_bindings_document_active`.
+- Do not delete, update, or rebuild `chunk_source_provenance_<strategy>`, `source_documents`, `chunks_*`, `chunks_fts_*`, `vec_meta_*`, or graph data in these helpers.
+- Add storage tests with:
+  - one active and one inactive filesystem binding for different chunks;
+  - one shared chunk with an active binding and an inactive binding, where the active provenance wins;
+  - normal provenance helper returns inactive retained provenance;
+  - active provenance helper returns only active public provenance;
   - retained chunk/source/provenance rows remain present.
 </action>
 <acceptance_criteria>
@@ -163,6 +213,8 @@ Concrete target state:
 - `backend/src/dotmd/storage/metadata.py` contains `ORDER BY chunk_id, namespace, document_ref` in the active helper or shared query path.
 - `backend/tests/storage/test_metadata_m2m.py` asserts `get_chunk_provenance_for_chunk_ids` returns inactive retained provenance.
 - `backend/tests/storage/test_metadata_m2m.py` asserts `get_active_chunk_provenance_for_chunk_ids` excludes inactive provenance.
+- `backend/tests/storage/test_metadata_m2m.py` asserts shared active/inactive M2M provenance resolves to the active ref.
+- `backend/tests/storage/test_metadata_m2m.py` contains `EXPLAIN QUERY PLAN` and `idx_resource_bindings_document_active`.
 - `backend/tests/storage/test_metadata_m2m.py` asserts retained rows still exist after deactivation.
 - `cd backend && uv run pytest tests/storage/test_metadata_m2m.py -q` exits 0.
 </acceptance_criteria>
@@ -178,8 +230,9 @@ cd backend && uv run pytest tests/storage/test_metadata_m2m.py -q
 </verification>
 
 <success_criteria>
+- Existing `source_documents` are backfilled into active `resource_bindings` without full reindex.
 - Resource binding state exists independently of retained artifact rows.
+- Fingerprint producer and source-of-truth rules are explicit and tested.
 - Storage helpers can answer active-only provenance queries.
 - Deactivation can be represented without hard deletion.
-- No full reindex/rebuild command is introduced or required.
 </success_criteria>

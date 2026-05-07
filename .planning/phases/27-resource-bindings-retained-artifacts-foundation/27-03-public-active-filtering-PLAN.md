@@ -26,6 +26,8 @@ must_haves:
     - "D-13: No graph inactive-state schema is required for this public filter."
     - "D-14: Telegram deleted_upstream metadata is not modeled as resource unbind in this phase."
     - "D-15: No Telegram recycle bin or inactive Telegram browsing is added."
+    - "Review feedback: active filtering depends on Plan 01 backfill and must reject inactive refs before filesystem fallback."
+    - "Review feedback: fixed top_k * 3 over-fetch is replaced by a named active-filter pool policy that filters before reranking and logs underfill."
     - "Full-reindex answer: this plan changes public filtering only and does not rebuild indexes."
 ---
 
@@ -42,17 +44,18 @@ without leaking to MCP/API callers.
 
 | Threat | Severity | Mitigation |
 |---|---:|---|
-| Semantic/FTS/graph candidates leak inactive refs through fusion hydration | HIGH | Service filters candidate chunk IDs through active provenance before public `SearchResult` creation. |
-| Filtering after top-k causes empty/underfilled results despite active fallback candidates | MEDIUM | Over-fetch candidates before filtering and cap only after active hydration. |
-| `read(ref)` reads an inactive filesystem source because file exists or chunks remain retained | HIGH | Ref resolution requires an active binding before reading frontmatter or chunk ranges. |
+| Semantic/FTS/graph candidates leak inactive refs through fusion hydration | HIGH | Service filters candidate chunk IDs through active provenance before reranking and public `SearchResult` creation. |
+| Filtering after fixed top-k starves active results when inactive candidates dominate | HIGH | Use a named active-filter candidate pool policy and log underfill when active candidates are insufficient. |
+| `read(ref)` reads an inactive filesystem source because file exists or chunks remain retained | HIGH | Ref resolution requires an active binding before filesystem fallback, frontmatter, or chunk ranges. |
+| Phase 26 synthetic filesystem fallback bypasses binding checks | HIGH | Tests cover inactive binding plus present file and missing `source_documents` row. |
 | MCP errors become confusing protocol failures | MEDIUM | Preserve existing `ValueError` to tool-level error path with `Action: pass a ref returned by search.` |
 | Service calls reload indexes per request | HIGH | Reuse initialized pipeline/stores; do not call `load_index()` from search/read/drill. |
 </threat_model>
 
 <tasks>
 <task id="1" type="tdd">
-<title>Filter search candidates by active bindings before public hydration</title>
-<name>Filter search candidates by active bindings before public hydration</name>
+<title>Filter search candidates by active bindings before rerank and hydration</title>
+<name>Filter search candidates by active bindings before rerank and hydration</name>
 <read_first>
 - `backend/src/dotmd/api/service.py`
 - `backend/src/dotmd/search/fusion.py`
@@ -67,42 +70,52 @@ without leaking to MCP/API callers.
 - `backend/tests/api/test_service_search.py`
 </files>
 <action>
-Add active-binding filtering to public search result hydration.
+Add active-binding filtering to public search result hydration before reranking.
 
 Concrete target state:
-- `DotMDService._execute_search()` or a narrow helper filters fused candidate
-  chunk IDs through `metadata_store.get_active_chunk_provenance_for_chunk_ids(strategy, chunk_ids)`.
-- Filtering occurs before public `SearchResult` objects are returned.
+- Define `ACTIVE_FILTER_OVERFETCH_FACTOR = 5` in `backend/src/dotmd/api/service.py` or an adjacent search constants location.
+- Compute an active-filter candidate pool size as:
+  `active_pool_size = max(pool_size, top_k * ACTIVE_FILTER_OVERFETCH_FACTOR, top_k + 50)`.
+- Pass `active_pool_size` to the fused candidate collection path so semantic,
+  FTS5, and graph-direct engines all get enough candidates for filtering.
+- Filter fused candidate chunk IDs through
+  `metadata_store.get_active_chunk_provenance_for_chunk_ids(strategy, chunk_ids)`.
+- Filtering occurs before reranking and before public `SearchResult` objects are returned.
+- Reranker receives only active candidates. If inactive candidates are removed,
+  rerank `min(pool_size, len(active_candidates))` candidates.
 - `build_search_results()` may accept an optional precomputed `provenance_map`
   or service may pass only active candidate IDs; either way, inactive candidates
   must not hydrate into public results.
-- Semantic, FTS5, and graph-direct engines may still return inactive retained
-  chunk IDs internally.
-- Over-fetch behavior:
-  - when filtering is active, collect at least `max(pool_size, top_k * 3)` fused candidates before final active filtering;
-  - return at most `top_k` public results after filtering.
+- If active results underfill `top_k`, return the active results found and log a
+  warning containing `active filter underfilled` plus active/inactive candidate counts.
 - If a candidate lacks active provenance because its binding is inactive, skip
   it; if it lacks any provenance due to an invariant violation, preserve the
   existing missing-provenance hard error for active strategy safety.
 - Add tests:
-  - fused list contains inactive chunk first and active chunk second;
-  - public results contain only the active ref;
-  - inactive retained chunk still exists in metadata fixture;
+  - fused list contains inactive chunks before active chunks and public results
+    still return the later active refs;
+  - inactive candidate ratio above 80 percent does not return inactive refs and
+    logs the underfill warning if fewer than `top_k` active candidates exist;
+  - reranker mock receives only active chunk IDs;
   - graph-direct candidate path uses the same filter.
 </action>
 <acceptance_criteria>
+- `backend/src/dotmd/api/service.py` contains `ACTIVE_FILTER_OVERFETCH_FACTOR`.
+- `backend/src/dotmd/api/service.py` contains `top_k + 50` or an equivalent non-fixed minimum candidate cushion.
 - `backend/src/dotmd/api/service.py` contains `get_active_chunk_provenance_for_chunk_ids`.
-- `backend/src/dotmd/api/service.py` contains `top_k * 3` or an equivalent over-fetch constant/comment.
+- `backend/src/dotmd/api/service.py` filters active candidates before calling `rerank`.
+- `backend/src/dotmd/api/service.py` contains `active filter underfilled`.
 - `backend/tests/api/test_service_search.py` contains `inactive` and asserts inactive results are excluded from `service.search`.
-- `backend/tests/test_fusion.py` or `backend/tests/api/test_service_search.py` covers an inactive first candidate and active fallback candidate.
+- `backend/tests/api/test_service_search.py` covers an inactive-skewed candidate pool with active fallback candidates beyond the first `top_k * 3` positions or explicitly asserts the new pool policy.
+- `backend/tests/api/test_service_search.py` asserts the reranker mock only sees active chunk IDs.
 - Public `SearchResult` fixtures still contain `ref` and do not contain `file_paths`.
 - `cd backend && uv run pytest tests/api/test_service_search.py tests/test_fusion.py -q` exits 0.
 </acceptance_criteria>
 </task>
 
 <task id="2" type="tdd">
-<title>Require active bindings for read and drill refs</title>
-<name>Require active bindings for read and drill refs</name>
+<title>Require active bindings for read and drill refs before filesystem fallback</title>
+<name>Require active bindings for read and drill refs before filesystem fallback</name>
 <read_first>
 - `backend/src/dotmd/api/service.py`
 - `backend/src/dotmd/mcp_server.py`
@@ -123,15 +136,22 @@ Concrete target state:
 - Add service helper such as `_require_active_source_document(ref: str) -> SourceDocument`.
 - It must parse the ref, resolve `source_documents`, and require an active
   resource binding for `(namespace, document_ref)` or equivalent resource ref.
-- `read(ref)` and `drill(ref)` call this active resolver before reading
-  frontmatter, counting chunks, or reading chunk ranges.
-- Existing Phase 26 fallback for filesystem refs without `source_documents`
-  must not bypass active binding state. If the active binding is missing or
-  inactive, raise `ValueError(f"Unknown source ref: {ref}")`.
-- Keep unsupported namespaces rejected until later source-specific readers are
-  implemented.
-- MCP `read` and `drill` continue converting `ValueError` into tool-level
-  errors containing:
+- The active binding check happens before:
+  - `_resolve_source_document()` synthetic filesystem fallback;
+  - `_filesystem_path_for_source()` `Path.exists()` checks;
+  - frontmatter reads;
+  - chunk range reads;
+  - drill metadata assembly.
+- If `source_documents` has a row but the binding is missing or inactive, raise
+  `ValueError(f"Unknown source ref: {ref}")`.
+- If `source_documents` has no row and the ref is a filesystem ref whose file is
+  present on disk, first check for an active binding. If the binding is missing
+  or inactive, raise `ValueError(f"Unknown source ref: {ref}")` and do not create
+  a synthetic `SourceDocument`.
+- Active backfilled filesystem refs with active bindings may still use the
+  Phase 26 filesystem fallback for source-document reconstruction when needed.
+- Keep unsupported namespaces rejected until later source-specific readers are implemented.
+- MCP `read` and `drill` continue converting `ValueError` into tool-level errors containing:
   `Action: pass a ref returned by search.`
 - Do not add inactive browsing flags such as `include_inactive`.
 </action>
@@ -139,6 +159,8 @@ Concrete target state:
 - `backend/src/dotmd/api/service.py` contains `_require_active` or an equivalently named active resolver.
 - `backend/src/dotmd/api/service.py` raises `Unknown source ref` for inactive bindings.
 - `backend/tests/api/test_service_search.py` contains a test where retained chunks exist but `service.read(ref)` rejects an inactive binding.
+- `backend/tests/api/test_service_search.py` contains a test where an inactive filesystem binding and present on-disk file still make `service.read(ref)` raise `ValueError`.
+- `backend/tests/api/test_service_search.py` contains a test where no `source_documents` row exists, the file exists, and a missing/inactive binding prevents synthetic fallback.
 - `backend/tests/api/test_service_search.py` contains a test where `service.drill(ref)` rejects an inactive binding.
 - `backend/tests/mcp/test_search_tool.py` still asserts `Action: pass a ref returned by search.` for rejected read/drill refs.
 - `backend/src/dotmd/api/service.py` does not contain `load_index(` inside `search`, `read`, or `drill`.
@@ -169,16 +191,22 @@ Concrete target state:
   keyed exactly:
   `active`, `inactive`, `retained`, `reused`.
 - `active` and `inactive` derive from resource binding counts.
-- `retained` counts retained inactive documents/chunks or returns a clearly
-  documented count that tests can assert.
-- `reused` may be a cumulative run-local diagnostic from Plan 02 or zero when
-  no rebind has happened.
+- `retained` counts inactive bindings with retained provenance/chunks or returns
+  a clearly documented retained-artifact count that tests can assert.
+- `reused` comes from the Plan 02 rebind diagnostic when available and is `0`
+  when no rebind has happened.
+- Do not duplicate `source_documents` metadata into public diagnostics. The
+  diagnostic source-of-truth rule is:
+  - binding activity from `resource_bindings`;
+  - current document metadata/fingerprints from `source_documents`;
+  - retained artifact counts from provenance/chunk/vector/FTS tables.
 - Do not add `include_inactive`, recycle-bin search, inactive `read`, or a
   list-inactive-content MCP tool.
 </action>
 <acceptance_criteria>
 - `backend/src/dotmd/api/service.py` or `backend/src/dotmd/storage/metadata.py` contains `active`, `inactive`, `retained`, and `reused` count keys in one diagnostic path.
 - Tests assert the diagnostic path returns active/inactive/retained counts.
+- Diagnostics tests assert `source_documents` metadata values are not duplicated from `resource_bindings.metadata_json`.
 - `rg "include_inactive|recycle|inactive search|list_inactive" backend/src/dotmd backend/tests` returns no new public inactive browsing surface except tests/comments explicitly asserting absence.
 - `cd backend && uv run pytest tests/api/test_service_search.py -q` exits 0.
 </acceptance_criteria>
@@ -195,7 +223,9 @@ cd backend && uv run pytest tests/api/test_service_search.py tests/test_fusion.p
 
 <success_criteria>
 - Search hides inactive retained chunks even if engines produce them internally.
+- Active filtering runs before reranking and public hydration.
 - Read/drill reject inactive refs before loading filesystem content.
+- Phase 26 filesystem fallback cannot bypass active-binding enforcement.
 - Diagnostics expose counts but no inactive browsing feature exists.
 - Public MCP/API behavior remains source-ref-first.
 </success_criteria>
