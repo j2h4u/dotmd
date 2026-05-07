@@ -32,6 +32,7 @@ from dotmd.core.models import (
     IndexStats,
     ResourceBinding,
     SourceDocument,
+    SourceUnit,
 )
 
 # ---------------------------------------------------------------------------
@@ -146,6 +147,34 @@ CREATE INDEX IF NOT EXISTS idx_resource_bindings_document_active
 _CREATE_RESOURCE_BINDINGS_FINGERPRINTS_IDX = """
 CREATE INDEX IF NOT EXISTS idx_resource_bindings_fingerprints
     ON resource_bindings(namespace, content_fingerprint, metadata_fingerprint, active)
+"""
+
+_CREATE_SOURCE_CHECKPOINTS = """
+CREATE TABLE IF NOT EXISTS source_checkpoints (
+    namespace         TEXT PRIMARY KEY,
+    checkpoint_cursor TEXT,
+    last_success_at   TEXT,
+    last_error        TEXT,
+    metadata_json     TEXT NOT NULL DEFAULT '{}'
+)
+"""
+
+_CREATE_SOURCE_UNIT_FINGERPRINTS = """
+CREATE TABLE IF NOT EXISTS source_unit_fingerprints (
+    namespace     TEXT NOT NULL,
+    document_ref  TEXT NOT NULL,
+    unit_ref      TEXT NOT NULL,
+    fingerprint   TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    indexed_at    TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (namespace, document_ref, unit_ref)
+)
+"""
+
+_CREATE_SOURCE_UNIT_FINGERPRINTS_DOCUMENT_IDX = """
+CREATE INDEX IF NOT EXISTS idx_source_unit_fingerprints_document
+    ON source_unit_fingerprints(namespace, document_ref)
 """
 
 _CREATE_CHUNK_SOURCE_PROVENANCE_TPL = """
@@ -326,6 +355,7 @@ class SQLiteMetadataStore:
         self._conn.execute(_CREATE_STATS)
         self.ensure_source_document_table()
         self.ensure_resource_bindings_table()
+        self.ensure_source_state_tables()
         self.backfill_resource_bindings_from_source_documents(conn=self._conn)
         # Idempotent schema migration: add diff-reporting columns
         for col, typedef in [
@@ -352,6 +382,12 @@ class SQLiteMetadataStore:
         self._conn.execute(_CREATE_RESOURCE_BINDINGS)
         self._conn.execute(_CREATE_RESOURCE_BINDINGS_DOCUMENT_ACTIVE_IDX)
         self._conn.execute(_CREATE_RESOURCE_BINDINGS_FINGERPRINTS_IDX)
+
+    def ensure_source_state_tables(self) -> None:
+        """Create source checkpoint and source-unit fingerprint tables."""
+        self._conn.execute(_CREATE_SOURCE_CHECKPOINTS)
+        self._conn.execute(_CREATE_SOURCE_UNIT_FINGERPRINTS)
+        self._conn.execute(_CREATE_SOURCE_UNIT_FINGERPRINTS_DOCUMENT_IDX)
 
     def ensure_chunk_source_provenance_table(self, strategy: str) -> None:
         """Create chunk_source_provenance_<strategy> and its chunk index."""
@@ -547,6 +583,141 @@ class SQLiteMetadataStore:
             (namespace, resource_ref),
         ).fetchone()
         return bool(row[0]) if row is not None else False
+
+    def commit_source_checkpoint(
+        self,
+        namespace: str,
+        checkpoint_cursor: str | None,
+        *,
+        conn: _SQLiteConn,
+        metadata_json: dict | None = None,
+    ) -> None:
+        """Persist a source checkpoint inside the caller-owned transaction."""
+        now = datetime.now(tz=UTC).isoformat()
+        conn.execute(
+            "INSERT INTO source_checkpoints ("
+            "namespace, checkpoint_cursor, last_success_at, last_error, metadata_json"
+            ") VALUES (?, ?, ?, NULL, ?) "
+            "ON CONFLICT(namespace) DO UPDATE SET "
+            "checkpoint_cursor = excluded.checkpoint_cursor, "
+            "last_success_at = excluded.last_success_at, "
+            "last_error = NULL, "
+            "metadata_json = excluded.metadata_json",
+            (
+                namespace,
+                checkpoint_cursor,
+                now,
+                json.dumps(metadata_json or {}, sort_keys=True),
+            ),
+        )
+
+    def get_source_checkpoint(
+        self,
+        namespace: str,
+        *,
+        conn: _SQLiteConn | None = None,
+    ) -> dict[str, object] | None:
+        """Return source checkpoint state for one namespace."""
+        read_conn = conn or self._conn
+        row = read_conn.execute(
+            "SELECT namespace, checkpoint_cursor, last_success_at, last_error, "
+            "metadata_json FROM source_checkpoints WHERE namespace = ?",
+            (namespace,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "namespace": row[0],
+            "checkpoint_cursor": row[1],
+            "last_success_at": row[2],
+            "last_error": row[3],
+            "metadata_json": json.loads(row[4]),
+        }
+
+    def record_source_checkpoint_error(
+        self,
+        namespace: str,
+        error: str,
+        *,
+        conn: _SQLiteConn | None = None,
+    ) -> None:
+        """Persist source checkpoint diagnostics, committing only standalone writes."""
+        write_conn = conn or self._conn
+        write_conn.execute(
+            "INSERT INTO source_checkpoints ("
+            "namespace, checkpoint_cursor, last_success_at, last_error, metadata_json"
+            ") VALUES (?, NULL, NULL, ?, '{}') "
+            "ON CONFLICT(namespace) DO UPDATE SET last_error = excluded.last_error",
+            (namespace, error),
+        )
+        if conn is None:
+            write_conn.commit()
+
+    def upsert_source_unit_fingerprint(
+        self,
+        unit: SourceUnit,
+        *,
+        conn: _SQLiteConn,
+        indexed_at: datetime | None = None,
+    ) -> bool:
+        """Upsert source-unit fingerprint and return whether indexing is needed."""
+        existing = conn.execute(
+            "SELECT fingerprint FROM source_unit_fingerprints "
+            "WHERE namespace = ? AND document_ref = ? AND unit_ref = ?",
+            (unit.namespace, unit.document_ref, unit.unit_ref),
+        ).fetchone()
+        if existing is not None and existing[0] == unit.fingerprint:
+            return False
+
+        conn.execute(
+            "INSERT INTO source_unit_fingerprints ("
+            "namespace, document_ref, unit_ref, fingerprint, updated_at, indexed_at, "
+            "metadata_json"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(namespace, document_ref, unit_ref) DO UPDATE SET "
+            "fingerprint = excluded.fingerprint, "
+            "updated_at = excluded.updated_at, "
+            "indexed_at = excluded.indexed_at, "
+            "metadata_json = excluded.metadata_json",
+            (
+                unit.namespace,
+                unit.document_ref,
+                unit.unit_ref,
+                unit.fingerprint,
+                unit.updated_at.isoformat(),
+                (indexed_at or datetime.now(tz=UTC)).isoformat(),
+                json.dumps(unit.metadata_json, sort_keys=True),
+            ),
+        )
+        return True
+
+    def get_source_unit_fingerprint(
+        self,
+        namespace: str,
+        document_ref: str,
+        unit_ref: str,
+        *,
+        conn: _SQLiteConn | None = None,
+    ) -> dict[str, object] | None:
+        """Return one stored source-unit fingerprint row."""
+        read_conn = conn or self._conn
+        row = read_conn.execute(
+            "SELECT namespace, document_ref, unit_ref, fingerprint, updated_at, "
+            "indexed_at, metadata_json FROM source_unit_fingerprints "
+            "WHERE namespace = ? AND document_ref = ? AND unit_ref = ?",
+            (namespace, document_ref, unit_ref),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "namespace": row[0],
+            "document_ref": row[1],
+            "unit_ref": row[2],
+            "fingerprint": row[3],
+            "updated_at": row[4],
+            "indexed_at": row[5],
+            "metadata_json": json.loads(row[6]),
+        }
 
     def set_resource_binding_active(
         self,

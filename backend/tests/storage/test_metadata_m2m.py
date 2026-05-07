@@ -22,7 +22,13 @@ from pathlib import Path
 import pytest
 
 # These imports will ImportError or AttributeError until P1 ships:
-from dotmd.core.models import Chunk, ChunkProvenance, ResourceBinding, SourceDocument
+from dotmd.core.models import (
+    Chunk,
+    ChunkProvenance,
+    ResourceBinding,
+    SourceDocument,
+    SourceUnit,
+)
 from dotmd.storage.metadata import SQLiteMetadataStore
 
 STRATEGY = "heading_512_50"
@@ -84,6 +90,25 @@ def _resource_binding(path: Path, *, active: bool = True) -> ResourceBinding:
         metadata_fingerprint="metadata-fp",
         source_unit_refs=[],
         metadata_json={"deactivation_reason": "file_missing"} if not active else {},
+    )
+
+
+def _source_unit(
+    *,
+    fingerprint: str = "unit-fp",
+    metadata_json: dict | None = None,
+) -> SourceUnit:
+    return SourceUnit(
+        namespace="telegram",
+        document_ref="dialog:123",
+        unit_ref="dialog:123:message:456",
+        unit_type="message",
+        text="hello",
+        order_key="0000000456",
+        fingerprint=fingerprint,
+        updated_at=datetime(2026, 5, 7, 12, 0, tzinfo=UTC),
+        metadata_json=metadata_json or {"sender": "alice"},
+        chunking_hints={},
     )
 
 
@@ -696,6 +721,109 @@ class TestDeleteAllClearsSourceProvenance:
         conn.close()
 
         assert store.count_reused_chunks_from_bindings() == 5
+
+
+class TestSourceCheckpointState:
+    """source_checkpoints persists only safe checkpoint cursor state."""
+
+    def test_commit_source_checkpoint_uses_caller_transaction(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        store = _build_m2m_store(tmp_path)
+        conn = store._conn
+
+        conn.execute("BEGIN")
+        store.commit_source_checkpoint(
+            "telegram",
+            "checkpoint:1",
+            conn=conn,
+            metadata_json={"batch": 1},
+        )
+        conn.rollback()
+
+        assert store.get_source_checkpoint("telegram") is None
+
+        conn.execute("BEGIN")
+        store.commit_source_checkpoint(
+            "telegram",
+            "checkpoint:2",
+            conn=conn,
+            metadata_json={"batch": 2},
+        )
+        conn.commit()
+
+        checkpoint = store.get_source_checkpoint("telegram")
+        assert checkpoint is not None
+        assert checkpoint["checkpoint_cursor"] == "checkpoint:2"
+        assert checkpoint["metadata_json"] == {"batch": 2}
+        assert checkpoint["last_error"] is None
+
+    def test_record_source_checkpoint_error_commits_without_conn(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        store = _build_m2m_store(tmp_path)
+
+        store.record_source_checkpoint_error("telegram", "boom")
+
+        checkpoint = store.get_source_checkpoint("telegram")
+        assert checkpoint is not None
+        assert checkpoint["last_error"] == "boom"
+
+
+class TestSourceUnitFingerprints:
+    """source_unit_fingerprints classifies active unit recomputation."""
+
+    def test_source_unit_fingerprint_idempotent_flow(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        store = _build_m2m_store(tmp_path)
+        conn = store._conn
+        first = _source_unit(metadata_json={"sender": "alice"})
+
+        assert store.upsert_source_unit_fingerprint(first, conn=conn) is True
+        conn.commit()
+        loaded = store.get_source_unit_fingerprint(
+            first.namespace,
+            first.document_ref,
+            first.unit_ref,
+        )
+
+        assert loaded is not None
+        assert loaded["fingerprint"] == "unit-fp"
+        assert loaded["metadata_json"] == {"sender": "alice"}
+        assert isinstance(datetime.fromisoformat(str(loaded["updated_at"])), datetime)
+        assert isinstance(datetime.fromisoformat(str(loaded["indexed_at"])), datetime)
+
+        assert store.upsert_source_unit_fingerprint(first, conn=conn) is False
+        changed = _source_unit(fingerprint="unit-fp-changed")
+        assert store.upsert_source_unit_fingerprint(changed, conn=conn) is True
+        conn.commit()
+
+        updated = store.get_source_unit_fingerprint(
+            changed.namespace,
+            changed.document_ref,
+            changed.unit_ref,
+        )
+        assert updated is not None
+        assert updated["fingerprint"] == "unit-fp-changed"
+
+    def test_source_unit_fingerprint_table_has_no_lifecycle_columns(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        store = _build_m2m_store(tmp_path)
+
+        columns = {
+            row[1]
+            for row in store._conn.execute(
+                "PRAGMA table_info(source_unit_fingerprints)"
+            ).fetchall()
+        }
+
+        assert "deleted_at" not in columns
 
 
 class TestChunkModelRejectsCharOffset:
