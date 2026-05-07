@@ -156,8 +156,52 @@ class SourceUnit(BaseModel):
     text: str
     order_key: str
     fingerprint: str
+    updated_at: datetime
     metadata_json: dict = Field(default_factory=dict)
     chunking_hints: dict = Field(default_factory=dict)
+
+
+class SourceUnitWindow(BaseModel):
+    """Neighboring source units around a provider-owned unit reference."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    namespace: str
+    document_ref: str
+    unit_ref: str
+    units: list[SourceUnit]
+    metadata_json: dict = Field(default_factory=dict)
+
+
+class ApplicationSourceDescription(BaseModel):
+    """Description of an application source exposed by a provider."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    namespace: str
+    source_kind: str
+    display_name: str
+    capabilities: list[str] = Field(default_factory=list)
+    metadata_json: dict = Field(default_factory=dict)
+
+
+class ApplicationSourceChange(BaseModel):
+    """One active source change carrying a document envelope and source unit."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    document: SourceDocument
+    unit: SourceUnit
+
+
+class ApplicationSourceChangeBatch(BaseModel):
+    """Provider export batch with cursors controlled by the provider."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    changes: list[ApplicationSourceChange] = Field(default_factory=list)
+    next_cursor: str | None = None
+    checkpoint_cursor: str | None = None
 
 
 class ChunkProvenance(BaseModel):
