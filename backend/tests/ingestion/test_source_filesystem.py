@@ -300,6 +300,66 @@ def test_bulk_and_index_file_use_identical_filesystem_provenance(
     assert bulk_chunks[0].provenance.source_unit_refs == []
 
 
+def test_successful_bulk_index_creates_active_filesystem_binding(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    md_path = data_dir / "note.md"
+    _write_markdown(md_path, "Binding", ["source"], "# Heading\n\nBody text.")
+
+    pipeline = _pipeline_with_mock_embedding(data_dir, tmp_path / "index")
+    pipeline.index(data_dir)
+
+    document_ref = str(md_path.resolve())
+    binding = pipeline._metadata_store.get_resource_binding(
+        "filesystem",
+        document_ref,
+    )
+    source_document = pipeline._metadata_store.get_source_document(
+        "filesystem",
+        document_ref,
+    )
+    assert source_document is not None
+    assert binding is not None
+    assert binding.active is True
+    assert binding.unbound_at is None
+    assert binding.resource_ref == document_ref
+    assert binding.document_ref == document_ref
+    assert binding.ref == f"filesystem:{document_ref}"
+    assert binding.content_fingerprint == source_document.content_fingerprint
+    assert binding.metadata_fingerprint == source_document.metadata_fingerprint
+    assert binding.source_unit_refs == []
+    assert binding.metadata_json == {}
+
+
+def test_successful_index_file_creates_active_filesystem_binding(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    md_path = data_dir / "note.md"
+    _write_markdown(md_path, "Trickle Binding", ["source"], "Body text.")
+
+    pipeline = _pipeline_with_mock_embedding(data_dir, tmp_path / "index")
+    pipeline.index_file(md_path)
+
+    document_ref = str(md_path.resolve())
+    binding = pipeline._metadata_store.get_resource_binding(
+        "filesystem",
+        document_ref,
+    )
+    source_document = pipeline._metadata_store.get_source_document(
+        "filesystem",
+        document_ref,
+    )
+    assert source_document is not None
+    assert binding is not None
+    assert binding.active is True
+    assert binding.content_fingerprint == source_document.content_fingerprint
+    assert binding.metadata_fingerprint == source_document.metadata_fingerprint
+
+
 def test_reindex_vectors_preserves_existing_provenance_and_skips_legacy_chunks(
     tmp_path: Path,
 ) -> None:
