@@ -1,0 +1,167 @@
+# v1.5 Requirements: Telegram Source Adapter
+
+## Goal
+
+Add Telegram as a first-class dotMD application source with incremental
+search + sync through the existing `mcp-telegram` runtime, while avoiding
+recomputation of already processed content and derived artifacts.
+
+Telegram is the proving source for a reusable application-source integration
+model. The milestone should produce the smallest generic foundation that
+Telegram validates, not a Telegram-only import path and not a broad plugin
+framework.
+
+## Scope Summary
+
+### Must Have
+
+- Content-addressed resource bindings that separate active resource visibility
+  from retained content and derived artifacts.
+- Retained unbound content/artifacts hidden from public search/read but
+  available for reuse until later garbage collection.
+- Application source-provider contract suitable for Telegram now and other app
+  sources later.
+- Telegram adapter backed by existing `mcp-telegram`, not a direct Telegram API
+  client inside dotMD.
+- Incremental Telegram sync that treats message/source-unit content as the
+  recomputation boundary rather than hashing an entire dialog.
+- Telegram search hits that round-trip through dotMD `drill(ref)` and
+  `read(ref, start, end)`.
+- Regression coverage that keeps filesystem Markdown behavior working.
+
+### Should Have
+
+- Structured sync metrics: discovered, new, changed, rebound, skipped, hidden,
+  failed, and reused counts.
+- Stable Telegram refs/provenance containing dialog id, message id, timestamp,
+  sender label/id when available, and topic metadata when available.
+- A small structured source/export surface in `mcp-telegram` if current MCP
+  tools are insufficient for efficient machine-oriented incremental export.
+- Live smoke against the deployed `mcp-telegram` runtime for discovery,
+  sync-status, dotMD search, and read/drill round-trip.
+
+### Deferred
+
+- Full edit/delete/TTL lifecycle policy.
+- Attachments/media indexing.
+- Shared contact/entity catalog across sources.
+- Bidirectional Telegram actions.
+- Direct Telegram API client in dotMD.
+- Generic plugin marketplace or UI for arbitrary source apps.
+
+## Requirements
+
+### R1: Resource Binding Foundation
+
+dotMD can represent source resources independently from filesystem paths.
+
+Acceptance criteria:
+
+- Resource bindings support at least filesystem and Telegram namespaces.
+- Active bindings are the visibility gate for public search/read.
+- Removing a binding does not immediately delete retained content or derived
+  artifacts.
+- Rebinding equivalent content can reuse retained chunks/embeddings/artifacts.
+- Existing filesystem search/read behavior remains compatible.
+
+### R2: Retained Derived Artifacts
+
+dotMD can keep deduplicated content and derived artifacts after a resource
+binding disappears.
+
+Acceptance criteria:
+
+- Inactive/unbound retained content is excluded from public search results.
+- Retained content has enough identity to be reused when the same source-unit
+  content appears again.
+- Garbage collection remains a later explicit operation, not part of normal
+  missing-resource handling.
+- The implementation avoids full reindexing for unchanged content.
+
+### R3: Application Source Provider Contract
+
+dotMD has a source-provider contract for application-backed sources.
+
+Acceptance criteria:
+
+- The contract separates discovery/catalog state from source-unit content.
+- The contract supports stable source refs, source-unit refs, metadata,
+  content fingerprints, and sync cursors.
+- The contract does not require human-rendered source output as an input.
+- Telegram can implement the contract without dotMD owning Telegram auth or
+  Telethon runtime behavior.
+
+### R4: Telegram Provider Via mcp-telegram
+
+dotMD consumes Telegram data through the existing `mcp-telegram` runtime.
+
+Acceptance criteria:
+
+- dotMD can discover candidate Telegram dialogs and their sync status.
+- dotMD can identify selected/in-scope dialogs for indexing.
+- dotMD can consume Telegram source units with stable `(dialog_id, message_id)`
+  identity.
+- dotMD does not instantiate a Telegram API client.
+- If a new `mcp-telegram` export/source API is needed, it is structured,
+  cursor-friendly, and treated as the integration contract.
+
+### R5: Telegram Source Units
+
+Telegram message/source-unit content is the recomputation boundary.
+
+Acceptance criteria:
+
+- A new Telegram message does not force rechunking/reembedding of unchanged
+  previous messages.
+- Source-unit fingerprints are based on normalized unit content and relevant
+  metadata, not the entire dialog.
+- Message provenance survives into chunk provenance.
+- The model leaves room for later edits/deletes without public ref churn.
+
+### R6: Telegram Incremental Sync
+
+Repeated Telegram sync processes only new or changed source units.
+
+Acceptance criteria:
+
+- dotMD stores per-source or per-dialog sync state/cursors.
+- Re-running sync on an unchanged source reports skipped/reused work.
+- New messages become searchable without full filesystem-style reindex.
+- Sync failures are reported without corrupting previously indexed content.
+
+### R7: Telegram Search/Read/Drill Round-Trip
+
+Telegram content participates in the public dotMD MCP contract.
+
+Acceptance criteria:
+
+- `search(query)` can return Telegram-backed `ref` values.
+- `drill(ref)` returns Telegram source metadata without assuming filesystem
+  frontmatter.
+- `read(ref, start, end)` returns useful Telegram message context/chunks.
+- A Telegram search hit can be followed to source context through dotMD alone.
+
+### R8: Validation And Smoke
+
+The milestone is validated against both fixtures and the real runtime boundary.
+
+Acceptance criteria:
+
+- Unit/integration tests cover resource binding lifecycle, reuse, and inactive
+  visibility filtering.
+- Telegram adapter tests use fixture data and do not require live Telegram.
+- Live smoke verifies deployed `mcp-telegram` reachability and dotMD
+  search/read/drill round-trip.
+- `just typecheck`, `just lint`, and relevant tests pass or have documented
+  pre-existing ratchet status.
+
+## Open Design Questions For Planning
+
+- Should the first Telegram public `ref` resolve at dialog scope, message
+  context scope, or another source-document shape?
+- Should dotMD consume a new structured `mcp-telegram` source export API, or is
+  a read-only stable view over the sync cache acceptable?
+- What is the minimal active-binding schema change that supports both current
+  filesystem paths and Telegram source units without a full migration?
+- How much edit/delete behavior belongs in v1.5 MVP versus a later lifecycle
+  phase?
