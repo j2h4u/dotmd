@@ -617,11 +617,11 @@ class TestNormalFilesystemUnbind:
         def record_chunks(chunk_ids, *args, **kwargs):  # type: ignore[no-untyped-def]
             graph_calls.append(("chunks", list(chunk_ids)))
 
-        def record_file(file_path_arg, *args, **kwargs):  # type: ignore[no-untyped-def]
-            graph_calls.append(("file", file_path_arg))
+        def record_file(file_path, *args, **kwargs):  # type: ignore[no-untyped-def]
+            graph_calls.append(("file", file_path))
 
-        def record_subgraph(file_path_arg, *args, **kwargs):  # type: ignore[no-untyped-def]
-            graph_calls.append(("subgraph", file_path_arg))
+        def record_subgraph(file_path, *args, **kwargs):  # type: ignore[no-untyped-def]
+            graph_calls.append(("subgraph", file_path))
 
         pipeline._graph_store.delete_chunks_from_graph = record_chunks
         pipeline._graph_store.delete_file_node = record_file

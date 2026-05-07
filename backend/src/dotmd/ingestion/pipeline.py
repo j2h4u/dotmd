@@ -67,6 +67,7 @@ from dotmd.search.semantic import SemanticSearchEngine
 from dotmd.storage.base import GraphStoreProtocol, VectorStoreProtocol
 from dotmd.storage.cache import EmbeddingCache, ExtractionCache
 from dotmd.storage.metadata import SQLiteMetadataStore
+from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
 from dotmd.storage.vec_components import VecComponentStore
 
 logger = logging.getLogger(__name__)
@@ -938,15 +939,16 @@ class IndexingPipeline:
 
         diagnostic["reused_chunks"] = len(chunk_ids)
         placeholders = ",".join("?" for _ in chunk_ids)
-        try:
-            row = self._conn.execute(
-                f"SELECT COUNT(*) FROM {self._vector_store._META_TABLE} "
-                f"WHERE chunk_id IN ({placeholders})",
-                chunk_ids,
-            ).fetchone()
-            diagnostic["reused_embeddings"] = int(row[0]) if row else 0
-        except sqlite3.OperationalError:
-            diagnostic["reused_embeddings"] = 0
+        if isinstance(self._vector_store, SQLiteVecVectorStore):
+            try:
+                row = self._conn.execute(
+                    f"SELECT COUNT(*) FROM {self._vector_store._META_TABLE} "
+                    f"WHERE chunk_id IN ({placeholders})",
+                    chunk_ids,
+                ).fetchone()
+                diagnostic["reused_embeddings"] = int(row[0]) if row else 0
+            except sqlite3.OperationalError:
+                diagnostic["reused_embeddings"] = 0
 
         self._metadata_store.upsert_source_document(
             source_document,
