@@ -1529,6 +1529,8 @@ class SQLiteMetadataStore:
         self._conn.execute("DELETE FROM stats")
         self._conn.execute("DELETE FROM source_documents")
         self._conn.execute("DELETE FROM resource_bindings")
+        self._conn.execute("DELETE FROM source_checkpoints")
+        self._conn.execute("DELETE FROM source_unit_fingerprints")
         m2m_tables = self._conn.execute(
             "SELECT name FROM sqlite_master "
             "WHERE type='table' AND name LIKE 'chunk_file_paths_%'"

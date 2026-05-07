@@ -663,6 +663,12 @@ class TestDeleteAllClearsSourceProvenance:
         conn = sqlite3.connect(str(tmp_path / "metadata.db"))
         store.upsert_source_document(_source_document(md_path), conn=conn)
         store.upsert_resource_binding(_resource_binding(md_path), conn=conn)
+        store.commit_source_checkpoint(
+            "telegram",
+            "checkpoint:1",
+            conn=conn,
+        )
+        store.upsert_source_unit_fingerprint(_source_unit(), conn=conn)
         store.add_chunk_provenance(
             STRATEGY,
             _filesystem_provenance(md_path),
@@ -682,6 +688,12 @@ class TestDeleteAllClearsSourceProvenance:
         binding_count = store._conn.execute(
             "SELECT COUNT(*) FROM resource_bindings"
         ).fetchone()[0]
+        checkpoint_count = store._conn.execute(
+            "SELECT COUNT(*) FROM source_checkpoints"
+        ).fetchone()[0]
+        source_unit_fingerprint_count = store._conn.execute(
+            "SELECT COUNT(*) FROM source_unit_fingerprints"
+        ).fetchone()[0]
         holder_count = store._conn.execute(
             f"SELECT COUNT(*) FROM chunk_file_paths_{STRATEGY}"
         ).fetchone()[0]
@@ -690,6 +702,8 @@ class TestDeleteAllClearsSourceProvenance:
         ).fetchone()[0]
         assert source_count == 0
         assert binding_count == 0
+        assert checkpoint_count == 0
+        assert source_unit_fingerprint_count == 0
         assert holder_count == 0
         assert provenance_count == 0
 
