@@ -420,6 +420,92 @@ class TestResourceBindings:
             "total": 2,
         }
 
+    def test_backfill_existing_source_documents_creates_active_bindings(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        store = _build_m2m_store(tmp_path)
+        md_path = tmp_path / "note.md"
+        md_path.write_text("# Note\n", encoding="utf-8")
+        source_document = _source_document(md_path)
+
+        conn = sqlite3.connect(str(tmp_path / "metadata.db"))
+        store.upsert_source_document(source_document, conn=conn)
+        conn.commit()
+        conn.close()
+
+        backfilled = store.backfill_resource_bindings_from_source_documents()
+        binding = store.get_resource_binding(
+            "filesystem",
+            str(md_path.resolve()),
+        )
+
+        assert backfilled == 1
+        assert binding is not None
+        assert binding.active is True
+        assert binding.resource_ref == source_document.document_ref
+        assert binding.document_ref == source_document.document_ref
+        assert binding.ref == source_document.ref
+        assert binding.content_fingerprint == source_document.content_fingerprint
+        assert binding.metadata_fingerprint == source_document.metadata_fingerprint
+        assert binding.source_unit_refs == []
+        assert binding.metadata_json == {}
+
+        assert store.backfill_resource_bindings_from_source_documents() == 0
+
+    def test_resource_binding_startup_backfill_is_idempotent(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        store = _build_m2m_store(tmp_path)
+        md_path = tmp_path / "startup.md"
+        md_path.write_text("# Startup\n", encoding="utf-8")
+
+        conn = sqlite3.connect(str(tmp_path / "metadata.db"))
+        store.upsert_source_document(_source_document(md_path), conn=conn)
+        conn.commit()
+        conn.close()
+
+        restarted = SQLiteMetadataStore(
+            db_path=tmp_path / "metadata.db",
+            table_name=f"chunks_{STRATEGY}",
+        )
+
+        assert restarted.is_resource_binding_active(
+            "filesystem",
+            str(md_path.resolve()),
+        )
+        assert restarted.backfill_resource_bindings_from_source_documents() == 0
+
+    def test_backfill_does_not_reactivate_inactive_binding(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        store = _build_m2m_store(tmp_path)
+        md_path = tmp_path / "inactive.md"
+        md_path.write_text("# Inactive\n", encoding="utf-8")
+
+        conn = sqlite3.connect(str(tmp_path / "metadata.db"))
+        store.upsert_source_document(_source_document(md_path), conn=conn)
+        store.upsert_resource_binding(_resource_binding(md_path), conn=conn)
+        store.set_resource_binding_active(
+            "filesystem",
+            str(md_path.resolve()),
+            False,
+            conn=conn,
+            unbound_at=datetime.now(tz=UTC),
+        )
+        conn.commit()
+        conn.close()
+
+        assert store.backfill_resource_bindings_from_source_documents() == 0
+        binding = store.get_resource_binding(
+            "filesystem",
+            str(md_path.resolve()),
+        )
+        assert binding is not None
+        assert binding.active is False
+
 
 class TestDeleteAllClearsSourceProvenance:
     """delete_all clears source-aware tables alongside legacy chunk tables."""
