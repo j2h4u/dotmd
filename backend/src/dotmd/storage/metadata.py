@@ -754,6 +754,20 @@ class SQLiteMetadataStore:
         ).fetchone()
         return int(row[0]) if row else 0
 
+    def count_retained_inactive_chunks(self, strategy: str) -> int:
+        """Count retained chunks attached to inactive resource bindings."""
+        self.ensure_chunk_source_provenance_table(strategy)
+        table = f"chunk_source_provenance_{strategy}"
+        row = self._conn.execute(
+            f"SELECT COUNT(DISTINCT p.chunk_id) "
+            f"FROM {table} p "
+            f"JOIN resource_bindings rb "
+            f"  ON rb.namespace = p.namespace "
+            f" AND rb.document_ref = p.document_ref "
+            f" AND rb.active = 0"
+        ).fetchone()
+        return int(row[0]) if row else 0
+
     def count_missing_source_provenance(self, strategy: str) -> int:
         """Count active chunks without source provenance for one strategy."""
         self.ensure_chunk_source_provenance_table(strategy)

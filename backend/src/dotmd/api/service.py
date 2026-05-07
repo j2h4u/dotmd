@@ -52,6 +52,13 @@ class DrillPayload(TypedDict):
     total_chunks: int
 
 
+class BindingDiagnostics(TypedDict):
+    active: int
+    inactive: int
+    retained: int
+    reused: int
+
+
 class RerankCandidatePool(TypedDict):
     search_query: str
     original_query: str
@@ -879,6 +886,22 @@ class DotMDService:
             "parser_name": document.parser_name,
             "frontmatter": frontmatter,
             "total_chunks": total_chunks,
+        }
+
+    def binding_diagnostics(self) -> BindingDiagnostics:
+        """Return binding/artifact count diagnostics without exposing inactive content."""
+        binding_counts = self._pipeline.metadata_store.count_resource_bindings()
+        rebind_diagnostic = getattr(self._pipeline, "_last_rebind_diagnostic", {})
+        reused = 0
+        if isinstance(rebind_diagnostic, dict):
+            reused = int(rebind_diagnostic.get("reused_chunks", 0) or 0)
+        return {
+            "active": int(binding_counts.get("active", 0)),
+            "inactive": int(binding_counts.get("inactive", 0)),
+            "retained": self._pipeline.metadata_store.count_retained_inactive_chunks(
+                self._settings.chunk_strategy,
+            ),
+            "reused": reused,
         }
 
     def status(self, live_diff: bool = True) -> IndexStats:
