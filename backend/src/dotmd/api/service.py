@@ -937,9 +937,9 @@ class DotMDService:
         """Return binding/artifact count diagnostics without exposing inactive content."""
         binding_counts = self._pipeline.metadata_store.count_resource_bindings()
         rebind_diagnostic = getattr(self._pipeline, "_last_rebind_diagnostic", {})
-        reused = 0
+        reused = self._pipeline.metadata_store.count_reused_chunks_from_bindings()
         if isinstance(rebind_diagnostic, dict):
-            reused = int(rebind_diagnostic.get("reused_chunks", 0) or 0)
+            reused = max(reused, int(rebind_diagnostic.get("reused_chunks", 0) or 0))
         return {
             "active": int(binding_counts.get("active", 0)),
             "inactive": int(binding_counts.get("inactive", 0)),

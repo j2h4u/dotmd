@@ -768,6 +768,19 @@ class SQLiteMetadataStore:
         ).fetchone()
         return int(row[0]) if row else 0
 
+    def count_reused_chunks_from_bindings(self) -> int:
+        """Return durable reused chunk count recorded in binding metadata."""
+        rows = self._conn.execute(
+            "SELECT metadata_json FROM resource_bindings"
+        ).fetchall()
+        reused = 0
+        for (metadata_raw,) in rows:
+            metadata = json.loads(metadata_raw or "{}")
+            last_rebind = metadata.get("last_rebind")
+            if isinstance(last_rebind, dict):
+                reused += int(last_rebind.get("reused_chunks", 0) or 0)
+        return reused
+
     def count_missing_source_provenance(self, strategy: str) -> int:
         """Count active chunks without source provenance for one strategy."""
         self.ensure_chunk_source_provenance_table(strategy)
@@ -1331,6 +1344,12 @@ class SQLiteMetadataStore:
         self._conn.execute("DELETE FROM stats")
         self._conn.execute("DELETE FROM source_documents")
         self._conn.execute("DELETE FROM resource_bindings")
+        m2m_tables = self._conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name LIKE 'chunk_file_paths_%'"
+        ).fetchall()
+        for (table_name,) in m2m_tables:
+            self._conn.execute(f"DELETE FROM {table_name}")
         provenance_tables = self._conn.execute(
             "SELECT name FROM sqlite_master "
             "WHERE type='table' AND name LIKE 'chunk_source_provenance_%'"

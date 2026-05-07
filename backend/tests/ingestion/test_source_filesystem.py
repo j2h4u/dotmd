@@ -409,6 +409,12 @@ def test_bulk_index_rebinds_equivalent_inactive_filesystem_content_without_tei(
     assert rebound is not None
     assert rebound.active is True
     assert rebound.unbound_at is None
+    assert rebound.metadata_json["last_rebind"]["reused_chunks"] == len(
+        original_chunk_ids
+    )
+    assert pipeline._metadata_store.count_reused_chunks_from_bindings() == len(
+        original_chunk_ids
+    )
     assert rebound_chunk_ids == original_chunk_ids
     assert set(provenance) == set(original_chunk_ids)
     assert encode_calls == []
@@ -456,6 +462,9 @@ def test_index_file_rebinds_equivalent_inactive_filesystem_content_without_tei(
     assert rebound is not None
     assert rebound.active is True
     assert rebound.unbound_at is None
+    assert rebound.metadata_json["last_rebind"]["reused_chunks"] == len(
+        original_chunk_ids
+    )
     assert rebound_chunk_ids == original_chunk_ids
     assert set(provenance) == set(original_chunk_ids)
     assert encode_calls == []

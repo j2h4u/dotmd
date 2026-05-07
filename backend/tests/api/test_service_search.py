@@ -740,6 +740,7 @@ class TestBindingDiagnostics:
             "total": 3,
         }
         metadata.count_retained_inactive_chunks.return_value = 4
+        metadata.count_reused_chunks_from_bindings.return_value = 6
         service._pipeline._metadata_store = metadata
         object.__setattr__(
             service._pipeline,
@@ -768,6 +769,7 @@ class TestBindingDiagnostics:
             "total": 1,
         }
         metadata.count_retained_inactive_chunks.return_value = 0
+        metadata.count_reused_chunks_from_bindings.return_value = 0
         metadata.get_source_document.side_effect = AssertionError(
             "diagnostics must not duplicate source document metadata"
         )

@@ -646,6 +646,8 @@ class TestDeleteAllClearsSourceProvenance:
         )
         conn.commit()
         conn.close()
+        store.insert_chunk(STRATEGY, VALID_CHUNK_ID, ["H"], 1, "text")
+        store.add_file_path(STRATEGY, VALID_CHUNK_ID, str(md_path), chunk_index=0)
 
         store.delete_all()
 
@@ -655,12 +657,45 @@ class TestDeleteAllClearsSourceProvenance:
         binding_count = store._conn.execute(
             "SELECT COUNT(*) FROM resource_bindings"
         ).fetchone()[0]
+        holder_count = store._conn.execute(
+            f"SELECT COUNT(*) FROM chunk_file_paths_{STRATEGY}"
+        ).fetchone()[0]
         provenance_count = store._conn.execute(
             f"SELECT COUNT(*) FROM chunk_source_provenance_{STRATEGY}"
         ).fetchone()[0]
         assert source_count == 0
         assert binding_count == 0
+        assert holder_count == 0
         assert provenance_count == 0
+
+    def test_count_reused_chunks_from_binding_metadata(self, tmp_path: Path) -> None:
+        store = _build_m2m_store(tmp_path)
+        first = tmp_path / "first.md"
+        second = tmp_path / "second.md"
+        first.write_text("# First\n", encoding="utf-8")
+        second.write_text("# Second\n", encoding="utf-8")
+
+        conn = sqlite3.connect(str(tmp_path / "metadata.db"))
+        store.upsert_resource_binding(
+            _resource_binding(
+                first,
+            ).model_copy(
+                update={"metadata_json": {"last_rebind": {"reused_chunks": 2}}}
+            ),
+            conn=conn,
+        )
+        store.upsert_resource_binding(
+            _resource_binding(
+                second,
+            ).model_copy(
+                update={"metadata_json": {"last_rebind": {"reused_chunks": 3}}}
+            ),
+            conn=conn,
+        )
+        conn.commit()
+        conn.close()
+
+        assert store.count_reused_chunks_from_bindings() == 5
 
 
 class TestChunkModelRejectsCharOffset:

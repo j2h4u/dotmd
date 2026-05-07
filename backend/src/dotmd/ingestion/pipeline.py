@@ -956,12 +956,30 @@ class IndexingPipeline:
             except sqlite3.OperationalError:
                 diagnostic["reused_embeddings"] = 0
 
+        metadata_json = dict(binding.metadata_json)
+        metadata_json["last_rebind"] = {
+            "rebound_at": datetime.now(tz=UTC).isoformat(),
+            "reused_chunks": diagnostic["reused_chunks"],
+            "reused_embeddings": diagnostic["reused_embeddings"],
+        }
         self._metadata_store.upsert_source_document(
             source_document,
             conn=self._conn,
         )
-        self._upsert_active_filesystem_binding(
-            source_document,
+        self._metadata_store.upsert_resource_binding(
+            ResourceBinding(
+                namespace=source_document.namespace,
+                resource_ref=source_document.document_ref,
+                document_ref=source_document.document_ref,
+                ref=source_document.ref,
+                active=True,
+                bound_at=source_document.updated_at,
+                unbound_at=None,
+                content_fingerprint=source_document.content_fingerprint,
+                metadata_fingerprint=source_document.metadata_fingerprint,
+                source_unit_refs=binding.source_unit_refs,
+                metadata_json=metadata_json,
+            ),
             conn=self._conn,
         )
         self._conn.commit()
