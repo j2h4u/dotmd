@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 # These imports will ImportError or AttributeError until P1 ships:
-from dotmd.core.models import Chunk, ChunkProvenance, SourceDocument
+from dotmd.core.models import Chunk, ChunkProvenance, ResourceBinding, SourceDocument
 from dotmd.storage.metadata import SQLiteMetadataStore
 
 STRATEGY = "heading_512_50"
@@ -67,6 +67,23 @@ def _filesystem_provenance(path: Path) -> ChunkProvenance:
         source_unit_refs=[],
         chunk_strategy=STRATEGY,
         parser_name="markdown",
+    )
+
+
+def _resource_binding(path: Path, *, active: bool = True) -> ResourceBinding:
+    document_ref = str(path.resolve())
+    return ResourceBinding(
+        namespace="filesystem",
+        resource_ref=document_ref,
+        document_ref=document_ref,
+        ref=f"filesystem:{document_ref}",
+        active=active,
+        bound_at=datetime.now(tz=UTC),
+        unbound_at=None,
+        content_fingerprint="content-fp",
+        metadata_fingerprint="metadata-fp",
+        source_unit_refs=[],
+        metadata_json={"deactivation_reason": "file_missing"} if not active else {},
     )
 
 
@@ -320,6 +337,88 @@ class TestChunkSourceProvenance:
             provenance.source_unit_refs == []
             for provenance in loaded.values()
         )
+
+
+class TestResourceBindings:
+    """resource_bindings tracks active source visibility separately."""
+
+    def test_resource_binding_model_requires_canonical_ref(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        md_path = tmp_path / "note.md"
+        md_path.write_text("# Note\n", encoding="utf-8")
+        binding = _resource_binding(md_path)
+
+        assert binding.ref == f"filesystem:{md_path.resolve()}"
+        assert binding.active is True
+
+        with pytest.raises(ValueError):
+            ResourceBinding(
+                namespace="filesystem",
+                resource_ref=str(md_path.resolve()),
+                document_ref=str(md_path.resolve()),
+                ref="filesystem:wrong",
+                active=True,
+                bound_at=datetime.now(tz=UTC),
+                content_fingerprint="content-fp",
+                metadata_fingerprint="metadata-fp",
+            )
+
+    def test_resource_binding_round_trips_and_counts_active_state(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        store = _build_m2m_store(tmp_path)
+        active_path = tmp_path / "active.md"
+        inactive_path = tmp_path / "inactive.md"
+        active_path.write_text("# Active\n", encoding="utf-8")
+        inactive_path.write_text("# Inactive\n", encoding="utf-8")
+
+        conn = sqlite3.connect(str(tmp_path / "metadata.db"))
+        store.upsert_resource_binding(_resource_binding(active_path), conn=conn)
+        store.upsert_resource_binding(
+            _resource_binding(inactive_path, active=False),
+            conn=conn,
+        )
+        store.set_resource_binding_active(
+            "filesystem",
+            str(inactive_path.resolve()),
+            False,
+            conn=conn,
+            unbound_at=datetime.now(tz=UTC),
+        )
+        conn.commit()
+        conn.close()
+
+        active = store.get_resource_binding(
+            "filesystem",
+            str(active_path.resolve()),
+        )
+        inactive = store.get_resource_binding(
+            "filesystem",
+            str(inactive_path.resolve()),
+        )
+
+        assert active is not None
+        assert active.active is True
+        assert active.content_fingerprint == "content-fp"
+        assert inactive is not None
+        assert inactive.active is False
+        assert inactive.unbound_at is not None
+        assert store.is_resource_binding_active(
+            "filesystem",
+            str(active_path.resolve()),
+        )
+        assert not store.is_resource_binding_active(
+            "filesystem",
+            str(inactive_path.resolve()),
+        )
+        assert store.count_resource_bindings() == {
+            "active": 1,
+            "inactive": 1,
+            "total": 2,
+        }
 
 
 class TestDeleteAllClearsSourceProvenance:
