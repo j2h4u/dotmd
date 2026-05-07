@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
+from dotmd.storage.metadata import SQLiteMetadataStore
 
 
 def _get_service(tmp_path: Path):  # type: ignore[no-untyped-def]
@@ -182,7 +184,7 @@ class TestActiveSearchFiltering:
             ["inactive-1", "inactive-2", "active-1", "active-2"],
             {"active-1", "active-2"},
         )
-        service._pipeline._metadata_store = metadata
+        service._pipeline._metadata_store = cast(SQLiteMetadataStore, metadata)
         service._pipeline.log_search = MagicMock()
         service._collect_candidate_pool = MagicMock(
             return_value={
@@ -233,7 +235,7 @@ class TestActiveSearchFiltering:
             [f"inactive-{i}" for i in range(40)] + ["active-1"],
             {"active-1"},
         )
-        service._pipeline._metadata_store = metadata
+        service._pipeline._metadata_store = cast(SQLiteMetadataStore, metadata)
         service._pipeline.log_search = MagicMock()
         service._collect_candidate_pool = MagicMock(
             return_value={
@@ -260,7 +262,7 @@ class TestActiveSearchFiltering:
             ["inactive-1", "active-1", "active-2"],
             {"active-1", "active-2"},
         )
-        service._pipeline._metadata_store = metadata
+        service._pipeline._metadata_store = cast(SQLiteMetadataStore, metadata)
         service._pipeline.log_search = MagicMock()
         service._collect_candidate_pool = MagicMock(
             return_value={
@@ -299,7 +301,7 @@ class TestActiveSearchFiltering:
             ["graph-inactive", "graph-active"],
             {"graph-active"},
         )
-        service._pipeline._metadata_store = metadata
+        service._pipeline._metadata_store = cast(SQLiteMetadataStore, metadata)
         service._pipeline.log_search = MagicMock()
         service._collect_candidate_pool = MagicMock(
             return_value={
@@ -608,7 +610,7 @@ class TestBindingDiagnostics:
         }
         metadata.count_retained_inactive_chunks.return_value = 4
         service._pipeline._metadata_store = metadata
-        service._pipeline._last_rebind_diagnostic = {"reused_chunks": 7}
+        setattr(service._pipeline, "_last_rebind_diagnostic", {"reused_chunks": 7})
 
         diagnostics = service.binding_diagnostics()
 
