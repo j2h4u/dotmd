@@ -792,6 +792,16 @@ class DotMDService:
             )
         raise ValueError(f"Unknown source ref: {ref}")
 
+    def _require_active_source_document(self, ref: str) -> SourceDocument:
+        """Resolve a public ref only when its resource binding is active."""
+        namespace, document_ref = self._parse_ref(ref)
+        if not self._pipeline.metadata_store.is_resource_binding_active(
+            namespace,
+            document_ref,
+        ):
+            raise ValueError(f"Unknown source ref: {ref}")
+        return self._resolve_source_document(ref)
+
     def _filesystem_path_for_source(
         self,
         document: SourceDocument,
@@ -821,7 +831,7 @@ class DotMDService:
         mode — cheap, useful for planning a subsequent ranged call).
         When end is provided, also returns chunks[start:end], capped at 50.
         """
-        document = self._resolve_source_document(ref)
+        document = self._require_active_source_document(ref)
         file_path = self._filesystem_path_for_source(document, ref)
         path = Path(file_path)
         frontmatter = self._read_frontmatter(path)
@@ -854,7 +864,7 @@ class DotMDService:
 
     def drill(self, ref: str) -> DrillPayload:
         """Return structured source metadata for a source ref."""
-        document = self._resolve_source_document(ref)
+        document = self._require_active_source_document(ref)
         file_path = self._filesystem_path_for_source(document, ref)
         frontmatter = self._read_frontmatter(Path(file_path))
         total_chunks = self._pipeline.metadata_store.get_chunk_count_for_file(
