@@ -108,6 +108,222 @@ def _source_document(file_path: Path, *, namespace: str = "filesystem"):
     )
 
 
+def _search_chunk(chunk_id: str, text: str = "target snippet"):
+    from dotmd.core.models import Chunk
+
+    return Chunk(
+        chunk_id=chunk_id,
+        file_paths=[Path(f"/mnt/{chunk_id}.md")],
+        heading_hierarchy=["H"],
+        level=1,
+        text=text,
+        chunk_index=0,
+    )
+
+
+def _chunk_provenance(chunk_id: str):
+    from dotmd.core.models import ChunkProvenance
+
+    return ChunkProvenance(
+        namespace="filesystem",
+        document_ref=f"/mnt/{chunk_id}.md",
+        ref=f"filesystem:/mnt/{chunk_id}.md",
+        source_unit_refs=[],
+        chunk_strategy="contextual_512_50",
+        parser_name="markdown",
+    )
+
+
+class _SearchMetadataStore:
+    _table = "chunks_contextual_512_50"
+
+    def __init__(self, chunks: list[str], active_chunks: set[str]) -> None:
+        self._chunks = {chunk_id: _search_chunk(chunk_id) for chunk_id in chunks}
+        self._active_chunks = active_chunks
+
+    def count_missing_source_provenance(self, strategy: str) -> int:
+        return 0
+
+    def get_chunks(self, chunk_ids: list[str]):
+        return [self._chunks[chunk_id] for chunk_id in chunk_ids if chunk_id in self._chunks]
+
+    def get_chunk_provenance_for_chunk_ids(self, strategy: str, chunk_ids: list[str]):
+        return {
+            chunk_id: _chunk_provenance(chunk_id)
+            for chunk_id in chunk_ids
+            if chunk_id in self._chunks
+        }
+
+    def get_active_chunk_provenance_for_chunk_ids(
+        self,
+        strategy: str,
+        chunk_ids: list[str],
+    ):
+        return {
+            chunk_id: _chunk_provenance(chunk_id)
+            for chunk_id in chunk_ids
+            if chunk_id in self._active_chunks
+        }
+
+
+class TestActiveSearchFiltering:
+    """Public search hides inactive retained candidates before rerank/hydration."""
+
+    def test_execute_search_skips_inactive_fused_candidates_before_hydration(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = _get_service(tmp_path)
+        metadata = _SearchMetadataStore(
+            ["inactive-1", "inactive-2", "active-1", "active-2"],
+            {"active-1", "active-2"},
+        )
+        service._pipeline._metadata_store = metadata
+        service._pipeline.log_search = MagicMock()
+        service._collect_candidate_pool = MagicMock(
+            return_value={
+                "fused": [
+                    ("inactive-1", 0.9),
+                    ("inactive-2", 0.8),
+                    ("active-1", 0.7),
+                    ("active-2", 0.6),
+                ],
+                "engine_results": {
+                    "semantic": [
+                        ("inactive-1", 0.9),
+                        ("inactive-2", 0.8),
+                        ("active-1", 0.7),
+                        ("active-2", 0.6),
+                    ],
+                },
+                "semantic_hits": [],
+                "keyword_hits": [],
+                "graph_direct_hits": [],
+                "pool_size": 4,
+            }
+        )
+
+        results = service._execute_search(
+            search_query="target",
+            original_query="target",
+            top_k=2,
+            mode="hybrid",
+            rerank=False,
+            reranker_name=None,
+            pool_size=4,
+        )
+
+        assert [result.ref for result in results] == [
+            "filesystem:/mnt/active-1.md",
+            "filesystem:/mnt/active-2.md",
+        ]
+        assert all("inactive" not in result.ref for result in results)
+
+    def test_inactive_skewed_pool_uses_named_active_filter_policy(
+        self,
+        tmp_path: Path,
+        caplog,
+    ) -> None:
+        service = _get_service(tmp_path)
+        metadata = _SearchMetadataStore(
+            [f"inactive-{i}" for i in range(40)] + ["active-1"],
+            {"active-1"},
+        )
+        service._pipeline._metadata_store = metadata
+        service._pipeline.log_search = MagicMock()
+        service._collect_candidate_pool = MagicMock(
+            return_value={
+                "fused": [(f"inactive-{i}", 1.0 - i / 100) for i in range(40)]
+                + [("active-1", 0.1)],
+                "engine_results": {},
+                "semantic_hits": [],
+                "keyword_hits": [],
+                "graph_direct_hits": [],
+                "pool_size": 52,
+            }
+        )
+
+        results = service.search("target", top_k=2, rerank=False, expand=False)
+
+        service._collect_candidate_pool.assert_called_once()
+        assert service._collect_candidate_pool.call_args.kwargs["pool_size"] >= 52
+        assert [result.ref for result in results] == ["filesystem:/mnt/active-1.md"]
+        assert "active filter underfilled" in caplog.text
+
+    def test_reranker_receives_only_active_chunk_ids(self, tmp_path: Path) -> None:
+        service = _get_service(tmp_path)
+        metadata = _SearchMetadataStore(
+            ["inactive-1", "active-1", "active-2"],
+            {"active-1", "active-2"},
+        )
+        service._pipeline._metadata_store = metadata
+        service._pipeline.log_search = MagicMock()
+        service._collect_candidate_pool = MagicMock(
+            return_value={
+                "fused": [
+                    ("inactive-1", 0.9),
+                    ("active-1", 0.8),
+                    ("active-2", 0.7),
+                ],
+                "engine_results": {},
+                "semantic_hits": [],
+                "keyword_hits": [],
+                "graph_direct_hits": [],
+                "pool_size": 3,
+            }
+        )
+        reranker = MagicMock()
+        reranker.rerank.return_value = [("active-2", 0.95), ("active-1", 0.8)]
+        service._reranker_factory = MagicMock()
+        service._reranker_factory.get.return_value = reranker
+
+        service._execute_search(
+            search_query="target",
+            original_query="target",
+            top_k=2,
+            mode="hybrid",
+            rerank=True,
+            reranker_name=None,
+            pool_size=3,
+        )
+
+        assert reranker.rerank.call_args.args[1] == ["active-1", "active-2"]
+
+    def test_graph_direct_candidates_use_active_filter(self, tmp_path: Path) -> None:
+        service = _get_service(tmp_path)
+        metadata = _SearchMetadataStore(
+            ["graph-inactive", "graph-active"],
+            {"graph-active"},
+        )
+        service._pipeline._metadata_store = metadata
+        service._pipeline.log_search = MagicMock()
+        service._collect_candidate_pool = MagicMock(
+            return_value={
+                "fused": [("graph-inactive", 0.9), ("graph-active", 0.8)],
+                "engine_results": {
+                    "graph_direct": [("graph-inactive", 0.9), ("graph-active", 0.8)]
+                },
+                "semantic_hits": [],
+                "keyword_hits": [],
+                "graph_direct_hits": [("graph-inactive", 0.9), ("graph-active", 0.8)],
+                "pool_size": 2,
+            }
+        )
+
+        results = service._execute_search(
+            search_query="target",
+            original_query="target",
+            top_k=1,
+            mode="hybrid",
+            rerank=False,
+            reranker_name=None,
+            pool_size=2,
+        )
+
+        assert [result.ref for result in results] == ["filesystem:/mnt/graph-active.md"]
+        assert results[0].graph_direct_score == 0.8
+
+
 class TestReadRefContract:
     """DotMDService.read resolves source refs and keeps paths internal."""
 
