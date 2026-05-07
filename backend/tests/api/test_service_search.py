@@ -407,6 +407,87 @@ class TestReadRefContract:
             str(note_path.resolve()),
         )
 
+    def test_read_ref_rejects_inactive_binding_with_retained_chunks(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = _get_service(tmp_path)
+        note_path = tmp_path / "inactive.md"
+        note_path.write_text("---\ntitle: Retained\n---\nBody", encoding="utf-8")
+        document = _source_document(note_path)
+        metadata = MagicMock()
+        metadata.get_source_document.return_value = document
+        metadata.is_resource_binding_active.return_value = False
+        metadata.get_chunk_count_for_file.return_value = 1
+        service._pipeline._metadata_store = metadata
+
+        try:
+            service.read(document.ref)
+        except ValueError as exc:
+            assert "Unknown source ref" in str(exc)
+        else:
+            raise AssertionError("read() should reject inactive retained refs")
+
+    def test_read_ref_rejects_inactive_filesystem_binding_with_present_file(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = _get_service(tmp_path)
+        note_path = tmp_path / "present-but-inactive.md"
+        note_path.write_text("Body", encoding="utf-8")
+        ref = f"filesystem:{note_path.resolve()}"
+        metadata = MagicMock()
+        metadata.get_source_document.return_value = None
+        metadata.is_resource_binding_active.return_value = False
+        metadata.get_chunk_count_for_file.return_value = 1
+        service._pipeline._metadata_store = metadata
+
+        try:
+            service.read(ref)
+        except ValueError as exc:
+            assert "Unknown source ref" in str(exc)
+        else:
+            raise AssertionError("read() should reject inactive filesystem fallback refs")
+
+    def test_read_ref_rejects_missing_binding_before_synthetic_fallback(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = _get_service(tmp_path)
+        note_path = tmp_path / "missing-binding.md"
+        note_path.write_text("Body", encoding="utf-8")
+        ref = f"filesystem:{note_path.resolve()}"
+        metadata = MagicMock()
+        metadata.get_source_document.return_value = None
+        metadata.is_resource_binding_active.return_value = False
+        metadata.get_chunk_count_for_file.return_value = 1
+        service._pipeline._metadata_store = metadata
+
+        try:
+            service.read(ref)
+        except ValueError as exc:
+            assert "Unknown source ref" in str(exc)
+        else:
+            raise AssertionError("read() should reject missing active binding")
+
+    def test_drill_ref_rejects_inactive_binding(self, tmp_path: Path) -> None:
+        service = _get_service(tmp_path)
+        note_path = tmp_path / "inactive-drill.md"
+        note_path.write_text("Body", encoding="utf-8")
+        document = _source_document(note_path)
+        metadata = MagicMock()
+        metadata.get_source_document.return_value = document
+        metadata.is_resource_binding_active.return_value = False
+        metadata.get_chunk_count_for_file.return_value = 1
+        service._pipeline._metadata_store = metadata
+
+        try:
+            service.drill(document.ref)
+        except ValueError as exc:
+            assert "Unknown source ref" in str(exc)
+        else:
+            raise AssertionError("drill() should reject inactive refs")
+
     def test_read_ref_rejects_existing_filesystem_path_not_in_active_index(
         self,
         tmp_path: Path,
