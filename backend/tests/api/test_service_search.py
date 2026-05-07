@@ -51,7 +51,7 @@ class TestSearchReturnsFilePaths:
             mode=SearchMode.HYBRID,
             rerank=False,
             reranker_name=None,
-            pool_size=5,
+            pool_size=55,
         )
         assert results == [stub_result]
         for r in results:
@@ -83,7 +83,11 @@ class TestSearchRespectsTopK:
         assert results == stub_results
         kwargs = execute_search.call_args.kwargs
         assert kwargs["top_k"] == 3
-        assert kwargs["pool_size"] == service._settings.rerank_pool_size
+        assert kwargs["pool_size"] == max(
+            service._settings.rerank_pool_size,
+            3 * 5,
+            3 + 50,
+        )
         assert kwargs["rerank"] is True
 
 

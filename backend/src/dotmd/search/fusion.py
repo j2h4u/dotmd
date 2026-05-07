@@ -239,6 +239,7 @@ def build_search_results(
     query: str = "",
     top_k: int = 10,
     snippet_length: int = 300,
+    provenance_map: dict[str, ChunkProvenance] | None = None,
 ) -> list[SearchResult]:
     """Convert fused scores into fully hydrated :class:`SearchResult` objects.
 
@@ -275,13 +276,18 @@ def build_search_results(
     chunks_by_id = {c.chunk_id: c for c in metadata_store.get_chunks(top_ids)}
 
     strategy = getattr(metadata_store, "_table", "").removeprefix("chunks_")
-    provenance_map: dict[str, ChunkProvenance] = {}
-    if strategy and hasattr(metadata_store, "get_chunk_provenance_for_chunk_ids"):
+    if (
+        provenance_map is None
+        and strategy
+        and hasattr(metadata_store, "get_chunk_provenance_for_chunk_ids")
+    ):
         batch_store = cast(_ChunkProvenanceBatchStore, metadata_store)
         provenance_map = batch_store.get_chunk_provenance_for_chunk_ids(
             strategy,
             top_ids,
         )
+    if provenance_map is None:
+        provenance_map = {}
 
     results: list[SearchResult] = []
     for chunk_id, fused_score in fused[:top_k]:

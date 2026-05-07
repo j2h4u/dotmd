@@ -13,7 +13,13 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from dotmd.core.config import Settings, load_settings
-from dotmd.core.models import IndexStats, SearchMode, SearchResult, SourceDocument
+from dotmd.core.models import (
+    ChunkProvenance,
+    IndexStats,
+    SearchMode,
+    SearchResult,
+    SourceDocument,
+)
 from dotmd.ingestion.pipeline import IndexingPipeline
 from dotmd.ingestion.reader import parse_frontmatter, read_file
 from dotmd.ingestion.trickle import TrickleIndexer
@@ -25,6 +31,8 @@ from dotmd.search.reranker import RerankerFactory
 from dotmd.search.semantic import SemanticSearchEngine
 
 logger = logging.getLogger(__name__)
+
+ACTIVE_FILTER_OVERFETCH_FACTOR = 5
 
 
 class ReadPayload(TypedDict):
@@ -306,6 +314,7 @@ class DotMDService:
 
         # -- Determine pool size for reranking --------------------------------
         pool_size = self._settings.rerank_pool_size if rerank else top_k
+        active_pool_size = self._active_filter_pool_size(top_k, pool_size)
 
         try:
             return self._execute_search(
@@ -315,7 +324,7 @@ class DotMDService:
                 mode=mode,
                 rerank=rerank,
                 reranker_name=reranker_name,
-                pool_size=pool_size,
+                pool_size=active_pool_size,
             )
         except Exception:
             logger.error("search failed: query=%r mode=%s", query[:100], mode, exc_info=True)
@@ -346,11 +355,12 @@ class DotMDService:
         Same as :meth:`search`.
         """
         self._ensure_source_provenance_ready()
+        active_pool_size = self._active_filter_pool_size(top_k, pool_size)
         pool = self._collect_candidate_pool(
             search_query=search_query,
             original_query=original_query,
             mode=mode,
-            pool_size=pool_size,
+            pool_size=active_pool_size,
         )
         fused = pool["fused"]
         if not fused:
@@ -358,11 +368,26 @@ class DotMDService:
         engine_results = pool["engine_results"]
         semantic_hits = pool["semantic_hits"]
         keyword_hits = pool["keyword_hits"]
+        filtered_fused, active_provenance_map, inactive_count = (
+            self._filter_active_fused_candidates(fused)
+        )
+        if len(filtered_fused) < top_k:
+            logger.warning(
+                "active filter underfilled: requested=%d active=%d inactive=%d candidates=%d",
+                top_k,
+                len(filtered_fused),
+                inactive_count,
+                len(fused),
+            )
+        fused = filtered_fused
+        if not fused:
+            return []
 
         # -- Optional reranking -----------------------------------------------
         reranked_applied = False
         if rerank and fused:
-            rerank_candidates = fused[:pool_size]
+            rerank_limit = min(pool_size, len(fused))
+            rerank_candidates = fused[:rerank_limit]
             chunk_ids = [cid for cid, _ in rerank_candidates]
             fused_scores = dict(fused)  # ALL fused, not just pool_size
             reranker = self._reranker_factory.get(reranker_name)
@@ -370,7 +395,7 @@ class DotMDService:
                 search_query,
                 chunk_ids,
                 self._pipeline.metadata_store,
-                top_k=pool_size,
+                top_k=rerank_limit,
             )
             if not reranked:
                 logger.info(
@@ -427,6 +452,7 @@ class DotMDService:
             query=original_query,
             top_k=top_k,
             snippet_length=self._settings.snippet_length,
+            provenance_map=active_provenance_map,
         )
 
         # Log search for observability and future auto-calibration (Phase 999.12)
@@ -449,6 +475,41 @@ class DotMDService:
             logger.warning("search log failed — non-fatal", exc_info=True)
 
         return results
+
+    def _active_filter_pool_size(self, top_k: int, pool_size: int) -> int:
+        """Return candidate pool size used before active-binding filtering."""
+        return max(
+            pool_size,
+            top_k * ACTIVE_FILTER_OVERFETCH_FACTOR,
+            top_k + 50,
+        )
+
+    def _filter_active_fused_candidates(
+        self,
+        fused: list[tuple[str, float]],
+    ) -> tuple[list[tuple[str, float]], dict[str, ChunkProvenance], int]:
+        """Drop inactive public candidates while preserving missing-provenance errors."""
+        strategy = self._settings.chunk_strategy
+        chunk_ids = [chunk_id for chunk_id, _score in fused]
+        store = self._pipeline.metadata_store
+        all_provenance = store.get_chunk_provenance_for_chunk_ids(strategy, chunk_ids)
+        active_provenance = store.get_active_chunk_provenance_for_chunk_ids(
+            strategy,
+            chunk_ids,
+        )
+
+        filtered: list[tuple[str, float]] = []
+        inactive_count = 0
+        for chunk_id, score in fused:
+            if chunk_id in active_provenance:
+                filtered.append((chunk_id, score))
+                continue
+            if chunk_id in all_provenance:
+                inactive_count += 1
+                continue
+            raise ValueError(f"missing source provenance for chunk_id={chunk_id}")
+
+        return filtered, active_provenance, inactive_count
 
     def compare_rerankers(
         self,
