@@ -128,7 +128,7 @@ See: `.planning/REQUIREMENTS.md`
 | 24. Config separation | 2/2 | Complete    | 2026-05-05 |
 | 25. Document source abstraction MVP | 4/4 | Complete | 2026-05-06 |
 | 26. Source-ref-first read/search contract cleanup | 3/3 | Complete | 2026-05-06 |
-| 27. Resource bindings and retained artifacts foundation | v1.5 | Ready to execute | — |
+| 27. Resource bindings and retained artifacts foundation | 1/4 | In Progress|  |
 | 28. Application source provider contract | v1.5 | Not started | — |
 | 29. Telegram adapter MVP ingestion | v1.5 | Not started | — |
 | 30. Incremental Telegram sync and reuse | v1.5 | Not started | — |
@@ -1032,7 +1032,7 @@ resource churn does not force recomputation of already processed content.
 **Requirements:** R1, R2, R8
 **Depends on:** Phase 26
 **Backlog source:** 999.25, SEED-002
-**Plans:** 0/4 plans complete
+**Plans:** 1/4 plans executed
 
 Phase context:
 - Telegram is the first validation source, but this phase should be source
@@ -1055,7 +1055,7 @@ Phase boundary:
 
 Plans:
 **Wave 1**
-- [ ] 27-01-storage-binding-state-PLAN.md — Add generic active/inactive resource binding storage state and active provenance helpers
+- [x] 27-01-storage-binding-state-PLAN.md — Add generic active/inactive resource binding storage state and active provenance helpers
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 27-02-filesystem-unbind-and-rebind-PLAN.md — Convert filesystem missing-resource handling to inactive bindings and retained artifact reuse
