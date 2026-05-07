@@ -27,6 +27,9 @@ must_haves:
     - "D-16: Tests cover short acknowledgements, duplicate short messages, rapid multi-person chats, topic/reply metadata, edited fingerprints, and unchanged replay."
     - "D-17: Executors may use Graphify output only as a navigation aid for affected modules."
     - "D-18: Any graph-derived finding must be verified against live source files before implementation."
+    - "Review-HIGH: Telegram chunks intentionally use file_paths=[] and must be accessed through source provenance helpers, not file-path joins."
+    - "Review-HIGH: Telegram embeddings use text-only metadata-in-text fusion for Phase 29; no FileInfo/frontmatter e_meta is required."
+    - "Review-HIGH: FTS5 receives explicit Telegram title/tags metadata under the empty file-meta key so title/tags columns are not accidental blanks."
     - "Full-reindex answer: this plan adds an incremental application-source ingest path; it must not call dotmd index --force or rebuild existing filesystem indexes."
 ---
 
@@ -47,6 +50,9 @@ recomputation boundary.
 | Checkpoint commits before local persistence | HIGH | Commit checkpoint inside the successful transaction after source document, binding, fingerprint, chunk/provenance, FTS/vector work. |
 | Low-signal units are dropped from provenance | HIGH | Store fingerprints/bindings for every unit; only suppress standalone normal chunks. |
 | Telegram chunks accidentally become filesystem chunks | HIGH | Add a dedicated application-source ingest path and provenance namespace `telegram`. |
+| M2M file-path joins drop Telegram chunks | HIGH | Store chunks with `file_paths=[]` and add provenance-based metadata helpers for Telegram chunk lookup/read/drill. |
+| Embedding flow requires filesystem `FileInfo` | HIGH | For Phase 29, build Telegram text with compact metadata prefix and fuse text embedding with itself (`e_meta = e_text`) rather than calling `_embed_meta_component(FileInfo)`. |
+| FTS5 title/tags degrade to accidental blanks | MEDIUM | Pass explicit `file_meta={"": (dialog title, "telegram")}` or add a small `add_chunks_with_source_meta` wrapper for Telegram chunks. |
 | Existing filesystem indexing regresses | HIGH | Run existing filesystem source tests and keep chunk file path behavior untouched. |
 </threat_model>
 
@@ -71,6 +77,7 @@ recomputation boundary.
 - It creates an active `ResourceBinding` for the Telegram dialog/message scope.
 - It persists `source_unit_fingerprints` for substantive and low-signal messages.
 - It writes chunk provenance with namespace `telegram` and source-unit refs.
+- It can retrieve Telegram chunks by `namespace/document_ref/source_unit_ref` without using `chunk_file_paths_*`.
 - It commits the provider checkpoint only after successful local persistence.
 </behavior>
 <action>
@@ -92,6 +99,16 @@ Concrete test cases:
 - `test_low_signal_message_is_not_standalone_search_chunk`:
   - low-signal message fingerprint exists;
   - no chunk text equals only `"ok"` or equivalent standalone low-signal text.
+- `test_telegram_chunks_with_empty_file_paths_are_saved_and_hydrated_by_provenance`:
+  - substantive Telegram chunks have `file_paths == []`;
+  - `get_chunks_by_source_unit_ref("telegram", "dialog:-1001", "dialog:-1001:message:42", strategy)` returns the chunk;
+  - the same test proves no `chunk_file_paths_<strategy>` row is required.
+- `test_telegram_fts_and_vector_index_without_fileinfo_frontmatter`:
+  - FTS rows for Telegram chunks have non-empty `title == "Project Chat"` and `tags` containing `telegram`;
+  - vector rows are written for Telegram chunk ids without calling `_embed_meta_component`.
+- `test_filesystem_and_telegram_chunks_coexist`:
+  - one existing filesystem fixture chunk and one Telegram chunk can be saved and fetched in the same active strategy;
+  - filesystem `get_chunks_for_file_range()` still returns only filesystem chunks.
 </action>
 <verify>
 <automated>cd backend && uv run pytest tests/ingestion/test_telegram_ingestion.py -q</automated>
@@ -103,6 +120,9 @@ Concrete test cases:
 - `backend/tests/ingestion/test_telegram_ingestion.py` asserts an unchanged replay skip count.
 - `backend/tests/ingestion/test_telegram_ingestion.py` asserts a changed/edited message count of one.
 - `backend/tests/ingestion/test_telegram_ingestion.py` asserts low-signal `"ok"` is not a standalone normal chunk.
+- `backend/tests/ingestion/test_telegram_ingestion.py` contains `get_chunks_by_source_unit_ref`.
+- `backend/tests/ingestion/test_telegram_ingestion.py` asserts Telegram chunk `file_paths == []`.
+- `backend/tests/ingestion/test_telegram_ingestion.py` asserts FTS title `Project Chat` or equivalent dialog title is present for Telegram chunks.
 - The focused pytest command initially fails before implementation and exits 0 after implementation.
 </acceptance_criteria>
 </task>
@@ -128,6 +148,7 @@ Concrete test cases:
 - Substantive messages are converted into message-anchored chunks with Telegram provenance.
 - Unchanged messages skip chunk/embedding work.
 - The method returns structured counts for discovered, new, changed, skipped, hidden, failed, and reused where available.
+- Changed messages remove/replace old Telegram chunks for that source unit before writing the replacement chunk.
 </behavior>
 <action>
 Add a focused application-source ingestion method to `IndexingPipeline`.
@@ -142,12 +163,15 @@ Concrete target state:
   - `failed_units`
   - `reused_units`
   - `chunks_indexed`
+- Define counts precisely:
+  - `skipped_units`: exported units whose stored fingerprint already matches and no chunk/embedding/FTS work ran;
+  - `reused_units`: retained existing chunk/vector artifacts reused for the same changed/new unit without a new embedding call; in Phase 29 this may remain `0` unless a concrete reuse path exists.
 - Add `IndexingPipeline.ingest_application_source(provider: ApplicationSourceProviderProtocol, *, limit: int = 500) -> ApplicationSourceIngestResult`.
 - The method reads `checkpoint = metadata_store.get_source_checkpoint(namespace)`.
-- It calls `provider.export_changes(checkpoint_cursor, limit)`.
+- It calls `provider.export_changes(checkpoint_cursor, limit, updated_after=checkpoint.metadata_json.get("updated_after"))` so edited already-exported messages are delivered.
 - For each change:
   - `upsert_source_document(change.document, conn=conn)`;
-  - `upsert_resource_binding(ResourceBinding(namespace="telegram", resource_ref=change.document.document_ref, document_ref=change.document.document_ref, ref=change.document.ref, active=True, bound_at=..., content_fingerprint=change.document.content_fingerprint, metadata_fingerprint=change.document.metadata_fingerprint, source_unit_refs=[change.unit.unit_ref], metadata_json=change.document.metadata_json), conn=conn)`;
+  - `upsert_resource_binding(ResourceBinding(namespace="telegram", resource_ref=change.document.document_ref, document_ref=change.document.document_ref, ref=change.document.ref, active=True, bound_at=..., content_fingerprint=change.document.content_fingerprint, metadata_fingerprint=change.document.metadata_fingerprint, source_unit_refs=<merged existing refs plus change.unit.unit_ref>, metadata_json=change.document.metadata_json), conn=conn)`;
   - `upsert_source_unit_fingerprint(change.unit, conn=conn)` to classify changed vs unchanged.
 - If `change.unit.metadata_json["standalone_search"] is False`, persist the unit fingerprint and binding but do not create a standalone chunk.
 - For substantive units, create a `Chunk` with:
@@ -155,15 +179,19 @@ Concrete target state:
   - `heading_hierarchy=[change.document.title]`;
   - `text` prefixed with compact metadata lines for dialog, sender, sent_at, topic, reply when present;
   - `kind="document"`;
-  - `provenance=ChunkProvenance(namespace="telegram", document_ref=change.document.document_ref, ref=change.document.ref, source_unit_refs=[change.unit.unit_ref], chunk_strategy=self._strategy, parser_name="telegram-message")`.
-- Reuse existing vector and FTS helpers for chunks where possible; if a helper requires file metadata, add a small Telegram-specific metadata payload instead of filesystem frontmatter.
-- Commit `metadata_store.commit_source_checkpoint("telegram", batch.checkpoint_cursor, conn=conn, metadata_json=result_counts)` only after all local persistence for the batch succeeds.
+  - `provenance=ChunkProvenance(namespace="telegram", document_ref=change.document.document_ref, ref=f"telegram:{change.unit.unit_ref}", source_unit_refs=[change.unit.unit_ref], chunk_strategy=self._strategy, parser_name="telegram-message")`.
+- Add `SQLiteMetadataStore.get_chunks_by_source_unit_ref(namespace, document_ref, source_unit_ref, strategy)` using `chunk_source_provenance_<strategy>` joined to `chunks_<strategy>`; do not use `chunk_file_paths_<strategy>` for this helper.
+- Add `SQLiteMetadataStore.delete_chunks_for_source_unit(namespace, document_ref, source_unit_ref, strategy, conn=conn)` or equivalent so a changed message can remove previous Telegram chunk/provenance/FTS/vector rows for that unit before replacement.
+- Persist Telegram chunks with `metadata_store.save_chunks(chunks)`; current `save_chunks()` permits `file_paths=[]` because it only iterates file paths for M2M inserts.
+- For embeddings, do not call `_embed_meta_component()` because it requires filesystem `FileInfo/frontmatter`; encode Telegram chunk text once as `e_text`, store text component, set `e_meta = e_text`, and fuse using configured weights so the resulting vector is equivalent to text-only embedding while satisfying the dual-component table contract.
+- For FTS5, pass explicit source metadata per document/chunk group: call `add_chunks([chunk], file_meta={"": (change.document.title, "telegram")})` for each Telegram document group, or add a narrowly named `add_chunks_with_source_meta(chunks, title, tags_csv)` wrapper that delegates to `add_chunks`. Do not index a mixed-dialog batch with one shared empty-key title.
+- Commit `metadata_store.commit_source_checkpoint("telegram", batch.checkpoint_cursor, conn=conn, metadata_json={**result_counts, "updated_after": batch.updated_after})` only after all local persistence for the batch succeeds.
 - On exception, roll back and call `record_source_checkpoint_error("telegram", str(exc))`.
 - Do not call `self.run()`, `dotmd index --force`, `_purge_file`, or filesystem discovery from this method.
 </action>
 <verify>
 <automated>cd backend && uv run pytest tests/ingestion/test_telegram_ingestion.py tests/ingestion/test_source_filesystem.py tests/storage/test_metadata_m2m.py -q</automated>
-<automated>rg -n "ingest_application_source|ApplicationSourceIngestResult|standalone_search|telegram-message" backend/src/dotmd/ingestion/pipeline.py backend/src/dotmd/ingestion/telegram_provider.py backend/tests/ingestion/test_telegram_ingestion.py</automated>
+<automated>rg -n "ingest_application_source|ApplicationSourceIngestResult|standalone_search|telegram-message|get_chunks_by_source_unit_ref|updated_after" backend/src/dotmd/ingestion/pipeline.py backend/src/dotmd/ingestion/telegram_provider.py backend/src/dotmd/storage/metadata.py backend/tests/ingestion/test_telegram_ingestion.py</automated>
 </verify>
 <acceptance_criteria>
 - `backend/src/dotmd/ingestion/pipeline.py` contains `def ingest_application_source`.
@@ -171,6 +199,9 @@ Concrete target state:
 - `backend/src/dotmd/ingestion/pipeline.py` contains `commit_source_checkpoint`.
 - `backend/src/dotmd/ingestion/pipeline.py` contains `standalone_search`.
 - `backend/src/dotmd/ingestion/pipeline.py` contains `telegram-message`.
+- `backend/src/dotmd/ingestion/pipeline.py` contains `updated_after`.
+- `backend/src/dotmd/storage/metadata.py` contains `get_chunks_by_source_unit_ref`.
+- `backend/src/dotmd/storage/metadata.py` contains `delete_chunks_for_source_unit` or the final equivalent helper.
 - `backend/src/dotmd/ingestion/pipeline.py` does not call `dotmd index --force`.
 - `cd backend && uv run pytest tests/ingestion/test_telegram_ingestion.py tests/ingestion/test_source_filesystem.py tests/storage/test_metadata_m2m.py -q` exits 0.
 </acceptance_criteria>

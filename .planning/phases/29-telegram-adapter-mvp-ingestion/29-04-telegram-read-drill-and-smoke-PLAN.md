@@ -6,6 +6,7 @@ wave: 4
 depends_on:
   - "29-03"
 files_modified:
+  - backend/src/dotmd/core/config.py
   - backend/src/dotmd/api/service.py
   - backend/src/dotmd/cli.py
   - backend/tests/api/test_service_search.py
@@ -24,6 +25,8 @@ must_haves:
     - "D-14: Live smoke proves only the ingestion boundary."
     - "D-15: Full public search -> ref -> read/drill live smoke remains Phase 31 scope."
     - "D-16: Resolver tests include topic/reply metadata and duplicate short-message refs where useful."
+    - "Review-HIGH: Message refs must resolve active bindings at dialog scope while preserving message-level target refs."
+    - "Review-HIGH: Production smoke must specify how dotMD reaches the mcp-telegram daemon."
     - "Full-reindex answer: resolver/docs/smoke work must use existing Telegram ingest state and must not force a full index rebuild."
 ---
 
@@ -43,6 +46,8 @@ Phase 31 public search quality is complete.
 | Telegram refs fall back into filesystem frontmatter reads | HIGH | Add Telegram-specific branches and tests proving no file path is required. |
 | Phase 29 overclaims full search/read/drill live behavior | HIGH | Docs and smoke explicitly limit live validation to export/import/metadata/index state. |
 | Inactive bindings can be read through Telegram resolver | HIGH | Reuse `_require_active_source_document` before Telegram read/drill resolution. |
+| Message-level refs fail active-binding lookup | HIGH | Parse `telegram:dialog:<dialog_id>:message:<message_id>` into dialog `document_ref=dialog:<dialog_id>` for binding checks and target `unit_ref=dialog:<dialog_id>:message:<message_id>` for reads. |
+| dotMD container cannot reach mcp-telegram during smoke | HIGH | Add `DOTMD_TELEGRAM_DAEMON_SOCKET`/`DOTMD_TELEGRAM_DAEMON_URL` configuration and verify the chosen path inside the dotMD container before claiming live smoke. |
 | Window reads return whole dialogs | MEDIUM | Clamp default before/after windows and test target-centered output. |
 | Operational smoke requires unsafe restart/reindex | MEDIUM | Use existing runtime boundary and a dry-run/limited ingest command; do not call `dotmd index --force`. |
 </threat_model>
@@ -73,13 +78,17 @@ Concrete tests:
 - Build a fake active `SourceDocument(namespace="telegram", document_ref="dialog:-1001", ref="telegram:dialog:-1001", title="Project Chat", source_uri="telegram://dialog/-1001", parser_name="telegram-message", document_type="dialog", metadata_json={"dialog_id": -1001, "dialog_name": "Project Chat"})`.
 - Mock metadata store active binding lookup so `is_resource_binding_active("telegram", "dialog:-1001")` is `True`.
 - Mock source document lookup so the service can resolve `telegram:dialog:-1001` from a message ref.
+- Assert `_parse_telegram_message_ref("telegram:dialog:-1001:message:42")` returns document ref `dialog:-1001` and unit ref `dialog:-1001:message:42`.
+- Assert active binding is checked with namespace `telegram` and resource/document ref `dialog:-1001`, not `dialog:-1001:message:42`.
 - Provide a fake provider/window resolver returning units `41`, `42`, and `43`.
 - Assert `drill()` payload has:
   - `ref == "telegram:dialog:-1001:message:42"` or an explicit `target_ref` with that value;
   - `document_ref == "dialog:-1001"` or metadata equivalent;
   - no `frontmatter` key, or `frontmatter == {}` if the existing payload contract requires the key.
 - Assert `read()` payload includes message ids `41`, `42`, and `43` and marks message `42` as target.
+- Assert `read(ref, start=2, end=4)` maps to `before=2, after=4` for Telegram refs; if `end is None`, default to `before=5, after=5`.
 - Assert inactive binding raises `ValueError("Unknown source ref: telegram:dialog:-1001:message:42")`.
+- Add a stored-chunk fallback test for Phase 29: when no live provider is configured, `read()` can return indexed Telegram chunks from `get_chunks_by_source_unit_ref` and must mark the target unit ref.
 </action>
 <verify>
 <automated>cd backend && uv run pytest tests/api/test_service_search.py -q</automated>
@@ -88,6 +97,8 @@ Concrete tests:
 - `backend/tests/api/test_service_search.py` contains `telegram:dialog:-1001:message:42`.
 - `backend/tests/api/test_service_search.py` contains `read_unit_window` or the final resolver method name.
 - `backend/tests/api/test_service_search.py` asserts a three-message window.
+- `backend/tests/api/test_service_search.py` asserts `dialog:-1001` is the active binding lookup key.
+- `backend/tests/api/test_service_search.py` contains `get_chunks_by_source_unit_ref`.
 - `backend/tests/api/test_service_search.py` asserts inactive Telegram refs raise `Unknown source ref`.
 - The focused pytest command initially fails before implementation and exits 0 after implementation.
 </acceptance_criteria>
@@ -99,6 +110,7 @@ Concrete tests:
 <read_first>
 - `backend/src/dotmd/api/service.py`
 - `backend/src/dotmd/cli.py`
+- `backend/src/dotmd/core/config.py`
 - `backend/src/dotmd/ingestion/pipeline.py`
 - `backend/src/dotmd/ingestion/telegram_provider.py`
 - `backend/tests/api/test_service_search.py`
@@ -124,25 +136,35 @@ Concrete target state:
   - input `telegram:dialog:-1001:message:42`;
   - returns document_ref `dialog:-1001` and unit_ref `dialog:-1001:message:42`;
   - malformed Telegram refs raise `ValueError(f"Unknown source ref: {ref}")`.
-- Extend `_require_active_source_document` or add a wrapper so message refs check active binding on resource/document ref `dialog:<dialog_id>`.
+- Add `_require_active_telegram_message_ref(ref: str) -> tuple[SourceDocument, str]` or equivalent wrapper so message refs check active binding on resource/document ref `dialog:<dialog_id>` and return the target unit ref separately.
 - Add Telegram branches in `DotMDService.read()` and `DotMDService.drill()` before `_filesystem_path_for_source()`.
-- For `read(ref)`, call the configured/fake Telegram provider `read_unit_window(unit_ref, before=5, after=5)` unless `start/end` are explicitly mapped to bounded window sizes by the implementation.
+- For `read(ref)`, use this order:
+  1. if a Telegram provider/client is configured, call `read_unit_window(unit_ref, before=<mapped start>, after=<mapped end>)`;
+  2. otherwise return locally indexed chunks from `metadata_store.get_chunks_by_source_unit_ref("telegram", document_ref, unit_ref, self._settings.chunk_strategy)` so Phase 29 reads do not require live mcp-telegram availability after ingestion.
+- Map Telegram `read(ref, start, end)` as window sizes, not filesystem chunk offsets: `before=max(0, min(start, 50))`; `after=5 if end is None else max(0, min(end, 50))`.
 - Return a payload with:
   - `ref` as the target message ref;
   - `document_ref`;
   - `target_unit_ref`;
   - `chunks` or `units` containing message text, message_id, sender, sent_at, topic, reply metadata, and `target: true` on the anchor.
 - For `drill(ref)`, return title/source_uri/document_type/parser_name plus Telegram metadata from `SourceDocument.metadata_json` and target unit metadata when available.
-- Add a bounded CLI command or service facade, e.g. `dotmd telegram ingest --limit 100 --dry-run`, that calls `IndexingPipeline.ingest_application_source()` and prints structured counts. If the exact CLI name differs, update docs/tests to the chosen command.
+- Add settings:
+  - `telegram_daemon_socket: Path | None = None` from `DOTMD_TELEGRAM_DAEMON_SOCKET`;
+  - `telegram_daemon_url: str | None = None` from `DOTMD_TELEGRAM_DAEMON_URL`;
+  - socket wins when both are set.
+- Add a bounded CLI command `dotmd telegram ingest --limit 100 --dry-run` that builds the Telegram client from the configured socket/URL, calls `IndexingPipeline.ingest_application_source()`, and prints structured counts.
+- If neither `DOTMD_TELEGRAM_DAEMON_SOCKET` nor `DOTMD_TELEGRAM_DAEMON_URL` is configured, the command exits non-zero with `Telegram daemon connection is not configured`.
 </action>
 <verify>
 <automated>cd backend && uv run pytest tests/api/test_service_search.py tests/ingestion/test_telegram_ingestion.py -q</automated>
-<automated>rg -n "telegram.*ingest|_parse_telegram_message_ref|read_unit_window|target_unit_ref" backend/src/dotmd/api/service.py backend/src/dotmd/cli.py backend/tests/api/test_service_search.py</automated>
+<automated>rg -n "telegram.*ingest|_parse_telegram_message_ref|read_unit_window|target_unit_ref|DOTMD_TELEGRAM_DAEMON_SOCKET|DOTMD_TELEGRAM_DAEMON_URL|get_chunks_by_source_unit_ref" backend/src/dotmd/api/service.py backend/src/dotmd/cli.py backend/src/dotmd/core/config.py backend/tests/api/test_service_search.py</automated>
 </verify>
 <acceptance_criteria>
 - `backend/src/dotmd/api/service.py` contains `_parse_telegram_message_ref` or an equivalently named parser.
 - `backend/src/dotmd/api/service.py` contains `read_unit_window`.
+- `backend/src/dotmd/api/service.py` contains `get_chunks_by_source_unit_ref`.
 - `backend/src/dotmd/api/service.py` does not call `_filesystem_path_for_source` for Telegram refs.
+- `backend/src/dotmd/core/config.py` contains `telegram_daemon_socket` and `telegram_daemon_url`.
 - `backend/src/dotmd/cli.py` contains `telegram` and `ingest` for the bounded smoke command or the final documented command name.
 - `cd backend && uv run pytest tests/api/test_service_search.py tests/ingestion/test_telegram_ingestion.py -q` exits 0.
 </acceptance_criteria>
@@ -180,6 +202,11 @@ Concrete target state:
   - low-signal messages are stored but suppressed as standalone normal chunks;
   - Phase 31 still owns full public search/read/drill live smoke.
 - Run the final smoke command chosen in task 2 with a small limit, e.g. `docker exec dotmd dotmd telegram ingest --limit 10 --dry-run` or the final equivalent.
+- Before smoke, verify container connectivity with the exact configured path:
+  - `docker exec dotmd printenv DOTMD_TELEGRAM_DAEMON_SOCKET DOTMD_TELEGRAM_DAEMON_URL`;
+  - if socket is configured: `docker exec dotmd test -S "$DOTMD_TELEGRAM_DAEMON_SOCKET"`;
+  - if URL is configured: `docker exec dotmd python - <<'PY'` with a small HTTP health/probe request to the configured URL, or use the implemented client probe if available.
+- Production target for this plan is explicit: dotMD must reach the mcp-telegram daemon through `DOTMD_TELEGRAM_DAEMON_SOCKET` when the socket is bind-mounted into the dotMD container, or through `DOTMD_TELEGRAM_DAEMON_URL` when both services share a Docker network. The executor must choose and document the actual deployed value before claiming live smoke.
 - Do not run `dotmd index --force`.
 - If the live runtime has zero exportable synced messages or is unavailable, record the exact command and reason in the Phase 29 summary during execution; do not fabricate a pass.
 </action>

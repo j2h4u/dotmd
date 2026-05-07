@@ -6,6 +6,7 @@ wave: 2
 depends_on:
   - "29-01"
 files_modified:
+  - backend/src/dotmd/core/models.py
   - backend/src/dotmd/ingestion/telegram_provider.py
   - backend/tests/ingestion/test_telegram_provider.py
 autonomous: true
@@ -20,6 +21,7 @@ must_haves:
     - "D-10: Any retrieval context remains anchored to one concrete message and records all included source units."
     - "D-11: dotMD provider code must not import Telethon, mcp_telegram.sync_db, or parse rendered list_messages output."
     - "D-16: Fixtures cover short acknowledgements, duplicate short messages, rapid chats, topic/reply metadata, edited fingerprints, and unchanged replay inputs."
+    - "Review-HIGH: Edited message fingerprint assertions are valid because Plan 01 now delivers edited existing messages through updated_after."
     - "Full-reindex answer: this plan adds provider mapping and tests only; no live indexing or rebuild."
 ---
 
@@ -41,6 +43,7 @@ low-signal message classification.
 | Low-signal messages disappear entirely | HIGH | Tests assert low-signal units still become `SourceUnit` records. |
 | Fingerprints ignore edit-relevant metadata | MEDIUM | Fingerprint helper includes normalized text plus sent/edit/delete/topic/reply metadata. |
 | Duplicate short messages collapse into one ref | HIGH | Tests include duplicate short messages with different ids/senders/timestamps. |
+| RU/EN short acknowledgements classify inconsistently | MEDIUM | Low-signal vocabulary uses `casefold()` and includes conservative English and Russian acknowledgement tokens. |
 </threat_model>
 
 <tasks>
@@ -62,6 +65,7 @@ low-signal message classification.
 - A message maps to `SourceUnit(unit_ref="dialog:<id>:message:<id>", unit_type="message")`.
 - The provider exposes public message refs with shape `telegram:dialog:<dialog_id>:message:<message_id>` for downstream chunk/search hydration.
 - Duplicate low-signal messages with different ids remain distinct units.
+- Provider batches preserve daemon `updated_after` so ingestion can request edited already-exported messages on the next run.
 </behavior>
 <action>
 Create `backend/tests/ingestion/test_telegram_provider.py`.
@@ -81,6 +85,9 @@ Tests must assert:
 - low-signal units have metadata marker `standalone_search == false` or equivalent concrete key chosen by implementation.
 - duplicate low-signal units have different `unit_ref` and different fingerprints.
 - edited payload changes the fingerprint.
+- `public_ref_for_unit(change.unit)` is defined by the provider module and returns `f"telegram:{unit.unit_ref}"`.
+- missing optional fields such as `edit_date`, `topic_id`, and `reply_to_msg_id` fingerprint as explicit `null` values, not omitted keys.
+- `batch.updated_after` equals the daemon response watermark when present.
 </action>
 <verify>
 <automated>cd backend && uv run pytest tests/ingestion/test_telegram_provider.py -q</automated>
@@ -91,6 +98,9 @@ Tests must assert:
 - `backend/tests/ingestion/test_telegram_provider.py` contains `dialog:-1001:message:43`.
 - `backend/tests/ingestion/test_telegram_provider.py` asserts duplicate `ok` messages remain distinct.
 - `backend/tests/ingestion/test_telegram_provider.py` asserts edited content changes fingerprint.
+- `backend/tests/ingestion/test_telegram_provider.py` imports or calls `public_ref_for_unit`.
+- `backend/tests/ingestion/test_telegram_provider.py` contains at least one Russian acknowledgement such as `спасибо` or `да`.
+- `backend/tests/ingestion/test_telegram_provider.py` asserts `updated_after`.
 - The focused pytest command initially fails before implementation and exits 0 after implementation.
 </acceptance_criteria>
 </task>
@@ -106,6 +116,7 @@ Tests must assert:
 </read_first>
 <files>
 - `backend/src/dotmd/ingestion/telegram_provider.py`
+- `backend/src/dotmd/core/models.py`
 - `backend/tests/ingestion/test_telegram_provider.py`
 </files>
 <behavior>
@@ -114,16 +125,18 @@ Tests must assert:
 - Low-signal classification is conservative and visible in unit metadata for ingestion.
 </behavior>
 <action>
-Add `backend/src/dotmd/ingestion/telegram_provider.py`.
+Add provider mapping and the minimal batch-contract extension needed for edit delivery.
 
 Concrete target state:
+- In `backend/src/dotmd/core/models.py`, add `updated_after: str | None = None` to `ApplicationSourceChangeBatch`.
 - Define `TelegramSourceClientProtocol` with:
   - `describe_source() -> dict`
-  - `export_source_changes(cursor: str | None, limit: int) -> dict`
+  - `export_source_changes(cursor: str | None, limit: int, updated_after: str | None = None) -> dict`
   - `read_source_unit_window(unit_ref: str, before: int, after: int) -> dict`
-- Define `TelegramApplicationSourceProvider(ApplicationSourceProviderProtocol)` that wraps the client.
+- Define `TelegramApplicationSourceProvider(ApplicationSourceProviderProtocol)` with constructor signature `__init__(self, client: TelegramSourceClientProtocol) -> None`.
+- Define `public_ref_for_unit(unit: SourceUnit) -> str` returning `f"telegram:{unit.unit_ref}"`.
 - Map source description dicts to `ApplicationSourceDescription`.
-- Map export payloads to `ApplicationSourceChangeBatch`.
+- Map export payloads to `ApplicationSourceChangeBatch`, including `checkpoint_cursor`, `next_cursor`, and `updated_after`.
 - Build document fields:
   - `namespace="telegram"`
   - `document_ref="dialog:<dialog_id>"`
@@ -135,14 +148,16 @@ Concrete target state:
 - Build unit fields:
   - `unit_ref="dialog:<dialog_id>:message:<message_id>"`
   - `unit_type="message"`
-  - `order_key=f"{message_id:020d}"` for non-negative ids and a deterministic signed-safe equivalent if needed.
+  - `order_key=f"{message_id:020d}"`; Telegram message ids inside one dialog are non-negative, and tests assert a negative dialog id does not affect the order key.
   - `metadata_json` includes `dialog_id`, `dialog_name`, `message_id`, `sent_at`, `sender_id`, `sender_name`, `topic_id`, `topic_title`, `reply_to_msg_id`, `edit_date`, `is_deleted`, and `standalone_search`.
 - Implement `is_low_signal_telegram_text(text: str) -> bool` with conservative rules:
   - empty/whitespace is low signal;
-  - casefolded text in `{"ok", "yes", "yep", "no", "+1", "thanks", "thx"}` is low signal;
-  - emoji-only or punctuation-only text is low signal;
+  - casefolded text in `{"ok", "yes", "yep", "no", "+1", "thanks", "thx", "да", "нет", "ок", "окей", "спасибо", "ага", "угу"}` is low signal;
+  - punctuation-only text is low signal using `not any(ch.isalnum() for ch in text)`;
+  - emoji-only text is low signal by treating text with no alphanumeric characters and at least one non-ASCII symbol category as low signal; implement this with `unicodedata.category(ch).startswith("S")` and no new dependency.
   - otherwise not low signal.
-- Implement deterministic fingerprinting over normalized text plus `sent_at`, `edit_date`, `is_deleted`, `sender_id`, `topic_id`, and `reply_to_msg_id`.
+- Implement deterministic fingerprinting over normalized text plus `sent_at`, `edit_date`, `is_deleted`, `sender_id`, `topic_id`, `reply_to_msg_id`, and `unit_updated_at`.
+- Fingerprinting must serialize optional metadata with sorted JSON keys and explicit `None`/`null` values for missing optional fields.
 - Add a grep-proven guard in tests that `telegram_provider.py` does not contain `telethon`, `sync_db`, or `list_messages`.
 </action>
 <verify>
@@ -153,7 +168,10 @@ Concrete target state:
 - `backend/src/dotmd/ingestion/telegram_provider.py` contains `class TelegramApplicationSourceProvider`.
 - `backend/src/dotmd/ingestion/telegram_provider.py` contains `class TelegramSourceClientProtocol` or `TelegramSourceClientProtocol`.
 - `backend/src/dotmd/ingestion/telegram_provider.py` contains `def is_low_signal_telegram_text`.
+- `backend/src/dotmd/ingestion/telegram_provider.py` contains `def public_ref_for_unit`.
+- `backend/src/dotmd/ingestion/telegram_provider.py` contains `unicodedata`.
 - `backend/src/dotmd/ingestion/telegram_provider.py` contains `standalone_search`.
+- `backend/src/dotmd/core/models.py` contains `updated_after: str | None = None`.
 - `backend/src/dotmd/ingestion/telegram_provider.py` does not contain `telethon`.
 - `backend/src/dotmd/ingestion/telegram_provider.py` does not contain `sync_db`.
 - `backend/src/dotmd/ingestion/telegram_provider.py` does not contain `list_messages`.
