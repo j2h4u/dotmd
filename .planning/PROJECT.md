@@ -41,8 +41,8 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 
 ### Active
 
-- v1.5 Telegram Source Adapter — Phase 27 complete. Next step:
-  Phase 28 discussion for the application source provider contract.
+- v1.5 Telegram Source Adapter — Phase 28 complete. Next step:
+  Phase 29 discussion for Telegram adapter MVP ingestion.
 
 ### Out of Scope
 
@@ -118,6 +118,8 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 | Source refs as public read/search identity | Non-filesystem sources should not inherit a path-shaped public API | ✓ Good — shipped in Phase 26 |
 | Filesystem paths remain internal holder mechanics | Local discovery, reads, delete detection, and content-dedup still need paths | ✓ Good |
 | Avoid full reindex for source-ref migration | Existing Phase 25 provenance was enough for lightweight backfill | ✓ Good |
+| Application source provider contract stays source-neutral | Telegram is the first proof source, but the contract must remain viable for Slack, Notion, PDFs, and other application sources | ✓ Good — validated in Phase 28 |
+| checkpoint_cursor is durable progress, next_cursor is not | Saving continuation state before local persistence can lose source units after a crash | ✓ Good — validated in Phase 28 |
 
 ## Shipped Milestones
 
@@ -188,6 +190,18 @@ The active strategy provenance gate backfilled missing lightweight
 `chunk_source_provenance_contextual_512_50` rows without a full reindex and now
 blocks incomplete provenance before search hydration.
 
+Phase 28 complete (2026-05-07): dotMD now has a minimal application-source
+provider contract for future non-filesystem sources. The contract exposes
+`describe_source`, `export_changes`, and `read_unit_window`; provider payloads
+carry `SourceDocument`, `SourceUnit`, source-unit windows, and checkpoint
+cursors. SQLite source-state helpers persist checkpoint cursors only after local
+persistence succeeds and classify replayed source-unit fingerprints as
+unchanged. Deterministic fixtures prove Telegram-like message units, document
+implicit-root units, read windows, and replay idempotency without live Telegram.
+The `mcp-telegram` Phase 29 boundary is documented in
+`docs/mcp-telegram-source-contract.md`; Phase 28 did not require
+`dotmd index --force` or a full rebuild.
+
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
@@ -206,4 +220,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-07 after v1.5 roadmap creation*
+*Last updated: 2026-05-07 after Phase 28 completion*

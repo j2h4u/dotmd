@@ -129,7 +129,7 @@ See: `.planning/REQUIREMENTS.md`
 | 25. Document source abstraction MVP | 4/4 | Complete | 2026-05-06 |
 | 26. Source-ref-first read/search contract cleanup | 3/3 | Complete | 2026-05-06 |
 | 27. Resource bindings and retained artifacts foundation | 4/4 | Complete    | 2026-05-07 |
-| 28. Application source provider contract | v1.5 | Not started | — |
+| 28. Application source provider contract | 4/4 | Complete    | 2026-05-07 |
 | 29. Telegram adapter MVP ingestion | v1.5 | Not started | — |
 | 30. Incremental Telegram sync and reuse | v1.5 | Not started | — |
 | 31. Telegram search/read/drill smoke | v1.5 | Not started | — |
@@ -1075,7 +1075,7 @@ application-backed sources, with Telegram as the first provider shape and
 future app integrations as a design constraint.
 **Requirements:** R3, R4, R8
 **Depends on:** Phase 27
-**Plans:** 0/0 plans complete
+**Plans:** 4/4 plans complete
 
 Phase context:
 - The contract must separate discovery/catalog state from source-unit content.

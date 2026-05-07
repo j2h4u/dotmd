@@ -114,6 +114,48 @@ No Phase 27 step requires `dotmd index --force`, a full reindex, or a full
 rebuild. The foundation was validated with local filesystem fixtures; live
 Telegram smoke is deferred to the Telegram search/read/drill phase.
 
+## Phase 28 Delivered State
+
+Phase 28 adds the generic application-source provider contract and deterministic
+fixtures for future non-filesystem sources. It does not ship Telegram ingestion,
+an `mcp-telegram` implementation, attachments/media support, a generic plugin
+marketplace, or common delete/hidden/tombstone lifecycle policy.
+
+The minimal provider method set is now:
+
+```text
+describe_source()
+export_changes(cursor, limit)
+read_unit_window(unit_ref, before, after)
+```
+
+`export_changes` carries documents and units in one payload. For Telegram-like
+sources this means a dialog arrives as `SourceDocument` and each message arrives
+as a `SourceUnit`; document-only sources can use an implicit root unit. The
+provider contract deliberately does not add separate `export_documents` or
+`export_units` methods in Phase 28.
+
+Cursor semantics are explicit. `next_cursor` is the provider continuation hint,
+but it is not durable progress by itself. dotMD saves `checkpoint_cursor` only
+after local source-document, source-unit fingerprint, binding/provenance, and
+index persistence succeeds. This prevents a crash after cursor save from losing
+source units that were never locally persisted.
+
+`SourceUnit` is the provider-owned recomputation boundary for active application
+records. The durable helper `source_unit_fingerprints` keys by
+`(namespace, document_ref, unit_ref)` and classifies replayed active units with
+the same fingerprint as unchanged. This makes repeated active exports
+idempotent without promoting lifecycle delete/tombstone state into the common
+contract.
+
+The concrete `mcp-telegram` boundary for Phase 29 planning is documented in
+[mcp-telegram Source Contract for dotMD](mcp-telegram-source-contract.md). dotMD
+must consume structured provider payloads and must not read private
+`mcp-telegram` SQLite tables directly.
+
+No Phase 28 step requires `dotmd index --force`; the work is additive provider
+models, fixture tests, and SQLite source-state tables.
+
 ## Problem
 
 dotMD currently indexes markdown files from the local filesystem. That is too
@@ -394,15 +436,13 @@ Minimal conceptual methods:
 ```text
 describe_source()
 export_changes(cursor, limit)
-export_document(document_ref)
-export_units(document_ref, cursor, limit)
-export_entities(cursor, limit)
 read_unit_window(unit_ref, before, after)
 ```
 
 The cursor should be opaque to dotMD. Each adapter owns its cursor semantics.
-Document/unit cursors and entity cursors may be separate if a source updates
-contacts or identity metadata independently from corpus content.
+`export_changes` returns active document/unit changes together in Phase 28.
+`checkpoint_cursor` is durable only after dotMD's local persistence succeeds;
+`next_cursor` alone is not durable progress.
 
 Example refs:
 
@@ -427,18 +467,17 @@ Almost every adapter needs thin persistent state:
 ```text
 source_checkpoints:
   namespace
-  cursor
+  checkpoint_cursor
   last_success_at
   last_error
 
-source_fingerprints:
+source_unit_fingerprints:
   namespace
   document_ref
   unit_ref
   fingerprint
   updated_at
   indexed_at
-  deleted_at
 ```
 
 This should be shared infrastructure, not custom SQLite code invented by every
@@ -447,8 +486,10 @@ adapter.
 Phase 27's `resource_bindings` table is the first concrete binding-state slice,
 not the full source-state platform. It tracks active/inactive resource
 visibility and retained fingerprint snapshots for rebind lookup. Future source
-state still needs cursors, source-unit fingerprints, and adapter-specific sync
-state before Telegram or other application sources are complete.
+state still needs adapter-specific sync state before Telegram or other
+application sources are complete. Phase 28 adds checkpoint cursor and
+source-unit fingerprint helpers, but delete/hidden/tombstone lifecycle remains
+deferred from the common contract.
 
 ### Source Mirror
 

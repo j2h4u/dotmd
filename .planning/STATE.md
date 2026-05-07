@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Telegram Source Adapter
-status: executing
-last_updated: "2026-05-07T18:05:57.212Z"
+status: ready_to_plan
+last_updated: "2026-05-07T18:27:44.255Z"
 last_activity: 2026-05-07
 progress:
   total_phases: 21
-  completed_phases: 15
+  completed_phases: 17
   total_plans: 42
-  completed_plans: 38
-  percent: 90
+  completed_plans: 42
+  percent: 81
 ---
 
 # GSD State
@@ -20,18 +20,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-07 after v1.5 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 28 — application-source-provider-contract
+**Current focus:** Phase 29 — telegram-adapter-mvp-ingestion
 
 ## Current Milestone
 
 **v1.5 — Telegram Source Adapter**
 
-Phase: 28
+Phase: 29
 Plan: Not started
-Status: Ready to execute
+Status: Ready to plan
 Last activity: 2026-05-07
 
-Progress: [██████████] 97%
+Progress: [████████░░] 81%
 
 ## Deferred Items
 
@@ -54,7 +54,7 @@ Items acknowledged and deferred at milestone close on 2026-05-06:
 
 **Velocity:**
 
-- Total plans completed: 40 (across all milestones)
+- Total plans completed: 44 (across all milestones)
 - Average duration: ~3 min
 - Total execution time: —
 
@@ -83,6 +83,7 @@ Items acknowledged and deferred at milestone close on 2026-05-06:
 | Phase 27 P01 | 8min | 3 tasks | 3 files |
 | Phase 27 P03 | 7min | 3 tasks | 4 files |
 | 27 | 4 | - | - |
+| 28 | 4 | - | - |
 
 ## Accumulated Context
 
@@ -242,11 +243,11 @@ No blockers. Phase 27 is complete; Phase 28 is next.
 
 ## Current Position
 
-Phase: 28 (application-source-provider-contract) — READY TO PLAN
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-05-07 -- Phase 28 planning complete
+Phase: 28 (application-source-provider-contract) — EXECUTING
+Plan: 1 of 4
+Status: Executing Phase 28
+Last activity: 2026-05-07 -- Phase 28 execution started
 
 ## Operator Next Steps
 
-- Run `$gsd-discuss-phase 28` to gather context for the application source provider contract.
+- Run `$gsd-discuss-phase 29` to gather context for Telegram adapter MVP ingestion.

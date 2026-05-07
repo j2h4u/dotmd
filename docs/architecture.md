@@ -231,6 +231,18 @@ Phase 27 is foundation only. Telegram ingestion, a structured `mcp-telegram`
 export API, attachments/media, generic plugin UI, Telegram deleted-upstream
 metadata policy, and live Telegram smoke remain later-phase work.
 
+Phase 28 adds the reusable application-source provider contract for future
+non-filesystem sources. The generic method set is `describe_source`,
+`export_changes`, and `read_unit_window`; `export_changes` carries
+`SourceDocument` and `SourceUnit` together. dotMD persists `checkpoint_cursor`
+only after local persistence succeeds, while `next_cursor` is not durable
+progress by itself. `SourceUnit` is the provider-owned recomputation boundary,
+with source-unit fingerprints making replayed active records idempotent.
+Delete/hidden/tombstone lifecycle policy remains deferred from the common
+contract. The Phase 29 Telegram boundary is captured in
+[mcp-telegram Source Contract](mcp-telegram-source-contract.md). No Phase 28
+step requires `dotmd index --force` or a full rebuild.
+
 The intended future direction is source/document/unit ingestion where
 filesystem files are only one source adapter. The design context and open
 questions for Telegram, Notion, Google Docs, Perplexity, ChatGPT/Claude
