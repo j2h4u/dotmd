@@ -41,8 +41,8 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 
 ### Active
 
-- v1.5 Telegram Source Adapter — requirements and roadmap created. Next step:
-  Phase 27 discussion for resource bindings and retained artifacts foundation.
+- v1.5 Telegram Source Adapter — Phase 27 complete. Next step:
+  Phase 28 discussion for the application source provider contract.
 
 ### Out of Scope
 

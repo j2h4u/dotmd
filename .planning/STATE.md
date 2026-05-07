@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Telegram Source Adapter
-status: executing
+status: ready_to_plan
 last_updated: "2026-05-07T15:08:29.868Z"
 last_activity: 2026-05-07
 progress:
   total_phases: 21
-  completed_phases: 14
+  completed_phases: 15
   total_plans: 38
   completed_plans: 37
-  percent: 97
+  percent: 71
 ---
 
 # GSD State
@@ -20,15 +20,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-07 after v1.5 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 27 — resource-bindings-retained-artifacts-foundation
+**Current focus:** Phase 28 — application-source-provider-contract
 
 ## Current Milestone
 
 **v1.5 — Telegram Source Adapter**
 
-Phase: 27 — Resource bindings and retained artifacts foundation
+Phase: 28
 Plan: Not started
-Status: Executing Phase 27
+Status: Ready to plan
 Last activity: 2026-05-07
 
 Progress: [██████████] 97%
@@ -54,7 +54,7 @@ Items acknowledged and deferred at milestone close on 2026-05-06:
 
 **Velocity:**
 
-- Total plans completed: 36 (across all milestones)
+- Total plans completed: 40 (across all milestones)
 - Average duration: ~3 min
 - Total execution time: —
 
@@ -82,6 +82,7 @@ Items acknowledged and deferred at milestone close on 2026-05-06:
 | Phase 26 P03 | 11min | 4 tasks | 7 files |
 | Phase 27 P01 | 8min | 3 tasks | 3 files |
 | Phase 27 P03 | 7min | 3 tasks | 4 files |
+| 27 | 4 | - | - |
 
 ## Accumulated Context
 
@@ -226,7 +227,7 @@ was moved under `.planning/notes/completed-backlog/`.
 
 ### Blockers/Concerns
 
-No blockers. v1.5 requirements and roadmap are ready; Phase 27 is next.
+No blockers. Phase 27 is complete; Phase 28 is next.
 
 ### Quick Tasks Completed
 
@@ -241,11 +242,11 @@ No blockers. v1.5 requirements and roadmap are ready; Phase 27 is next.
 
 ## Current Position
 
-Phase: 27 (resource-bindings-retained-artifacts-foundation) — EXECUTING
-Plan: 3 of 4
-Status: Executing Phase 27
-Last activity: 2026-05-07 -- Phase 27 Plan 03 complete
+Phase: 28 (application-source-provider-contract) — READY TO PLAN
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-05-07 -- Phase 27 complete
 
 ## Operator Next Steps
 
-- Await orchestrator routing for the remaining Phase 27 plan.
+- Run `$gsd-discuss-phase 28` to gather context for the application source provider contract.
