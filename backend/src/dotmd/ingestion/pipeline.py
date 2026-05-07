@@ -420,6 +420,7 @@ class IndexingPipeline:
             meta_diff = self._meta_tracker.diff(files)
             meta_changed_paths = set(meta_diff.new) | set(meta_diff.modified)
             if not meta_changed_paths:
+                self._rebind_retained_filesystem_documents(documents)
                 logger.info("[%s] no changes — skipping (%.2fs total)", run_id, time.perf_counter() - t_start)
                 stats = self._metadata_store.get_stats() or IndexStats()
                 stats.new_files = 0
@@ -889,6 +890,96 @@ class IndexingPipeline:
             ),
             conn=conn,
         )
+
+    def _rebind_retained_filesystem_document(
+        self,
+        source_document: SourceDocument,
+    ) -> dict[str, int]:
+        """Reactivate matching retained filesystem content without recomputing."""
+        diagnostic = {
+            "rebound": 0,
+            "reused_chunks": 0,
+            "reused_embeddings": 0,
+            "retained_hidden": 0,
+        }
+        if source_document.namespace != "filesystem":
+            return diagnostic
+
+        binding = self._metadata_store.get_resource_binding(
+            source_document.namespace,
+            source_document.document_ref,
+        )
+        if binding is None:
+            binding = self._metadata_store.get_inactive_resource_binding_by_fingerprints(
+                source_document.namespace,
+                source_document.content_fingerprint,
+                source_document.metadata_fingerprint,
+            )
+        if binding is None or binding.active:
+            return diagnostic
+        if (
+            binding.content_fingerprint != source_document.content_fingerprint
+            or binding.metadata_fingerprint != source_document.metadata_fingerprint
+        ):
+            return diagnostic
+
+        file_path = (
+            str(source_document.file_path)
+            if source_document.file_path is not None
+            else source_document.document_ref
+        )
+        chunk_ids = self._metadata_store.get_chunk_ids_by_file(
+            self._strategy,
+            file_path,
+        )
+        diagnostic["retained_hidden"] = len(chunk_ids)
+        if not chunk_ids:
+            return diagnostic
+
+        diagnostic["reused_chunks"] = len(chunk_ids)
+        placeholders = ",".join("?" for _ in chunk_ids)
+        try:
+            row = self._conn.execute(
+                f"SELECT COUNT(*) FROM {self._vector_store._META_TABLE} "
+                f"WHERE chunk_id IN ({placeholders})",
+                chunk_ids,
+            ).fetchone()
+            diagnostic["reused_embeddings"] = int(row[0]) if row else 0
+        except sqlite3.OperationalError:
+            diagnostic["reused_embeddings"] = 0
+
+        self._metadata_store.upsert_source_document(
+            source_document,
+            conn=self._conn,
+        )
+        self._upsert_active_filesystem_binding(
+            source_document,
+            conn=self._conn,
+        )
+        self._conn.commit()
+        file_info = source_document_to_file_info(source_document)
+        self._save_chunk_fingerprint(file_info)
+        self._save_meta_fingerprint(file_info)
+        diagnostic["rebound"] = 1
+        logger.info("filesystem_rebind: %s", diagnostic)
+        return diagnostic
+
+    def _rebind_retained_filesystem_documents(
+        self,
+        source_documents: list[SourceDocument],
+    ) -> dict[str, int]:
+        """Reactivate all matching retained filesystem bindings in a batch."""
+        total = {
+            "rebound": 0,
+            "reused_chunks": 0,
+            "reused_embeddings": 0,
+            "retained_hidden": 0,
+        }
+        for source_document in source_documents:
+            diagnostic = self._rebind_retained_filesystem_document(source_document)
+            for key in total:
+                total[key] += diagnostic[key]
+        return total
 
     @staticmethod
     def _normalize_vector(v: list[float]) -> list[float]:
@@ -1738,6 +1829,7 @@ class IndexingPipeline:
         file_info, source_document = normalized
 
         path_str = str(file_info.path)
+        self._rebind_retained_filesystem_document(source_document)
         needs_embed = False
         prof = self._settings.profile_indexing  # gate: DOTMD_PROFILE_INDEXING=true
 

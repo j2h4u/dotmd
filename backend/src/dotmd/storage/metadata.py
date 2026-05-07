@@ -503,6 +503,38 @@ class SQLiteMetadataStore:
             metadata_json=json.loads(row[10]),
         )
 
+    def get_inactive_resource_binding_by_fingerprints(
+        self,
+        namespace: str,
+        content_fingerprint: str,
+        metadata_fingerprint: str,
+    ) -> ResourceBinding | None:
+        """Return an inactive binding matching retained content fingerprints."""
+        row = self._conn.execute(
+            "SELECT namespace, resource_ref, document_ref, ref, active, "
+            "bound_at, unbound_at, content_fingerprint, metadata_fingerprint, "
+            "source_unit_refs, metadata_json FROM resource_bindings "
+            "WHERE namespace = ? AND content_fingerprint = ? "
+            "AND metadata_fingerprint = ? AND active = 0 "
+            "ORDER BY bound_at DESC, resource_ref LIMIT 1",
+            (namespace, content_fingerprint, metadata_fingerprint),
+        ).fetchone()
+        if row is None:
+            return None
+        return ResourceBinding(
+            namespace=row[0],
+            resource_ref=row[1],
+            document_ref=row[2],
+            ref=row[3],
+            active=bool(row[4]),
+            bound_at=datetime.fromisoformat(row[5]),
+            unbound_at=datetime.fromisoformat(row[6]) if row[6] else None,
+            content_fingerprint=row[7],
+            metadata_fingerprint=row[8],
+            source_unit_refs=json.loads(row[9]),
+            metadata_json=json.loads(row[10]),
+        )
+
     def is_resource_binding_active(
         self,
         namespace: str,
