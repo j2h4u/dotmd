@@ -592,6 +592,61 @@ class TestDrillRefContract:
         assert payload["total_chunks"] == 3
 
 
+class TestBindingDiagnostics:
+    """Service diagnostics expose counts without inactive content browsing."""
+
+    def test_binding_diagnostics_returns_active_inactive_retained_and_reused_counts(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = _get_service(tmp_path)
+        metadata = MagicMock()
+        metadata.count_resource_bindings.return_value = {
+            "active": 2,
+            "inactive": 1,
+            "total": 3,
+        }
+        metadata.count_retained_inactive_chunks.return_value = 4
+        service._pipeline._metadata_store = metadata
+        service._pipeline._last_rebind_diagnostic = {"reused_chunks": 7}
+
+        diagnostics = service.binding_diagnostics()
+
+        assert diagnostics == {
+            "active": 2,
+            "inactive": 1,
+            "retained": 4,
+            "reused": 7,
+        }
+
+    def test_binding_diagnostics_do_not_duplicate_source_document_metadata(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = _get_service(tmp_path)
+        metadata = MagicMock()
+        metadata.count_resource_bindings.return_value = {
+            "active": 1,
+            "inactive": 0,
+            "total": 1,
+        }
+        metadata.count_retained_inactive_chunks.return_value = 0
+        metadata.get_source_document.side_effect = AssertionError(
+            "diagnostics must not duplicate source document metadata"
+        )
+        service._pipeline._metadata_store = metadata
+
+        diagnostics = service.binding_diagnostics()
+
+        assert diagnostics == {
+            "active": 1,
+            "inactive": 0,
+            "retained": 0,
+            "reused": 0,
+        }
+        metadata.get_source_document.assert_not_called()
+
+
 class TestCompareRerankers:
     """DotMDService.compare_rerankers uses one shared candidate pool."""
 
