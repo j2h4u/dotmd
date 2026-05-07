@@ -113,6 +113,37 @@ class SourceDocument(BaseModel):
         return self
 
 
+class ResourceBinding(BaseModel):
+    """Active/inactive binding between a source resource and a document ref."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    namespace: str
+    resource_ref: str
+    document_ref: str
+    ref: str
+    active: bool = True
+    bound_at: datetime
+    unbound_at: datetime | None = None
+    content_fingerprint: str
+    metadata_fingerprint: str
+    source_unit_refs: list[str] = Field(default_factory=list)
+    metadata_json: dict = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_refs(self) -> ResourceBinding:
+        expected_ref = f"{self.namespace}:{self.document_ref}"
+        if self.ref != expected_ref:
+            raise ValueError(f"ref must be {expected_ref!r}")
+
+        if self.namespace == "filesystem" and self.resource_ref != self.document_ref:
+            raise ValueError(
+                "filesystem resource_ref must match document_ref"
+            )
+
+        return self
+
+
 class SourceUnit(BaseModel):
     """Parser-emitted unit before dotMD chunking."""
 

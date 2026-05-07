@@ -23,10 +23,16 @@ import json
 import sqlite3
 from collections import defaultdict
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
-from dotmd.core.models import Chunk, ChunkProvenance, IndexStats, SourceDocument
+from dotmd.core.models import (
+    Chunk,
+    ChunkProvenance,
+    IndexStats,
+    ResourceBinding,
+    SourceDocument,
+)
 
 # ---------------------------------------------------------------------------
 # _ConnProxy — thin wrapper around sqlite3.Connection
@@ -112,6 +118,33 @@ CREATE TABLE IF NOT EXISTS source_documents (
 )
 """
 
+_CREATE_RESOURCE_BINDINGS = """
+CREATE TABLE IF NOT EXISTS resource_bindings (
+    namespace            TEXT NOT NULL,
+    resource_ref         TEXT NOT NULL,
+    document_ref         TEXT NOT NULL,
+    ref                  TEXT NOT NULL,
+    active               INTEGER NOT NULL DEFAULT 1,
+    bound_at             TEXT NOT NULL,
+    unbound_at           TEXT,
+    content_fingerprint  TEXT NOT NULL DEFAULT '',
+    metadata_fingerprint TEXT NOT NULL DEFAULT '',
+    source_unit_refs     TEXT NOT NULL DEFAULT '[]',
+    metadata_json        TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (namespace, resource_ref)
+)
+"""
+
+_CREATE_RESOURCE_BINDINGS_DOCUMENT_ACTIVE_IDX = """
+CREATE INDEX IF NOT EXISTS idx_resource_bindings_document_active
+    ON resource_bindings(namespace, document_ref, active)
+"""
+
+_CREATE_RESOURCE_BINDINGS_FINGERPRINTS_IDX = """
+CREATE INDEX IF NOT EXISTS idx_resource_bindings_fingerprints
+    ON resource_bindings(namespace, content_fingerprint, metadata_fingerprint, active)
+"""
+
 _CREATE_CHUNK_SOURCE_PROVENANCE_TPL = """
 CREATE TABLE IF NOT EXISTS {table} (
     chunk_id         TEXT NOT NULL,
@@ -170,6 +203,24 @@ ON CONFLICT(namespace, document_ref) DO UPDATE SET
     updated_at = excluded.updated_at,
     content_fingerprint = excluded.content_fingerprint,
     metadata_fingerprint = excluded.metadata_fingerprint,
+    metadata_json = excluded.metadata_json
+"""
+
+_UPSERT_RESOURCE_BINDING = """
+INSERT INTO resource_bindings (
+    namespace, resource_ref, document_ref, ref, active, bound_at, unbound_at,
+    content_fingerprint, metadata_fingerprint, source_unit_refs, metadata_json
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(namespace, resource_ref) DO UPDATE SET
+    document_ref = excluded.document_ref,
+    ref = excluded.ref,
+    active = excluded.active,
+    bound_at = excluded.bound_at,
+    unbound_at = excluded.unbound_at,
+    content_fingerprint = excluded.content_fingerprint,
+    metadata_fingerprint = excluded.metadata_fingerprint,
+    source_unit_refs = excluded.source_unit_refs,
     metadata_json = excluded.metadata_json
 """
 
@@ -249,6 +300,7 @@ class SQLiteMetadataStore:
         self._conn.execute(_CREATE_CHUNKS_TPL.format(table=self._table))
         self._conn.execute(_CREATE_STATS)
         self.ensure_source_document_table()
+        self.ensure_resource_bindings_table()
         # Idempotent schema migration: add diff-reporting columns
         for col, typedef in [
             ("new_files", "INTEGER NOT NULL DEFAULT 0"),
@@ -268,6 +320,12 @@ class SQLiteMetadataStore:
     def ensure_source_document_table(self) -> None:
         """Create the global source_documents table if absent."""
         self._conn.execute(_CREATE_SOURCE_DOCUMENTS)
+
+    def ensure_resource_bindings_table(self) -> None:
+        """Create active/inactive resource binding state tables if absent."""
+        self._conn.execute(_CREATE_RESOURCE_BINDINGS)
+        self._conn.execute(_CREATE_RESOURCE_BINDINGS_DOCUMENT_ACTIVE_IDX)
+        self._conn.execute(_CREATE_RESOURCE_BINDINGS_FINGERPRINTS_IDX)
 
     def ensure_chunk_source_provenance_table(self, strategy: str) -> None:
         """Create chunk_source_provenance_<strategy> and its chunk index."""
@@ -358,6 +416,118 @@ class SQLiteMetadataStore:
             metadata_fingerprint=row[11],
             metadata_json=json.loads(row[12]),
         )
+
+    def upsert_resource_binding(
+        self,
+        binding: ResourceBinding,
+        *,
+        conn: sqlite3.Connection,
+    ) -> None:
+        """Upsert resource binding state using caller-owned transaction scope.
+
+        ``source_documents`` remains authoritative for active/current document
+        metadata. Binding fingerprints are snapshots for retained lookup, and
+        ``metadata_json`` stores binding lifecycle metadata only.
+        """
+        conn.execute(
+            _UPSERT_RESOURCE_BINDING,
+            (
+                binding.namespace,
+                binding.resource_ref,
+                binding.document_ref,
+                binding.ref,
+                int(binding.active),
+                binding.bound_at.isoformat(),
+                binding.unbound_at.isoformat()
+                if binding.unbound_at is not None
+                else None,
+                binding.content_fingerprint,
+                binding.metadata_fingerprint,
+                json.dumps(binding.source_unit_refs),
+                json.dumps(binding.metadata_json, sort_keys=True),
+            ),
+        )
+
+    def get_resource_binding(
+        self,
+        namespace: str,
+        resource_ref: str,
+    ) -> ResourceBinding | None:
+        """Return one resource binding by namespace/resource_ref, or None."""
+        row = self._conn.execute(
+            "SELECT namespace, resource_ref, document_ref, ref, active, "
+            "bound_at, unbound_at, content_fingerprint, metadata_fingerprint, "
+            "source_unit_refs, metadata_json FROM resource_bindings "
+            "WHERE namespace = ? AND resource_ref = ?",
+            (namespace, resource_ref),
+        ).fetchone()
+        if row is None:
+            return None
+        return ResourceBinding(
+            namespace=row[0],
+            resource_ref=row[1],
+            document_ref=row[2],
+            ref=row[3],
+            active=bool(row[4]),
+            bound_at=datetime.fromisoformat(row[5]),
+            unbound_at=datetime.fromisoformat(row[6]) if row[6] else None,
+            content_fingerprint=row[7],
+            metadata_fingerprint=row[8],
+            source_unit_refs=json.loads(row[9]),
+            metadata_json=json.loads(row[10]),
+        )
+
+    def is_resource_binding_active(
+        self,
+        namespace: str,
+        resource_ref: str,
+    ) -> bool:
+        """Return True when a resource binding exists and is active."""
+        row = self._conn.execute(
+            "SELECT active FROM resource_bindings "
+            "WHERE namespace = ? AND resource_ref = ?",
+            (namespace, resource_ref),
+        ).fetchone()
+        return bool(row[0]) if row is not None else False
+
+    def set_resource_binding_active(
+        self,
+        namespace: str,
+        resource_ref: str,
+        active: bool,
+        *,
+        conn: sqlite3.Connection,
+        unbound_at: datetime | None = None,
+    ) -> None:
+        """Update binding activity without touching retained artifacts."""
+        effective_unbound_at = None
+        if not active:
+            effective_unbound_at = unbound_at or datetime.now(tz=UTC)
+        conn.execute(
+            "UPDATE resource_bindings SET active = ?, unbound_at = ? "
+            "WHERE namespace = ? AND resource_ref = ?",
+            (
+                int(active),
+                effective_unbound_at.isoformat()
+                if effective_unbound_at is not None
+                else None,
+                namespace,
+                resource_ref,
+            ),
+        )
+
+    def count_resource_bindings(self) -> dict[str, int]:
+        """Return active/inactive/total resource binding counts."""
+        row = self._conn.execute(
+            "SELECT "
+            "SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END), "
+            "SUM(CASE WHEN active = 0 THEN 1 ELSE 0 END), "
+            "COUNT(*) FROM resource_bindings"
+        ).fetchone()
+        active = int(row[0] or 0) if row else 0
+        inactive = int(row[1] or 0) if row else 0
+        total = int(row[2] or 0) if row else 0
+        return {"active": active, "inactive": inactive, "total": total}
 
     def delete_source_document(
         self,
