@@ -71,6 +71,9 @@ class _ConnProxy:
         else:
             object.__getattribute__(self, "__dict__")[name] = value
 
+
+_SQLiteConn = sqlite3.Connection | _ConnProxy
+
 # ---------------------------------------------------------------------------
 # SQL templates (table name injected at instance level)
 # ---------------------------------------------------------------------------
@@ -384,7 +387,7 @@ class SQLiteMetadataStore:
         self,
         document: SourceDocument,
         *,
-        conn: sqlite3.Connection,
+        conn: _SQLiteConn,
     ) -> None:
         """Upsert one source document using caller-owned transaction scope."""
         conn.execute(
@@ -411,7 +414,7 @@ class SQLiteMetadataStore:
         namespace: str,
         document_ref: str,
         *,
-        conn: sqlite3.Connection | None = None,
+        conn: _SQLiteConn | None = None,
     ) -> SourceDocument | None:
         """Return one SourceDocument by namespace/ref, or None."""
         read_conn = conn or self._conn
@@ -444,7 +447,7 @@ class SQLiteMetadataStore:
         self,
         binding: ResourceBinding,
         *,
-        conn: sqlite3.Connection,
+        conn: _SQLiteConn,
     ) -> None:
         """Upsert resource binding state using caller-owned transaction scope.
 
@@ -519,7 +522,7 @@ class SQLiteMetadataStore:
         resource_ref: str,
         active: bool,
         *,
-        conn: sqlite3.Connection,
+        conn: _SQLiteConn,
         unbound_at: datetime | None = None,
     ) -> None:
         """Update binding activity without touching retained artifacts."""
@@ -555,7 +558,7 @@ class SQLiteMetadataStore:
     def backfill_resource_bindings_from_source_documents(
         self,
         *,
-        conn: sqlite3.Connection | None = None,
+        conn: _SQLiteConn | None = None,
     ) -> int:
         """Backfill active resource bindings from existing source_documents.
 
@@ -579,7 +582,7 @@ class SQLiteMetadataStore:
         namespace: str,
         document_ref: str,
         *,
-        conn: sqlite3.Connection,
+        conn: _SQLiteConn,
     ) -> None:
         """Delete one source document using caller-owned transaction scope."""
         conn.execute(
@@ -591,7 +594,7 @@ class SQLiteMetadataStore:
         self,
         file_path: str | Path,
         *,
-        conn: sqlite3.Connection,
+        conn: _SQLiteConn,
     ) -> None:
         """Delete filesystem source document derived from resolved file_path."""
         document_ref = str(Path(file_path).resolve())
@@ -607,7 +610,7 @@ class SQLiteMetadataStore:
         provenance: ChunkProvenance,
         chunk_id: str,
         *,
-        conn: sqlite3.Connection,
+        conn: _SQLiteConn,
     ) -> None:
         """Persist one chunk provenance row using caller-owned transaction scope."""
         if provenance.namespace == "filesystem" and provenance.source_unit_refs:
@@ -1031,7 +1034,7 @@ class SQLiteMetadataStore:
         strategy: str,
         file_path: str,
         *,
-        conn: sqlite3.Connection,
+        conn: _SQLiteConn,
     ) -> list[str]:
         """Remove all M2M rows for file_path and return orphaned chunk_ids.
 
@@ -1096,7 +1099,7 @@ class SQLiteMetadataStore:
         strategy: str,
         chunk_ids: Sequence[str],
         *,
-        conn: sqlite3.Connection,
+        conn: _SQLiteConn,
     ) -> None:
         """Delete rows from chunks_<strategy> for orphaned chunk_ids.
 

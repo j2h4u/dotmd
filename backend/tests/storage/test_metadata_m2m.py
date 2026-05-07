@@ -671,5 +671,5 @@ class TestChunkModelRejectsCharOffset:
                 level=1,
                 text="text",
                 chunk_index=0,
-                char_offset=10,  # Must be rejected
+                char_offset=10,  # type: ignore[call-arg]  # Must be rejected
             )
