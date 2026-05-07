@@ -660,6 +660,65 @@ class SQLiteMetadataStore:
                 )
         return result
 
+    def get_active_chunk_provenance_for_chunk_ids(
+        self,
+        strategy: str,
+        chunk_ids: Sequence[str],
+    ) -> dict[str, ChunkProvenance]:
+        """Batch-hydrate canonical active chunk provenance by chunk_id."""
+        if not chunk_ids:
+            return {}
+        self.ensure_chunk_source_provenance_table(strategy)
+        table = f"chunk_source_provenance_{strategy}"
+        placeholders = ",".join("?" for _ in chunk_ids)
+        rows = self._conn.execute(
+            f"SELECT p.chunk_id, p.namespace, p.document_ref, "
+            f"p.source_unit_refs, p.chunk_strategy, p.parser_name "
+            f"FROM {table} p "
+            f"JOIN resource_bindings rb INDEXED BY "
+            f"idx_resource_bindings_document_active "
+            f"  ON rb.namespace = p.namespace "
+            f" AND rb.document_ref = p.document_ref "
+            f" AND rb.active = 1 "
+            f"WHERE p.chunk_id IN ({placeholders}) "
+            f"ORDER BY p.chunk_id, p.namespace, p.document_ref",
+            list(chunk_ids),
+        ).fetchall()
+        result: dict[str, ChunkProvenance] = {}
+        for row in rows:
+            chunk_id = row[0]
+            if chunk_id not in result:
+                result[chunk_id] = ChunkProvenance(
+                    namespace=row[1],
+                    document_ref=row[2],
+                    ref=f"{row[1]}:{row[2]}",
+                    source_unit_refs=json.loads(row[3]),
+                    chunk_strategy=row[4],
+                    parser_name=row[5],
+                )
+        return result
+
+    def get_inactive_chunk_count_for_document(
+        self,
+        strategy: str,
+        namespace: str,
+        document_ref: str,
+    ) -> int:
+        """Count retained chunks for an inactive document binding."""
+        self.ensure_chunk_source_provenance_table(strategy)
+        table = f"chunk_source_provenance_{strategy}"
+        row = self._conn.execute(
+            f"SELECT COUNT(DISTINCT p.chunk_id) "
+            f"FROM {table} p "
+            f"JOIN resource_bindings rb "
+            f"  ON rb.namespace = p.namespace "
+            f" AND rb.document_ref = p.document_ref "
+            f" AND rb.active = 0 "
+            f"WHERE p.namespace = ? AND p.document_ref = ?",
+            (namespace, document_ref),
+        ).fetchone()
+        return int(row[0]) if row else 0
+
     def count_missing_source_provenance(self, strategy: str) -> int:
         """Count active chunks without source provenance for one strategy."""
         self.ensure_chunk_source_provenance_table(strategy)
