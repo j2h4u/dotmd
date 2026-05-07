@@ -353,6 +353,39 @@ def test_metadata_only_index_file_replaces_existing_fused_vector(
     assert source_document.title == "Updated"
 
 
+def test_modified_index_file_updates_binding_fingerprints_without_inactive_binding(
+    pipeline_settings,
+):
+    """Trickle body changes keep replacement semantics and leave an active binding."""
+
+    doc = pipeline_settings.data_dir / "binding-index-file.md"
+    _write_md(doc, "Initial", ["alpha"], "Original body.")
+
+    pipeline = _make_pipeline_with_directional_vectors(pipeline_settings)
+    pipeline.index_file(doc)
+
+    document_ref = str(doc.resolve())
+    before = pipeline._metadata_store.get_resource_binding(
+        "filesystem",
+        document_ref,
+    )
+    assert before is not None
+    assert before.active is True
+
+    _write_md(doc, "Initial", ["alpha"], "Modified body.")
+    pipeline.index_file(doc)
+
+    after = pipeline._metadata_store.get_resource_binding(
+        "filesystem",
+        document_ref,
+    )
+    assert after is not None
+    assert after.active is True
+    assert after.unbound_at is None
+    assert after.content_fingerprint != before.content_fingerprint
+    assert after.metadata_fingerprint == before.metadata_fingerprint
+
+
 def test_metadata_only_index_file_refreshes_graph_title_and_removed_tags(
     pipeline_settings,
 ):

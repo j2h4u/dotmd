@@ -360,6 +360,107 @@ def test_successful_index_file_creates_active_filesystem_binding(
     assert binding.metadata_fingerprint == source_document.metadata_fingerprint
 
 
+def test_bulk_index_rebinds_equivalent_inactive_filesystem_content_without_tei(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    md_path = data_dir / "note.md"
+    _write_markdown(md_path, "Rebind", ["source"], "# Heading\n\nBody text.")
+
+    pipeline = _pipeline_with_mock_embedding(data_dir, tmp_path / "index")
+    encode_calls: list[list[str]] = []
+
+    def record_encode(texts):  # type: ignore[no-untyped-def]
+        encode_calls.append(list(texts))
+        return [[0.1] * 768 for _ in texts]
+
+    pipeline._semantic_engine.encode_batch = record_encode
+    pipeline.index(data_dir)
+    original_chunk_ids = pipeline._metadata_store.get_chunk_ids_by_file(
+        pipeline._strategy,
+        str(md_path),
+    )
+    assert original_chunk_ids
+
+    pipeline._deactivate_filesystem_binding(str(md_path))
+    inactive = pipeline._metadata_store.get_resource_binding(
+        "filesystem",
+        str(md_path.resolve()),
+    )
+    assert inactive is not None
+    assert inactive.active is False
+
+    encode_calls.clear()
+    pipeline.index(data_dir)
+
+    rebound = pipeline._metadata_store.get_resource_binding(
+        "filesystem",
+        str(md_path.resolve()),
+    )
+    rebound_chunk_ids = pipeline._metadata_store.get_chunk_ids_by_file(
+        pipeline._strategy,
+        str(md_path),
+    )
+    provenance = pipeline._metadata_store.get_chunk_provenance_for_chunk_ids(
+        pipeline._strategy,
+        original_chunk_ids,
+    )
+    assert rebound is not None
+    assert rebound.active is True
+    assert rebound.unbound_at is None
+    assert rebound_chunk_ids == original_chunk_ids
+    assert set(provenance) == set(original_chunk_ids)
+    assert encode_calls == []
+
+
+def test_index_file_rebinds_equivalent_inactive_filesystem_content_without_tei(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    md_path = data_dir / "note.md"
+    _write_markdown(md_path, "Trickle Rebind", ["source"], "Body text.")
+
+    pipeline = _pipeline_with_mock_embedding(data_dir, tmp_path / "index")
+    encode_calls: list[list[str]] = []
+
+    def record_encode(texts):  # type: ignore[no-untyped-def]
+        encode_calls.append(list(texts))
+        return [[0.1] * 768 for _ in texts]
+
+    pipeline._semantic_engine.encode_batch = record_encode
+    pipeline.index_file(md_path)
+    original_chunk_ids = pipeline._metadata_store.get_chunk_ids_by_file(
+        pipeline._strategy,
+        str(md_path),
+    )
+    assert original_chunk_ids
+
+    pipeline._deactivate_filesystem_binding(str(md_path))
+    encode_calls.clear()
+    pipeline.index_file(md_path)
+
+    rebound = pipeline._metadata_store.get_resource_binding(
+        "filesystem",
+        str(md_path.resolve()),
+    )
+    rebound_chunk_ids = pipeline._metadata_store.get_chunk_ids_by_file(
+        pipeline._strategy,
+        str(md_path),
+    )
+    provenance = pipeline._metadata_store.get_chunk_provenance_for_chunk_ids(
+        pipeline._strategy,
+        original_chunk_ids,
+    )
+    assert rebound is not None
+    assert rebound.active is True
+    assert rebound.unbound_at is None
+    assert rebound_chunk_ids == original_chunk_ids
+    assert set(provenance) == set(original_chunk_ids)
+    assert encode_calls == []
+
+
 def test_reindex_vectors_preserves_existing_provenance_and_skips_legacy_chunks(
     tmp_path: Path,
 ) -> None:
