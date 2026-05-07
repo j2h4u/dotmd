@@ -1052,6 +1052,20 @@ class SQLiteMetadataStore:
         ).fetchall()
         return [r[0] for r in rows]
 
+    def get_chunk_refs_by_file(
+        self,
+        strategy: str,
+        file_path: str,
+    ) -> list[tuple[str, int]]:
+        """Return ``(chunk_id, chunk_index)`` refs for one file in index order."""
+        m2m_table = f"chunk_file_paths_{strategy}"
+        rows = self._conn.execute(
+            f"SELECT chunk_id, chunk_index FROM {m2m_table} "
+            "WHERE file_path = ? ORDER BY chunk_index",
+            (file_path,),
+        ).fetchall()
+        return [(row[0], int(row[1])) for row in rows]
+
     def get_chunk_count_for_file(self, strategy: str, file_path: str) -> int:
         """Return total number of chunks associated with file_path."""
         m2m_table = f"chunk_file_paths_{strategy}"

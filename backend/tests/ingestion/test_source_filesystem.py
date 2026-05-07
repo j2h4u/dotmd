@@ -420,6 +420,72 @@ def test_bulk_index_rebinds_equivalent_inactive_filesystem_content_without_tei(
     assert encode_calls == []
 
 
+def test_bulk_index_rebinds_equivalent_content_from_new_filesystem_path_without_tei(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    old_path = data_dir / "old.md"
+    new_path = data_dir / "new.md"
+    body = "# Heading\n\nBody text."
+    _write_markdown(old_path, "Cross Path Rebind", ["source"], body)
+
+    pipeline = _pipeline_with_mock_embedding(data_dir, tmp_path / "index")
+    encode_calls: list[list[str]] = []
+
+    def record_encode(texts):  # type: ignore[no-untyped-def]
+        encode_calls.append(list(texts))
+        return [[0.1] * 768 for _ in texts]
+
+    pipeline._semantic_engine.encode_batch = record_encode
+    pipeline.index(data_dir)
+    original_chunk_refs = pipeline._metadata_store.get_chunk_refs_by_file(
+        pipeline._strategy,
+        str(old_path),
+    )
+    original_chunk_ids = [chunk_id for chunk_id, _index in original_chunk_refs]
+    assert original_chunk_ids
+
+    old_path.unlink()
+    pipeline.index(data_dir)
+    inactive = pipeline._metadata_store.get_resource_binding(
+        "filesystem",
+        str(old_path.resolve()),
+    )
+    assert inactive is not None
+    assert inactive.active is False
+
+    _write_markdown(new_path, "Cross Path Rebind", ["source"], body)
+    encode_calls.clear()
+    pipeline.index(data_dir)
+
+    rebound = pipeline._metadata_store.get_resource_binding(
+        "filesystem",
+        str(new_path.resolve()),
+    )
+    new_chunk_refs = pipeline._metadata_store.get_chunk_refs_by_file(
+        pipeline._strategy,
+        str(new_path),
+    )
+    new_chunk_ids = [chunk_id for chunk_id, _index in new_chunk_refs]
+    new_provenance = pipeline._metadata_store.get_chunk_provenance_for_chunk_ids(
+        pipeline._strategy,
+        new_chunk_ids,
+    )
+    assert rebound is not None
+    assert rebound.active is True
+    assert rebound.metadata_json["last_rebind"]["reused_chunks"] == len(
+        original_chunk_ids
+    )
+    assert new_chunk_refs == original_chunk_refs
+    assert set(new_provenance) == set(original_chunk_ids)
+    assert all(
+        provenance.document_ref == str(new_path.resolve())
+        for provenance in new_provenance.values()
+    )
+    assert encode_calls == []
+
+
 def test_index_file_rebinds_equivalent_inactive_filesystem_content_without_tei(
     tmp_path: Path,
 ) -> None:

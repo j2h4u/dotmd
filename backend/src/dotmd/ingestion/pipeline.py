@@ -944,10 +944,12 @@ class IndexingPipeline:
             if source_document.file_path is not None
             else source_document.document_ref
         )
-        chunk_ids = self._metadata_store.get_chunk_ids_by_file(
+        retained_path = binding.resource_ref
+        chunk_refs = self._metadata_store.get_chunk_refs_by_file(
             self._strategy,
-            file_path,
+            retained_path,
         )
+        chunk_ids = [chunk_id for chunk_id, _chunk_index in chunk_refs]
         diagnostic["retained_hidden"] = len(chunk_ids)
         if not chunk_ids:
             return diagnostic
@@ -971,27 +973,47 @@ class IndexingPipeline:
             "reused_chunks": diagnostic["reused_chunks"],
             "reused_embeddings": diagnostic["reused_embeddings"],
         }
-        self._metadata_store.upsert_source_document(
-            source_document,
-            conn=self._conn,
-        )
-        self._metadata_store.upsert_resource_binding(
-            ResourceBinding(
-                namespace=source_document.namespace,
-                resource_ref=source_document.document_ref,
-                document_ref=source_document.document_ref,
-                ref=source_document.ref,
-                active=True,
-                bound_at=source_document.updated_at,
-                unbound_at=None,
-                content_fingerprint=source_document.content_fingerprint,
-                metadata_fingerprint=source_document.metadata_fingerprint,
-                source_unit_refs=binding.source_unit_refs,
-                metadata_json=metadata_json,
-            ),
-            conn=self._conn,
-        )
-        self._conn.commit()
+        provenance = self._filesystem_chunk_provenance(source_document)
+        self._conn.execute("BEGIN")
+        try:
+            self._metadata_store.upsert_source_document(
+                source_document,
+                conn=self._conn,
+            )
+            for chunk_id, chunk_index in chunk_refs:
+                self._metadata_store.add_file_path(
+                    self._strategy,
+                    chunk_id,
+                    file_path,
+                    chunk_index,
+                    _commit=False,
+                )
+                self._metadata_store.add_chunk_provenance(
+                    self._strategy,
+                    provenance,
+                    chunk_id,
+                    conn=self._conn,
+                )
+            self._metadata_store.upsert_resource_binding(
+                ResourceBinding(
+                    namespace=source_document.namespace,
+                    resource_ref=source_document.document_ref,
+                    document_ref=source_document.document_ref,
+                    ref=source_document.ref,
+                    active=True,
+                    bound_at=source_document.updated_at,
+                    unbound_at=None,
+                    content_fingerprint=source_document.content_fingerprint,
+                    metadata_fingerprint=source_document.metadata_fingerprint,
+                    source_unit_refs=binding.source_unit_refs,
+                    metadata_json=metadata_json,
+                ),
+                conn=self._conn,
+            )
+            self._conn.execute("COMMIT")
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
         file_info = source_document_to_file_info(source_document)
         self._save_chunk_fingerprint(file_info)
         self._save_meta_fingerprint(file_info)
@@ -1528,6 +1550,18 @@ class IndexingPipeline:
         # 3. Determine files to ingest (new + modified in chunk_diff)
         changed_paths = set(diff.new) | set(diff.modified)
         files_to_ingest = [fi for fi in all_files if str(fi.path) in changed_paths]
+        rebound_paths: set[str] = set()
+        for fi in files_to_ingest:
+            if str(fi.path) not in set(diff.new):
+                continue
+            source_document = documents_by_path[Path(fi.path)]
+            diagnostic = self._rebind_retained_filesystem_document(source_document)
+            if diagnostic["rebound"]:
+                rebound_paths.add(str(fi.path))
+        if rebound_paths:
+            files_to_ingest = [
+                fi for fi in files_to_ingest if str(fi.path) not in rebound_paths
+            ]
 
         # 4. Check meta_diff for files unchanged in chunk_diff.
         #    These files already have chunks but may need embedding
