@@ -1386,7 +1386,7 @@ class IndexingPipeline:
         # 1. Purge deleted files
         t0 = time.perf_counter()
         for path_str in diff.deleted:
-            self._purge_file(path_str)
+            self._deactivate_filesystem_binding(path_str)
         if diff.deleted:
             logger.info("[%s] purge_deleted: %d files (%.2fs)", run_id, len(diff.deleted), time.perf_counter() - t0)
 
@@ -2092,6 +2092,9 @@ class IndexingPipeline:
     def _purge_file(self, file_path: str) -> None:
         """Remove all indexed data for a single file, using holder-aware cascade.
 
+        Hard purge is not normal missing-resource handling; Phase 27 normal
+        unbind uses _deactivate_filesystem_binding.
+
         Phase 16 rewrite (P4): decrement M2M, then cascade-delete only chunks
         whose holder count dropped to 0.  Shared chunks (still referenced by
         another file) survive.
@@ -2152,6 +2155,61 @@ class IndexingPipeline:
                 "fingerprint cleanup failed after DB commit: %s (file=%s)", e, file_path,
             )
 
+    def _deactivate_filesystem_binding(
+        self,
+        file_path: str,
+        *,
+        reason: str = "file_missing",
+    ) -> None:
+        """Deactivate a filesystem binding while retaining derived artifacts."""
+        document_ref = self._meta_entity_id(file_path)
+        source_document = self._metadata_store.get_source_document(
+            "filesystem",
+            document_ref,
+        )
+        existing = self._metadata_store.get_resource_binding(
+            "filesystem",
+            document_ref,
+        )
+        now = datetime.now(tz=UTC)
+
+        if source_document is not None:
+            bound_at = source_document.updated_at
+            content_fingerprint = source_document.content_fingerprint
+            metadata_fingerprint = source_document.metadata_fingerprint
+            ref = source_document.ref
+        elif existing is not None:
+            bound_at = existing.bound_at
+            content_fingerprint = existing.content_fingerprint
+            metadata_fingerprint = existing.metadata_fingerprint
+            ref = existing.ref
+        else:
+            bound_at = now
+            content_fingerprint = ""
+            metadata_fingerprint = ""
+            ref = f"filesystem:{document_ref}"
+
+        metadata_json = dict(existing.metadata_json) if existing is not None else {}
+        metadata_json["deactivation_reason"] = reason
+
+        self._metadata_store.upsert_resource_binding(
+            ResourceBinding(
+                namespace="filesystem",
+                resource_ref=document_ref,
+                document_ref=document_ref,
+                ref=ref,
+                active=False,
+                bound_at=bound_at,
+                unbound_at=now,
+                content_fingerprint=content_fingerprint,
+                metadata_fingerprint=metadata_fingerprint,
+                source_unit_refs=existing.source_unit_refs if existing is not None else [],
+                metadata_json=metadata_json,
+            ),
+            conn=self._conn,
+        )
+        self._conn.commit()
+
     def purge_orphaned_files(
         self,
         discovered_paths: set[str] | None = None,
@@ -2165,8 +2223,8 @@ class IndexingPipeline:
         absent from that set is treated as an orphan.  When omitted (startup
         / test call), each stored file_path is checked via Path.exists().
 
-        Per-file purge delegates to ``_purge_file`` which runs the full
-        decrement-cascade inside a single sqlite3 transaction per file.
+        Normal missing-resource handling delegates to
+        ``_deactivate_filesystem_binding`` so retained artifacts can be reused.
 
         Returns ``(files_discovered, files_missing, paths_purged)``.
         The return shape is kept backward-compatible:
@@ -2199,7 +2257,7 @@ class IndexingPipeline:
         files_missing = len(orphan_paths)
 
         logger.info(
-            "purge_orphaned_files: files_discovered=%d files_missing=%d paths_purging=%d "
+            "purge_orphaned_files: files_discovered=%d files_missing=%d paths_deactivating=%d "
             "(strategies=%s)",
             files_discovered, files_missing, files_missing,
             ", ".join(strategies) if strategies else "none",
@@ -2211,15 +2269,16 @@ class IndexingPipeline:
         files_removed = 0
         for file_path in sorted(orphan_paths):
             try:
-                self._purge_file(file_path)
+                self._deactivate_filesystem_binding(file_path)
                 files_removed += 1
             except Exception:
                 logger.exception(
-                    "purge_orphaned_files: failed to purge %s — skipping", file_path,
+                    "purge_orphaned_files: failed to deactivate %s — skipping",
+                    file_path,
                 )
 
         logger.info(
-            "purge_orphaned_files: purged %d/%d orphan files",
+            "purge_orphaned_files: deactivated %d/%d orphan files",
             files_removed, files_missing,
         )
         return files_removed, 0, 0

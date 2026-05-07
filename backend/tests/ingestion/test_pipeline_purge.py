@@ -42,7 +42,7 @@ def _build_post_v16_db(tmp_path: Path, strategy: str = "heading_512_50") -> Path
         CREATE INDEX idx_chunk_file_paths_{strategy}_file_path
             ON chunk_file_paths_{strategy}(file_path);
         CREATE VIRTUAL TABLE chunks_fts_{strategy} USING fts5(
-            chunk_id UNINDEXED, text, tokenize='unicode61'
+            chunk_id UNINDEXED, text, title, tags, tokenize='unicode61'
         );
         CREATE TABLE vec_meta_{strategy}_{MODEL} (
             rowid INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -260,7 +260,7 @@ class TestDropChunksClearsSourceAwareTables:
                     PRIMARY KEY (chunk_id, file_path, chunk_index)
                 );
                 CREATE VIRTUAL TABLE chunks_fts_{strategy} USING fts5(
-                    chunk_id UNINDEXED, text, tokenize='unicode61'
+                    chunk_id UNINDEXED, text, title, tags, tokenize='unicode61'
                 );
                 CREATE TABLE vec_meta_{strategy}_{MODEL} (
                     rowid INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -449,7 +449,7 @@ class TestPurgeRunsAcrossAllStrategies:
                     chunk_id TEXT NOT NULL UNIQUE, text_hash TEXT
                 );
                 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts_{s} USING fts5(
-                    chunk_id UNINDEXED, text, tokenize='unicode61'
+                    chunk_id UNINDEXED, text, title, tags, tokenize='unicode61'
                 );
             """)
         conn.commit()
