@@ -591,11 +591,20 @@ class IndexingPipeline:
         stale_paths = m2m_paths - remaining_paths
         if stale_paths:
             placeholders = ",".join("?" for _ in stale_paths)
+            stale_path_values = list(stale_paths)
             self._conn.execute(
                 "DELETE FROM source_documents "
                 "WHERE namespace = 'filesystem' "
                 f"AND file_path IN ({placeholders})",
-                list(stale_paths),
+                stale_path_values,
+            )
+            stale_refs = [str(Path(path).resolve()) for path in stale_path_values]
+            ref_placeholders = ",".join("?" for _ in stale_refs)
+            self._conn.execute(
+                "DELETE FROM resource_bindings "
+                "WHERE namespace = 'filesystem' "
+                f"AND resource_ref IN ({ref_placeholders})",
+                stale_refs,
             )
 
         self._conn.commit()

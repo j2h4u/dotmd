@@ -65,6 +65,20 @@ def _build_post_v16_db(tmp_path: Path, strategy: str = "heading_512_50") -> Path
             metadata_json TEXT NOT NULL DEFAULT '{{}}',
             PRIMARY KEY (namespace, document_ref)
         );
+        CREATE TABLE resource_bindings (
+            namespace TEXT NOT NULL,
+            resource_ref TEXT NOT NULL,
+            document_ref TEXT NOT NULL,
+            ref TEXT NOT NULL,
+            active INTEGER NOT NULL,
+            bound_at TEXT NOT NULL,
+            unbound_at TEXT,
+            content_fingerprint TEXT NOT NULL,
+            metadata_fingerprint TEXT NOT NULL,
+            source_unit_refs TEXT NOT NULL DEFAULT '[]',
+            metadata_json TEXT NOT NULL DEFAULT '{{}}',
+            PRIMARY KEY (namespace, resource_ref)
+        );
         CREATE TABLE chunk_source_provenance_{strategy} (
             chunk_id TEXT NOT NULL,
             namespace TEXT NOT NULL,
@@ -139,6 +153,33 @@ def _add_source_document(db_path: Path, file_path: str) -> None:
     conn.close()
 
 
+def _add_resource_binding(db_path: Path, file_path: str) -> None:
+    document_ref = str(Path(file_path).resolve())
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "INSERT OR REPLACE INTO resource_bindings ("
+        "namespace, resource_ref, document_ref, ref, active, bound_at, "
+        "unbound_at, content_fingerprint, metadata_fingerprint, source_unit_refs, "
+        "metadata_json"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "filesystem",
+            document_ref,
+            document_ref,
+            f"filesystem:{document_ref}",
+            1,
+            "2026-05-05T00:00:00+00:00",
+            None,
+            "content",
+            "metadata",
+            "[]",
+            "{}",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
 def _add_chunk_provenance(
     db_path: Path,
     strategy: str,
@@ -201,6 +242,7 @@ class TestPurgeSingleHolder:
         _insert_chunk(db_path, strategy, chunk_id, "content")
         _add_m2m(db_path, strategy, chunk_id, "/file_A.md")
         _add_source_document(db_path, "/file_A.md")
+        _add_resource_binding(db_path, "/file_A.md")
         _add_chunk_provenance(db_path, strategy, chunk_id, "/file_A.md")
 
         pipeline = _get_pipeline(db_path)
@@ -236,6 +278,7 @@ class TestDropChunksClearsSourceAwareTables:
         assert not _table_exists(db_path, f"chunk_file_paths_{strategy}")
         assert not _table_exists(db_path, f"chunk_source_provenance_{strategy}")
         assert _count(db_path, "source_documents") == 0
+        assert _count(db_path, "resource_bindings") == 0
 
     def test_drop_chunks_preserves_source_documents_referenced_by_other_strategy(
         self,
