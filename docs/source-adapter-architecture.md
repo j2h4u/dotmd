@@ -69,6 +69,51 @@ filesystem nodes or path-shaped APIs.
 No Phase 26 step requires `dotmd index --force`; full rebuild remains a
 three-day cost/risk item requiring an explicit user decision.
 
+## Phase 27 Delivered State
+
+Phase 27 adds the retained-artifact lifecycle foundation for the existing
+filesystem source. It does not ship Telegram ingestion, a Telegram export API,
+attachments/media processing, a generic plugin UI, live Telegram smoke, or a
+garbage-collection policy.
+
+The current visibility rule is:
+
+```text
+active resource binding -> normal public search/read may expose the ref
+inactive resource binding -> retained artifacts stay internal and hidden
+```
+
+`source_documents` remains the source of truth for active/current document
+metadata, including title, source URI, parser metadata, fingerprints, and
+filesystem compatibility fields. `resource_bindings` stores binding activity
+plus retained fingerprint snapshots used to find equivalent content during
+rebind. The retained rows are deliberately separate from public visibility:
+chunks, provenance, FTS rows, vector rows, and graph artifacts may remain after
+a resource becomes inactive, but normal public `search`, `read(ref)`, and
+`drill(ref)` are active-binding gated.
+
+Filesystem missing paths now deactivate the corresponding binding instead of
+running the normal hard purge. This hides the ref from public output while
+retaining reusable artifacts. Modified files still use replacement reindex
+semantics, and successful reindex updates active binding fingerprints after the
+new content is written. Restoring equivalent filesystem content can reactivate
+the binding and reuse retained chunks/embeddings without TEI calls when content
+and metadata fingerprints match.
+
+Retained inactive artifacts are not a recycle bin or inactive browsing feature.
+They exist to avoid recomputing expensive derived work. Garbage collection,
+TTL, hard purge policy, and user-facing inactive-resource browsing remain
+deferred until there is a concrete lifecycle requirement.
+
+Telegram deletion semantics remain future work. Telegram messages that
+`mcp-telegram` marks as deleted upstream are not modeled as Phase 27 resource
+unbinds; that metadata should be preserved by the later Telegram adapter and
+handled by future read/drill/display policy.
+
+No Phase 27 step requires `dotmd index --force`, a full reindex, or a full
+rebuild. The foundation was validated with local filesystem fixtures; live
+Telegram smoke is deferred to the Telegram search/read/drill phase.
+
 ## Problem
 
 dotMD currently indexes markdown files from the local filesystem. That is too
@@ -398,6 +443,12 @@ source_fingerprints:
 
 This should be shared infrastructure, not custom SQLite code invented by every
 adapter.
+
+Phase 27's `resource_bindings` table is the first concrete binding-state slice,
+not the full source-state platform. It tracks active/inactive resource
+visibility and retained fingerprint snapshots for rebind lookup. Future source
+state still needs cursors, source-unit fingerprints, and adapter-specific sync
+state before Telegram or other application sources are complete.
 
 ### Source Mirror
 
@@ -1055,7 +1106,8 @@ Deliver:
 - search results that show source label, dialog title, date, sender, and
   message range;
 - `read(ref)` for Telegram context windows;
-- delete handling for tombstoned messages if available in `sync.db`.
+- preserve deleted-upstream metadata from `mcp-telegram` if available in
+  `sync.db`, without treating that metadata as a Phase 27 unbind rule.
 
 Do not deliver:
 
@@ -1063,6 +1115,7 @@ Do not deliver:
 - contact imports;
 - fuzzy cross-source entity merging;
 - native Telegram search as a candidate provider;
+- Telegram recycle-bin behavior;
 - full mirror inside dotMD.
 
 This phase is successful when real Telegram chats can be searched from the same

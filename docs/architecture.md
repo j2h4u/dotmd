@@ -23,6 +23,7 @@ flowchart TD
 
     subgraph SQLite["Unified SQLite index.db"]
         D --> META[chunk metadata]
+        META --> RB[active resource bindings]
         D --> M2M[Internal filesystem holder paths]
         D --> FTS[FTS5 keyword index]
         FP --> TRACK[file and embed fingerprints]
@@ -86,7 +87,7 @@ flowchart TD
 
 | Store | Technology | Contents |
 |-------|------------|----------|
-| Metadata | SQLite `index.db` | Chunks, file metadata, M2M file paths, index stats |
+| Metadata | SQLite `index.db` | Chunks, source documents, active resource bindings, M2M file paths, index stats |
 | Keyword | SQLite FTS5 | Incremental keyword index with title/tag weighting |
 | Vector | sqlite-vec in `index.db` | Embeddings keyed by chunk strategy and embedding model |
 | Graph | FalkorDB or LadybugDB | Files, sections, entities, tags, and relations |
@@ -120,6 +121,8 @@ The schema is two-dimensional where needed: `(chunk_strategy, embedding_model)`.
 5. Results return public source refs, snippets, fused scores, engine matches,
    and optional heading paths. Filesystem holder paths are internal provenance
    mechanics, not the public read/search identity.
+6. Public hydration filters candidates through active resource bindings before
+   refs can reach normal `search`, `read(ref)`, or `drill(ref)` output.
 
 ### Reranker Adapter Layer
 
@@ -207,6 +210,26 @@ sources should use `SourceDocument` and `SourceUnit` semantics instead.
 
 No Phase 26 step required `dotmd index --force`. A full rebuild remains a
 three-day cost/risk item that requires an explicit user decision.
+
+Phase 27 adds the retained artifact lifecycle boundary for filesystem Markdown.
+An active resource binding is now the public visibility gate. `source_documents`
+remains the source of truth for active/current document metadata and
+fingerprints; `resource_bindings` records whether a resource is active plus the
+retained content and metadata fingerprint snapshots used for equivalent rebind
+lookup. Retained inactive artifacts are hidden from normal public `search`,
+`read(ref)`, and `drill(ref)` and are retained only for reuse, not as a recycle
+bin or inactive browsing surface.
+
+Filesystem missing paths deactivate their binding instead of doing the normal
+hard purge, preserving chunks, provenance, FTS rows, vector rows, and graph
+artifacts for possible reuse. Modified files still use replacement reindex
+semantics and update active binding fingerprints after successful reindex.
+Garbage collection and TTL policy are deferred. No Phase 27 step required
+`dotmd index --force`, a full reindex, or a full rebuild.
+
+Phase 27 is foundation only. Telegram ingestion, a structured `mcp-telegram`
+export API, attachments/media, generic plugin UI, Telegram deleted-upstream
+metadata policy, and live Telegram smoke remain later-phase work.
 
 The intended future direction is source/document/unit ingestion where
 filesystem files are only one source adapter. The design context and open
