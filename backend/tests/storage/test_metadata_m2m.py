@@ -110,7 +110,7 @@ class TestInsertChunkIsIdempotent:
             text="Test content",
         )
 
-        conn = sqlite3.connect(str(tmp_path / "metadata.db"))
+        conn = store._conn
         count = conn.execute(
             f"SELECT COUNT(*) FROM chunks_{STRATEGY} WHERE chunk_id=?",
             (VALID_CHUNK_ID,),
@@ -130,7 +130,7 @@ class TestAddFilePathIsIdempotent:
         store.add_file_path(STRATEGY, VALID_CHUNK_ID, "/path/file.md", chunk_index=0)
         store.add_file_path(STRATEGY, VALID_CHUNK_ID, "/path/file.md", chunk_index=0)
 
-        conn = sqlite3.connect(str(tmp_path / "metadata.db"))
+        conn = store._conn
         count = conn.execute(
             f"SELECT COUNT(*) FROM chunk_file_paths_{STRATEGY} WHERE chunk_id=?",
             (VALID_CHUNK_ID,),
@@ -216,10 +216,9 @@ class TestDeleteM2MForFileReturnsOrphans:
         store.add_file_path(STRATEGY, sole_cid, "/file_a.md", chunk_index=1)
 
         # delete_m2m_for_file MUST use the caller's conn (contract: no internal commit)
-        conn = sqlite3.connect(str(tmp_path / "metadata.db"))
+        conn = store._conn
         orphans = store.delete_m2m_for_file(STRATEGY, "/file_a.md", conn=conn)
         conn.commit()
-        conn.close()
 
         assert sole_cid in orphans, (
             f"sole_cid should be in orphans (last holder removed), got {orphans!r}"
@@ -238,10 +237,9 @@ class TestSourceDocumentPersistence:
         md_path.write_text("# Note\n", encoding="utf-8")
         document = _source_document(md_path)
 
-        conn = sqlite3.connect(str(tmp_path / "metadata.db"))
+        conn = store._conn
         store.upsert_source_document(document, conn=conn)
         conn.commit()
-        conn.close()
 
         loaded = store.get_source_document("filesystem", str(md_path.resolve()))
 
@@ -271,7 +269,6 @@ class TestChunkSourceProvenance:
             conn=conn,
         )
         conn.commit()
-        conn.close()
 
         loaded = store.get_chunk_provenance_for_chunk_ids(
             STRATEGY,
@@ -304,7 +301,6 @@ class TestChunkSourceProvenance:
             conn=conn,
         )
         conn.commit()
-        conn.close()
 
         assert store.get_file_paths_by_chunk_id(STRATEGY, VALID_CHUNK_ID) == [
             str(md_path)
@@ -336,6 +332,126 @@ class TestChunkSourceProvenance:
         assert all(
             provenance.source_unit_refs == []
             for provenance in loaded.values()
+        )
+
+    def test_active_chunk_provenance_excludes_inactive_retained_rows(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        store = _build_m2m_store(tmp_path)
+        store.ensure_chunk_source_provenance_table(STRATEGY)
+        active_path = tmp_path / "z-active.md"
+        inactive_path = tmp_path / "a-inactive.md"
+        active_path.write_text("# Active\n", encoding="utf-8")
+        inactive_path.write_text("# Inactive\n", encoding="utf-8")
+        active_chunk_id = "1" * 64
+        inactive_chunk_id = "2" * 64
+        shared_chunk_id = "3" * 64
+
+        conn = store._conn
+        for md_path, active in [(active_path, True), (inactive_path, False)]:
+            store.upsert_source_document(_source_document(md_path), conn=conn)
+            store.upsert_resource_binding(
+                _resource_binding(md_path, active=active),
+                conn=conn,
+            )
+            if not active:
+                store.set_resource_binding_active(
+                    "filesystem",
+                    str(md_path.resolve()),
+                    False,
+                    conn=conn,
+                    unbound_at=datetime.now(tz=UTC),
+                )
+        for chunk_id, md_path in [
+            (active_chunk_id, active_path),
+            (inactive_chunk_id, inactive_path),
+            (shared_chunk_id, inactive_path),
+            (shared_chunk_id, active_path),
+        ]:
+            store.insert_chunk(
+                STRATEGY,
+                chunk_id,
+                ["H"],
+                1,
+                f"text {chunk_id}",
+                _commit=False,
+            )
+            store.add_file_path(
+                STRATEGY,
+                chunk_id,
+                str(md_path),
+                chunk_index=0,
+                _commit=False,
+            )
+            store.add_chunk_provenance(
+                STRATEGY,
+                _filesystem_provenance(md_path),
+                chunk_id,
+                conn=conn,
+            )
+        conn.commit()
+
+        normal = store.get_chunk_provenance_for_chunk_ids(
+            STRATEGY,
+            [inactive_chunk_id, shared_chunk_id],
+        )
+        active = store.get_active_chunk_provenance_for_chunk_ids(
+            STRATEGY,
+            [active_chunk_id, inactive_chunk_id, shared_chunk_id],
+        )
+
+        assert normal[inactive_chunk_id].document_ref == str(
+            inactive_path.resolve()
+        )
+        assert normal[shared_chunk_id].document_ref == str(
+            inactive_path.resolve()
+        )
+        assert inactive_chunk_id not in active
+        assert active[active_chunk_id].document_ref == str(active_path.resolve())
+        assert active[shared_chunk_id].document_ref == str(active_path.resolve())
+
+        assert store.get_inactive_chunk_count_for_document(
+            STRATEGY,
+            "filesystem",
+            str(inactive_path.resolve()),
+        ) == 2
+        assert store._conn.execute(
+            f"SELECT COUNT(*) FROM chunk_source_provenance_{STRATEGY} "
+            "WHERE document_ref = ?",
+            (str(inactive_path.resolve()),),
+        ).fetchone()[0] == 2
+        assert store._conn.execute(
+            f"SELECT COUNT(*) FROM chunks_{STRATEGY} WHERE chunk_id = ?",
+            (inactive_chunk_id,),
+        ).fetchone()[0] == 1
+        assert store.get_file_paths_by_chunk_id(STRATEGY, inactive_chunk_id) == [
+            str(inactive_path)
+        ]
+
+    def test_active_chunk_provenance_uses_document_active_index(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        store = _build_m2m_store(tmp_path)
+        store.ensure_chunk_source_provenance_table(STRATEGY)
+        table = f"chunk_source_provenance_{STRATEGY}"
+
+        plan = store._conn.execute(
+            "EXPLAIN QUERY PLAN "
+            f"SELECT p.chunk_id FROM {table} p "
+            "JOIN resource_bindings rb INDEXED BY "
+            "idx_resource_bindings_document_active "
+            "ON rb.namespace = p.namespace "
+            "AND rb.document_ref = p.document_ref "
+            "AND rb.active = 1 "
+            "WHERE p.chunk_id IN (?) "
+            "ORDER BY p.chunk_id, p.namespace, p.document_ref",
+            (VALID_CHUNK_ID,),
+        ).fetchall()
+
+        assert "idx_resource_bindings_document_active" in " ".join(
+            row[3] for row in plan
         )
 
 
