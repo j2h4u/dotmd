@@ -4,6 +4,7 @@ plan: "04"
 type: tdd
 wave: 4
 depends_on:
+  - "29-01"
   - "29-03"
 files_modified:
   - backend/src/dotmd/core/config.py
@@ -13,6 +14,8 @@ files_modified:
   - backend/tests/ingestion/test_telegram_ingestion.py
   - docs/mcp-telegram-source-contract.md
   - docs/source-adapter-architecture.md
+  - /opt/docker/dotmd/docker-compose.yml
+  - /opt/docker/dotmd/.env
 autonomous: true
 requirements: ["R4", "R5", "R7", "R8"]
 requirements_addressed: ["R4", "R5", "R7", "R8"]
@@ -26,7 +29,8 @@ must_haves:
     - "D-15: Full public search -> ref -> read/drill live smoke remains Phase 31 scope."
     - "D-16: Resolver tests include topic/reply metadata and duplicate short-message refs where useful."
     - "Review-HIGH: Message refs must resolve active bindings at dialog scope while preserving message-level target refs."
-    - "Review-HIGH: Production smoke must specify how dotMD reaches the mcp-telegram daemon."
+    - "Review-HIGH: Production smoke uses the Plan 01 mcp-telegram daemon API over the existing UNIX-socket JSON transport; no phantom HTTP URL transport is planned in Phase 29."
+    - "Review-HIGH: This plan directly depends on Plan 01 because read windows and bounded smoke require the daemon source API, not only dotMD ingestion."
     - "Full-reindex answer: resolver/docs/smoke work must use existing Telegram ingest state and must not force a full index rebuild."
 ---
 
@@ -47,7 +51,8 @@ Phase 31 public search quality is complete.
 | Phase 29 overclaims full search/read/drill live behavior | HIGH | Docs and smoke explicitly limit live validation to export/import/metadata/index state. |
 | Inactive bindings can be read through Telegram resolver | HIGH | Reuse `_require_active_source_document` before Telegram read/drill resolution. |
 | Message-level refs fail active-binding lookup | HIGH | Parse `telegram:dialog:<dialog_id>:message:<message_id>` into dialog `document_ref=dialog:<dialog_id>` for binding checks and target `unit_ref=dialog:<dialog_id>:message:<message_id>` for reads. |
-| dotMD container cannot reach mcp-telegram during smoke | HIGH | Add `DOTMD_TELEGRAM_DAEMON_SOCKET`/`DOTMD_TELEGRAM_DAEMON_URL` configuration and verify the chosen path inside the dotMD container before claiming live smoke. |
+| dotMD container cannot reach mcp-telegram during smoke | HIGH | Add `DOTMD_TELEGRAM_DAEMON_SOCKET` configuration and verify the UNIX socket exists inside the dotMD container before claiming live smoke. |
+| Plan assumes an HTTP transport that mcp-telegram does not expose | HIGH | Do not add `DOTMD_TELEGRAM_DAEMON_URL` in Phase 29; the only supported live transport is Plan 01's newline-delimited JSON daemon API over UNIX socket. |
 | Window reads return whole dialogs | MEDIUM | Clamp default before/after windows and test target-centered output. |
 | Operational smoke requires unsafe restart/reindex | MEDIUM | Use existing runtime boundary and a dry-run/limited ingest command; do not call `dotmd index --force`. |
 </threat_model>
@@ -148,23 +153,26 @@ Concrete target state:
   - `target_unit_ref`;
   - `chunks` or `units` containing message text, message_id, sender, sent_at, topic, reply metadata, and `target: true` on the anchor.
 - For `drill(ref)`, return title/source_uri/document_type/parser_name plus Telegram metadata from `SourceDocument.metadata_json` and target unit metadata when available.
-- Add settings:
-  - `telegram_daemon_socket: Path | None = None` from `DOTMD_TELEGRAM_DAEMON_SOCKET`;
-  - `telegram_daemon_url: str | None = None` from `DOTMD_TELEGRAM_DAEMON_URL`;
-  - socket wins when both are set.
-- Add a bounded CLI command `dotmd telegram ingest --limit 100 --dry-run` that builds the Telegram client from the configured socket/URL, calls `IndexingPipeline.ingest_application_source()`, and prints structured counts.
-- If neither `DOTMD_TELEGRAM_DAEMON_SOCKET` nor `DOTMD_TELEGRAM_DAEMON_URL` is configured, the command exits non-zero with `Telegram daemon connection is not configured`.
+- Add setting:
+  - `telegram_daemon_socket: Path | None = None` from `DOTMD_TELEGRAM_DAEMON_SOCKET`.
+- Do not add `telegram_daemon_url` or `DOTMD_TELEGRAM_DAEMON_URL` in Phase 29. If HTTP transport is wanted later, it must be a separate mcp-telegram daemon feature before dotMD config consumes it.
+- Add a bounded CLI command `dotmd telegram ingest --limit 100 --dry-run --single-batch` that builds the Telegram client from the configured UNIX socket, calls `IndexingPipeline.ingest_application_source()` once, and prints structured counts.
+- Add an optional explicit loop mode such as `dotmd telegram ingest --limit 100 --max-batches 20` only if implementation has time; if present, it must call `ingest_application_source()` repeatedly and print per-batch counts. The default Phase 29 smoke path remains `--single-batch`.
+- If `DOTMD_TELEGRAM_DAEMON_SOCKET` is not configured, the command exits non-zero with `Telegram daemon socket is not configured`.
 </action>
 <verify>
 <automated>cd backend && uv run pytest tests/api/test_service_search.py tests/ingestion/test_telegram_ingestion.py -q</automated>
-<automated>rg -n "telegram.*ingest|_parse_telegram_message_ref|read_unit_window|target_unit_ref|DOTMD_TELEGRAM_DAEMON_SOCKET|DOTMD_TELEGRAM_DAEMON_URL|get_chunks_by_source_unit_ref" backend/src/dotmd/api/service.py backend/src/dotmd/cli.py backend/src/dotmd/core/config.py backend/tests/api/test_service_search.py</automated>
+<automated>rg -n "telegram.*ingest|_parse_telegram_message_ref|read_unit_window|target_unit_ref|DOTMD_TELEGRAM_DAEMON_SOCKET|get_chunks_by_source_unit_ref|single-batch" backend/src/dotmd/api/service.py backend/src/dotmd/cli.py backend/src/dotmd/core/config.py backend/tests/api/test_service_search.py</automated>
+<automated>! rg -n "DOTMD_TELEGRAM_DAEMON_URL|telegram_daemon_url" backend/src/dotmd backend/tests</automated>
 </verify>
 <acceptance_criteria>
 - `backend/src/dotmd/api/service.py` contains `_parse_telegram_message_ref` or an equivalently named parser.
 - `backend/src/dotmd/api/service.py` contains `read_unit_window`.
 - `backend/src/dotmd/api/service.py` contains `get_chunks_by_source_unit_ref`.
 - `backend/src/dotmd/api/service.py` does not call `_filesystem_path_for_source` for Telegram refs.
-- `backend/src/dotmd/core/config.py` contains `telegram_daemon_socket` and `telegram_daemon_url`.
+- `backend/src/dotmd/core/config.py` contains `telegram_daemon_socket`.
+- `backend/src/dotmd/core/config.py` does not contain `telegram_daemon_url`.
+- `backend/src/dotmd/cli.py` contains `single-batch` or the final equivalent flag for one-batch bootstrap semantics.
 - `backend/src/dotmd/cli.py` contains `telegram` and `ingest` for the bounded smoke command or the final documented command name.
 - `cd backend && uv run pytest tests/api/test_service_search.py tests/ingestion/test_telegram_ingestion.py -q` exits 0.
 </acceptance_criteria>
@@ -179,11 +187,15 @@ Concrete target state:
 - `.planning/REQUIREMENTS.md`
 - `.planning/phases/29-telegram-adapter-mvp-ingestion/29-CONTEXT.md`
 - `backend/src/dotmd/cli.py`
+- `/opt/docker/dotmd/docker-compose.yml`
+- `/opt/docker/dotmd/.env`
 </read_first>
 <files>
 - `docs/mcp-telegram-source-contract.md`
 - `docs/source-adapter-architecture.md`
 - `backend/tests/ingestion/test_telegram_ingestion.py`
+- `/opt/docker/dotmd/docker-compose.yml`
+- `/opt/docker/dotmd/.env`
 </files>
 <behavior>
 - Docs describe what Phase 29 shipped and still defer Phase 31 public search/read/drill live smoke.
@@ -203,10 +215,15 @@ Concrete target state:
   - Phase 31 still owns full public search/read/drill live smoke.
 - Run the final smoke command chosen in task 2 with a small limit, e.g. `docker exec dotmd dotmd telegram ingest --limit 10 --dry-run` or the final equivalent.
 - Before smoke, verify container connectivity with the exact configured path:
-  - `docker exec dotmd printenv DOTMD_TELEGRAM_DAEMON_SOCKET DOTMD_TELEGRAM_DAEMON_URL`;
-  - if socket is configured: `docker exec dotmd test -S "$DOTMD_TELEGRAM_DAEMON_SOCKET"`;
-  - if URL is configured: `docker exec dotmd python - <<'PY'` with a small HTTP health/probe request to the configured URL, or use the implemented client probe if available.
-- Production target for this plan is explicit: dotMD must reach the mcp-telegram daemon through `DOTMD_TELEGRAM_DAEMON_SOCKET` when the socket is bind-mounted into the dotMD container, or through `DOTMD_TELEGRAM_DAEMON_URL` when both services share a Docker network. The executor must choose and document the actual deployed value before claiming live smoke.
+  - `docker exec dotmd printenv DOTMD_TELEGRAM_DAEMON_SOCKET`;
+  - socket must be configured: `docker exec dotmd test -S "$DOTMD_TELEGRAM_DAEMON_SOCKET"`;
+  - URL checks are out of scope because Plan 01 does not add HTTP daemon transport.
+- Production deployment target for this plan is explicit:
+  - mcp-telegram exposes its existing daemon UNIX socket on the host or shared volume;
+  - `/opt/docker/dotmd/docker-compose.yml` bind-mounts that socket path into the dotMD container;
+  - `/opt/docker/dotmd/.env` sets `DOTMD_TELEGRAM_DAEMON_SOCKET` to the in-container socket path;
+  - deployment/restart is batched once after code and compose/env edits, per AGENTS.md "Never restart production on small changes".
+- The executor must document the actual mounted host path and in-container socket path before claiming live smoke.
 - Do not run `dotmd index --force`.
 - If the live runtime has zero exportable synced messages or is unavailable, record the exact command and reason in the Phase 29 summary during execution; do not fabricate a pass.
 </action>

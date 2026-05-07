@@ -66,6 +66,7 @@ low-signal message classification.
 - The provider exposes public message refs with shape `telegram:dialog:<dialog_id>:message:<message_id>` for downstream chunk/search hydration.
 - Duplicate low-signal messages with different ids remain distinct units.
 - Provider batches preserve daemon `updated_after` so ingestion can request edited already-exported messages on the next run.
+- Provider batches preserve daemon `updated_after_cursor` so ingestion can request same-timestamp edited messages without dropping equality ties.
 </behavior>
 <action>
 Create `backend/tests/ingestion/test_telegram_provider.py`.
@@ -88,6 +89,7 @@ Tests must assert:
 - `public_ref_for_unit(change.unit)` is defined by the provider module and returns `f"telegram:{unit.unit_ref}"`.
 - missing optional fields such as `edit_date`, `topic_id`, and `reply_to_msg_id` fingerprint as explicit `null` values, not omitted keys.
 - `batch.updated_after` equals the daemon response watermark when present.
+- `batch.updated_after_cursor` equals the daemon response tie-break cursor when present.
 </action>
 <verify>
 <automated>cd backend && uv run pytest tests/ingestion/test_telegram_provider.py -q</automated>
@@ -128,15 +130,15 @@ Tests must assert:
 Add provider mapping and the minimal batch-contract extension needed for edit delivery.
 
 Concrete target state:
-- In `backend/src/dotmd/core/models.py`, add `updated_after: str | None = None` to `ApplicationSourceChangeBatch`.
+- In `backend/src/dotmd/core/models.py`, add `updated_after: str | None = None` and `updated_after_cursor: str | None = None` to `ApplicationSourceChangeBatch`.
 - Define `TelegramSourceClientProtocol` with:
   - `describe_source() -> dict`
-  - `export_source_changes(cursor: str | None, limit: int, updated_after: str | None = None) -> dict`
+  - `export_source_changes(cursor: str | None, limit: int, updated_after: str | None = None, updated_after_cursor: str | None = None) -> dict`
   - `read_source_unit_window(unit_ref: str, before: int, after: int) -> dict`
 - Define `TelegramApplicationSourceProvider(ApplicationSourceProviderProtocol)` with constructor signature `__init__(self, client: TelegramSourceClientProtocol) -> None`.
 - Define `public_ref_for_unit(unit: SourceUnit) -> str` returning `f"telegram:{unit.unit_ref}"`.
 - Map source description dicts to `ApplicationSourceDescription`.
-- Map export payloads to `ApplicationSourceChangeBatch`, including `checkpoint_cursor`, `next_cursor`, and `updated_after`.
+- Map export payloads to `ApplicationSourceChangeBatch`, including `checkpoint_cursor`, `next_cursor`, `updated_after`, and `updated_after_cursor`.
 - Build document fields:
   - `namespace="telegram"`
   - `document_ref="dialog:<dialog_id>"`
@@ -172,6 +174,7 @@ Concrete target state:
 - `backend/src/dotmd/ingestion/telegram_provider.py` contains `unicodedata`.
 - `backend/src/dotmd/ingestion/telegram_provider.py` contains `standalone_search`.
 - `backend/src/dotmd/core/models.py` contains `updated_after: str | None = None`.
+- `backend/src/dotmd/core/models.py` contains `updated_after_cursor: str | None = None`.
 - `backend/src/dotmd/ingestion/telegram_provider.py` does not contain `telethon`.
 - `backend/src/dotmd/ingestion/telegram_provider.py` does not contain `sync_db`.
 - `backend/src/dotmd/ingestion/telegram_provider.py` does not contain `list_messages`.
