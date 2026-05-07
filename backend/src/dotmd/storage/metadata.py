@@ -224,6 +224,28 @@ ON CONFLICT(namespace, resource_ref) DO UPDATE SET
     metadata_json = excluded.metadata_json
 """
 
+_BACKFILL_RESOURCE_BINDINGS_FROM_SOURCE_DOCUMENTS = """
+INSERT INTO resource_bindings (
+    namespace, resource_ref, document_ref, ref, active, bound_at, unbound_at,
+    content_fingerprint, metadata_fingerprint, source_unit_refs, metadata_json
+)
+SELECT
+    namespace,
+    document_ref,
+    document_ref,
+    ref,
+    1,
+    COALESCE(updated_at, ?),
+    NULL,
+    content_fingerprint,
+    metadata_fingerprint,
+    '[]',
+    '{}'
+FROM source_documents
+WHERE TRUE
+ON CONFLICT(namespace, resource_ref) DO NOTHING
+"""
+
 _INSERT_CHUNK_SOURCE_PROVENANCE_TPL = """
 INSERT OR REPLACE INTO {table} (
     chunk_id, namespace, document_ref, source_unit_refs,
@@ -301,6 +323,7 @@ class SQLiteMetadataStore:
         self._conn.execute(_CREATE_STATS)
         self.ensure_source_document_table()
         self.ensure_resource_bindings_table()
+        self.backfill_resource_bindings_from_source_documents(conn=self._conn)
         # Idempotent schema migration: add diff-reporting columns
         for col, typedef in [
             ("new_files", "INTEGER NOT NULL DEFAULT 0"),
@@ -528,6 +551,28 @@ class SQLiteMetadataStore:
         inactive = int(row[1] or 0) if row else 0
         total = int(row[2] or 0) if row else 0
         return {"active": active, "inactive": inactive, "total": total}
+
+    def backfill_resource_bindings_from_source_documents(
+        self,
+        *,
+        conn: sqlite3.Connection | None = None,
+    ) -> int:
+        """Backfill active resource bindings from existing source_documents.
+
+        Existing binding rows are never overwritten, so inactive bindings stay
+        inactive. This only copies metadata already persisted in SQLite; it
+        does not read source files or rebuild derived artifacts.
+        """
+        write_conn = conn or self._conn
+        before = write_conn.total_changes
+        write_conn.execute(
+            _BACKFILL_RESOURCE_BINDINGS_FROM_SOURCE_DOCUMENTS,
+            (datetime.now(tz=UTC).isoformat(),),
+        )
+        inserted = write_conn.total_changes - before
+        if conn is None:
+            write_conn.commit()
+        return inserted
 
     def delete_source_document(
         self,
