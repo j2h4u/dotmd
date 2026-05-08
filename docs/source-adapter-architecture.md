@@ -203,6 +203,34 @@ Phase 31 still owns full public search/read/drill live smoke, including proving
 that a live `search(query)` returns Telegram refs that round-trip through
 `drill(ref)` and `read(ref, start, end)` with production data.
 
+## Phase 32 Planned Source Registry
+
+Phase 32 adds a source registry vocabulary before broader lifecycle work. Source
+descriptors are declarative: they describe source kind, display metadata,
+config schema, auth schema, cursor schema, and capability flags, but they do not
+construct providers, read credentials, open clients, or persist cursor
+checkpoints.
+
+The initial registry seeds include filesystem and Telegram. Filesystem remains
+a first-class source while local paths stay internal holder mechanics for
+discovery, local reads, delete detection, parser routing, and
+content-addressed reuse. Telegram remains an application source behind
+`mcp-telegram`; dotMD still consumes structured provider payloads and does not
+own Telegram API authentication or direct client access.
+
+Lifecycle construction, credential access, auth policy, provider factories,
+rate-limit handling, and cursor commit mechanics are Phase 33 scope. Phase 32
+only defines typed descriptor contracts and default seed metadata that later
+phases can consume.
+
+The Airweave comparison is documented in
+[Source Registry Airweave Mapping](source-registry-airweave-mapping.md)
+(`docs/source-registry-airweave-mapping.md`). The
+short version: dotMD adapts useful source catalog concepts such as config/auth
+schemas and capability flags, but has no runtime Airweave dependency and does
+not adopt Airweave organizations, billing, Temporal orchestration, or connector
+marketplace mechanics.
+
 ## Problem
 
 dotMD currently indexes markdown files from the local filesystem. That is too
