@@ -116,6 +116,52 @@ def _source_document(file_path: Path, *, namespace: str = "filesystem"):
     )
 
 
+def _telegram_document():
+    from dotmd.core.models import SourceDocument
+
+    return SourceDocument(
+        namespace="telegram",
+        document_ref="dialog:-1001",
+        ref="telegram:dialog:-1001",
+        title="Project Chat",
+        source_uri="telegram://dialog/-1001",
+        media_type="text/plain",
+        parser_name="telegram-message",
+        document_type="dialog",
+        updated_at=datetime(2026, 5, 7),
+        content_fingerprint="telegram-content",
+        metadata_fingerprint="telegram-metadata",
+        metadata_json={"dialog_id": -1001, "dialog_name": "Project Chat"},
+    )
+
+
+def _telegram_unit(message_id: int, text: str, *, target: bool = False):
+    from dotmd.core.models import SourceUnit
+
+    return SourceUnit(
+        namespace="telegram",
+        document_ref="dialog:-1001",
+        unit_ref=f"dialog:-1001:message:{message_id}",
+        unit_type="message",
+        text=text,
+        order_key=f"{message_id:020d}",
+        fingerprint=f"fingerprint-{message_id}",
+        updated_at=datetime(2026, 5, 7, 12, message_id % 60),
+        metadata_json={
+            "dialog_id": -1001,
+            "dialog_name": "Project Chat",
+            "message_id": message_id,
+            "sender_id": message_id * 10,
+            "sender_name": f"User {message_id}",
+            "sent_at": f"2026-05-07T12:{message_id % 60:02d}:00.000000Z",
+            "topic_id": 7,
+            "topic_title": "Deployments",
+            "reply_to_msg_id": 41 if message_id == 42 else None,
+            "target": target,
+        },
+    )
+
+
 def _search_chunk(chunk_id: str, text: str = "target snippet"):
     from dotmd.core.models import Chunk
 
@@ -464,6 +510,171 @@ class TestActiveSearchFiltering:
 class TestReadRefContract:
     """DotMDService.read resolves source refs and keeps paths internal."""
 
+    def test_parse_telegram_message_ref_keeps_dialog_binding_scope(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from dotmd.api.service import _parse_telegram_message_ref
+
+        service = _get_service(tmp_path)
+        metadata = MagicMock()
+        metadata.get_source_document.return_value = _telegram_document()
+        metadata.is_resource_binding_active.return_value = True
+        service._pipeline._metadata_store = metadata
+
+        document_ref, unit_ref = _parse_telegram_message_ref(
+            "telegram:dialog:-1001:message:42"
+        )
+        document, target_unit_ref = service._require_active_telegram_message_ref(
+            "telegram:dialog:-1001:message:42"
+        )
+
+        assert document_ref == "dialog:-1001"
+        assert unit_ref == "dialog:-1001:message:42"
+        assert document.document_ref == "dialog:-1001"
+        assert target_unit_ref == "dialog:-1001:message:42"
+        metadata.is_resource_binding_active.assert_called_once_with(
+            "telegram",
+            "dialog:-1001",
+        )
+
+    def test_read_telegram_ref_uses_provider_window_and_marks_target(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from dotmd.core.models import SourceUnitWindow
+
+        service = _get_service(tmp_path)
+        metadata = MagicMock()
+        metadata.get_source_document.return_value = _telegram_document()
+        metadata.is_resource_binding_active.return_value = True
+        service._pipeline._metadata_store = metadata
+        provider = MagicMock()
+        provider.read_unit_window.return_value = SourceUnitWindow(
+            namespace="telegram",
+            document_ref="dialog:-1001",
+            unit_ref="dialog:-1001:message:42",
+            units=[
+                _telegram_unit(41, "Can someone verify the migration window?"),
+                _telegram_unit(42, "Deployment checklist is ready", target=True),
+                _telegram_unit(43, "Smoke confirms the deployment path"),
+            ],
+            metadata_json={"dialog_id": -1001},
+        )
+        service._telegram_provider = provider
+
+        payload = service.read("telegram:dialog:-1001:message:42", start=2, end=4)
+
+        provider.read_unit_window.assert_called_once_with(
+            "dialog:-1001:message:42",
+            before=2,
+            after=4,
+        )
+        assert payload["ref"] == "telegram:dialog:-1001:message:42"
+        assert payload["document_ref"] == "dialog:-1001"
+        assert payload["target_unit_ref"] == "dialog:-1001:message:42"
+        assert payload["frontmatter"] == {}
+        assert [unit["message_id"] for unit in payload["units"]] == [41, 42, 43]
+        assert [unit["text"] for unit in payload["units"]] == [
+            "Can someone verify the migration window?",
+            "Deployment checklist is ready",
+            "Smoke confirms the deployment path",
+        ]
+        assert [unit["target"] for unit in payload["units"]] == [False, True, False]
+
+    def test_read_telegram_ref_defaults_and_clamps_window_sizes(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from dotmd.core.models import SourceUnitWindow
+
+        service = _get_service(tmp_path)
+        metadata = MagicMock()
+        metadata.get_source_document.return_value = _telegram_document()
+        metadata.is_resource_binding_active.return_value = True
+        service._pipeline._metadata_store = metadata
+        provider = MagicMock()
+        provider.read_unit_window.return_value = SourceUnitWindow(
+            namespace="telegram",
+            document_ref="dialog:-1001",
+            unit_ref="dialog:-1001:message:42",
+            units=[_telegram_unit(42, "Deployment checklist is ready")],
+            metadata_json={},
+        )
+        service._telegram_provider = provider
+
+        service.read("telegram:dialog:-1001:message:42", start=99, end=None)
+
+        provider.read_unit_window.assert_called_once_with(
+            "dialog:-1001:message:42",
+            before=50,
+            after=5,
+        )
+
+    def test_read_telegram_ref_falls_back_to_indexed_chunks_without_provider(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from dotmd.core.models import Chunk, ChunkProvenance
+
+        service = _get_service(tmp_path)
+        metadata = MagicMock()
+        metadata.get_source_document.return_value = _telegram_document()
+        metadata.is_resource_binding_active.return_value = True
+        metadata.get_chunks_by_source_unit_ref.return_value = [
+            Chunk(
+                chunk_id="c" * 64,
+                file_paths=[],
+                heading_hierarchy=["Telegram", "Project Chat"],
+                level=2,
+                text="Deployment checklist is ready",
+                chunk_index=0,
+                provenance=ChunkProvenance(
+                    namespace="telegram",
+                    document_ref="dialog:-1001",
+                    ref="telegram:dialog:-1001",
+                    source_unit_refs=["dialog:-1001:message:42"],
+                    chunk_strategy=service._settings.chunk_strategy,
+                    parser_name="telegram-message",
+                ),
+            )
+        ]
+        service._pipeline._metadata_store = metadata
+        service._telegram_provider = None
+
+        payload = service.read("telegram:dialog:-1001:message:42")
+
+        metadata.get_chunks_by_source_unit_ref.assert_called_once_with(
+            "telegram",
+            "dialog:-1001",
+            "dialog:-1001:message:42",
+            service._settings.chunk_strategy,
+        )
+        assert payload["ref"] == "telegram:dialog:-1001:message:42"
+        assert payload["target_unit_ref"] == "dialog:-1001:message:42"
+        assert payload["chunks"] == [
+            {
+                "index": 0,
+                "heading_hierarchy": ["Telegram", "Project Chat"],
+                "text": "Deployment checklist is ready",
+                "target": True,
+                "source_unit_refs": ["dialog:-1001:message:42"],
+            }
+        ]
+
+    def test_read_telegram_ref_rejects_inactive_dialog_binding(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = _get_service(tmp_path)
+        metadata = MagicMock()
+        metadata.get_source_document.return_value = _telegram_document()
+        metadata.is_resource_binding_active.return_value = False
+        service._pipeline._metadata_store = metadata
+
+        with pytest.raises(ValueError, match="Unknown source ref: telegram:dialog:-1001:message:42"):
+            service.read("telegram:dialog:-1001:message:42")
+
     def test_read_ref_returns_ref_not_file_path_and_uses_active_strategy(
         self,
         tmp_path: Path,
@@ -723,6 +934,41 @@ class TestDrillRefContract:
         assert payload["parser_name"] == "markdown"
         assert payload["frontmatter"]["title"] == "Service Note"
         assert payload["total_chunks"] == 3
+
+    def test_drill_telegram_ref_returns_metadata_without_frontmatter(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = _get_service(tmp_path)
+        metadata = MagicMock()
+        metadata.get_source_document.return_value = _telegram_document()
+        metadata.is_resource_binding_active.return_value = True
+        service._pipeline._metadata_store = metadata
+
+        payload = service.drill("telegram:dialog:-1001:message:42")
+
+        assert payload["ref"] == "telegram:dialog:-1001:message:42"
+        assert payload["document_ref"] == "dialog:-1001"
+        assert payload["target_unit_ref"] == "dialog:-1001:message:42"
+        assert payload["title"] == "Project Chat"
+        assert payload["source_uri"] == "telegram://dialog/-1001"
+        assert payload["document_type"] == "dialog"
+        assert payload["parser_name"] == "telegram-message"
+        assert payload["metadata"]["dialog_id"] == -1001
+        assert payload["frontmatter"] == {}
+
+    def test_drill_telegram_ref_rejects_inactive_dialog_binding(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = _get_service(tmp_path)
+        metadata = MagicMock()
+        metadata.get_source_document.return_value = _telegram_document()
+        metadata.is_resource_binding_active.return_value = False
+        service._pipeline._metadata_store = metadata
+
+        with pytest.raises(ValueError, match="Unknown source ref: telegram:dialog:-1001:message:42"):
+            service.drill("telegram:dialog:-1001:message:42")
 
 
 class TestBindingDiagnostics:
