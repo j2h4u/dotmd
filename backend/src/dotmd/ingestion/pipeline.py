@@ -490,6 +490,10 @@ class IndexingPipeline:
 
         chunks_to_index = [item.chunk for item in index_items]
         e_text_vectors, text_hashes = self._embed_chunks(chunks_to_index)
+
+        # Application-source dual-encoder invariant:
+        # e_text is per source unit/chunk; e_meta is per SourceDocument.
+        # Unit-level context belongs in chunk text, not in the shared meta vector.
         documents_by_key: dict[tuple[str, str], SourceDocument] = {}
         for item in index_items:
             documents_by_key.setdefault(item.source_key, item.change.document)
