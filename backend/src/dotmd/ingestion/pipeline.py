@@ -29,6 +29,7 @@ import uuid
 from dataclasses import dataclass as _dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 
 import blake3
 import sqlite_vec  # type: ignore[import-untyped]
@@ -61,10 +62,8 @@ from dotmd.ingestion.reader import (
     parse_frontmatter,
     read_file,
 )
-from dotmd.ingestion.source import (
-    FilesystemMarkdownSourceAdapter,
-    source_document_to_file_info,
-)
+from dotmd.ingestion.source import source_document_to_file_info
+from dotmd.ingestion.source_lifecycle import source_runtime_factory_from_settings
 from dotmd.ingestion.source_provider import ApplicationSourceProviderProtocol
 from dotmd.search.fts5 import FTS5SearchEngine
 from dotmd.search.semantic import SemanticSearchEngine
@@ -226,6 +225,10 @@ class IndexingPipeline:
         )
         # Ensure M2M table exists for this strategy (Phase 16).
         self._metadata_store.ensure_m2m_table(strategy)
+        self._source_runtime_factory = source_runtime_factory_from_settings(
+            settings,
+            self._metadata_store,
+        )
 
         if settings.vector_backend == "sqlite-vec":
             from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
@@ -1015,7 +1018,7 @@ class IndexingPipeline:
 
         # Re-ensure tables so the pipeline can immediately re-index.
         if hasattr(self._vector_store, "_tables_ensured"):
-            del self._vector_store._tables_ensured
+            del cast(Any, self._vector_store)._tables_ensured
 
         logger.info(
             "Dropped vectors for strategy=%s model=%s",
@@ -1257,7 +1260,10 @@ class IndexingPipeline:
 
     def _discover_documents(self, directory: Path) -> list[SourceDocument]:
         """Discover filesystem Markdown source documents for one directory."""
-        return FilesystemMarkdownSourceAdapter().discover(directory)
+        bundle = self._source_runtime_factory.build("filesystem")
+        if bundle.source is None:
+            raise RuntimeError("filesystem lifecycle runtime has no source adapter")
+        return bundle.source.discover(directory)
 
     def _discover_documents_multi(
         self,
@@ -1265,7 +1271,10 @@ class IndexingPipeline:
         exclude: list[str] | None = None,
     ) -> list[SourceDocument]:
         """Discover filesystem Markdown source documents from many path specs."""
-        return FilesystemMarkdownSourceAdapter().discover_multi(paths, exclude)
+        bundle = self._source_runtime_factory.build("filesystem")
+        if bundle.source is None:
+            raise RuntimeError("filesystem lifecycle runtime has no source adapter")
+        return bundle.source.discover_multi(paths, exclude)
 
     def _file_infos_by_source_document(
         self,
@@ -1318,7 +1327,10 @@ class IndexingPipeline:
         file_info: FileInfo,
     ) -> SourceDocument:
         """Build a filesystem SourceDocument for an existing FileInfo."""
-        source_document = FilesystemMarkdownSourceAdapter()._from_file_info(file_info)
+        bundle = self._source_runtime_factory.build("filesystem")
+        if bundle.source is None:
+            raise RuntimeError("filesystem lifecycle runtime has no source adapter")
+        source_document = bundle.source._from_file_info(file_info)
         bridged_file_info = source_document_to_file_info(source_document)
         if (
             bridged_file_info.path != file_info.path
@@ -1689,6 +1701,7 @@ class IndexingPipeline:
 
         missing_chunk_ids: set[str] = set()
         e_text_map: dict[str, list[float]] = {}
+        e_text_vectors: list[list[float]] = []
         text_hashes: dict[str, str] = {}
 
         if body_changed:
@@ -2746,7 +2759,7 @@ class IndexingPipeline:
                 self._metadata_store.delete_orphan_chunks(
                     strategy, orphans, conn=conn
                 )
-                self._vector_store.delete_by_chunk_ids(
+                cast(Any, self._vector_store).delete_by_chunk_ids(
                     strategy, orphans, conn=conn
                 )
                 # FTS5 cascade — runs inside the same transaction.
@@ -3341,8 +3354,9 @@ class IndexingPipeline:
         # Force vec_config table creation before reading from it.
         # SQLiteVecVectorStore creates tables lazily via _get_conn(); bypassing
         # it with self._conn directly would fail on a fresh database (#999.12).
-        self._vector_store._get_conn()
-        config_table = self._vector_store._CONFIG_TABLE
+        vector_store = cast(Any, self._vector_store)
+        vector_store._get_conn()
+        config_table = vector_store._CONFIG_TABLE
         row = self._conn.execute(
             f"SELECT value FROM {config_table} WHERE key = 'schema_version'"
         ).fetchone()
@@ -3468,7 +3482,7 @@ class IndexingPipeline:
             logger.debug("_check_weights_changed: VecComponentStore is empty — skipping")
             return
 
-        config_table = self._vector_store._CONFIG_TABLE
+        config_table = cast(Any, self._vector_store)._CONFIG_TABLE
         current_weights = self._settings.parsed_embedding_weights
         current_weights_json = json.dumps(current_weights, sort_keys=True)
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -195,6 +196,7 @@ def test_pipeline_helper_builds_filesystem_chunk_provenance(
             vector_backend="sqlite-vec",
             graph_backend="ladybugdb",
             extract_depth=ExtractDepth.STRUCTURAL,
+            indexing_paths=[str(data_dir)],
         )
     )
     normalized = pipeline._file_info_and_source_document(md_path)
@@ -224,6 +226,7 @@ def _pipeline_with_mock_embedding(data_dir: Path, index_dir: Path):
             vector_backend="sqlite-vec",
             graph_backend="ladybugdb",
             extract_depth=ExtractDepth.STRUCTURAL,
+            indexing_paths=[str(data_dir)],
         )
     )
     mock_engine = MagicMock()
@@ -285,7 +288,7 @@ def test_pipeline_discovers_filesystem_documents_through_lifecycle(
     pipeline = _pipeline_with_mock_embedding(data_dir, tmp_path / "index")
     adapter = _RecordingLifecycleAdapter()
     factory = _RecordingLifecycleFactory(adapter)
-    pipeline._source_runtime_factory = factory
+    cast(Any, pipeline)._source_runtime_factory = factory
     paths = [str(data_dir)]
 
     documents = pipeline._discover_documents_multi(paths, exclude=["skip"])
@@ -305,7 +308,7 @@ def test_pipeline_source_document_for_file_info_uses_lifecycle_adapter(
     pipeline = _pipeline_with_mock_embedding(data_dir, tmp_path / "index")
     adapter = _RecordingLifecycleAdapter()
     factory = _RecordingLifecycleFactory(adapter)
-    pipeline._source_runtime_factory = factory
+    cast(Any, pipeline)._source_runtime_factory = factory
     file_info = source_document_to_file_info(
         FilesystemMarkdownSourceAdapter().discover(data_dir)[0]
     )

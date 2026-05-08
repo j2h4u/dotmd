@@ -7,10 +7,12 @@ from typing import Any, Callable, Literal, Protocol, TypeAlias, cast
 
 from pydantic import BaseModel, ConfigDict, Field, SkipValidation, model_validator
 
+from dotmd.core.config import Settings
 from dotmd.core.models import SourceDescriptor
 from dotmd.core.source_registry import SourceRegistry
 from dotmd.ingestion.source import FilesystemMarkdownSourceAdapter
 from dotmd.ingestion.source_provider import ApplicationSourceProviderProtocol
+from dotmd.ingestion.source_registry import default_source_registry
 from dotmd.ingestion.telegram_provider import (
     TelegramApplicationSourceProvider,
     TelegramSourceClientProtocol,
@@ -332,3 +334,37 @@ class SourceRuntimeFactory:
         if config.socket_path is None:
             raise SourceLifecycleConfigError("telegram.socket_path is required")
         return cast(TelegramSourceConfig, config)
+
+
+def source_runtime_factory_from_settings(
+    settings: Settings,
+    metadata_store: SQLiteMetadataStore,
+) -> SourceRuntimeFactory:
+    """Build the default source runtime factory from live dotMD settings."""
+    records = [
+        SourceConfigRecord(
+            namespace="filesystem",
+            config=FilesystemSourceConfig(
+                paths=list(settings.indexing_paths),
+                exclude=list(settings.effective_indexing_exclude),
+            ),
+            credential_ref=SourceCredentialRef(namespace="filesystem"),
+        )
+    ]
+    if settings.telegram_daemon_socket is not None:
+        records.append(
+            SourceConfigRecord(
+                namespace="telegram",
+                config=TelegramSourceConfig(
+                    socket_path=settings.telegram_daemon_socket,
+                ),
+                credential_ref=SourceCredentialRef(namespace="telegram"),
+            )
+        )
+
+    return SourceRuntimeFactory(
+        registry=default_source_registry(),
+        config_store=InMemorySourceConfigStore(records),
+        credential_provider=DefaultSourceCredentialProvider(),
+        cursor_store=SQLiteSourceCursorStore(metadata_store),
+    )
