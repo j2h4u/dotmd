@@ -70,3 +70,9 @@ credentials, and cursor commit behavior. Phase 32 does not instantiate
 providers, open clients, read secrets, persist cursor checkpoints, import
 Airweave, or copy Airweave runtime identifiers into dotMD source code.
 
+Phase 33 adapts Airweave's lifecycle idea as a compact dotMD runtime bundle and
+factory. The bundle combines the descriptor, typed local config, delegated or
+no-auth access, cursor store, and the constructed filesystem source or Telegram
+provider. This keeps the useful construction boundary while still rejecting
+Airweave organizations, Temporal orchestration, billing, marketplace runtime,
+and runtime Airweave imports.

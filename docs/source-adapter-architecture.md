@@ -231,6 +231,30 @@ schemas and capability flags, but has no runtime Airweave dependency and does
 not adopt Airweave organizations, billing, Temporal orchestration, or connector
 marketplace mechanics.
 
+## Phase 33 Delivered Source Lifecycle
+
+Phase 33 adds the source lifecycle boundary that Phase 32 descriptors were
+designed to feed. The lifecycle/factory constructs source runtime bundles from
+registry descriptors, typed local config, credential/auth provider access,
+cursor store access, and small runtime helpers such as source clients. The
+bundle remains inspectable so future source phases can verify which descriptor,
+config, access policy, cursor store, and provider/source object were used.
+
+Filesystem and Telegram construction paths now route through lifecycle.
+Filesystem paths remain internal holder mechanics for discovery, local reads,
+delete detection, parser routing, and content-addressed reuse; they are not
+promoted back into public source identity. Telegram remains delegated to
+`mcp-telegram`: dotMD builds the local runtime wrapper, but does not own
+Telegram API authentication, import direct Telegram clients, read private
+Telegram SQLite tables, or store raw Telegram secrets.
+
+Lifecycle cursor access preserves the Phase 28 rule for `checkpoint_cursor`.
+The provider's `checkpoint_cursor` is durable progress only after local source
+documents, resource bindings, source-unit fingerprints, chunks, FTS rows,
+vectors, vector components, and checkpoint metadata succeed inside the same
+local transaction. `next_cursor` remains only a provider continuation hint.
+This construction-path migration does not require a full reindex.
+
 ## Problem
 
 dotMD currently indexes markdown files from the local filesystem. That is too
