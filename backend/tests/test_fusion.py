@@ -231,6 +231,55 @@ def test_build_search_results_hydrates_graph_direct_ref_from_provenance() -> Non
     assert results[0].matched_engines == ["graph_direct"]
 
 
+def test_build_search_results_uses_telegram_message_ref_from_unit_provenance() -> None:
+    """Telegram search hits must be directly usable by drill/read."""
+    telegram_chunk_id = "telegram-message-chunk"
+    chunk = Chunk(
+        chunk_id=telegram_chunk_id,
+        file_paths=[],
+        heading_hierarchy=[],
+        level=0,
+        text="Telegram message about smoke search",
+        chunk_index=0,
+    )
+
+    class TelegramStore:
+        _table = "chunks_contextual_512_50"
+
+        def get_chunks(self, chunk_ids: list[str]) -> list[Chunk]:
+            assert chunk_ids == [telegram_chunk_id]
+            return [chunk]
+
+        def get_chunk_provenance_for_chunk_ids(
+            self,
+            strategy: str,
+            chunk_ids: list[str],
+        ) -> dict[str, ChunkProvenance]:
+            assert strategy == "contextual_512_50"
+            assert chunk_ids == [telegram_chunk_id]
+            return {
+                telegram_chunk_id: ChunkProvenance(
+                    namespace="telegram",
+                    document_ref="dialog:-1001",
+                    ref="telegram:dialog:-1001",
+                    source_unit_refs=["dialog:-1001:message:42"],
+                    chunk_strategy=strategy,
+                    parser_name="telegram-message",
+                )
+            }
+
+    results = build_search_results(
+        [(telegram_chunk_id, 0.7)],
+        per_engine={"semantic": [(telegram_chunk_id, 0.95)]},
+        metadata_store=cast(Any, TelegramStore()),
+        query="smoke",
+        top_k=1,
+    )
+
+    assert len(results) == 1
+    assert results[0].ref == "telegram:dialog:-1001:message:42"
+
+
 def test_build_search_results_missing_provenance_raises() -> None:
     """Top chunks with no source provenance are hard invariant failures."""
     chunk = Chunk(

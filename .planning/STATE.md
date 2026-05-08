@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Telegram Source Adapter
-status: ready_to_plan
-last_updated: "2026-05-08T07:41:25.327Z"
+status: milestone_ready_to_close
+last_updated: "2026-05-08T11:45:00.000Z"
 last_activity: 2026-05-08
 progress:
   total_phases: 21
-  completed_phases: 17
-  total_plans: 46
-  completed_plans: 42
-  percent: 81
+  completed_phases: 18
+  total_plans: 47
+  completed_plans: 43
+  percent: 86
 ---
 
 # GSD State
@@ -20,18 +20,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-07 after v1.5 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 30 — incremental-telegram-sync-reuse
+**Current focus:** v1.5 closeout after Phase 31 live Telegram smoke
 
 ## Current Milestone
 
 **v1.5 — Telegram Source Adapter**
 
-Phase: 30
-Plan: Not started
-Status: Ready to plan
+Phase: None active
+Plan: Phase 31 complete
+Status: Milestone ready to close
 Last activity: 2026-05-08
 
-Progress: [████████░░] 81%
+Progress: [█████████░] 86%
 
 ## Deferred Items
 
@@ -133,6 +133,29 @@ Items acknowledged and deferred at milestone close on 2026-05-06:
 - Backlog `999.x` entries are documentation backlog items, not active phases;
   they should be promoted explicitly before planning/execution.
 
+- Backlog 999.26-999.31 captured on 2026-05-08. They preserve the
+  Airweave-inspired integration architecture thread as an ordered backlog line:
+  source capability registry, source lifecycle/config/auth/cursor boundary,
+  federated search candidate contract, filesystem unification, Telegram
+  sync+federated unification, and an Airweave connector compatibility spike.
+  These items are deliberately backlog only. After Phase 31 completion, current
+  routing is milestone closeout first, then promotion of the unified source
+  architecture backlog line in the next milestone when desired.
+- Anti-legacy guardrail for Backlog 999.26-999.31: the architecture line must
+  not create a second source plane beside existing filesystem and Telegram
+  adapters. Filesystem and Telegram unification are required gates before broad
+  third-party/Airweave connector work is considered architecturally complete.
+- Phase 30 was deferred to Backlog 999.30 on 2026-05-08. Do not plan or execute
+  Phase 30 as a Telegram-specific legacy incremental-sync phase. Its behavior
+  should be reintroduced through the unified Telegram source contract after the
+  registry/lifecycle/federated-search architecture line is promoted.
+- Phase 31 completed on 2026-05-08. The live baseline smoke ingested 100
+  Telegram messages, found real Telegram content through dotMD search, and
+  verified the returned message-level ref through `drill(ref)` and `read(ref)`.
+  The smoke fixed Telegram search ref hydration so search results now return
+  refs like `telegram:dialog:-1003897013523:message:80` instead of the
+  non-readable dialog-level ref.
+
 ### Decisions
 
 Decisions are logged in PROJECT.md Key Decisions table.
@@ -229,7 +252,9 @@ was moved under `.planning/notes/completed-backlog/`.
 
 ### Blockers/Concerns
 
-No blockers. Phase 29 is complete and verified; Phase 30 is ready to plan.
+No active phase blocker. Phase 31 live smoke passed and Phase 30 is deferred to
+Backlog 999.30. v1.5 is ready for milestone closeout; the next milestone can
+promote the unified source architecture backlog line when desired.
 
 ### Quick Tasks Completed
 
@@ -244,11 +269,13 @@ No blockers. Phase 29 is complete and verified; Phase 30 is ready to plan.
 
 ## Current Position
 
-Phase: 30 (incremental-telegram-sync-reuse) — READY TO PLAN
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-05-08 -- Phase 29 complete and verified
+Phase: none active — v1.5 ready to close
+Plan: Phase 31 complete
+Status: Milestone ready to close
+Last activity: 2026-05-08 -- Phase 31 live Telegram smoke passed
 
 ## Operator Next Steps
 
-- Run `$gsd-plan-phase 30` to plan incremental Telegram sync and reuse.
+- Run milestone closeout for v1.5.
+- Open the next milestone and promote the unified source architecture backlog
+  line when ready.

@@ -186,6 +186,12 @@ _ENGINE_SCORE_FIELDS: dict[str, str] = {
 }
 
 
+def _public_ref_for_provenance(provenance: ChunkProvenance) -> str:
+    if provenance.namespace == "telegram" and len(provenance.source_unit_refs) == 1:
+        return f"telegram:{provenance.source_unit_refs[0]}"
+    return provenance.ref
+
+
 def fuse_results(
     ranked_lists: dict[str, list[tuple[str, float]]],
     k: int = 60,
@@ -315,7 +321,7 @@ def build_search_results(
         results.append(
             SearchResult(
                 chunk_id=chunk_id,
-                ref=provenance.ref,
+                ref=_public_ref_for_provenance(provenance),
                 heading_path=heading_path,
                 snippet=snippet,
                 fused_score=fused_score,
