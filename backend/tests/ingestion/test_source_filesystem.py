@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -241,6 +242,82 @@ def _capture_indexed_chunks(pipeline) -> list:
 
     pipeline._keyword_engine = KeywordRecorder()
     return captured_chunks
+
+
+class _RecordingLifecycleAdapter(FilesystemMarkdownSourceAdapter):
+    def __init__(self) -> None:
+        self.discover_calls: list[Path] = []
+        self.discover_multi_calls: list[tuple[list[str], list[str] | None]] = []
+        self.file_infos: list[FileInfo] = []
+
+    def discover(self, directory: Path) -> list[SourceDocument]:
+        self.discover_calls.append(directory)
+        return []
+
+    def discover_multi(
+        self,
+        paths: list[str],
+        exclude: list[str] | None = None,
+    ) -> list[SourceDocument]:
+        self.discover_multi_calls.append((paths, exclude))
+        return []
+
+    def _from_file_info(self, file_info: FileInfo) -> SourceDocument:
+        self.file_infos.append(file_info)
+        return super()._from_file_info(file_info)
+
+
+class _RecordingLifecycleFactory:
+    def __init__(self, adapter: _RecordingLifecycleAdapter) -> None:
+        self.adapter = adapter
+        self.build_calls: list[str] = []
+
+    def build(self, namespace: str):
+        self.build_calls.append(namespace)
+        return SimpleNamespace(source=self.adapter, provider=None)
+
+
+def test_pipeline_discovers_filesystem_documents_through_lifecycle(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    pipeline = _pipeline_with_mock_embedding(data_dir, tmp_path / "index")
+    adapter = _RecordingLifecycleAdapter()
+    factory = _RecordingLifecycleFactory(adapter)
+    pipeline._source_runtime_factory = factory
+    paths = [str(data_dir)]
+
+    documents = pipeline._discover_documents_multi(paths, exclude=["skip"])
+
+    assert documents == []
+    assert factory.build_calls == ["filesystem"]
+    assert adapter.discover_multi_calls == [(paths, ["skip"])]
+
+
+def test_pipeline_source_document_for_file_info_uses_lifecycle_adapter(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    md_path = data_dir / "note.md"
+    _write_markdown(md_path, "Lifecycle", ["source"], "Body text.")
+    pipeline = _pipeline_with_mock_embedding(data_dir, tmp_path / "index")
+    adapter = _RecordingLifecycleAdapter()
+    factory = _RecordingLifecycleFactory(adapter)
+    pipeline._source_runtime_factory = factory
+    file_info = source_document_to_file_info(
+        FilesystemMarkdownSourceAdapter().discover(data_dir)[0]
+    )
+
+    document = pipeline._source_document_for_file_info(file_info)
+
+    document_ref = str(file_info.path.resolve())
+    assert factory.build_calls == ["filesystem"]
+    assert adapter.file_infos == [file_info]
+    assert document.namespace == "filesystem"
+    assert document.document_ref == document_ref
+    assert document.ref == f"filesystem:{document_ref}"
 
 
 def test_index_file_path_and_file_info_use_same_filesystem_provenance(

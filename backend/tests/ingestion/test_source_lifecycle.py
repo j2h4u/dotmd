@@ -23,6 +23,7 @@ from dotmd.ingestion.source_lifecycle import (
     SourceRuntimeFactory,
     TelegramSourceConfig,
 )
+import dotmd.ingestion.source_lifecycle as source_lifecycle
 from dotmd.ingestion.source_registry import default_source_registry
 from dotmd.ingestion.telegram_provider import (
     TelegramApplicationSourceProvider,
@@ -255,3 +256,33 @@ def test_default_credential_provider_matches_protocol() -> None:
     )
 
     assert access.kind == "none"
+
+
+def test_source_runtime_factory_from_settings_seeds_filesystem_config(
+    tmp_path: Path,
+) -> None:
+    from dotmd.core.config import Settings
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    index_dir = tmp_path / "index"
+    index_dir.mkdir()
+    settings = Settings(
+        data_dir=data_dir,
+        index_dir=index_dir,
+        embedding_url="http://localhost:18088",
+        indexing_paths=[str(data_dir)],
+        indexing_extra_exclude=["ignored"],
+    )
+
+    factory = source_lifecycle.source_runtime_factory_from_settings(
+        settings,
+        _metadata_store(tmp_path),
+    )
+    bundle = factory.build("filesystem")
+
+    assert isinstance(bundle.config, FilesystemSourceConfig)
+    assert bundle.config.paths == [str(data_dir)]
+    assert "ignored" in bundle.config.exclude
+    assert bundle.provider is None
+    assert bundle.cursor_store.get_checkpoint("filesystem") is None
