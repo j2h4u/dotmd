@@ -67,7 +67,7 @@ dotMD unless a later phase explicitly justifies it.
 - [x] **SRC-03**: Source capability flags distinguish local sync,
   federated/native search, read-unit windows, materialization, browse trees,
   ACL support, and incremental cursors.
-- [ ] **SRC-04**: Airweave source metadata can be mapped into the dotMD source
+- [x] **SRC-04**: Airweave source metadata can be mapped into the dotMD source
   descriptor model without making Airweave a runtime dependency.
 
 ### Lifecycle
