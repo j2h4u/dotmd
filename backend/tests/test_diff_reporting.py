@@ -229,6 +229,9 @@ class TestPipelineIncrementalDiffCounts:
         settings.acronyms_path = index_dir / "acronyms.json"
         settings.embedding_model = "test-model"
         settings.embedding_url = "http://test:8088"
+        settings.indexing_paths = [str(md_dir)]
+        settings.effective_indexing_exclude = []
+        settings.telegram_daemon_socket = None
         settings.extract_depth = "structural"
         settings.ner_entity_types = []
         settings.ner_model_name = "urchade/gliner_multi-v2.1"
@@ -315,6 +318,9 @@ class TestPipelineFullIndexDiffCounts:
         settings.acronyms_path = index_dir / "acronyms.json"
         settings.embedding_model = "test-model"
         settings.embedding_url = "http://test:8088"
+        settings.indexing_paths = [str(md_dir)]
+        settings.effective_indexing_exclude = []
+        settings.telegram_daemon_socket = None
         settings.extract_depth = "structural"
         settings.ner_entity_types = []
         settings.ner_model_name = "urchade/gliner_multi-v2.1"
@@ -379,6 +385,9 @@ class TestPipelineNoChangesDiffCounts:
         settings.acronyms_path = index_dir / "acronyms.json"
         settings.embedding_model = "test-model"
         settings.embedding_url = "http://test:8088"
+        settings.indexing_paths = [str(md_dir)]
+        settings.effective_indexing_exclude = []
+        settings.telegram_daemon_socket = None
         settings.extract_depth = "structural"
         settings.ner_entity_types = []
         settings.ner_model_name = "urchade/gliner_multi-v2.1"
