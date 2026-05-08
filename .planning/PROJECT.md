@@ -169,7 +169,8 @@ capability model, lifecycle boundary, and public search/read/drill contract.
 **Target features:**
 - Source capability registry seeded by filesystem and Telegram.
 - Typed source lifecycle boundary for config, auth/credentials, cursors, and
-  runtime construction.
+  runtime construction. Phase 33 completed this boundary for filesystem and
+  Telegram construction paths.
 - Normalized local/federated `SearchCandidate` contract.
 - Filesystem adapter migrated onto the unified source contract.
 - Telegram adapter migrated onto the unified source contract, including
@@ -184,6 +185,16 @@ capability model, lifecycle boundary, and public search/read/drill contract.
 Agents may inspect the local checkout as an architectural reference, but dotMD
 should not adopt Airweave's indexing, chunking, Vespa, Temporal, billing, or
 organization assumptions wholesale.
+
+Phase 33 complete (2026-05-08): Source runtimes now build through an
+inspectable lifecycle factory that combines registry descriptors, typed local
+config, credential-provider access, cursor state, and runtime objects.
+Filesystem discovery/source-document construction routes through
+`build("filesystem")`; Telegram service/CLI construction routes through
+`build_if_configured("telegram")` / `build("telegram")` and remains delegated to
+`mcp-telegram`. Application-source checkpoint reads, commits, and errors now go
+through `SourceCursorStoreProtocol`, with checkpoint commits kept inside the
+caller-owned SQLite transaction.
 
 Phase 999.12 complete (2026-04-27): Dual-encoder unified embedding shipped. Metadata-only changes (tag updates, title renames) now require 1 TEI call per document instead of N calls per chunk. VecComponentStore stores raw e_text/e_meta BLOBs; meta_tracker (title+tags checksum) triggers fast path when only metadata changes. search_log table added. 189 tests pass.
 
