@@ -27,6 +27,7 @@ def minimal_settings(tmp_path: Path) -> Settings:
         data_dir=data_dir,
         index_dir=index_dir,
         embedding_url="http://localhost:18088",
+        indexing_paths=[str(data_dir)],
         vector_backend="sqlite-vec",
         graph_backend="ladybugdb",
         extract_depth=ExtractDepth.STRUCTURAL,

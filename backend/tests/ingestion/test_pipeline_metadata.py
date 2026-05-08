@@ -39,6 +39,7 @@ def minimal_settings(tmp_path):
         data_dir=data_dir,
         index_dir=index_dir,
         embedding_url="http://localhost:18088",  # not real; mocked
+        indexing_paths=[str(data_dir)],
         vector_backend="sqlite-vec",
         graph_backend="ladybugdb",
         extract_depth=ExtractDepth.STRUCTURAL,
@@ -374,6 +375,7 @@ def test_weight_change_recomputes_fused_without_tei(minimal_settings, tmp_path):
         data_dir=minimal_settings.data_dir,
         index_dir=minimal_settings.index_dir,
         embedding_url=minimal_settings.embedding_url,
+        indexing_paths=list(minimal_settings.indexing_paths),
         vector_backend="sqlite-vec",
         graph_backend="ladybugdb",
         extract_depth=ExtractDepth.STRUCTURAL,
