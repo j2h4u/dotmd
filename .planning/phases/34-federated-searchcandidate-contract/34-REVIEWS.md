@@ -1,77 +1,72 @@
 ---
 phase: 34
 reviewers: [codex]
-cycle: 3
+cycle: 4
 status: complete
-reviewed_at: 2026-05-08T19:24:54Z
+reviewed_at: 2026-05-08T19:38:08Z
 plans_reviewed:
   - 34-01-searchcandidate-contract-and-ref-keyed-fusion-PLAN.md
   - 34-02-federated-fanout-and-source-status-PLAN.md
   - 34-03-telegram-federated-proof-and-read-roundtrip-PLAN.md
 ---
 
-# Cross-AI Plan Review — Phase 34 (Cycle 3, Post-Replan)
+# Cross-AI Plan Review — Phase 34 (Cycle 4, Post Replan-2)
 
-> Cycle 3 is a **single-reviewer cycle** (codex via `ssh hetz sudo codex
-> exec --skip-git-repo-check`). Opencode was dropped this cycle after
-> failing twice in different ways across cycles 1–2 (32-min hang, then
-> Explore-Agent fanout that never returned a final answer). Other CLIs
-> (gemini, cursor, claude, ollama, lm-studio, llama-cpp) are unavailable
-> or excluded for self-review independence reasons. No cross-AI consensus
-> is therefore available — codex's findings stand alone.
+> Cycle 4 is a **single-reviewer cycle** (codex via `ssh hetz sudo codex
+> exec --skip-git-repo-check`). Opencode remains dropped after two
+> failed cycles 1–2 (32-min hang, then Explore-Agent fanout that never
+> returned). Other CLIs (gemini, cursor, claude, ollama, lm-studio,
+> llama-cpp) are unavailable or excluded for self-review independence
+> reasons. No cross-AI consensus is therefore available — codex's
+> findings stand alone.
 >
-> The cycle ran as a **post-replan re-review**: the prompt explicitly
-> told codex what was just fixed (the eight cycle-2 HIGHs and seven
-> MEDIUMs folded into commit `4feab98` on `dev`) and asked codex to
-> verify each fix and surface any NEW concerns introduced by the fix
-> strategy itself. Codex returned a substantive 5 KB structured review
-> with explicit closure verdicts.
+> The cycle ran as a **post-replan-2 re-review**: the prompt explicitly
+> told codex what was just fixed in commit `13a39af` on `dev` (the one
+> cycle-3 HIGH about `asyncio.to_thread` per-engine wraps, plus three
+> MEDIUMs/LOWs) and asked codex to verify each fix and surface any NEW
+> concerns introduced by the fix strategy itself. Codex returned a
+> substantive 3.2 KB structured review with explicit closure verdicts.
 
 ## Codex Review
 
 Codex (hand-run on hetz: `ssh hetz sudo codex exec --skip-git-repo-check -`)
-returned a structured 5 KB review at the requested format. The hetz
+returned a structured 3.2 KB review at the requested format. The hetz
 sandbox blocks reading `/home/j2h4u` directly, so the review is grounded
-in the embedded prompt context (PROJECT.md, REQUIREMENTS.md, ROADMAP
-phase section, CONTEXT.md, RESEARCH.md, PATTERNS.md, all three PLAN.md
-files — total 200 KB prompt). The verbatim output follows.
+in the embedded prompt context (PROJECT.md head, CONTEXT.md,
+RESEARCH.md, all three PLAN.md files — total 189 KB prompt). The
+verbatim output follows.
 
 ---
 
-**Summary** — The replan closes the eight Cycle 2 HIGHs structurally. The plans are much more explicit about source identity, MCP contract shape, async boundaries, lifecycle failure handling, local Telegram visibility, and mcp-telegram coordination. I see two new concerns introduced by the fix strategy: one HIGH around `search_async` blocking the MCP/FastAPI event loop while local engines run synchronously, and one MEDIUM around an untestable/fragile "mutate then accept either behavior" contract for shallow-frozen containers.
+**Summary** — Replan-2 correctly fixes the specific Cycle 3 defect: it replaces three concurrent per-engine `asyncio.to_thread(...)` calls with one off-loop local sequence and overlaps that with federated fan-out. The plan is materially better and preserves local-engine sequencing within a single search call. I do see one new HIGH edge case: concurrent `search_async()` requests can still run multiple local sequences at the same time on the default thread pool, so the broader SQLite/metadata/graph single-access invariant is not globally pinned.
 
-**Closure verification of cycle-2 HIGHs**
+**Closure verification of cycle-3 HIGH (event-loop block)**
 
-- **1. descriptor_key added** — **FULLY RESOLVED**. `descriptor_key: str` is required, no default, independently tested from `source_kind`, and carried into Telegram candidates.
-- **2. SearchHit narrowing removed** — **FULLY RESOLVED**. Plans require no `SearchHit` / `SearchEnvelope` narrowing and MCP returns full `SearchResponse` with full `SearchCandidate` records.
-- **3. EngineOutcome split** — **FULLY RESOLVED**. `LocalEngineOutcome.ranked_chunks` and `FederatedEngineOutcome.candidates` are distinct, with tests forbidding shape conflation.
-- **4. Local engine concurrency** — **FULLY RESOLVED** for the original SQLite/thread-safety concern. Local engines are sequential; only federated providers fan out.
-- **5. search_async canonical / sync wrapper safety** — **PARTIALLY RESOLVED**. The running-loop `RuntimeError` and MCP `search_async` call are fixed, but the planned `search_async` runs local sync engines directly inside the event loop. See new HIGH.
-- **6. Lifecycle init failures** — **FULLY RESOLVED**. Per-source build failures are captured in `_lifecycle_init_errors` and surfaced as persistent `SourceStatus(error)`.
-- **7. Telegram read active-binding gate** — **FULLY RESOLVED**. The new `TelegramReadPath` local-first routing explicitly prevents inactive local Telegram refs from falling through to provider.
-- **8. autonomous flag / daemon endpoint** — **FULLY RESOLVED**. Task 0 preflight, `34-PREFLIGHT.md`, conditional smoke, and backlog follow-up address the out-of-repo dependency.
+- **FULLY RESOLVED** — Plan 34-02 Task 3 now specifies `asyncio.to_thread(self._run_local_search_sequence, ...)` exactly once, with semantic -> keyword -> graph_direct run sequentially inside that helper and composed with federated fan-out via `asyncio.gather(local_task, federated_task)`.
+
+**Regression check vs cycle-2 fixes**
+
+- **Partially preserved** — the single-thread local invariant is preserved **within one `search_async()` call**, and the new thread-ID test pins that; however, the plan does not serialize local search across **multiple concurrent `search_async()` calls**, so shared SQLite/metadata/graph clients can still be touched concurrently by two request-level worker threads.
 
 **New Concerns**
 
-- **HIGH — `search_async` blocks the event loop during local search.** Plan 34-02 says MCP/FastAPI call `await service.search_async(...)` directly, but `search_async` then calls `_run_local_engine(...)` synchronously for semantic, keyword, and graph engines. That preserves single-threaded local access, but it also blocks the FastMCP/FastAPI event loop for the full local search duration before federated fan-out begins. This is a regression from the old MCP `asyncio.to_thread(service.search, ...)` bridge and can stall unrelated MCP requests.
+- **HIGH** — Cross-request local concurrency remains unguarded. Because each `search_async()` call uses `asyncio.to_thread(...)` on the default executor, two simultaneous MCP/FastAPI searches can run two `_run_local_search_sequence(...)` calls concurrently on different worker threads. That is a missed edge case against the Cycle 2 single-thread SQLite/metadata/graph invariant.
 
-- **MEDIUM — Plan 34-02 accidentally serializes local and federated work.** The plan runs all local engines first, then federated fan-out. This is safe but undercuts the always-on fan-out latency model: the 4s federated timeout becomes additive after local search instead of overlapping with it. This may be acceptable, but it should be an explicit tradeoff and tested as `local_duration + federated_timeout`, not described as preserving response budget.
+- **MEDIUM** — `test_search_async_does_not_block_event_loop` needs to explicitly capture `interleave_count` at the moment `search_async` completes. As written in the plan, `await asyncio.gather(service.search_async(...), interleaver())` followed by asserting the final count can pass even if `search_async` blocked first and the interleaver only ran afterward.
 
-- **MEDIUM — The shallow-frozen container test is non-deterministic as written.** Plan 34-01 says a test may either observe mutation succeeds or assert mutation raises if the implementer chooses stronger immutability. That is not a stable contract test. Pick one contract: either convert containers to immutable types, or document shallow immutability and assert mutation succeeds as current Pydantic behavior.
-
-- **LOW — Minor internal inconsistency in Plan 34-02 task 4 done text.** It says "MCP `search` tool returns `SearchEnvelope`," while acceptance criteria explicitly forbid `SearchEnvelope` and require `SearchResponse`. Acceptance is correct; fix the done text to avoid executor confusion.
+- **LOW** — Task 3 Stage 5 wording is slightly contradictory: it says to merge per-engine attribution from federated engine names, then says federated candidates must have `engine_scores=None`. The D-02 invariant and test are clear, but the implementation instruction should be tightened.
 
 **Suggestions**
 
-- Keep local engines sequential, but move the whole local sequence off the event loop through one dedicated worker call, e.g. `await asyncio.to_thread(self._run_local_search_sequence, ...)`. That preserves "one thread, sequential local engines" while preventing MCP/FastAPI event-loop blockage.
+- Add a service-level local-search gate: either an `asyncio.Lock` around the single `to_thread` local sequence, or a dedicated single-worker executor for local search. The goal is no overlapping local sequences across concurrent requests.
 
-- Start federated fan-out before awaiting local worker completion if lifecycle providers are independent: create federated tasks, run the local sequence in one worker thread, then await both. This overlaps federated timeout with local work without concurrent local DB access.
+- Add a test like `test_concurrent_search_async_calls_do_not_overlap_local_sequences`: launch two `search_async()` calls, make `_run_local_search_sequence` block briefly, and assert no overlap.
 
-- Replace the flexible shallow-freeze test with a single chosen contract. Prefer immutable containers if this is a public model: `tuple[str, ...]` for `matched_engines` and read-only copied dicts, or document shallow freeze and avoid pretending the model is deeply immutable.
+- Fix the event-loop test by wrapping search in a coroutine that records the interleaver count in a `finally` or immediately after `await service.search_async(...)`, then assert that recorded value is >= 15.
 
-- Fix Plan 34-02 task 4 `<done>` to say `SearchResponse`, not `SearchEnvelope`.
+**Risk Assessment**
 
-**Risk Assessment** — **MEDIUM**. The replan closes the original HIGHs well, and the test strategy is strong. The main remaining risk is operational: the canonical async API may block the server event loop during local search unless the sequential local path is moved into one worker thread or otherwise isolated.
+- **MEDIUM** — The targeted Cycle 3 issue is closed, but the cross-request concurrency hole is significant for a server surface. With a local-search lock or single-worker executor plus the adjusted test, risk drops to LOW.
 
 ---
 
@@ -79,42 +74,45 @@ files — total 200 KB prompt). The verbatim output follows.
 
 | Reviewer | Status      | Wall time | Output bytes | Notes |
 |----------|-------------|-----------|--------------|-------|
-| codex (ssh-hetz) | substantive | 39s | 5115 | `ssh hetz sudo codex exec --skip-git-repo-check -`. Default model (no `review.models.codex` override). 200 KB prompt accepted. Output: 1 NEW HIGH, 2 NEW MEDIUM, 1 NEW LOW. 7/8 cycle-2 HIGHs marked FULLY RESOLVED, 1/8 (HIGH-5) marked PARTIALLY RESOLVED — same defect codex re-raises as the new HIGH. 65,015 tokens used. Stderr was a thinking-trace duplicate, not an error log. |
+| codex (ssh-hetz) | substantive | ~50s | 3280 | `ssh hetz sudo codex exec --skip-git-repo-check -`. Default model. 189 KB prompt. Output: cycle-3 HIGH FULLY RESOLVED, 1 NEW HIGH (cross-request concurrency), 1 NEW MEDIUM (test capture timing), 1 NEW LOW (stage-5 wording). 65,192 tokens used. Stderr was a thinking-trace duplicate, not an error log. |
 
 ## Consensus Summary
 
-**Single-reviewer cycle — no cross-AI consensus available.** Cycle 3
-ran with codex only; opencode was dropped after two failed runs and no
-other CLI was available. The summary below reflects codex's findings
-alone and should be treated as raised-by-codex, not consensus-blocking.
+**Single-reviewer cycle — no cross-AI consensus available.** Cycle 4
+ran with codex only; opencode remains dropped after two prior failed
+runs and no other CLI is available. The summary below reflects codex's
+findings alone and should be treated as raised-by-codex, not
+consensus-blocking.
 
 ### Strengths (codex)
 
-- All eight cycle-2 HIGHs structurally addressed (7 FULLY RESOLVED + 1
-  PARTIALLY RESOLVED with a precisely identified residual gap).
-- Source identity, MCP contract shape, EngineOutcome typing, lifecycle
-  init resilience, Telegram active-binding gate, and mcp-telegram
-  daemon coordination all read as correct.
-- Test strategy is "strong" per codex. `descriptor_key` independence,
-  `EngineOutcome` shape forbidding, `TelegramReadPath` local-first
-  routing — all explicitly testable.
+- Cycle-3 HIGH (event-loop block) **FULLY RESOLVED** — single
+  `asyncio.to_thread(_run_local_search_sequence, ...)` overlapping
+  federated fan-out via `asyncio.gather(local_task, federated_task)`.
+- New regression-pin tests (loop-not-blocked, single-worker-thread,
+  local↔federated overlap) directly target the defect class and lock
+  the structural choice.
+- Plan is "materially better" per codex.
 
 ### Concerns (codex; treat as raised, not consensus-blocking)
 
-1. **`search_async` event-loop blockage (NEW HIGH).** Local engines run
-   synchronously inside the awaited `search_async` coroutine. Stalls
-   FastMCP / FastAPI event loop for the full local-search duration
-   before federated fan-out starts. Same defect codex flagged as
-   HIGH-5 PARTIALLY RESOLVED — closing HIGH-5 means addressing this.
-2. **Sequential local-then-federated execution (NEW MEDIUM).** Federated
-   timeout becomes additive instead of overlapping with local work.
-   Either accept and document as `local_duration + federated_timeout`
-   budget, or overlap via concurrent task creation.
-3. **Shallow-frozen container test indeterminacy (NEW MEDIUM).** Plan
-   34-01's "accept either mutation-succeeds or mutation-raises" test
-   is not a stable contract. Pick one and assert it.
-4. **Plan 34-02 Task 4 `<done>` text mismatch (NEW LOW).** Says
-   `SearchEnvelope`; acceptance criteria require `SearchResponse`.
+1. **NEW HIGH — Cross-request local concurrency unguarded.** Two
+   simultaneous `search_async()` calls each call `to_thread` on the
+   default executor; two `_run_local_search_sequence(...)` invocations
+   can overlap on different worker threads. Cycle-2 single-thread
+   SQLite/metadata/graph invariant holds **per request** but not
+   **across requests**. Suggested fix: service-level `asyncio.Lock`
+   around the local-sequence `to_thread`, or a dedicated single-worker
+   executor.
+2. **NEW MEDIUM — Event-loop test timing.** `await asyncio.gather(...)`
+   in the test allows the interleaver to keep ticking after
+   `search_async` returns, so the count assertion may pass even if
+   `search_async` itself blocked first. Capture `interleave_count`
+   immediately when `search_async` completes (e.g. via `finally`).
+3. **NEW LOW — Stage 5 wording in Plan 34-02 Task 3.** Reads as if
+   federated engine attribution is merged into `engine_scores`, then
+   immediately says `engine_scores=None` for federated. The D-02
+   invariant and test are right; only the prose contradicts itself.
 
 ### Divergent Views
 
@@ -122,32 +120,46 @@ Not applicable — only one reviewer in this cycle.
 
 ---
 
-## HIGH Concern Counting (Cycle 3)
+## HIGH Concern Counting (Cycle 4)
 
 Per the GSD review-convergence contract:
 
-- **FULLY RESOLVED HIGHs (excluded):** 7 — HIGH-1, HIGH-2, HIGH-3,
-  HIGH-4, HIGH-6, HIGH-7, HIGH-8.
-- **PARTIALLY RESOLVED HIGHs (counted):** 1 — HIGH-5 (search_async
-  event-loop blockage).
-- **NEW HIGHs (counted):** 1 — `search_async` blocks event loop. **This
-  is the same defect as the HIGH-5 residual** (codex explicitly says
-  "See new HIGH" in its HIGH-5 verdict). To avoid double-counting,
-  treated as a single unresolved HIGH.
+- **FULLY RESOLVED prior HIGHs (excluded):** 1 — cycle-3 event-loop
+  block (now structurally fixed by single-helper `to_thread` plus
+  `gather`).
+- **NEW HIGHs (counted):** 1 — cross-request local concurrency
+  unguarded. Default executor allows two simultaneous `search_async`
+  calls to run two `_run_local_search_sequence` invocations on
+  different worker threads, breaking the cycle-2 single-thread
+  SQLite/metadata/graph invariant globally.
 
 **Total unresolved HIGHs (current_high): 1.**
 
-prev_high_count was 8; current_high is 1. Stall trigger
-(current_high >= prev_high_count) does NOT fire. Convergence loop is
-making progress and may continue to Cycle 4 if a replan is performed,
-or may proceed to plan acceptance if the operator deems 1 HIGH about
-event-loop blocking acceptable / addressable as a quick edit during
-execution.
+prev_high_count was 1; current_high is 1. **Stall trigger fires
+(current_high >= prev_high_count).** This is a concerning signal:
+replan-1 closed 7/8 cycle-2 HIGHs but left a residual that became
+cycle-3's HIGH. Replan-2 closed cycle-3's HIGH but surfaced a new
+cycle-4 HIGH about cross-request concurrency — the **same invariant
+class** (single-thread SQLite/metadata/graph) but at a different scope
+(cross-request rather than per-request). The reviewer scope keeps
+expanding: per-engine → per-request → cross-request.
+
+The orchestrator should weigh:
+
+- The new HIGH is a known fix (service-level `asyncio.Lock` or single-
+  worker executor — codex spelled it out). Replan-3 is small and well-
+  scoped.
+- This is cycle 4 of MAX_CYCLES=5. Replan-3 → cycle 5 review is the
+  last allotted slot. If cycle 5 surfaces yet another invariant scope,
+  convergence has failed and operator review is needed.
+- Alternatively: ship as-is and address cross-request concurrency
+  during execution, since dotMD is single-user localhost and concurrent
+  searches are rare. This is a defensible "known issue, deferred"
+  call given the system's actual usage pattern.
 
 ---
 
-*Cycle 3 of cross-AI review for Phase 34. Single reviewer (codex).
-Replan from cycle 2 commit `4feab98` verified: 7/8 prior HIGHs fully
-closed, 1/8 partially closed (residual surfaced as new HIGH about
-event-loop blockage). Plans are otherwise sound; risk dropped from
-MEDIUM-HIGH (cycle 2) to MEDIUM (cycle 3).*
+*Cycle 4 of cross-AI review for Phase 34. Single reviewer (codex).
+Replan-2 from commit `13a39af` verified: cycle-3 HIGH fully closed; one
+new HIGH surfaced about cross-request concurrency (same invariant
+class, broader scope). Stall trigger fires. Risk remains MEDIUM.*
