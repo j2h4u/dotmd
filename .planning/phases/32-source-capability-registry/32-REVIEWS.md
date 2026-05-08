@@ -1,232 +1,75 @@
 ---
 phase: 32
-reviewers: [claude, opencode]
-reviewed_at: 2026-05-08T17:47:16+05:00
+reviewers: [opencode, claude]
+reviewed_at: 2026-05-08T17:57:49+05:00
+cycle: 2
 plans_reviewed:
   - 32-01-source-descriptor-contract-PLAN.md
   - 32-02-filesystem-telegram-registry-seeds-PLAN.md
   - 32-03-provider-description-compatibility-PLAN.md
   - 32-04-airweave-mapping-docs-PLAN.md
-cycle: 1
-current_high: 2
 ---
 
-# Cross-AI Plan Review — Phase 32
+# Cross-AI Plan Review - Phase 32
 
-## Cycle Summary
-
-CYCLE_SUMMARY: current_high=2
-
-## Current HIGH Concerns
-
-- Plan 02 does not specify or test the filesystem config schema field types and requiredness, especially `paths` required and `exclude` optional, despite the existing filesystem adapter contract.
-- Plan 03 leaves a capability string mismatch between the new registry enum values (`read_unit_window`, `incremental_cursor`) and the live Telegram daemon payload strings (`unit-window`, `incremental-export`) without a concrete normalization or migration plan.
+Cycle 2 review after replan commit `eafd8ed`.
 
 ## Consensus Summary
 
+CYCLE_SUMMARY: current_high=0
+
+### Current HIGH Concerns
+
+None.
+
 ### Agreed Strengths
 
-- The phase is appropriately scoped as additive, declarative registry work with no runtime lifecycle construction, credential access, or Airweave dependency.
-- The TDD structure is sound: model contract first, seed descriptors and compatibility bridge next, documentation last.
-- Both reviewers found the source-provider boundary largely correct, especially keeping Telegram behind `mcp-telegram` and preserving the existing `ApplicationSourceProviderProtocol` surface.
-- Both reviewers liked the closed capability vocabulary and strict Pydantic model direction as a guard against descriptor drift.
+- Both reviewers agree the cycle-1 HIGH about filesystem config schema requiredness is resolved: the latest Plan 02 explicitly requires `paths` as required `list[str]` and `exclude` as optional `list[str]`, with concrete assertions.
+- Both reviewers agree the cycle-1 HIGH about Telegram daemon capability string mismatch is resolved: the latest Plan 03 defines `LEGACY_CAPABILITY_ALIASES`, a `normalized_capabilities()` accessor, and tests for legacy acceptance plus canonical normalization.
+- Both reviewers agree the phase remains additive, declarative, and runtime-neutral, with no production indexing, credential, cursor commit, or Airweave runtime dependency in scope.
 
 ### Agreed Concerns
 
-- Capability semantics need tightening before execution. Both reviewers called out ambiguity around Telegram `federated_search`; both also flagged the broader risk of registry capability values drifting away from live provider payloads.
-- Plan 01 should explicitly require `Field(default_factory=...)` for collection/dict defaults and make strict Pydantic validation grep-able in the plan.
-- Descriptor schema field typing is under-specified. Both reviewers accepted a lightweight Phase 32 shape, but recommended documenting or constraining valid `field_type` values so Phase 33 does not inherit arbitrary strings.
-- Filesystem cursor/materialization semantics are ambiguous enough to create downstream confusion unless Phase 32 clarifies whether these describe current implementation, source model capability, or future lifecycle behavior.
-- The optional README/doc placement guidance in Plan 04 should be made less ambiguous for autonomous execution.
+- MEDIUM: Capability semantics need careful wording. `MATERIALIZATION` on filesystem and `FEDERATED_SEARCH` on Telegram are defensible as source-model capabilities, but downstream phases need explicit semantics so they do not confuse provider capability with current dotMD routing.
+- LOW/MEDIUM: The two-module naming pattern, `core/source_registry.py` and `ingestion/source_registry.py`, remains easy to confuse during execution and review.
+- LOW: Some verification is grep-based and could be made more precise, especially around `ConfigDict(extra="forbid")` on every new descriptor sub-model.
 
 ### Divergent Views
 
-- Claude treated the capability-string mismatch as a medium maintainability risk because the bridge is small and fenced; OpenCode classified it as HIGH because live daemon payload strings already differ from the planned enum values and future comparisons could fail.
-- Claude considered filesystem materialization semantically odd and possibly unnecessary; OpenCode accepted it as reasonable but emphasized that cursor/config details need stronger tests.
-- Claude recommended avoiding two modules named `source_registry.py`; OpenCode viewed the split between core model contract and ingestion seed registry as a clean boundary.
+- OpenCode treated the remaining filename collision and capability semantics as non-blocking design opinions.
+- Claude recommended a few extra comments or acceptance criteria to make the same concerns clearer, but still classified the overall phase risk as LOW and found no HIGH blockers.
 
-### Recommended Replan Focus
+### Recommendation
 
-- Resolve the two HIGH findings explicitly in the Phase 32 plans before execution.
-- Add concrete acceptance criteria for capability vocabulary normalization or migration ownership.
-- Strengthen Plan 02 tests for schema field type and requiredness.
-- Tighten Plan 01 style requirements for mutable defaults and strict Pydantic models.
-
----
-
-## Claude Review
-
-# Cross-AI Plan Review: Phase 32 — Source Capability Registry
-
-## Plan 01: Source Descriptor Contract
-
-### Summary
-Solid TDD plan that establishes the typed descriptor vocabulary with a closed `SourceCapability` enum, strict Pydantic models, and an immutable registry container. Tests-first ordering and grep-able acceptance criteria are well-suited for autonomous execution. The main weaknesses are Python-level: mutable defaults on Pydantic fields and an under-specified module organization that creates a `source_registry.py` filename collision with Plan 02.
-
-### Strengths
-- Closed `StrEnum` for capabilities + explicit `extra="forbid"` test prevents the very drift the threat model calls out.
-- `model_copy(deep=True)` on every read prevents accidental registry mutation by callers.
-- Acceptance criteria use grep-able invariants (`does not contain "airweave"`, `does not contain "TokenProvider"`) so a downstream agent can self-verify without judgment calls.
-- Threat model and tasks are explicitly aligned (each threat has a corresponding test).
-
-### Concerns
-- **MEDIUM — Mutable defaults on Pydantic fields.** The model definitions use `labels: list[str] = []`, `metadata_json: dict = {}`, `fields: list[SourceSchemaField] = []`, `examples: list[str] = []`. Pydantic v2 deep-copies these on each instance, so this is not the classic Python footgun, but it's still discouraged style and `ruff` (`B006`) will flag it. Plan should mandate `Field(default_factory=list)` / `Field(default_factory=dict)` to match the codebase's strict-model conventions.
-- **MEDIUM — Filename collision risk.** Plan 01 creates `backend/src/dotmd/core/source_registry.py` and Plan 02 creates `backend/src/dotmd/ingestion/source_registry.py`. Two modules with the same basename make import lines harder to read at a glance and increase the chance of editing the wrong one. Consider renaming one (e.g., `core/source_registry.py` → `core/source_registry_types.py` or move the `SourceRegistry` container into `ingestion/source_registry.py` since that's where seeds live).
-- **MEDIUM — `ConfigDict(extra="forbid")` is implied but not mandated.** PATTERNS.md calls out the `extra="forbid"` convention, but Plan 01's task 2 does not explicitly require it on each new model — only the test indirectly enforces it via `test_source_descriptor_forbids_extra_fields`. Make it an explicit acceptance criterion (`backend/src/dotmd/core/models.py contains 'extra="forbid"'` for the new descriptor models).
-- **LOW — Test placement.** Tests for `core` types live under `tests/ingestion/test_source_registry.py`. The descriptor models are core-level; tests for them would be more discoverable under `tests/core/`. Seed tests can stay under `tests/ingestion/`.
-- **LOW — `SourceSchemaField.field_type: str`.** Using a free-form string for a type name (rather than an enum or Python-typed reference) means Phase 33 will have to interpret these strings to instantiate runtimes. Trade-off is acceptable to keep the descriptor lightweight, but worth a one-liner in the threat model acknowledging that Phase 33 is responsible for validating field_type values.
-
-### Suggestions
-- Add explicit `Field(default_factory=...)` requirement for every collection/dict default.
-- Rename `core/source_registry.py` → `core/source_registry_container.py`, OR collapse the container into `ingestion/source_registry.py`.
-- Add `extra="forbid"` as an explicit grep-able acceptance criterion.
-- Move type-level tests to `tests/core/test_source_registry.py`; keep seed tests in `tests/ingestion/`.
-
-### Risk Assessment: **LOW**
-Surface is small, additive, declarative, and unit-tested. No runtime impact, no migration. Worst case is Phase 33 finds the descriptor too thin and asks for additions — easy to evolve.
-
----
-
-## Plan 02: Filesystem And Telegram Registry Seeds
-
-### Summary
-Detailed seed entries with exact field assertions. The plan correctly keeps Telegram delegated to `mcp-telegram` and resists pulling Telegram API ownership into dotMD. The capability assignments deserve scrutiny: `materialization` on filesystem is semantically questionable, and `federated_search` on Telegram conflates "provider supports it natively" with "dotMD can route through it" — a distinction Phase 34 will need.
-
-### Strengths
-- Both seeds populate config/auth/cursor schemas with real fields, not placeholders — meets D-10's "detailed reference entries" mandate.
-- Telegram auth is explicitly `delegated` to `mcp-telegram`, with a grep-able acceptance criterion.
-- Negative assertions (`acl` not in Telegram caps) prevent overclaiming.
-- Forbidden-import grep checks (no `Telethon`, no `airweave`) close off the "creep into runtime" failure mode.
-
-### Concerns
-- **MEDIUM — `MATERIALIZATION` capability on filesystem is semantically odd.** Materialization in Airweave/connector vocabulary typically means "make a remote artifact available as a local readable byte stream." For a filesystem source, the artifact is already local — the capability is trivially true and adds no information. Either drop it for filesystem, or define materialization more precisely in the descriptor docs (e.g., "this source can produce on-demand bytes for a unit ref"). Otherwise downstream phases will read different meanings into it.
-- **MEDIUM — `FEDERATED_SEARCH` capability on Telegram conflates two things.** The flag suggests Telegram supports federated search, but Phase 34 is what implements the SearchCandidate pipeline. As declared today, the flag answers "does the *provider* expose native search?" rather than "is dotMD wired to consume it?". When Phase 34 lands, the same flag can mean "dotMD can route this source through the federated path." Today the flag is aspirational. Add a note in the descriptor docs distinguishing "provider-supported" from "dotMD-implemented," or split into two capabilities.
-- **MEDIUM — Default-registry test is hedged.** `test_default_registry_contains_filesystem_and_telegram` says "exactly the filesystem and telegram namespaces ... unless implementation also includes test fixtures explicitly marked non-default." That escape hatch undercuts the test. Either the default registry has exactly those two namespaces in Phase 32, or the contract is open. Recommend hard assertion: `set(ns for d in default_source_registry().list()) == {"filesystem", "telegram"}`.
-- **LOW — `metadata_json` carries semi-structured filesystem fields.** `media_type: "text/markdown"` and `parser_name: "markdown"` go into `metadata_json` rather than typed descriptor fields. This is fine for Phase 32 but worth noting: if Phase 33 needs these, they'll be reading a `dict[str, Any]`. Consider whether `parser_name` should be a first-class descriptor field (it appears already on `FilesystemMarkdownSourceAdapter`).
-- **LOW — Cursor schema mismatch between test and implementation.** Test asserts `cursor_kind == "fingerprint"` for filesystem; implementation says `cursor_kind: "fingerprint"`. Telegram test asserts only the example string is present; implementation has `cursor_kind: "provider_checkpoint"`. The Telegram test should probably also assert `cursor_kind`.
-
-### Suggestions
-- Drop `MATERIALIZATION` from filesystem caps (or define it precisely and document why local files have it).
-- Split `FEDERATED_SEARCH` into `PROVIDER_FEDERATED_SEARCH` (provider exposes it) vs `DOTMD_FEDERATED_SEARCH` (dotMD routes it), OR document the dual meaning explicitly.
-- Tighten the default-registry test to a hard set equality.
-- Add cursor_kind assertion to the Telegram seed test.
-- Consider promoting `parser_name` and `media_type` to typed descriptor fields rather than metadata_json keys.
-
-### Risk Assessment: **LOW–MEDIUM**
-Capability semantics will affect Phase 33 and Phase 34. Locking ambiguous flags now creates rework risk later. The materialization/federated_search definitions should be tightened in this phase, not deferred.
-
----
-
-## Plan 03: Provider Description Compatibility
-
-### Summary
-Necessary glue plan that prevents the new descriptor from breaking the live Telegram daemon payload. Preserves `ApplicationSourceProviderProtocol` unchanged and adds an explicit one-way bridge from descriptor to legacy description. The capability string mismatch between the new closed enum (`local_sync`, `incremental_cursor`) and the legacy daemon payload (`incremental-export`, `unit-window`) is acknowledged through coexistence but no migration path is defined.
-
-### Strengths
-- No runtime protocol change — Phase 33 and the live daemon are not pressured into rework.
-- Bridge is one-way (descriptor → description), avoiding the temptation to read legacy payloads back into the new enum.
-- Explicit grep checks that `describe_source(self) -> ApplicationSourceDescription` is preserved in both the protocol and Telegram provider.
-
-### Concerns
-- **MEDIUM — Capability string drift is left coexisting indefinitely.** The new enum produces `local_sync`, `read_unit_window`, `incremental_cursor`. The legacy Telegram daemon payload sends `incremental-export`, `unit-window`. The bridge does not normalize the legacy strings to the new vocabulary, and no future-phase task is queued for it. Consumers will see two parallel taxonomies. At minimum, add a TODO/ticket reference (or a Phase 33+ requirement) so the daemon payload migrates eventually.
-- **LOW — "Copy display metadata into metadata_json if useful" is vague.** Either the bridge does it or it doesn't. Vague acceptance criteria in autonomous plans tend to produce inconsistent agent decisions. Pick one.
-- **LOW — `from_descriptor` placement.** Putting it on `ApplicationSourceDescription` as a classmethod is fine but couples the legacy model to the new one. A free function `source_descriptor_to_application_description()` is more reversible. Plan offers both; it should pick one.
-
-### Suggestions
-- Define a concrete capability-string normalization plan: either the bridge translates legacy strings ↔ new enum values, or a Phase 33 task migrates the daemon payload. Don't leave both vocabularies alive forever.
-- Decide whether `descriptor_display` is copied into `metadata_json` — yes or no.
-- Pick free function vs classmethod for the bridge and stick with it.
-
-### Risk Assessment: **LOW**
-Bridge code is small and well-fenced. The unresolved capability-string duality is a slow-burn maintainability concern, not a correctness or security issue.
-
----
-
-## Plan 04: Airweave Mapping Documentation
-
-### Summary
-Documentation-only plan with concrete required tables, classifications, and forbidden-import checks. Discharges D-13/D-14/D-15 cleanly. Light on edge cases because docs don't have many; the small concerns are about scope creep into README and a slightly weak verification surface for "no runtime dependency."
-
-### Strengths
-- Mandates exact set of Airweave concepts to map — prevents an agent from cherry-picking the easy ones.
-- Status vocabulary is closed (`copied`/`adapted`/`rejected`/`deferred`).
-- Explicit "Runtime Boundary" section addresses Phase 33 ownership question that would otherwise come up in every later phase.
-
-### Concerns
-- **LOW — README modification is hedged.** `files_modified` lists `README.md`, but the task body says "skip README rather than creating a noisy doc index." If the intent is "modify only if there's already an architecture section," remove README from `files_modified` and put the conditional logic into the acceptance criteria.
-- **LOW — `from airweave|import airweave` grep is weak verification.** Airweave isn't pip-installed; the import would fail anyway. The real risk is the agent vendoring Airweave code or copying decorators into dotMD. A stronger check would also grep for `class_name`, `output_entity_definitions`, `feature_flag` (Airweave-specific identifiers) appearing in `backend/src/`.
-- **LOW — `supported_auth_providers` and `feature_flag` are listed as required mapping rows but their dotMD equivalents are unclear.** If they map to "rejected" or "deferred," the table should still have a non-empty Reason column — make sure the agent doesn't leave Reason blank.
-
-### Suggestions
-- Drop `README.md` from `files_modified` if the README change is conditional.
-- Add a stronger forbidden-pattern grep: e.g., `rg -n "supports_browse_tree|output_entity_definitions|class_name" backend/src` returns no matches (these are Airweave-specific identifiers).
-- Add an acceptance criterion that every row in the mapping table has a non-empty `Reason` cell.
-
-### Risk Assessment: **LOW**
-Docs-only, no runtime impact. Worst case is the table is incomplete and Phase 37 has to redo mapping work — recoverable.
-
----
-
-## Cross-Plan Concerns
-
-- **MEDIUM — Threat IDs `T-32-01` through `T-32-06` referenced in `32-VALIDATION.md` are not defined in any plan's threat model.** The plans use unlabeled threat tables. Either add IDs to plan threat tables matching the validation doc, or remove the IDs from validation. Right now the traceability column is dead text.
-- **MEDIUM — No explicit Phase 33 consumability test.** Phase 32 produces descriptors that Phase 33 must consume. There is no skeletal test in this phase that mocks lifecycle consumption (e.g., "given a descriptor, lifecycle can read auth_schema.auth_kind and pick a credential provider strategy"). Adding one cheap test would catch design gaps before Phase 33 starts and avoid descriptor rework.
-- **LOW — No CLI/MCP exposure of the registry.** `dotmd sources list` would be a natural debug surface and a sanity check that the registry actually lives in a publicly accessible place. Plan 04 could add this as a deferred follow-up rather than ignore it.
-- **LOW — Pydantic v2 model_dump round-trip is untested.** If Phase 34's SearchCandidate or any MCP tool ever serializes a descriptor, round-trip should work. Adding `model_dump_json() → model_validate_json()` to one test would future-proof for free.
-
----
-
-## Overall Risk Assessment: **LOW–MEDIUM**
-
-The phase is intentionally additive, declarative, and code-only with no production runtime change. TDD ordering and grep-able acceptance criteria are well-suited for autonomous execution. The headline risks are:
-
-1. **Capability semantics** (`materialization` on filesystem, `federated_search` as a hybrid flag) — should be tightened *now*, not in Phase 33.
-2. **Mutable defaults and pydantic style** — needs an explicit acceptance criterion before plan 01 ships.
-3. **Filename collision** between two `source_registry.py` files — easy to fix before execution.
-4. **Capability string drift** between new enum and legacy daemon payload — needs a migration owner (Phase 33+) or it will calcify.
-
-None of these are blockers. With the above tightenings, Phase 32 is ready to execute autonomously.
+Proceed to execution. The unresolved concerns are below HIGH severity and can be handled as implementation polish or reviewer attention points during Phase 32 execution.
 
 ---
 
 ## OpenCode Review
 
-Let me verify key code surfaces the plans reference before reviewing.
-Now I have a thorough understanding of the existing code. Here's my review:
-
----
-
-# Phase 32 Plan Review: Source Capability Registry
+# Cross-AI Plan Review: Phase 32, Cycle 2
 
 ## Plan 01: Source Descriptor Contract
 
 ### Summary
 
-Clean TDD plan that introduces the `SourceCapability` enum and typed descriptor models. The scope is well-bounded to declarative models only, with an explicit boundary against Phase 33 lifecycle concerns. The two-task structure (tests first, then models) is sound.
+Clean TDD plan establishing the closed `SourceCapability` enum, typed descriptor models, and immutable registry container. The prior concerns about mutable defaults, untyped field_type, and missing `extra="forbid"` mandate are all explicitly resolved. The plan is ready for execution.
 
 ### Strengths
 
-- **Threat model is precise and actionable** — each threat maps to a concrete mitigation in the tests (e.g., reject unknown capability values, forbid extra fields).
-- **Closed enum with explicit values** — directly addresses D-07/D-08 and prevents capability drift.
-- **`extra="forbid"` on all models** — matches existing `SourceDocument`, `ApplicationSourceDescription` patterns (`core/models.py:84,119,150,167,179`).
-- **`model_copy(deep=True)`** for registry immutability — prevents caller mutation leaking into registry state.
-- **No Airweave import, no credential, no runtime construction** — acceptance criteria explicitly grep for these.
+- `SOURCE_SCHEMA_FIELD_TYPES = frozenset({...})` with explicit validation addresses the prior stringly-typed `field_type` concern directly. The allowed vocabulary is closed and testable.
+- `Field(default_factory=...)` is now a mandatory acceptance criterion - grep-able and prevents the `B006` ruff issue.
+- `ConfigDict(extra="forbid")` appears in both the task action and acceptance criteria, closing the prior ambiguity.
+- Threat model entry for "Schema field type strings become arbitrary values" with MEDIUM severity and explicit mitigation shows the planners understood the concern even if they kept `str` for flexibility.
 
 ### Concerns
 
-- **MEDIUM — `SourceSchemaField.field_type: str` is untyped**. A `field_type: str` that should represent `"str"`, `"int"`, `"list[str]"`, etc. is effectively a stringly-typed type system. For Phase 32 (declarative only) this is acceptable, but the plan should note that Phase 33 lifecycle will need to either validate these strings against real Python types or the field should use a `JsonSchemaType` enum. If left as `str`, future phases risk "made-up" type strings the same way D-07 prevents made-up capability strings.
-- **MEDIUM — `SourceDisplayMetadata.labels: list[str] = []` uses mutable default**. Pydantic handles this correctly via `Field(default_factory=list)`, but the plan writes `labels: list[str] = []`. The actual implementation must use `Field(default_factory=list)` to match the existing pattern (`models.py:78,97,131`).
-- **LOW — No `__contains__` or iteration on `SourceRegistry`**. The plan specifies `register`, `get`, `require`, `list` but callers (and tests in Plans 02/03) will need `"filesystem" in registry`-style checks. Not a blocker, but `require` throwing `KeyError` or a custom error should be specified.
-- **LOW — Plan puts models in `core/models.py`** which is already 328 lines. Adding 6+ new models will push it toward 400+. This is fine for now but worth noting for future refactoring.
+- **MEDIUM - Two `source_registry.py` modules persist.** `core/source_registry.py` (container) and `ingestion/source_registry.py` (seeds). The naming collision is real but the boundary is clean (model container vs. ingestion-layer factory). Acceptable trade-off, just requires care in reviews.
+- **LOW - Test placement remains under `tests/ingestion/`** for what are core-level model tests. Not a correctness issue; discoverability could improve later.
 
-### Suggestions
+### Risk: **LOW**
 
-- Specify that `require(namespace)` raises `KeyError(namespace)` or a domain-specific error, so Plan 02 tests can assert on the exception type.
-- Clarify that `SourceSchemaField.field_type` values should be drawn from a known set (e.g., `"str"`, `"int"`, `"bool"`, `"list[str]"`, `"path"`) and that Phase 33 may tighten this.
-
-### Risk: LOW
-
-The plan is narrowly scoped, well-gated by tests, and has no runtime dependencies. The main risk is the stringly-typed `field_type`, which is a design debt rather than an execution risk.
+Both prior cycle-1 HIGHs for Plan 01 (mutable defaults, untyped field_type) are resolved with explicit acceptance criteria and tests.
 
 ---
 
@@ -234,31 +77,24 @@ The plan is narrowly scoped, well-gated by tests, and has no runtime dependencie
 
 ### Summary
 
-Seeds the registry with detailed filesystem and Telegram descriptors. The TDD wave structure (test the seeds, then implement) is correct. The descriptors are carefully grounded in existing code constants (`namespace = "filesystem"`, `media_type = "text/markdown"`, etc.).
+Detailed seed descriptors with exact field assertions. The prior HIGH about filesystem config schema requiredness is fully resolved - `paths` is now asserted as required and `exclude` as optional with typed field_type. The `socket_path` naming now aligns with the existing codebase. Default registry test is a hard set equality.
 
 ### Strengths
 
-- **Exact capability assertions** — filesystem gets `local_sync`, `materialization`, `browse_tree` and NOT `incremental_cursor` (correct: filesystem uses fingerprints, not provider cursors). Telegram gets `incremental_cursor` and `federated_search` but NOT `acl`. This shows deep understanding of the source semantics.
-- **Telegram `delegated_to = "mcp-telegram"`** — directly encodes D-12 (Telegram is behind `mcp-telegram`, not a direct API client) and matches the existing `TelegramSourceClientProtocol` boundary at `telegram_provider.py:41`.
-- **`metadata_json` includes `media_type` and `parser_name`** for filesystem — matches the existing `FilesystemMarkdownSourceAdapter` class attributes at `source.py:41-43`.
-- **New module `ingestion/source_registry.py`** — keeps descriptor *seeds* (which are ingestion-layer concepts) separate from the *model contract* in `core/source_registry.py`. Clean boundary.
+- `paths.required is True` and `exclude.required is False` are now explicit acceptance criteria with matching implementation in task 2. Prior HIGH fully resolved.
+- `socket_path` replaces the earlier `daemon_socket`, matching `telegram_provider.py:71`'s existing `socket_path: Path` attribute.
+- Default registry test uses `== {"filesystem", "telegram"}` - no escape hatch. Prior hedged-test concern resolved.
+- Telegram seed asserts `cursor_schema.cursor_kind == "provider_checkpoint"`, closing the prior LOW about missing cursor_kind assertion.
+- Exact capability sets are asserted with both positive and negative checks.
 
 ### Concerns
 
-- **HIGH — Filesystem config schema has `paths` and `exclude` but no `field_type` or `required` specification in the plan**. The test says "config schema has a `paths` field and an `exclude` field" but doesn't specify whether `paths` is required and `exclude` is optional. Given that the filesystem adapter's `discover_multi` signature is `paths: list[str], exclude: list[str] | None = None` (`source.py:32-33`), `paths` should be required and `exclude` should be optional. The test should assert this.
-- **MEDIUM — `cursor_schema.cursor_kind = "fingerprint"` for filesystem is ambiguous**. Filesystem uses content fingerprints and metadata fingerprints (two separate fingerprints per `SourceDocument`), but `cursor_kind` is singular. Is this a composite cursor? The plan should clarify that the filesystem cursor kind describes the *mechanism* (fingerprint-based change detection) rather than a single field, since filesystem doesn't use provider-owned cursors at all.
-- **MEDIUM — Telegram descriptor claims `federated_search` capability but Phase 32 doesn't implement federated search**. The plan says "capabilities include... `federated_search`" but D-12 says "future federated search where supported." If the descriptor says a capability exists, Phase 34 will need to implement it. Consider whether Telegram should have `federated_search` now or whether it should be added in Phase 34 when federated search is actually implemented. The CONTEXT says "Telegram registers... federated-search capabilities **where available**" — but it's not available yet. This is a declarative claim that may need a `planned` vs `available` distinction.
-- **LOW — `daemon_socket` field name for Telegram config**. The existing implementation uses `socket_path: Path` (`telegram_provider.py:71`). The descriptor uses `daemon_socket`. These should align or the plan should explain the mapping.
+- **MEDIUM - `federated_search` on Telegram remains aspirational.** The capability is declared but Phase 34 implements it. The descriptor describes the *source model* capability (the provider can support it), not current dotMD implementation status. This is a defensible design choice documented in context, but downstream phases should be aware of the distinction. No action needed in Phase 32 plans.
+- **MEDIUM - `materialization` on filesystem is still semantically debatable.** Same as cycle 1. The plan documents it, the descriptor carries it, and Phase 35 can refine semantics when it migrates the filesystem execution path. Not a blocker.
 
-### Suggestions
+### Risk: **LOW**
 
-- Assert `required=True` for filesystem `paths` and `required=False` for `exclude` in the test.
-- Consider whether `SourceCapability` needs a `planned` qualifier or whether the descriptor should have a separate `planned_capabilities: list[SourceCapability]` field to distinguish "implemented now" from "will be implemented." Alternatively, document clearly that capabilities describe the source *model*, not current dotMD implementation status.
-- Align Telegram config field name with existing `socket_path` naming in the codebase, or add a comment explaining the intentional rename.
-
-### Risk: MEDIUM
-
-The `federated_search` capability claim for Telegram is the main concern — it's a forward promise that Phase 34 must honor. The filesystem cursor kind ambiguity could cause confusion in Phase 35. Both are design decisions that should be made now rather than deferred.
+Prior HIGH resolved. Remaining concerns are design opinions, not plan quality defects.
 
 ---
 
@@ -266,37 +102,24 @@ The `federated_search` capability claim for Telegram is the main concern — it'
 
 ### Summary
 
-Bridges the new `SourceDescriptor` to the existing `ApplicationSourceDescription` without changing the runtime protocol. This is the most delicate plan because it touches the live provider path — `TelegramApplicationSourceProvider.describe_source()` at `telegram_provider.py:150-151` currently does `ApplicationSourceDescription(**self._client.describe_source())`.
+The capability string mismatch - the headline risk from cycle 1 - is now explicitly addressed with `LEGACY_CAPABILITY_ALIASES`, a `normalized_capabilities()` accessor, and tests for both legacy acceptance and canonical normalization. The bridge is cleanly scoped: no protocol changes, no runtime construction, no `descriptor_display` metadata_json copy.
 
 ### Strengths
 
-- **Preserves `ApplicationSourceProviderProtocol` return type** — the plan explicitly says "do not change `describe_source()` return type away from `ApplicationSourceDescription`." This is critical since the protocol is used by `pipeline.py` and tested by fixtures.
-- **Bridge direction is correct** — `from_descriptor()` converts the richer descriptor to the lighter description, not the other way. This means Phase 33 lifecycle can produce a description from a descriptor without breaking existing code.
-- **Capability string normalization** — converting `SourceCapability` enum values to `.value` strings preserves the current `capabilities: list[str]` contract on `ApplicationSourceDescription` (`models.py:184`).
+- `LEGACY_CAPABILITY_ALIASES: dict[str, str] = {"unit-window": "read_unit_window", "incremental-export": "incremental_cursor"}` is a concrete, testable normalization map. Prior HIGH resolved.
+- `normalized_capabilities(self) -> list[str]` provides canonical access while preserving raw `capabilities: list[str]` for backward compatibility with the daemon payload contract.
+- Tests cover all three angles: legacy payload validates, legacy normalizes to canonical, and `describe_source()` produces normalized capabilities from current daemon strings.
+- Explicitly forbids `descriptor_display` metadata_json copy - prior MEDIUM resolved.
+- Protocol return type preserved; `TelegramApplicationSourceProvider` still calls `ApplicationSourceDescription(**self._client.describe_source())`.
 
 ### Concerns
 
-- **HIGH — Capability string mismatch between registry and live daemon payloads**. The Telegram daemon fixture returns `capabilities: ["incremental-export", "unit-window"]` (`test_telegram_provider.py:25`), but the Telegram registry descriptor uses `SourceCapability.READ_UNIT_WINDOW` (value `"read_unit_window"`) and `SourceCapability.INCREMENTAL_CURSOR` (value `"incremental_cursor"`). These strings don't match. The bridge test says "capabilities include normalized string values from the descriptor" but the existing provider test still asserts on the old strings. There's no migration plan for the capability string vocabulary. Either:
-  1. The `SourceCapability` enum should use the existing daemon strings (`incremental-export`, `unit-window`), or
-  2. The bridge should include a mapping layer, or
-  3. The daemon payload contract should be updated separately.
-  This is the highest-risk item across all four plans.
-- **MEDIUM — `from_descriptor` adds `descriptor_display` to `metadata_json`**. The plan says "it must not flatten typed config/auth/cursor schemas into runtime settings" but then suggests putting display metadata into `metadata_json`. Since `ApplicationSourceDescription` already has `display_name` as a top-level field, adding `descriptor_display` to `metadata_json` is redundant. The bridge should just map `descriptor.display.display_name` to `description.display_name` directly.
-- **LOW — No test for filesystem provider description compatibility**. The plan only tests Telegram description compatibility. The filesystem adapter (`FilesystemMarkdownSourceAdapter`) doesn't implement `ApplicationSourceProviderProtocol` (it implements `SourceAdapterProtocol` from `source.py:22`), so there's nothing to bridge. But the plan doesn't call this out explicitly.
+- **MEDIUM - `LEGACY_CAPABILITY_ALIASES` lives on `ApplicationSourceDescription`** rather than near the `SourceCapability` enum. When Phase 33 lifecycle owns provider migration and the daemon contract updates, the alias map should move or be removed. Not a Phase 32 concern, but worth a TODO comment pointing to Phase 33/36 migration.
+- **LOW - No explicit test that unknown legacy strings pass through `normalized_capabilities` unchanged.** The map only covers two known aliases. If a future provider sends `"some-other-string"`, the normalization should leave it alone (identity mapping). The plan implies this but doesn't test it.
 
-### Suggestions
+### Risk: **LOW**
 
-- **Address the capability string mismatch explicitly.** Either:
-  - Change `SourceCapability` values to match existing daemon strings (e.g., `INCREMENTAL_EXPORT = "incremental-export"`, `UNIT_WINDOW = "unit-window"`), or
-  - Add a normalization mapping in the bridge that converts `SourceCapability.READ_UNIT_WINDOW.value` → `"unit-window"` and `SourceCapability.INCREMENTAL_CURSOR.value` → `"incremental-export"`, or
-  - Document that the daemon payload contract will be updated when Phase 36 migrates Telegram execution.
-  The first option is cleanest but requires changing the enum values. The second adds bridge complexity. The third is a deferral risk.
-- Remove the `descriptor_display` metadata_json suggestion — just map directly.
-- Add a note that `FilesystemMarkdownSourceAdapter` uses a different protocol (`SourceAdapterProtocol`) and is not in scope for this bridge.
-
-### Risk: HIGH
-
-The capability string mismatch between registry enum values and live daemon payloads is a real integration bug waiting to happen. If Plan 02 ships `read_unit_window` and the daemon returns `unit-window`, any code comparing them will fail silently (string inequality) or loudly. This must be resolved before execution.
+The capability string mismatch is now a solved problem with a tested bridge. No remaining HIGH concerns.
 
 ---
 
@@ -304,48 +127,177 @@ The capability string mismatch between registry enum values and live daemon payl
 
 ### Summary
 
-Documentation-only plan that creates an explicit Airweave-to-dotMD mapping table and updates architecture docs. Straightforward and well-scoped.
+Documentation plan with concrete mapping table, closed status vocabulary, runtime-boundary section, and strengthened grep checks. Prior concerns about conditional README modification and weak Airweave-import verification are resolved.
 
 ### Strengths
 
-- **Explicit "no runtime Airweave dependency" statement** — checked via grep in acceptance criteria.
-- **Four-status classification** (copied, adapted, rejected, deferred) — matches D-13/D-14 exactly.
-- **Comprehensive concept list** — covers all Airweave source schema fields plus Temporal, organizations, billing.
-- **Architecture doc update includes Phase 33 boundary** — prevents future confusion about where lifecycle lives.
+- `files_modified` correctly omits `README.md`; only listed when the conditional task actually modifies it.
+- Grep checks now include Airweave-specific identifiers (`supports_browse_tree`, `output_entity_definitions`, `class_name`, `feature_flag`) beyond just import checks.
+- Every mapping table row must have a non-empty Reason cell - explicit acceptance criterion.
+- Four-section structure (Copied/Adapted/Rejected/Deferred) matches D-13/D-14 exactly.
 
 ### Concerns
 
-- **MEDIUM — Plan says "update README.md" but only conditionally**. The acceptance criteria say "if README.md is modified, it contains `source-registry-airweave-mapping.md`." This is fine but the `files_modified` header lists `README.md` unconditionally, which could mislead execution agents into always modifying it.
-- **LOW — No review of existing `docs/source-adapter-architecture.md` content**. The plan says to add a Phase 32 section but doesn't specify what the current document contains or where the section should go. The execution agent will need to read the full file to find the right insertion point.
+- **LOW - No guidance on where in `docs/source-adapter-architecture.md` to insert the Phase 32 section.** The execution agent will need to read the full file to find the right insertion point. Minor discoverability issue.
 
-### Suggestions
+### Risk: **LOW**
 
-- Move `README.md` from `files_modified` to a conditional note — only modify if the README already has an architecture section.
-- Add a note about where in `docs/source-adapter-architecture.md` the Phase 32 section should be inserted (e.g., "after the existing Phase 29 section").
-
-### Risk: LOW
-
-Documentation-only with grep-based acceptance criteria. Minimal execution risk.
+Documentation-only, well-scoped, with strong grep-based verification.
 
 ---
 
-## Overall Phase Assessment
+## Cross-Plan Assessment
 
-### Dependency Graph
+### Prior HIGH Resolution
 
-```
-Plan 01 (models) ──┬── Plan 02 (seeds) ──── Plan 04 (docs)
-                    └── Plan 03 (bridge) ── Plan 04 (docs)
-```
+| Prior HIGH | Resolution | Evidence |
+|---|---|---|
+| Plan 02 filesystem config schema requiredness | **Resolved** | Task 1 asserts `paths.required is True`, `exclude.required is False`, both `field_type == "list[str]"`. Task 2 implementation specifies exact `SourceSchemaField` definitions. |
+| Plan 03 capability string mismatch | **Resolved** | `LEGACY_CAPABILITY_ALIASES` map, `normalized_capabilities()` accessor, tests for legacy acceptance + canonical normalization + `describe_source()` producing canonical strings. |
 
-Waves 1 → 2 → 3 are correct. Plans 02 and 03 can run in parallel (both depend only on Plan 01), which is already reflected in their shared Wave 2 assignment.
+### Agreed Remaining Concerns (all MEDIUM or below)
 
-### Cross-Plan Issues
+- Two `source_registry.py` filenames - acceptable boundary, not a quality defect.
+- `federated_search` on Telegram is aspirational - defensible design choice for Phase 32.
+- `materialization` on filesystem is semantically debatable - Phase 35 can refine.
+- `LEGACY_CAPABILITY_ALIASES` placement should point to Phase 33/36 for eventual removal.
 
-1. **Capability string vocabulary mismatch** (Plan 02 vs Plan 03 vs live code) — the `SourceCapability` enum values don't match the existing daemon payload strings. This is the single highest-risk item and should be resolved before any plan executes.
-2. **`SourceSchemaField.field_type: str`** (Plan 01) — if this is meant to be consumed by Phase 33 lifecycle, the valid values should be documented now rather than left open.
-3. **Filesystem `cursor_kind = "fingerprint"` semantics** (Plan 02) — the word "fingerprint" is overloaded in dotMD (content fingerprint, metadata fingerprint, source unit fingerprint). The cursor kind should be more specific.
+### Overall Phase Risk: **LOW**
 
-### Overall Risk: MEDIUM
+Both cycle-1 HIGH concerns are resolved with concrete, testable mechanisms. The phase is additive, declarative, and well-gated by TDD. No production runtime behavior changes. Ready for execution.
 
-The plans are well-structured and the phase boundary is clean. The main risk is the capability string mismatch between the new registry vocabulary and existing live daemon payloads — resolving this before execution will drop overall risk to LOW.
+---
+
+## Current HIGH Concerns
+
+None.
+
+---
+
+## Claude Review
+
+# Cross-AI Plan Review - Phase 32 (Cycle 2)
+
+## Cycle Summary
+
+CYCLE_SUMMARY: current_high=0
+
+---
+
+## Plan 01: Source Descriptor Contract
+
+### Summary
+The plan now mandates `Field(default_factory=...)` for every collection/dict default, requires `ConfigDict(extra="forbid")` on every new descriptor model, defines a closed `SOURCE_SCHEMA_FIELD_TYPES` vocabulary, and adds a mutability test that catches shared-default leakage. The cycle-1 style and field-type concerns are now grep-verifiable.
+
+### Strengths
+- `SOURCE_SCHEMA_FIELD_TYPES = frozenset({"str", "int", "bool", "path", "list[str]", "dict[str, Any]"})` closes the previously-open `field_type: str` design debt.
+- `test_descriptor_collection_defaults_are_not_mutable` directly exercises shared-state leakage instead of trusting style alone.
+- `model_copy(deep=True)` on every read keeps the registry immutable from caller mutation.
+- Explicit grep negatives (`does not contain "airweave"`, `does not contain "TokenProvider" or "credential"`) catch scope creep cheaply.
+
+### Concerns
+- **MEDIUM - Filename collision still present.** `core/source_registry.py` (Plan 01) and `ingestion/source_registry.py` (Plan 02) coexist. Imports like `from dotmd.core.source_registry import SourceRegistry` and `from dotmd.ingestion.source_registry import default_source_registry` are easy to confuse during edits and reviews. Cycle 1 flagged this; it was not addressed.
+- **LOW - `ConfigDict(extra="forbid")` grep is satisfied by pre-existing models.** `models.py` already contains `ConfigDict(extra="forbid")` for `SourceDocument` etc., so the grep passes even if a new descriptor model omits it. The `test_source_descriptor_forbids_extra_fields` test mitigates this for `SourceDescriptor`, but not for `SourceDisplayMetadata`, `SourceConfigSchema`, `SourceAuthSchema`, `SourceCursorSchema`, or `SourceSchemaField`.
+- **LOW - Test discoverability.** Tests for `core` types still live under `tests/ingestion/test_source_registry.py`. Not blocking, but `tests/core/` would be more conventional.
+
+### Suggestions
+- Rename one of the two `source_registry.py` modules - e.g., `core/source_registry_models.py` for the type contract, keeping `ingestion/source_registry.py` for seeds. Or collapse the `SourceRegistry` container into `ingestion/source_registry.py` since that is where seeds live.
+- Add per-model `extra="forbid"` tests for each descriptor sub-model, or add a stronger acceptance criterion: `rg -c 'extra="forbid"' backend/src/dotmd/core/models.py >= 9` (current 4 + 5 new).
+
+### Risk: LOW
+
+---
+
+## Plan 02: Filesystem And Telegram Registry Seeds
+
+### Summary
+Cycle-1 HIGH on filesystem field types and requiredness is fully resolved. Plan now mandates `paths` required `list[str]`, `exclude` optional `list[str]`, exact capability sets, and `cursor_schema.cursor_kind == "provider_checkpoint"` for Telegram. The default-registry test uses hard set equality.
+
+### Strengths
+- Filesystem config schema now has typed, required-marked fields with descriptions matching the live `discover_multi(paths, exclude=None)` signature.
+- `test_default_registry_contains_filesystem_and_telegram` uses `== {"filesystem", "telegram"}` instead of a hedged assertion.
+- Filesystem cursor_kind description (`fingerprint-based change detection over content and metadata fingerprints; filesystem does not own provider cursor commits`) clarifies the previously-ambiguous "fingerprint" overload.
+- Telegram auth `delegated_to == "mcp-telegram"` is grep-asserted, preventing the descriptor from implying direct Telegram API ownership.
+- Forbidden imports (`Telethon`, `airweave`) catch runtime creep.
+
+### Concerns
+- **MEDIUM - `MATERIALIZATION` capability on filesystem still semantically thin.** The plan retains it but adds no documentation justifying why a local filesystem source has it. If the intent is "this source can produce on-demand bytes for a unit ref," that should be in the `SourceCapability.MATERIALIZATION` docstring or in the Airweave mapping doc. Otherwise Phase 33+ readers will assign different meanings.
+- **MEDIUM - `FEDERATED_SEARCH` on Telegram is aspirational.** Phase 32 does not implement federated search; Phase 34 does. The descriptor advertises a capability dotMD does not yet route. There is no `planned_capabilities` vs `available_capabilities` split, so consumers must guess. Either document explicitly that capability flags describe the source *model*, not current dotMD wiring, or split into provider-supported vs dotmd-routed.
+- **LOW - Telegram `socket_path` field.** The descriptor uses `socket_path` matching `TelegramSourceClientProtocol`, which is consistent with the live code. Fine, just noting alignment was achieved.
+
+### Suggestions
+- Add a one-line definition for each `SourceCapability` enum value (docstring or comment). The mapping doc in Plan 04 is the natural home for `MATERIALIZATION` and `FEDERATED_SEARCH` semantics.
+- Optional: add a `planned_capabilities` field for future-only flags, or document in Plan 04 that Phase 32 capability flags are source-model claims, not implementation claims.
+
+### Risk: LOW
+
+---
+
+## Plan 03: Provider Description Compatibility
+
+### Summary
+Cycle-1 HIGH on capability string mismatch is fully resolved with `LEGACY_CAPABILITY_ALIASES` and `normalized_capabilities()`. The bridge keeps existing daemon payloads validating, exposes a canonical view, and explicitly declines to change the daemon contract (deferred to Phase 33+ when lifecycle owns providers). The acceptance criteria grep for both legacy and canonical strings.
+
+### Strengths
+- `LEGACY_CAPABILITY_ALIASES = {"unit-window": "read_unit_window", "incremental-export": "incremental_cursor"}` makes the two-vocabulary problem auditable in one place.
+- `normalized_capabilities()` is a clear migration point: future code compares canonical, legacy payloads still validate.
+- `from_descriptor` no longer adds `descriptor_display` to `metadata_json`; the cycle-1 ambiguity is removed.
+- `ApplicationSourceProviderProtocol.describe_source()` return type is unchanged - Phase 33 lifecycle work is not pre-empted.
+- Tests exercise both paths: legacy validation and canonical normalization.
+
+### Concerns
+- **MEDIUM - No enforcement that future code uses `normalized_capabilities()` over raw `capabilities`.** The bridge solves drift only if consumers consistently pick the normalized view. Today nothing prevents new code from comparing raw `description.capabilities` against `SourceCapability.READ_UNIT_WINDOW.value` and silently failing for legacy payloads. Phase 32 cannot fully prevent this, but a comment near `capabilities: list[str]` directing new code to `normalized_capabilities()` would reduce footguns.
+- **LOW - `LEGACY_CAPABILITY_ALIASES` is a static map.** If future daemon versions introduce new legacy strings, the map must be updated by hand. A test that asserts every alias source is unique and every alias target is in `SourceCapability` would catch typos.
+- **LOW - No daemon-payload migration owner identified.** The plan defers daemon contract migration to "Phase 33 lifecycle" implicitly. A one-line forward reference (e.g., "Phase 33+ may migrate the daemon payload to canonical strings; until then, normalize at read time") in the threat model or success criteria would close the loop.
+
+### Suggestions
+- Add a docstring on `ApplicationSourceDescription.capabilities` directing readers to `normalized_capabilities()` for canonical comparison.
+- Add a self-check test: `assert all(target in {c.value for c in SourceCapability} for target in LEGACY_CAPABILITY_ALIASES.values())`.
+- Add a one-line forward-reference comment in `models.py` near `LEGACY_CAPABILITY_ALIASES` saying "Phase 33+ owns daemon payload migration; until then normalize at read time."
+
+### Risk: LOW
+
+---
+
+## Plan 04: Airweave Mapping Documentation
+
+### Summary
+Documentation-only plan. Mandates field-by-field mapping, closed status vocabulary (copied/adapted/rejected/deferred), runtime-boundary section, and grep-verified absence of Airweave imports.
+
+### Strengths
+- Mandatory concept list prevents cherry-picking.
+- Status values are closed (`copied`, `adapted`, `rejected`, `deferred`).
+- "Every mapping table row must have a non-empty `Reason` cell" is explicit.
+- Runtime boundary section pre-emptively answers the "where does Phase 33 start" question.
+
+### Concerns
+- **LOW - README handling is conditional but `files_modified` does not reflect that.** The header still implies README will be modified; the task body says "skip README rather than creating a noisy doc index." Inconsistent for autonomous agents. Acceptance criterion `If README.md is modified, it contains ...` is conditional, which is correct, but `files_modified` is misleading.
+- **LOW - No verification that capability-flag semantics (MATERIALIZATION, FEDERATED_SEARCH) are documented in the mapping doc.** Plan 02's capability semantics are still under-defined; Plan 04 is the natural place to clarify them, but no acceptance criterion requires it.
+- **LOW - Stronger Airweave-runtime forbidden-pattern grep.** The verification includes `rg -n "from airweave|import airweave"` and a separate `rg -n "supports_browse_tree|output_entity_definitions|class_name|feature_flag"` for runtime-identifier copy. Good. Could add `rate_limit_level`, `requires_byoc` for completeness.
+
+### Suggestions
+- Move `README.md` out of the `files_modified` header; make it conditional in the task body only, or add `(if applicable)` next to it.
+- Add an acceptance criterion that the mapping doc defines what `MATERIALIZATION` and `FEDERATED_SEARCH` mean for dotMD specifically - addresses the Plan 02 semantic gap.
+- Extend the forbidden-identifier grep to include `rate_limit_level` and `requires_byoc`.
+
+### Risk: LOW
+
+---
+
+## Cross-Plan Concerns
+
+- **MEDIUM - Capability semantics drift across plans.** Plan 02 advertises `MATERIALIZATION` (filesystem) and `FEDERATED_SEARCH` (Telegram) without defining what they mean for dotMD specifically. Plan 04 is the natural home for those definitions but does not require them. Recommend adding a row to the mapping doc for every `SourceCapability` value that explains what dotMD takes the flag to mean.
+- **LOW - Two `source_registry.py` modules.** Cycle 1 flagged this; not addressed in cycle 2. Renaming or merging is a low-cost fix.
+- **LOW - `ConfigDict(extra="forbid")` not grep-enforced per-new-model.** Existing `models.py` content satisfies the grep regardless of whether new descriptor sub-models include it.
+
+---
+
+## Overall Risk Assessment: **LOW**
+
+Cycle 1's two HIGH concerns (filesystem field requiredness; capability string mismatch) are both explicitly resolved with testable, grep-verifiable acceptance criteria. The remaining concerns are MEDIUM/LOW cosmetic, semantic-clarity, or style-enforcement issues that do not block execution. The phase remains additive, declarative, and runtime-neutral.
+
+---
+
+## Current HIGH Concerns
+
+None.
