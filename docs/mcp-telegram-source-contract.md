@@ -96,15 +96,17 @@ fingerprint, binding/provenance, and index state in one local transaction.
       }
     }
   ],
-  "next_cursor": "dialog:12345:message:67891",
-  "checkpoint_cursor": "dialog:12345:message:67890"
+  "next_cursor": "telegram:v1:dialog:12345:message:67891",
+  "checkpoint_cursor": "telegram:v1:dialog:12345:message:67890"
 }
 ```
 
-`next_cursor` is only the provider's continuation hint. dotMD persists
-`checkpoint_cursor` only after local source-document, source-unit fingerprint,
-binding/provenance, and index persistence succeeds. Saving `next_cursor` before
-that transaction would risk losing source units after a crash.
+`next_cursor` and `checkpoint_cursor` use the daemon identity cursor shape
+`telegram:v1:dialog:<dialog_id>:message:<message_id>`. `next_cursor` is only the
+provider's continuation hint. dotMD persists `checkpoint_cursor` only after
+local source-document, source-unit fingerprint, binding/provenance, and index
+persistence succeeds. Saving `next_cursor` before that transaction would risk
+losing source units after a crash.
 
 ## Unit Window
 

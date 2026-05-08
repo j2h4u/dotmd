@@ -775,8 +775,9 @@ Telegram mapping:
 
 ```text
 namespace = telegram
-document_ref = telegram:dialog:<dialog_id>
-unit_ref = telegram:dialog:<dialog_id>:message:<message_id>
+document_ref = dialog:<dialog_id>
+unit_ref = dialog:<dialog_id>:message:<message_id>
+public_ref = telegram:dialog:<dialog_id>:message:<message_id>
 document = dialog/chat/channel
 unit = message
 ```
