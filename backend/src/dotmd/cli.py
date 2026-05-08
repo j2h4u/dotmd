@@ -490,6 +490,33 @@ def telegram_ingest(
     )
 
 
+@telegram.command("reset-index")
+@click.option("--yes", is_flag=True, help="Confirm deletion of indexed Telegram state.")
+@click.pass_context
+def telegram_reset_index(ctx: click.Context, yes: bool) -> None:
+    """Delete indexed Telegram state so the next ingest recomputes it."""
+    if not yes:
+        raise click.ClickException("Refusing to reset Telegram index without --yes")
+
+    index_dir = (ctx.obj or {}).get("index_dir")
+    overrides: dict[str, object] = {}
+    if index_dir is not None:
+        overrides["index_dir"] = index_dir
+    settings = load_settings(**overrides)
+    service = DotMDService(settings=settings)
+    result = service._pipeline.purge_application_source("telegram")
+    click.echo(
+        "telegram_reset_index "
+        f"namespace={result.namespace} "
+        f"chunks_deleted={result.chunks_deleted} "
+        f"source_units_deleted={result.source_units_deleted} "
+        f"documents_deleted={result.documents_deleted} "
+        f"bindings_deleted={result.bindings_deleted} "
+        f"checkpoints_deleted={result.checkpoints_deleted} "
+        f"vec_components_deleted={result.vec_components_deleted}"
+    )
+
+
 @main.command()
 @click.option("--host", default="127.0.0.1", help="Bind host.")
 @click.option("--port", "-p", default=8000, help="Bind port.")

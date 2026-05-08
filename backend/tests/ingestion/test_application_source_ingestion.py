@@ -118,3 +118,34 @@ def test_application_source_embeddings_are_chunk_batched_and_document_meta_scope
     assert encode_calls[1] == ["fixture Doc A page", "fixture Doc B page"]
     assert all("body" not in text for text in encode_calls[1])
     assert all("speaker" not in text for text in encode_calls[1])
+
+
+def test_purge_application_source_removes_checkpoint_fingerprints_and_vectors(
+    tmp_path: Path,
+) -> None:
+    pipeline = _pipeline(tmp_path)
+    doc_a = _document("doc:a", "Doc A")
+    provider = FixtureApplicationSourceProvider(
+        ApplicationSourceDescription(
+            namespace="fixture",
+            source_kind="document",
+            display_name="Fixture",
+        ),
+        [
+            _change(doc_a, 1, "alpha body"),
+            _change(doc_a, 2, "beta body"),
+        ],
+    )
+
+    first = pipeline.ingest_application_source(provider, limit=10)
+    purge = pipeline.purge_application_source("fixture")
+    assert pipeline._metadata_store.get_source_checkpoint("fixture") is None
+    second = pipeline.ingest_application_source(provider, limit=10)
+
+    assert first.new_units == 2
+    assert purge.chunks_deleted == 2
+    assert purge.source_units_deleted == 2
+    assert purge.documents_deleted == 1
+    assert purge.checkpoints_deleted == 1
+    assert second.new_units == 2
+    assert second.skipped_units == 0

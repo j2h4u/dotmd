@@ -107,6 +107,19 @@ class ApplicationSourceIngestResult:
 
 
 @_dataclass
+class ApplicationSourcePurgeResult:
+    """Counts returned after purging one application source namespace."""
+
+    namespace: str
+    chunks_deleted: int = 0
+    source_units_deleted: int = 0
+    documents_deleted: int = 0
+    bindings_deleted: int = 0
+    checkpoints_deleted: int = 0
+    vec_components_deleted: int = 0
+
+
+@_dataclass
 class _ApplicationSourceIndexItem:
     """Prepared application-source unit ready for shared indexing work."""
 
@@ -644,6 +657,113 @@ class IndexingPipeline:
         except Exception as exc:
             self._conn.execute("ROLLBACK")
             self._metadata_store.record_source_checkpoint_error(namespace, str(exc))
+            raise
+
+        return result
+
+    def purge_application_source(self, namespace: str) -> ApplicationSourcePurgeResult:
+        """Delete indexed state for one application-source namespace.
+
+        This is intentionally narrower than ``drop_chunks``: filesystem chunks and
+        other source namespaces survive.  The checkpoint and unit fingerprints are
+        removed so the next provider ingest recomputes vectors with current
+        pipeline semantics.
+        """
+        if not namespace or not re.match(r"^[a-zA-Z0-9_-]+$", namespace):
+            raise ValueError(f"Invalid application source namespace: {namespace!r}")
+
+        result = ApplicationSourcePurgeResult(namespace=namespace)
+        strategy = self._strategy
+        provenance_table = f"chunk_source_provenance_{strategy}"
+        chunk_table = f"chunks_{strategy}"
+        m2m_table = f"chunk_file_paths_{strategy}"
+        fts_table = f"chunks_fts_{strategy}"
+
+        self._metadata_store.ensure_chunk_source_provenance_table(strategy)
+        rows = self._conn.execute(
+            f"SELECT chunk_id, document_ref, source_unit_refs "
+            f"FROM {provenance_table} WHERE namespace = ?",
+            (namespace,),
+        ).fetchall()
+        chunk_ids = sorted({row[0] for row in rows})
+        document_refs = sorted({row[1] for row in rows})
+        source_unit_refs = sorted(
+            {
+                source_unit_ref
+                for row in rows
+                for source_unit_ref in json.loads(row[2])
+            }
+        )
+        vector_component_entity_ids = [
+            *chunk_ids,
+            *(f"{namespace}-meta:{document_ref}" for document_ref in document_refs),
+            # Phase 29 initially stored application-source meta per source unit.
+            # Delete those legacy component rows too, if present.
+            *(f"{namespace}-meta:{source_unit_ref}" for source_unit_ref in source_unit_refs),
+        ]
+
+        self._conn.execute("BEGIN")
+        try:
+            result.source_units_deleted = self._conn.execute(
+                "SELECT COUNT(*) FROM source_unit_fingerprints WHERE namespace = ?",
+                (namespace,),
+            ).fetchone()[0]
+            result.documents_deleted = self._conn.execute(
+                "SELECT COUNT(*) FROM source_documents WHERE namespace = ?",
+                (namespace,),
+            ).fetchone()[0]
+            result.bindings_deleted = self._conn.execute(
+                "SELECT COUNT(*) FROM resource_bindings WHERE namespace = ?",
+                (namespace,),
+            ).fetchone()[0]
+            result.checkpoints_deleted = self._conn.execute(
+                "SELECT COUNT(*) FROM source_checkpoints WHERE namespace = ?",
+                (namespace,),
+            ).fetchone()[0]
+
+            if chunk_ids:
+                placeholders = ",".join("?" for _ in chunk_ids)
+                self._conn.execute(
+                    f"DELETE FROM {provenance_table} WHERE chunk_id IN ({placeholders})",
+                    chunk_ids,
+                )
+                self._conn.execute(
+                    f"DELETE FROM {m2m_table} WHERE chunk_id IN ({placeholders})",
+                    chunk_ids,
+                )
+                self._conn.execute(
+                    f"DELETE FROM {fts_table} WHERE chunk_id IN ({placeholders})",
+                    chunk_ids,
+                )
+                self._conn.execute(
+                    f"DELETE FROM {chunk_table} WHERE chunk_id IN ({placeholders})",
+                    chunk_ids,
+                )
+                self._delete_vectors_for_chunk_ids_in_transaction(chunk_ids)
+                result.vec_components_deleted = self._vec_components.delete_by_entity_ids(
+                    vector_component_entity_ids
+                )
+
+            self._conn.execute(
+                "DELETE FROM source_unit_fingerprints WHERE namespace = ?",
+                (namespace,),
+            )
+            self._conn.execute(
+                "DELETE FROM resource_bindings WHERE namespace = ?",
+                (namespace,),
+            )
+            self._conn.execute(
+                "DELETE FROM source_documents WHERE namespace = ?",
+                (namespace,),
+            )
+            self._conn.execute(
+                "DELETE FROM source_checkpoints WHERE namespace = ?",
+                (namespace,),
+            )
+            result.chunks_deleted = len(chunk_ids)
+            self._conn.execute("COMMIT")
+        except Exception:
+            self._conn.execute("ROLLBACK")
             raise
 
         return result
