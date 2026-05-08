@@ -847,6 +847,25 @@ class DotMDService:
                 inserted,
             )
 
+        # Migration guard, not a steady-state search dependency.
+        #
+        # Phase 27 made active resource bindings the public visibility gate:
+        # chunks/provenance may be retained for reuse, but ordinary search must
+        # only return resources with active source_documents/resource_bindings.
+        # Phase 33 then routed filesystem construction through lifecycle, which
+        # correctly writes those rows for newly indexed files. The problem this
+        # guard covers is older live indexes: they can already have chunks,
+        # FTS/vector rows, and chunk_source_provenance, while unchanged files
+        # never re-enter the indexing path that now creates source_documents and
+        # active bindings. Without this repair, the active filter would hide
+        # valid indexed content even though the expensive artifacts are intact.
+        #
+        # Keep this path additive: it may create missing filesystem
+        # source_documents and active resource_bindings from existing provenance,
+        # but it must not rebuild chunks, embeddings, FTS, graph data, or
+        # fingerprints. Once all supported deployments have migrated cleanly
+        # and new indexing has proven it maintains the invariant by itself, this
+        # guard should be removed and replaced with a hard integrity failure.
         try:
             source_doc_diagnostic = (
                 self._pipeline.backfill_filesystem_source_documents_from_provenance(
