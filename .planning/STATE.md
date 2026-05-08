@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.6
 milestone_name: Unified Source Architecture
-status: ready_to_plan
-last_updated: "2026-05-08T12:06:07.184Z"
+status: ready_to_execute
+last_updated: "2026-05-08T12:37:19.439Z"
 last_activity: 2026-05-08
 progress:
   total_phases: 6
   completed_phases: 0
-  total_plans: 0
+  total_plans: 4
   completed_plans: 0
   percent: 0
 ---
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **v1.6 — Unified Source Architecture**
 
-Phase: Not started
+Phase: 32 (source-capability-registry)
 Plan: —
-Status: Ready to plan
+Status: Ready to execute
 Last activity: 2026-05-08
 
 Progress: [░░░░░░░░░░] 0%
@@ -273,11 +273,12 @@ a standalone Telegram-specific legacy phase.
 
 ## Current Position
 
-Phase: 32 (source-capability-registry) — READY TO PLAN
+Phase: 32 (source-capability-registry) — READY TO EXECUTE
 Plan: —
-Status: Ready to plan
-Last activity: 2026-05-08 — Milestone v1.6 roadmap created
+Status: Ready to execute
+Last activity: 2026-05-08 -- Phase 32 planning complete
 
 ## Operator Next Steps
 
-- Start Phase 32 with `$gsd-discuss-phase 32` or `$gsd-plan-phase 32`.
+- Continue Phase 32 plan-review convergence with `$gsd-review --phase 32 --opencode --claude`.
+- After reviews converge, execute with `$gsd-execute-phase 32`.

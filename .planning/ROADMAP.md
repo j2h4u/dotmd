@@ -1382,7 +1382,7 @@ through one vocabulary.
 **Requirements:** SRC-01, SRC-02, SRC-03, SRC-04
 **Depends on:** Phase 31
 **Backlog source:** 999.26
-**Plans:** 0/0 plans complete
+**Plans:** 0/4 plans complete
 
 Reference:
 - Upstream: `https://github.com/airweave-ai/airweave`
@@ -1396,6 +1396,17 @@ Success criteria:
    materialization, browse trees, ACLs, and incremental cursors.
 4. Docs map Airweave source metadata to dotMD descriptors without a runtime
    Airweave dependency.
+
+Plans:
+**Wave 1**
+- [ ] 32-01-source-descriptor-contract-PLAN.md — Source descriptor contract
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 32-02-filesystem-telegram-registry-seeds-PLAN.md — Filesystem and Telegram registry seeds
+- [ ] 32-03-provider-description-compatibility-PLAN.md — Provider description compatibility
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 32-04-airweave-mapping-docs-PLAN.md — Airweave mapping documentation
 
 ---
 
