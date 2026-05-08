@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 from pydantic import (
     BaseModel,
@@ -65,6 +66,98 @@ class EntityType(StrEnum):
 
     PERSON = "PERSON"
     TAG = "TAG"
+
+
+class SourceCapability(StrEnum):
+    """Closed source capability vocabulary for descriptor metadata."""
+
+    LOCAL_SYNC = "local_sync"
+    FEDERATED_SEARCH = "federated_search"
+    READ_UNIT_WINDOW = "read_unit_window"
+    MATERIALIZATION = "materialization"
+    BROWSE_TREE = "browse_tree"
+    ACL = "acl"
+    INCREMENTAL_CURSOR = "incremental_cursor"
+
+
+SOURCE_SCHEMA_FIELD_TYPES = frozenset(
+    {"str", "int", "bool", "path", "list[str]", "dict[str, Any]"}
+)
+
+
+class SourceDisplayMetadata(BaseModel):
+    """Human-facing source display metadata."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str
+    description: str
+    labels: list[str] = Field(default_factory=list)
+    docs_slug: str | None = None
+
+
+class SourceSchemaField(BaseModel):
+    """Declarative source configuration, auth, or cursor schema field."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    field_type: str
+    required: bool = False
+    description: str = ""
+
+    @field_validator("field_type")
+    @classmethod
+    def _validate_field_type(cls, value: str) -> str:
+        if value not in SOURCE_SCHEMA_FIELD_TYPES:
+            raise ValueError(f"field_type must be one of {SOURCE_SCHEMA_FIELD_TYPES}")
+        return value
+
+
+class SourceConfigSchema(BaseModel):
+    """Declarative source configuration schema."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    fields: list[SourceSchemaField] = Field(default_factory=list)
+    empty: bool = False
+
+
+class SourceAuthSchema(BaseModel):
+    """Declarative source authentication schema."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    auth_kind: str
+    methods: list[str] = Field(default_factory=list)
+    fields: list[SourceSchemaField] = Field(default_factory=list)
+    delegated_to: str | None = None
+
+
+class SourceCursorSchema(BaseModel):
+    """Declarative source cursor schema."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cursor_kind: str
+    examples: list[str] = Field(default_factory=list)
+    description: str = ""
+
+
+class SourceDescriptor(BaseModel):
+    """Declarative source descriptor registered by namespace."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    namespace: str
+    source_kind: str
+    display: SourceDisplayMetadata
+    config_schema: SourceConfigSchema
+    auth_schema: SourceAuthSchema
+    cursor_schema: SourceCursorSchema
+    capabilities: list[SourceCapability] = Field(default_factory=list)
+    metadata_json: dict[str, Any] = Field(default_factory=dict)
 
 
 class FileInfo(BaseModel):
