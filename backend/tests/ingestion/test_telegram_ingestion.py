@@ -407,6 +407,28 @@ def test_telegram_fts_and_vector_index_without_fileinfo_frontmatter(
     assert "Deployment checklist is ready" not in metadata_inputs[0]
 
 
+def test_application_source_ingest_batches_body_and_metadata_embeddings(
+    tmp_path: Path,
+) -> None:
+    pipeline = _pipeline(tmp_path)
+    encode_calls: list[list[str]] = []
+
+    def record_encode(texts: list[str]) -> list[list[float]]:
+        encode_calls.append(list(texts))
+        return [[float(len(encode_calls))] * 8 for _text in texts]
+
+    pipeline._semantic_engine.encode_batch = record_encode  # type: ignore[method-assign]
+
+    result = pipeline.ingest_application_source(_provider(), limit=10)
+
+    assert result.chunks_indexed == 2
+    assert [len(call) for call in encode_calls] == [2, 2]
+    assert any("Deployment checklist is ready" in text for text in encode_calls[0])
+    assert any("Smoke confirms the deployment path" in text for text in encode_calls[0])
+    assert all("Project Chat" in text for text in encode_calls[1])
+    assert all("Deployment checklist is ready" not in text for text in encode_calls[1])
+
+
 def test_telegram_transaction_rolls_back_metadata_fts_vectors_and_checkpoint_on_vector_failure(
     tmp_path: Path,
 ) -> None:

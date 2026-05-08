@@ -36,6 +36,7 @@ import sqlite_vec  # type: ignore[import-untyped]
 import dotmd.ingestion.chunker as _chunker_module
 from dotmd.core.config import Settings
 from dotmd.core.models import (
+    ApplicationSourceChange,
     Chunk,
     ChunkProvenance,
     DocKind,
@@ -103,6 +104,15 @@ class ApplicationSourceIngestResult:
     failed_units: int = 0
     reused_units: int = 0
     chunks_indexed: int = 0
+
+
+@_dataclass
+class _ApplicationSourceIndexItem:
+    """Prepared application-source unit ready for shared indexing work."""
+
+    change: ApplicationSourceChange
+    chunk: Chunk
+    metadata_text: str
 
 
 def _model_to_table_suffix(model_name: str) -> str:
@@ -445,10 +455,7 @@ class IndexingPipeline:
                 raise
             return result
 
-        chunks_to_index: list[Chunk] = []
-        e_text_vectors: list[list[float]] = []
-        e_meta_vectors: list[list[float]] = []
-        text_hashes: dict[str, str] = {}
+        index_items: list[_ApplicationSourceIndexItem] = []
         changed_chunk_ids: list[str] = []
 
         for change in batch.changes:
@@ -472,15 +479,23 @@ class IndexingPipeline:
                 result.hidden_units += 1
                 continue
 
-            chunk = self._telegram_chunk_for_unit(change.document, change.unit)
-            chunks_to_index.append(chunk)
-            e_text, hashes = self._embed_chunks([chunk])
-            e_meta = self._embed_source_meta_component(
-                self._telegram_source_meta_text(change.document, change.unit)
+            chunk = self._application_chunk_for_unit(change.document, change.unit)
+            index_items.append(
+                _ApplicationSourceIndexItem(
+                    change=change,
+                    chunk=chunk,
+                    metadata_text=self._application_source_meta_text(
+                        change.document,
+                        change.unit,
+                    ),
+                )
             )
-            e_text_vectors.extend(e_text)
-            e_meta_vectors.append(e_meta)
-            text_hashes.update(hashes)
+
+        chunks_to_index = [item.chunk for item in index_items]
+        e_text_vectors, text_hashes = self._embed_chunks(chunks_to_index)
+        e_meta_vectors = self._embed_source_meta_components(
+            [item.metadata_text for item in index_items]
+        )
 
         weights = self._settings.parsed_embedding_weights
         e_fused_vectors = [
@@ -562,8 +577,8 @@ class IndexingPipeline:
                     chunk.provenance.document_ref,
                     conn=self._conn,
                 )
-                title = document.title if document is not None else "Telegram"
-                tags = "telegram"
+                title = document.title if document is not None else "Application Source"
+                tags = chunk.provenance.namespace
                 chunks_by_title_tags.setdefault((title, tags), []).append(chunk)
             for (title, tags_csv), chunks in chunks_by_title_tags.items():
                 self._keyword_engine.add_chunks_with_source_meta(
@@ -580,10 +595,13 @@ class IndexingPipeline:
                 strict=False,
             ):
                 self._vec_components.store(chunk.chunk_id, "text", e_text)
+                assert chunk.provenance is not None
+                meta_entity_id = (
+                    f"{chunk.provenance.namespace}-meta:"
+                    f"{chunk.provenance.source_unit_refs[0]}"
+                )
                 self._vec_components.store(
-                    f"telegram-meta:{chunk.provenance.source_unit_refs[0]}"
-                    if chunk.provenance is not None
-                    else f"telegram-meta:{chunk.chunk_id}",
+                    meta_entity_id,
                     "meta",
                     e_meta,
                 )
@@ -613,14 +631,17 @@ class IndexingPipeline:
 
         return result
 
-    def _telegram_chunk_for_unit(
+    def _application_chunk_for_unit(
         self,
         document: SourceDocument,
         unit: SourceUnit,
     ) -> Chunk:
         metadata = unit.metadata_json
+        source_label = (
+            "Dialog" if document.namespace == "telegram" else document.namespace.title()
+        )
         context_lines = [
-            f"Dialog: {document.title}",
+            f"{source_label}: {document.title}",
             f"Sender: {metadata.get('sender_name') or metadata.get('sender_id') or ''}",
             f"Sent: {metadata.get('sent_at') or ''}",
         ]
@@ -630,7 +651,7 @@ class IndexingPipeline:
             context_lines.append(f"Reply to: {metadata['reply_to_msg_id']}")
         text = "\n".join([*context_lines, "", unit.text])
         chunk_id = blake3.blake3(
-            f"telegram:{unit.unit_ref}:{unit.fingerprint}:{self._strategy}".encode()
+            f"{unit.namespace}:{unit.unit_ref}:{unit.fingerprint}:{self._strategy}".encode()
         ).hexdigest()
         return Chunk(
             chunk_id=chunk_id,
@@ -641,23 +662,23 @@ class IndexingPipeline:
             chunk_index=0,
             kind=DocKind.DOCUMENT,
             provenance=ChunkProvenance(
-                namespace="telegram",
+                namespace=unit.namespace,
                 document_ref=document.document_ref,
-                ref=f"telegram:{unit.unit_ref}",
+                ref=f"{unit.namespace}:{unit.unit_ref}",
                 source_unit_refs=[unit.unit_ref],
                 chunk_strategy=self._strategy,
-                parser_name="telegram-message",
+                parser_name=document.parser_name,
             ),
         )
 
-    def _telegram_source_meta_text(
+    def _application_source_meta_text(
         self,
         document: SourceDocument,
         unit: SourceUnit,
     ) -> str:
         metadata = unit.metadata_json
         parts = [
-            "telegram",
+            document.namespace,
             document.title,
             str(metadata.get("sender_name") or metadata.get("sender_id") or ""),
             str(metadata.get("topic_title") or ""),
@@ -668,10 +689,15 @@ class IndexingPipeline:
         ]
         return " ".join(part for part in parts if part).strip()
 
-    def _embed_source_meta_component(self, metadata_text: str) -> list[float]:
-        """Encode non-filesystem metadata into the dual-encoder meta component."""
+    def _embed_source_meta_components(
+        self,
+        metadata_texts: list[str],
+    ) -> list[list[float]]:
+        """Encode non-filesystem metadata into dual-encoder meta components."""
+        if not metadata_texts:
+            return []
         try:
-            return self._semantic_engine.encode_batch([metadata_text])[0]
+            return self._semantic_engine.encode_batch(metadata_texts)
         except Exception as exc:
             raise RuntimeError("encode_batch failed for source metadata") from exc
 
