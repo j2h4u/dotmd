@@ -89,8 +89,8 @@ See: `.planning/milestones/v1.4-ROADMAP.md`
 <summary>v1.5 Telegram Source Adapter (Phases 27-31) — ACTIVE</summary>
 
 - [x] Phase 27: Resource bindings and retained artifacts foundation
-- [ ] Phase 28: Application source provider contract
-- [ ] Phase 29: Telegram adapter MVP ingestion
+- [x] Phase 28: Application source provider contract
+- [x] Phase 29: Telegram adapter MVP ingestion
 - [ ] Phase 30: Incremental Telegram sync and reuse
 - [ ] Phase 31: Telegram search/read/drill smoke
 
@@ -130,7 +130,7 @@ See: `.planning/REQUIREMENTS.md`
 | 26. Source-ref-first read/search contract cleanup | 3/3 | Complete | 2026-05-06 |
 | 27. Resource bindings and retained artifacts foundation | 4/4 | Complete    | 2026-05-07 |
 | 28. Application source provider contract | 4/4 | Complete    | 2026-05-07 |
-| 29. Telegram adapter MVP ingestion | 0/4 | Planned    |  |
+| 29. Telegram adapter MVP ingestion | 4/4 | Complete    | 2026-05-08 |
 | 30. Incremental Telegram sync and reuse | v1.5 | Not started | — |
 | 31. Telegram search/read/drill smoke | v1.5 | Not started | — |
 
@@ -1102,7 +1102,7 @@ Phase boundary:
 provenance.
 **Requirements:** R4, R5, R7, R8
 **Depends on:** Phase 28
-**Plans:** 0/4 plans executed
+**Plans:** 4/4 plans complete
 
 Phase context:
 - Message/source-unit identity is the recomputation boundary, not whole-dialog

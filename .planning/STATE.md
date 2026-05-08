@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Telegram Source Adapter
-status: executing
-last_updated: "2026-05-07T19:42:05.991Z"
-last_activity: 2026-05-07
+status: ready_to_plan
+last_updated: "2026-05-08T07:41:25.327Z"
+last_activity: 2026-05-08
 progress:
   total_phases: 21
-  completed_phases: 16
+  completed_phases: 17
   total_plans: 46
   completed_plans: 42
-  percent: 91
+  percent: 81
 ---
 
 # GSD State
@@ -20,16 +20,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-07 after v1.5 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 29 — telegram-adapter-mvp-ingestion
+**Current focus:** Phase 30 — incremental-telegram-sync-reuse
 
 ## Current Milestone
 
 **v1.5 — Telegram Source Adapter**
 
-Phase: 29
+Phase: 30
 Plan: Not started
-Status: Ready to execute
-Last activity: 2026-05-07
+Status: Ready to plan
+Last activity: 2026-05-08
 
 Progress: [████████░░] 81%
 
@@ -54,7 +54,7 @@ Items acknowledged and deferred at milestone close on 2026-05-06:
 
 **Velocity:**
 
-- Total plans completed: 44 (across all milestones)
+- Total plans completed: 48 (across all milestones)
 - Average duration: ~3 min
 - Total execution time: —
 
@@ -84,6 +84,7 @@ Items acknowledged and deferred at milestone close on 2026-05-06:
 | Phase 27 P03 | 7min | 3 tasks | 4 files |
 | 27 | 4 | - | - |
 | 28 | 4 | - | - |
+| 29 | 4 | - | - |
 
 ## Accumulated Context
 
@@ -228,7 +229,7 @@ was moved under `.planning/notes/completed-backlog/`.
 
 ### Blockers/Concerns
 
-No blockers. Phase 29 is planned and ready to execute.
+No blockers. Phase 29 is complete and verified; Phase 30 is ready to plan.
 
 ### Quick Tasks Completed
 
@@ -239,15 +240,15 @@ No blockers. Phase 29 is planned and ready to execute.
 | 260502-scv | Normalize dotMD .planning docs: separate active roadmap from backlog/done 999.x items, fix progress/health warnings where safe, keep historical phase artifacts intact | 2026-05-02 | this commit | [260502-scv-normalize-dotmd-planning-docs-separate-a](./quick/260502-scv-normalize-dotmd-planning-docs-separate-a/) |
 
 ---
-*Last updated: 2026-05-07*
+*Last updated: 2026-05-08*
 
 ## Current Position
 
-Phase: 29 (telegram-adapter-mvp-ingestion) — READY TO EXECUTE
-Plan: 0 of 4
-Status: Ready to execute
-Last activity: 2026-05-07 -- Phase 29 planning complete
+Phase: 30 (incremental-telegram-sync-reuse) — READY TO PLAN
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-05-08 -- Phase 29 complete and verified
 
 ## Operator Next Steps
 
-- Run `$gsd-execute-phase 29` to execute the Telegram adapter MVP ingestion plans.
+- Run `$gsd-plan-phase 30` to plan incremental Telegram sync and reuse.
