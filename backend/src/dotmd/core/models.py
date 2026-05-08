@@ -266,6 +266,12 @@ class SourceUnitWindow(BaseModel):
     metadata_json: dict = Field(default_factory=dict)
 
 
+LEGACY_CAPABILITY_ALIASES: dict[str, str] = {
+    "unit-window": SourceCapability.READ_UNIT_WINDOW.value,
+    "incremental-export": SourceCapability.INCREMENTAL_CURSOR.value,
+}
+
+
 class ApplicationSourceDescription(BaseModel):
     """Description of an application source exposed by a provider."""
 
@@ -276,6 +282,29 @@ class ApplicationSourceDescription(BaseModel):
     display_name: str
     capabilities: list[str] = Field(default_factory=list)
     metadata_json: dict = Field(default_factory=dict)
+
+    @classmethod
+    def from_descriptor(
+        cls,
+        descriptor: SourceDescriptor,
+    ) -> ApplicationSourceDescription:
+        """Build the lightweight provider description from a descriptor."""
+        return cls(
+            namespace=descriptor.namespace,
+            source_kind=descriptor.source_kind,
+            display_name=descriptor.display.display_name,
+            capabilities=[
+                capability.value for capability in descriptor.capabilities
+            ],
+            metadata_json=dict(descriptor.metadata_json),
+        )
+
+    def normalized_capabilities(self) -> list[str]:
+        """Return canonical capability strings for comparison."""
+        return [
+            LEGACY_CAPABILITY_ALIASES.get(capability, capability)
+            for capability in self.capabilities
+        ]
 
 
 class ApplicationSourceChange(BaseModel):
