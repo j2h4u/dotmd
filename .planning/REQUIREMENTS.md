@@ -62,7 +62,7 @@ dotMD unless a later phase explicitly justifies it.
 - [x] **SRC-01**: dotMD can describe every source through a source descriptor
   containing source kind, display metadata, config schema, auth schema, cursor
   schema, and capability flags.
-- [ ] **SRC-02**: Filesystem and Telegram are registered sources, not special
+- [x] **SRC-02**: Filesystem and Telegram are registered sources, not special
   cases outside the registry.
 - [x] **SRC-03**: Source capability flags distinguish local sync,
   federated/native search, read-unit windows, materialization, browse trees,
