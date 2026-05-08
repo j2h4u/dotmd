@@ -189,7 +189,11 @@ def _m2m_exists(db_path: Path, chunk_id: str, file_path: str) -> bool:
 def _get_pipeline(db_path: Path):  # type: ignore[no-untyped-def]
     from dotmd.core.config import Settings
     from dotmd.ingestion.pipeline import IndexingPipeline
-    settings = Settings(index_dir=db_path.parent)
+
+    settings = Settings(
+        index_dir=db_path.parent,
+        indexing_paths=[str(db_path.parent)],
+    )
     return IndexingPipeline(settings)
 
 
@@ -536,7 +540,7 @@ class TestPropertyReindexHolderInvariant:
         from dotmd.ingestion.pipeline import IndexingPipeline
 
         db_path = _build_db(tmp_path)
-        settings = Settings(index_dir=tmp_path)
+        settings = Settings(index_dir=tmp_path, indexing_paths=[str(tmp_path)])
         pipeline = IndexingPipeline(settings)
 
         rng = random.Random(42)
