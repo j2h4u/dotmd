@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Telegram Source Adapter
-status: milestone_ready_to_close
-last_updated: "2026-05-08T11:45:00.000Z"
+status: milestone_complete
+last_updated: "2026-05-08T12:00:59.123Z"
 last_activity: 2026-05-08
 progress:
   total_phases: 21
   completed_phases: 18
   total_plans: 47
-  completed_plans: 43
-  percent: 86
+  completed_plans: 47
+  percent: 100
 ---
 
 # GSD State
@@ -20,22 +20,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-07 after v1.5 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** v1.5 closeout after Phase 31 live Telegram smoke
+**Current focus:** v1.5 shipped; next milestone not started
 
 ## Current Milestone
 
 **v1.5 — Telegram Source Adapter**
 
 Phase: None active
-Plan: Phase 31 complete
-Status: Milestone ready to close
+Plan: —
+Status: Shipped
 Last activity: 2026-05-08
 
-Progress: [█████████░] 86%
+Progress: [██████████] 100%
 
 ## Deferred Items
 
-Items acknowledged and deferred at milestone close on 2026-05-06:
+Items acknowledged and deferred at milestone close:
 
 | Category | Item | Status |
 |----------|------|--------|
@@ -49,6 +49,7 @@ Items acknowledged and deferred at milestone close on 2026-05-06:
 | todo | 2026-03-27-smoke-tests.md | pending |
 | todo | 2026-03-28-soft-delete-with-ttl-for-removed-source-files.md | pending |
 | seed | SEED-001-safe-migration-architecture | dormant |
+| seed | SEED-002-promote-content-addressed-bindings-before-telegram | dormant |
 
 ## Performance Metrics
 
@@ -141,14 +142,17 @@ Items acknowledged and deferred at milestone close on 2026-05-06:
   These items are deliberately backlog only. After Phase 31 completion, current
   routing is milestone closeout first, then promotion of the unified source
   architecture backlog line in the next milestone when desired.
+
 - Anti-legacy guardrail for Backlog 999.26-999.31: the architecture line must
   not create a second source plane beside existing filesystem and Telegram
   adapters. Filesystem and Telegram unification are required gates before broad
   third-party/Airweave connector work is considered architecturally complete.
+
 - Phase 30 was deferred to Backlog 999.30 on 2026-05-08. Do not plan or execute
   Phase 30 as a Telegram-specific legacy incremental-sync phase. Its behavior
   should be reintroduced through the unified Telegram source contract after the
   registry/lifecycle/federated-search architecture line is promoted.
+
 - Phase 31 completed on 2026-05-08. The live baseline smoke ingested 100
   Telegram messages, found real Telegram content through dotMD search, and
   verified the returned message-level ref through `drill(ref)` and `read(ref)`.
@@ -252,9 +256,9 @@ was moved under `.planning/notes/completed-backlog/`.
 
 ### Blockers/Concerns
 
-No active phase blocker. Phase 31 live smoke passed and Phase 30 is deferred to
-Backlog 999.30. v1.5 is ready for milestone closeout; the next milestone can
-promote the unified source architecture backlog line when desired.
+No active phase blocker. v1.5 is shipped. Phase 30 is deferred to Backlog
+999.30, and the next milestone can promote the unified source architecture
+backlog line when desired.
 
 ### Quick Tasks Completed
 
@@ -269,13 +273,11 @@ promote the unified source architecture backlog line when desired.
 
 ## Current Position
 
-Phase: none active — v1.5 ready to close
-Plan: Phase 31 complete
-Status: Milestone ready to close
-Last activity: 2026-05-08 -- Phase 31 live Telegram smoke passed
+Phase: Milestone v1.5 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-05-08 — Milestone v1.5 completed and archived
 
 ## Operator Next Steps
 
-- Run milestone closeout for v1.5.
-- Open the next milestone and promote the unified source architecture backlog
-  line when ready.
+- Start the next milestone with /gsd-new-milestone

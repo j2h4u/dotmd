@@ -41,8 +41,10 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 
 ### Active
 
-- v1.5 Telegram Source Adapter — Phase 28 complete. Next step:
-  Phase 29 discussion for Telegram adapter MVP ingestion.
+- v1.5 Telegram Source Adapter — shipped 2026-05-08. Next milestone should
+  promote the unified source architecture backlog line when ready: source
+  capability registry, source lifecycle/config/auth/cursor, federated search,
+  filesystem unification, Telegram unification, and connector compatibility.
 
 ### Out of Scope
 
@@ -127,39 +129,36 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 - **v1.2** — FalkorDB Migration & Search Fix (Phases 4-6, shipped 2026-03-27)
 - **v1.3** — Production Packaging & Background Indexing (Phases 7-10, shipped 2026-03-28)
 - **v1.4** — Search Quality & Architecture (Phases 15-26, shipped 2026-05-06)
+- **v1.5** — Telegram Source Adapter (Phases 27-31, shipped 2026-05-08)
 
-## Current Milestone: v1.5 Telegram Source Adapter
+## Last Shipped Milestone: v1.5 Telegram Source Adapter
 
-**Goal:** Add Telegram as a first-class dotMD source with incremental search +
-sync through the existing `mcp-telegram` runtime, while avoiding recomputation
-of already-processed content and derived artifacts.
+**Goal:** Add Telegram as a first-class dotMD source through the existing
+`mcp-telegram` runtime and validate the reusable application-source foundation.
 
-**Target features:**
-- Content-addressed resource bindings and retained derived artifacts as the
-  first infrastructure phase before Telegram.
-- Telegram source discovery through existing `mcp-telegram`, not a new direct
-  Telegram API client inside dotMD.
-- Telegram search results return source refs that round-trip through
-  `drill(ref)` / `read(ref, start, end)`.
-- Repeated Telegram sync/refresh is incremental and reuses unchanged
-  messages/chunks/derived artifacts.
-- Telegram adapter hardening is scoped to what is needed for reliable read-only
-  search + sync; full lifecycle edits/deletes/TTL can follow after real usage.
+**Shipped:**
+- Resource bindings and retained artifact visibility gates.
+- Application source provider contract with source documents, source units,
+  fingerprints, cursors, and source-unit windows.
+- Telegram MVP ingestion via `mcp-telegram`, not a direct Telegram API client
+  inside dotMD.
+- Telegram message refs that round-trip through `search -> drill/read`.
+- Live Telegram smoke over 100 messages.
+
+**Deferred:** Repeated incremental Telegram sync/reuse moved to Backlog 999.30
+so it can land through the unified source architecture instead of a
+Telegram-only legacy path.
 
 ## Current State
 
-v1.5 is active around Telegram source integration. v1.4 shipped and archived
-the source-ref-first read/search contract, which is now the public identity
-surface for this work. Backlog `999.25` and `SEED-002` are selected as
-milestone context so Telegram does not inherit path-shaped holder semantics or
-force wasted TEI/NER/FTS/graph recomputation for already-processed content.
+v1.5 is shipped and archived. The current project state is between milestones.
+The next milestone should promote the Airweave-inspired unified source
+architecture backlog line when ready: source capability registry,
+lifecycle/config/auth/cursor boundary, federated search candidates, filesystem
+unification, Telegram unification, and connector compatibility.
 
-The v1.5 roadmap has five phases:
-1. Resource bindings and retained artifacts foundation.
-2. Application source provider contract.
-3. Telegram adapter MVP ingestion.
-4. Incremental Telegram sync and reuse.
-5. Telegram search/read/drill smoke.
+Root `.planning/REQUIREMENTS.md` was archived for v1.5 and should be recreated
+by the next milestone workflow.
 
 Phase 999.12 complete (2026-04-27): Dual-encoder unified embedding shipped. Metadata-only changes (tag updates, title renames) now require 1 TEI call per document instead of N calls per chunk. VecComponentStore stores raw e_text/e_meta BLOBs; meta_tracker (title+tags checksum) triggers fast path when only metadata changes. search_log table added. 189 tests pass.
 

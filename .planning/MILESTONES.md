@@ -1,5 +1,30 @@
 # Milestones
 
+## v1.5 Telegram Source Adapter (Shipped: 2026-05-08)
+
+**Phases completed:** 4 phases complete, 1 phase deferred, 13 plans complete
+
+**Key accomplishments:**
+
+- Resource bindings now separate active public source visibility from retained
+  content and derived artifacts.
+- Application source provider contracts now model source documents, source
+  units, cursors, fingerprints, and neighboring source-unit reads.
+- Telegram ingestion now flows through the existing `mcp-telegram` runtime
+  without dotMD owning Telegram auth or a Telethon client.
+- Telegram source units persist into dotMD search indexes with stable
+  message-shaped refs and source-unit provenance.
+- Public Telegram `search -> drill/read` round-trip was verified against live
+  containers and real Telegram messages.
+- Phase 30 incremental sync/reuse was intentionally deferred to Backlog 999.30
+  so it can land through the unified source architecture rather than a
+  Telegram-only legacy path.
+
+**Known deferred items at close:** 11 old planning inbox artifacts ignored for
+closeout, plus Phase 30 carried to Backlog 999.30.
+
+---
+
 ## v1.4 Search Quality & Architecture (Shipped: 2026-05-06)
 
 **Phases completed:** 12 phases, 30 plans, 61 tasks

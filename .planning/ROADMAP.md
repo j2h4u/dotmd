@@ -8,7 +8,7 @@
 - [x] **v1.2 FalkorDB Migration & Search Fix** — Phases 4-6 (shipped 2026-03-27)
 - [x] **v1.3 Production Packaging & Background Indexing** — Phases 7-10 (shipped 2026-03-28)
 - [x] **v1.4 Search Quality & Architecture** — Phases 15-26 (shipped 2026-05-06)
-- [ ] **v1.5 Telegram Source Adapter** — Phases 27-31 (ready to close)
+- [x] **v1.5 Telegram Source Adapter** — Phases 27-31 (shipped 2026-05-08)
 
 <details>
 <summary>v1.1 Incremental Indexing (Phases 1-3) — SHIPPED 2026-03-26</summary>
@@ -85,8 +85,8 @@ See: `.planning/milestones/v1.4-ROADMAP.md`
 
 </details>
 
-<details open>
-<summary>v1.5 Telegram Source Adapter (Phases 27-31) — READY TO CLOSE</summary>
+<details>
+<summary>v1.5 Telegram Source Adapter (Phases 27-31) — SHIPPED 2026-05-08</summary>
 
 - [x] Phase 27: Resource bindings and retained artifacts foundation
 - [x] Phase 28: Application source provider contract
@@ -94,7 +94,7 @@ See: `.planning/milestones/v1.4-ROADMAP.md`
 - [ ] Phase 30: Incremental Telegram sync and reuse — deferred to Backlog 999.30
 - [x] Phase 31: Telegram search/read/drill smoke — completed 2026-05-08
 
-See: `.planning/REQUIREMENTS.md`
+See: `.planning/milestones/v1.5-ROADMAP.md`
 
 </details>
 
@@ -1346,171 +1346,6 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [x] 26-03-regression-docs-and-live-smoke-PLAN.md — Regression, documentation, and live smoke
-
----
-
-### Phase 27: Resource bindings and retained artifacts foundation
-
-**Goal:** Add the generic storage and service foundation that separates active
-source-resource visibility from retained content and derived artifacts, so
-resource churn does not force recomputation of already processed content.
-**Requirements:** R1, R2, R8
-**Depends on:** Phase 26
-**Backlog source:** 999.25, SEED-002
-**Plans:** 4/4 plans complete
-
-Phase context:
-- Telegram is the first validation source, but this phase should be source
-  agnostic and preserve filesystem behavior.
-- Active bindings are the public search/read visibility gate. Retained
-  unbound content may remain in storage for reuse, but must not leak through
-  public search/read.
-- Avoid full reindex. Existing `SourceDocument`, `ChunkProvenance`,
-  `source_documents`, `chunk_source_provenance_<strategy>`,
-  `chunk_file_paths_<strategy>`, split fingerprints, and embedding `text_hash`
-  are the starting substrate.
-- Garbage collection policy is deferred. This phase should make deletion and
-  retention separate operations, not implement a full lifecycle scheduler.
-
-Phase boundary:
-- In scope: schema/model/service changes for bindings, active filtering,
-  retained artifact reuse, and filesystem regression coverage.
-- Out of scope: Telegram ingestion, mcp-telegram export API, edit/delete TTL
-  policy, attachments/media, and generic plugin UI.
-
-Plans:
-**Wave 1**
-- [x] 27-01-storage-binding-state-PLAN.md — Add generic active/inactive resource binding storage state and active provenance helpers
-
-**Wave 2** *(blocked on Wave 1 completion)*
-- [x] 27-02-filesystem-unbind-and-rebind-PLAN.md — Convert filesystem missing-resource handling to inactive bindings and retained artifact reuse
-
-**Wave 3** *(blocked on Wave 2 completion)*
-- [x] 27-03-public-active-filtering-PLAN.md — Enforce active-binding filtering in public search, read, drill, and diagnostics
-
-**Wave 4** *(blocked on Wave 3 completion)*
-- [x] 27-04-regression-docs-and-verification-PLAN.md — Run focused regression, update architecture docs, and record no-full-reindex verification
-
----
-
-### Phase 28: Application source provider contract
-
-**Goal:** Define and implement the smallest provider contract needed for
-application-backed sources, with Telegram as the first provider shape and
-future app integrations as a design constraint.
-**Requirements:** R3, R4, R8
-**Depends on:** Phase 27
-**Plans:** 4/4 plans complete
-
-Phase context:
-- The contract must separate discovery/catalog state from source-unit content.
-- Source providers should expose stable refs, source-unit refs, metadata,
-  content fingerprints, and sync cursors.
-- Human-rendered MCP output must not become the indexing input format.
-- dotMD should not own Telegram auth, Telethon session state, FloodWait
-  handling, or event catch-up.
-
-Phase boundary:
-- In scope: provider protocol, cursor model, fixture provider, Telegram
-  provider design, and identifying whether `mcp-telegram` needs a structured
-  export/source API.
-- In scope if needed: a small cross-repo contract note for `mcp-telegram`.
-- Out of scope: full Telegram indexing, direct Telegram API client in dotMD,
-  and broad plugin marketplace abstractions.
-
----
-
-### Phase 29: Telegram adapter MVP ingestion
-
-**Goal:** Ingest selected synced Telegram dialogs/messages from the existing
-`mcp-telegram` runtime into dotMD as first-class source units with stable
-provenance.
-**Requirements:** R4, R5, R7, R8
-**Depends on:** Phase 28
-**Plans:** 4/4 plans complete
-
-Phase context:
-- Message/source-unit identity is the recomputation boundary, not whole-dialog
-  content.
-- Public refs must be stable enough for `search -> drill/read` while leaving
-  room for later edits/deletes without API churn.
-- Telegram metadata should include dialog id/name, message id, sent_at, sender
-  label/id when available, and topic id/title when available.
-- Existing MCP tools are useful for discovery and live smoke; do not parse
-  human-rendered `list_messages` text as the durable ingest format.
-
-Phase boundary:
-- In scope: Telegram source adapter, fixture-backed ingestion tests, selected
-  dialog scope, source-unit provenance, and initial read/drill resolver support.
-- Out of scope: full lifecycle delete/edit policy, attachments/media,
-  bidirectional Telegram actions, and shared contact/entity catalog.
-
----
-
-### Phase 30: Incremental Telegram sync and reuse — DEFERRED to Backlog 999.30
-
-**Goal:** Make repeated Telegram sync process only new or changed source units
-and reuse retained chunks, embeddings, and derived artifacts for unchanged
-content.
-**Requirements:** R2, R5, R6, R8
-**Depends on:** Phase 29
-**Status:** Deferred to Backlog 999.30 on 2026-05-08.
-**Plans:** 0/0 plans complete
-
-Phase context:
-- A new message in a dialog must not cause unchanged history to be
-  rechunked/reembedded.
-- Sync state should be per source or per dialog/source-unit stream, not a
-  single whole-dialog fingerprint.
-- Sync reporting should expose discovered, new, changed, rebound, skipped,
-  hidden, failed, and reused counts where practical.
-- Existing filesystem trickle behavior must remain intact.
-
-Phase boundary:
-- In scope: cursor persistence, repeat-sync behavior, skip/reuse accounting,
-  failure isolation, and regression coverage.
-- Out of scope: long-term TTL/GC scheduler, complete edit/delete semantics,
-  media ingestion, and external UI.
-
-Deferral note:
-- This phase should not be implemented as a Telegram-specific legacy branch.
-  Its behavior is now carried by Backlog 999.30, after the unified source
-  registry/lifecycle/federated-search contract is promoted.
-
----
-
-### Phase 31: Telegram search/read/drill smoke
-
-**Goal:** Harden and verify the public dotMD MCP workflow for Telegram content:
-`search(query) -> ref -> drill(ref) / read(ref, start, end)`.
-**Requirements:** R7, R8
-**Depends on:** Phase 29
-**Plans:** 1/1 plans complete
-
-Plans:
-- [x] 31-01-live-telegram-smoke-PLAN.md — Run live Telegram ingest/search/read/drill smoke
-
-Phase context:
-- This can remain as an optional v1.5 baseline smoke after Phase 29: validate
-  filesystem and Telegram behavior together, then run a live smoke against
-  deployed `mcp-telegram`.
-- Because Phase 30 was deferred to Backlog 999.30, this phase does not prove
-  incremental Telegram sync/reuse behavior.
-- `drill(ref)` must return useful Telegram source metadata without assuming
-  filesystem frontmatter.
-- `read(ref)` must return useful Telegram message context/chunks without
-  requiring callers to use `mcp-telegram` directly.
-- Smoke should verify reachability, sync status, dotMD search result refs, and
-  round-trip read/drill behavior.
-- Completed smoke ingested 100 Telegram messages, searched real Telegram text,
-  fixed message-level Telegram ref hydration, and verified `drill`/`read` on
-  `telegram:dialog:-1003897013523:message:80`.
-
-Phase boundary:
-- In scope: MCP/API/CLI docs as needed, live smoke, test hardening, source
-  visibility checks, and milestone verification artifacts.
-- Out of scope: new product UI, broad app-source plugin framework, and
-  post-MVP Telegram lifecycle policy.
 
 ---
 
