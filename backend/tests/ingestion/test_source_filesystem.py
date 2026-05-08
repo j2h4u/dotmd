@@ -813,6 +813,158 @@ def test_index_file_trackers_receive_file_info_objects(tmp_path: Path) -> None:
     assert all(isinstance(files[0], FileInfo) for files in tracker_inputs)
 
 
+def test_backfill_filesystem_source_documents_from_existing_provenance(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    md_path = data_dir / "note.md"
+    md_path.write_text(
+        "---\n"
+        "title: Recovered\n"
+        "kind: document\n"
+        "date: 2026-05-08\n"
+        "tags:\n"
+        "  - source\n"
+        "---\n"
+        "# Recovered\n\nBody.",
+        encoding="utf-8",
+    )
+    pipeline = _pipeline_with_mock_embedding(data_dir, tmp_path / "index")
+    document = FilesystemMarkdownSourceAdapter().discover(data_dir)[0]
+    provenance = pipeline._filesystem_chunk_provenance(document)
+
+    pipeline._metadata_store.ensure_chunk_source_provenance_table(pipeline._strategy)
+    pipeline._metadata_store.add_chunk_provenance(
+        pipeline._strategy,
+        provenance,
+        "chunk-1",
+        conn=pipeline._conn,
+    )
+    pipeline._conn.commit()
+
+    assert pipeline._metadata_store.get_source_document(
+        "filesystem",
+        str(md_path.resolve()),
+    ) is None
+    assert pipeline._metadata_store.count_missing_source_documents_from_provenance(
+        pipeline._strategy,
+    ) == 1
+
+    dry_run = pipeline.backfill_filesystem_source_documents_from_provenance(
+        dry_run=True,
+    )
+    assert dry_run["missing_source_documents"] == 1
+    assert pipeline._metadata_store.get_source_document(
+        "filesystem",
+        str(md_path.resolve()),
+    ) is None
+
+    repaired = pipeline.backfill_filesystem_source_documents_from_provenance(
+        dry_run=False,
+    )
+
+    source_document = pipeline._metadata_store.get_source_document(
+        "filesystem",
+        str(md_path.resolve()),
+    )
+    binding = pipeline._metadata_store.get_resource_binding(
+        "filesystem",
+        str(md_path.resolve()),
+    )
+    assert repaired["inserted_source_documents"] == 1
+    assert repaired["inserted_bindings"] == 1
+    assert repaired["missing_files"] == 0
+    assert source_document is not None
+    assert source_document.title == "Recovered"
+    assert binding is not None
+    assert binding.active is True
+
+
+def test_backfill_filesystem_source_documents_skips_deleted_provenance_refs(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    missing_path = data_dir / "deleted.md"
+    pipeline = _pipeline_with_mock_embedding(data_dir, tmp_path / "index")
+    document = _source_document(missing_path)
+    provenance = pipeline._filesystem_chunk_provenance(document)
+
+    pipeline._metadata_store.ensure_chunk_source_provenance_table(pipeline._strategy)
+    pipeline._metadata_store.add_chunk_provenance(
+        pipeline._strategy,
+        provenance,
+        "chunk-1",
+        conn=pipeline._conn,
+    )
+    pipeline._conn.commit()
+
+    repaired = pipeline.backfill_filesystem_source_documents_from_provenance(
+        dry_run=False,
+    )
+
+    assert repaired["missing_source_documents"] == 1
+    assert repaired["inserted_source_documents"] == 0
+    assert repaired["inserted_bindings"] == 0
+    assert repaired["missing_files"] == 1
+
+
+def test_backfill_preserves_symlink_provenance_ref(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    target_path = data_dir / "target.md"
+    target_path.write_text("# Target\n\nBody.", encoding="utf-8")
+    link_path = data_dir / "link.md"
+    link_path.symlink_to(target_path)
+    pipeline = _pipeline_with_mock_embedding(data_dir, tmp_path / "index")
+    document = SourceDocument(
+        namespace="filesystem",
+        document_ref=str(link_path),
+        ref=f"filesystem:{link_path}",
+        title="Target",
+        source_uri=str(link_path),
+        media_type="text/markdown",
+        parser_name="markdown",
+        document_type="document",
+        updated_at=datetime.now(tz=UTC),
+        content_fingerprint=chunk_checksum(link_path),
+        metadata_fingerprint=meta_checksum(link_path),
+        metadata_json={},
+        file_path=link_path,
+    )
+    provenance = pipeline._filesystem_chunk_provenance(document)
+
+    pipeline._metadata_store.ensure_chunk_source_provenance_table(pipeline._strategy)
+    pipeline._metadata_store.add_chunk_provenance(
+        pipeline._strategy,
+        provenance,
+        "chunk-1",
+        conn=pipeline._conn,
+    )
+    pipeline._conn.commit()
+
+    repaired = pipeline.backfill_filesystem_source_documents_from_provenance(
+        dry_run=False,
+    )
+
+    source_document = pipeline._metadata_store.get_source_document(
+        "filesystem",
+        str(link_path),
+    )
+    binding = pipeline._metadata_store.get_resource_binding(
+        "filesystem",
+        str(link_path),
+    )
+    assert repaired["inserted_source_documents"] == 1
+    assert repaired["inserted_bindings"] == 1
+    assert source_document is not None
+    assert source_document.document_ref == str(link_path)
+    assert source_document.file_path == link_path
+    assert binding is not None
+    assert binding.active is True
+
+
 def test_discover_multi_excludes_empty_and_non_markdown_files(
     tmp_path: Path,
 ) -> None:

@@ -197,10 +197,11 @@ class SourceDocument(BaseModel):
             raise ValueError(f"ref must be {expected_ref!r}")
 
         if self.namespace == "filesystem" and self.file_path is not None:
-            document_ref = str(self.file_path.resolve())
-            if self.document_ref != document_ref:
+            file_path_ref = str(self.file_path)
+            resolved_ref = str(self.file_path.resolve())
+            if self.document_ref not in {file_path_ref, resolved_ref}:
                 raise ValueError(
-                    "filesystem document_ref must match resolved file_path"
+                    "filesystem document_ref must match file_path or resolved file_path"
                 )
 
         return self

@@ -282,6 +282,30 @@ def _collect_glob(
             _add_file(match, exclude_names, seen, results)
 
 
+def file_info_from_path(md_path: Path) -> FileInfo | None:
+    """Return FileInfo for one markdown file, or None when it is not indexable."""
+    try:
+        if not md_path.is_file() or md_path.suffix != ".md":
+            return None
+        stat = md_path.stat()
+        if stat.st_size == 0:
+            logger.info("Skipping empty file (0 bytes): %s", md_path)
+            return None
+        content = read_file(md_path)
+        frontmatter, _ = parse_frontmatter(content)
+        return FileInfo(
+            path=md_path,
+            title=_extract_title(content, md_path, frontmatter),
+            last_modified=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
+            size_bytes=stat.st_size,
+            kind=frontmatter.get("kind", DocKind.DOCUMENT),
+            frontmatter=frontmatter,
+        )
+    except OSError:
+        logger.warning("Skipping unreadable file: %s", md_path, exc_info=True)
+        return None
+
+
 def _add_file(
     md_path: Path,
     exclude_names: set[str],
@@ -295,26 +319,10 @@ def _add_file(
     if _is_excluded(md_path, exclude_names):
         return
 
-    try:
-        stat = md_path.stat()
-        if stat.st_size == 0:
-            logger.info("Skipping empty file (0 bytes): %s", md_path)
-            return
-        content = read_file(md_path)
-        frontmatter, _ = parse_frontmatter(content)
-        results.append(
-            FileInfo(
-                path=md_path,
-                title=_extract_title(content, md_path, frontmatter),
-                last_modified=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
-                size_bytes=stat.st_size,
-                kind=frontmatter.get("kind", DocKind.DOCUMENT),
-                frontmatter=frontmatter,
-            )
-        )
+    file_info = file_info_from_path(md_path)
+    if file_info is not None:
+        results.append(file_info)
         seen.add(resolved)
-    except OSError:
-        logger.warning("Skipping unreadable file: %s", md_path, exc_info=True)
 
 
 def read_file(path: Path) -> str:

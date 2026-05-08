@@ -58,6 +58,7 @@ from dotmd.extraction.structural import StructuralExtractor
 from dotmd.ingestion.file_tracker import FileDiff, FileTracker
 from dotmd.ingestion.reader import (
     chunk_checksum,
+    file_info_from_path,
     meta_checksum,
     parse_frontmatter,
     read_file,
@@ -1602,6 +1603,86 @@ class IndexingPipeline:
                 total[key] += diagnostic[key]
         self._last_rebind_diagnostic = total
         return total
+
+    def backfill_filesystem_source_documents_from_provenance(
+        self,
+        strategy: str | None = None,
+        *,
+        dry_run: bool = True,
+    ) -> dict[str, int]:
+        """Recreate missing filesystem source docs/bindings from chunk provenance.
+
+        This is an additive repair path for pre-binding filesystem chunks. It
+        reads live markdown files to rebuild SourceDocument metadata, but does
+        not touch chunks, FTS rows, vectors, graph artifacts, or fingerprints.
+        """
+        effective_strategy = strategy or self._strategy
+        refs = (
+            self._metadata_store.get_missing_source_document_refs_from_provenance(
+                effective_strategy,
+                namespace="filesystem",
+            )
+        )
+        diagnostic = {
+            "missing_source_documents": len(refs),
+            "inserted_source_documents": 0,
+            "inserted_bindings": 0,
+            "missing_files": 0,
+            "skipped_files": 0,
+        }
+        if dry_run or not refs:
+            return diagnostic
+
+        self._conn.execute("BEGIN")
+        try:
+            for document_ref in refs:
+                file_info = file_info_from_path(Path(document_ref))
+                if file_info is None:
+                    if Path(document_ref).exists():
+                        diagnostic["skipped_files"] += 1
+                    else:
+                        diagnostic["missing_files"] += 1
+                    continue
+
+                source_document = self._source_document_for_file_info(file_info)
+                if source_document.document_ref != document_ref:
+                    source_document = SourceDocument(
+                        namespace=source_document.namespace,
+                        document_ref=document_ref,
+                        ref=f"{source_document.namespace}:{document_ref}",
+                        title=source_document.title,
+                        source_uri=document_ref,
+                        media_type=source_document.media_type,
+                        parser_name=source_document.parser_name,
+                        document_type=source_document.document_type,
+                        updated_at=source_document.updated_at,
+                        content_fingerprint=source_document.content_fingerprint,
+                        metadata_fingerprint=source_document.metadata_fingerprint,
+                        metadata_json=source_document.metadata_json,
+                        file_path=Path(document_ref),
+                    )
+                before = self._conn.total_changes
+                self._metadata_store.upsert_source_document(
+                    source_document,
+                    conn=self._conn,
+                )
+                diagnostic["inserted_source_documents"] += (
+                    self._conn.total_changes - before
+                )
+
+                before = self._conn.total_changes
+                self._upsert_active_filesystem_binding(
+                    source_document,
+                    conn=self._conn,
+                )
+                diagnostic["inserted_bindings"] += self._conn.total_changes - before
+            self._conn.execute("COMMIT")
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+
+        logger.info("filesystem_source_document_backfill: %s", diagnostic)
+        return diagnostic
 
     @staticmethod
     def _normalize_vector(v: list[float]) -> list[float]:

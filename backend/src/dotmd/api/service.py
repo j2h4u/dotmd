@@ -847,6 +847,31 @@ class DotMDService:
                 inserted,
             )
 
+        try:
+            source_doc_diagnostic = (
+                self._pipeline.backfill_filesystem_source_documents_from_provenance(
+                    strategy,
+                    dry_run=False,
+                )
+            )
+        except AttributeError:
+            logger.debug("pipeline has no filesystem source-document backfill helper")
+        else:
+            inserted_docs = int(
+                source_doc_diagnostic.get("inserted_source_documents", 0)
+            )
+            inserted_bindings = int(source_doc_diagnostic.get("inserted_bindings", 0))
+            if inserted_docs or inserted_bindings:
+                logger.info(
+                    "filesystem source bindings backfilled: strategy=%s docs=%d "
+                    "bindings=%d missing_files=%d skipped_files=%d",
+                    strategy,
+                    inserted_docs,
+                    inserted_bindings,
+                    int(source_doc_diagnostic.get("missing_files", 0)),
+                    int(source_doc_diagnostic.get("skipped_files", 0)),
+                )
+
         self._source_provenance_ready_strategies.add(strategy)
 
     def _parse_ref(self, ref: str) -> tuple[str, str]:
@@ -930,7 +955,7 @@ class DotMDService:
         path = document.file_path
         if not path.exists():
             raise ValueError(f"Unknown source ref: {ref}")
-        return str(path.resolve())
+        return str(path)
 
     def _read_frontmatter(self, path: Path) -> dict[str, Any]:
         try:

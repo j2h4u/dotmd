@@ -441,7 +441,7 @@ class SQLiteMetadataStore:
                 document.updated_at.isoformat(),
                 document.content_fingerprint,
                 document.metadata_fingerprint,
-                json.dumps(document.metadata_json, sort_keys=True),
+                json.dumps(document.metadata_json, sort_keys=True, default=str),
             ),
         )
 
@@ -506,7 +506,7 @@ class SQLiteMetadataStore:
                 binding.content_fingerprint,
                 binding.metadata_fingerprint,
                 json.dumps(binding.source_unit_refs),
-                json.dumps(binding.metadata_json, sort_keys=True),
+                json.dumps(binding.metadata_json, sort_keys=True, default=str),
             ),
         )
 
@@ -607,7 +607,7 @@ class SQLiteMetadataStore:
                 namespace,
                 checkpoint_cursor,
                 now,
-                json.dumps(metadata_json or {}, sort_keys=True),
+                json.dumps(metadata_json or {}, sort_keys=True, default=str),
             ),
         )
 
@@ -686,7 +686,7 @@ class SQLiteMetadataStore:
                 unit.fingerprint,
                 unit.updated_at.isoformat(),
                 (indexed_at or datetime.now(tz=UTC)).isoformat(),
-                json.dumps(unit.metadata_json, sort_keys=True),
+                json.dumps(unit.metadata_json, sort_keys=True, default=str),
             ),
         )
         return True
@@ -1109,6 +1109,49 @@ class SQLiteMetadataStore:
             inserted += self._conn.total_changes - before
         self._conn.commit()
         return inserted
+
+    def count_missing_source_documents_from_provenance(
+        self,
+        strategy: str,
+        *,
+        namespace: str = "filesystem",
+    ) -> int:
+        """Count provenance document refs that have no source_documents row."""
+        self.ensure_chunk_source_provenance_table(strategy)
+        provenance_table = f"chunk_source_provenance_{strategy}"
+        row = self._conn.execute(
+            f"SELECT COUNT(*) FROM ("
+            f"SELECT DISTINCT p.namespace, p.document_ref "
+            f"FROM {provenance_table} p "
+            f"LEFT JOIN source_documents sd "
+            f"  ON sd.namespace = p.namespace "
+            f" AND sd.document_ref = p.document_ref "
+            f"WHERE p.namespace = ? AND sd.document_ref IS NULL"
+            f")",
+            (namespace,),
+        ).fetchone()
+        return int(row[0]) if row else 0
+
+    def get_missing_source_document_refs_from_provenance(
+        self,
+        strategy: str,
+        *,
+        namespace: str = "filesystem",
+    ) -> list[str]:
+        """Return distinct provenance refs missing source_documents rows."""
+        self.ensure_chunk_source_provenance_table(strategy)
+        provenance_table = f"chunk_source_provenance_{strategy}"
+        rows = self._conn.execute(
+            f"SELECT DISTINCT p.document_ref "
+            f"FROM {provenance_table} p "
+            f"LEFT JOIN source_documents sd "
+            f"  ON sd.namespace = p.namespace "
+            f" AND sd.document_ref = p.document_ref "
+            f"WHERE p.namespace = ? AND sd.document_ref IS NULL "
+            f"ORDER BY p.document_ref",
+            (namespace,),
+        ).fetchall()
+        return [str(row[0]) for row in rows]
 
     def delete_chunk_provenance(
         self,

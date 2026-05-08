@@ -1582,3 +1582,47 @@ class TestSourceProvenanceSafetyGate:
             assert "source provenance backfill incomplete" in str(exc)
         else:
             raise AssertionError("search should block incomplete provenance backfill")
+
+    def test_execute_search_backfills_missing_filesystem_source_documents(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = _get_service(tmp_path)
+        metadata = MagicMock()
+        metadata.count_missing_source_provenance.return_value = 0
+        service._pipeline._metadata_store = metadata
+        service._pipeline.backfill_filesystem_source_documents_from_provenance = (
+            MagicMock(
+                return_value={
+                    "missing_source_documents": 2,
+                    "inserted_source_documents": 2,
+                    "inserted_bindings": 2,
+                    "missing_files": 0,
+                    "skipped_files": 0,
+                }
+            )
+        )
+        service._collect_candidate_pool = MagicMock(
+            return_value={
+                "fused": [],
+                "engine_results": {},
+                "semantic_hits": [],
+                "keyword_hits": [],
+            }
+        )
+
+        results = service._execute_search(
+            search_query="expanded",
+            original_query="query",
+            top_k=5,
+            mode="hybrid",
+            rerank=False,
+            reranker_name=None,
+            pool_size=5,
+        )
+
+        assert results == []
+        service._pipeline.backfill_filesystem_source_documents_from_provenance.assert_called_once_with(
+            service._settings.chunk_strategy,
+            dry_run=False,
+        )

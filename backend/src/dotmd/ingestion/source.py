@@ -89,7 +89,8 @@ def source_document_to_file_info(document: SourceDocument) -> FileInfo:
         raise FileNotFoundError(f"Source file does not exist: {document.file_path}")
 
     document_ref = filesystem_document_ref(document.file_path)
-    if document.document_ref != document_ref:
+    file_path_ref = str(document.file_path)
+    if document.document_ref not in {document_ref, file_path_ref}:
         raise ValueError("filesystem document_ref must match resolved file_path")
 
     return FileInfo(
