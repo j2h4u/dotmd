@@ -6,11 +6,11 @@ status: planning
 last_updated: "2026-05-08T14:17:44.522Z"
 last_activity: 2026-05-08
 progress:
-  total_phases: 23
-  completed_phases: 18
-  total_plans: 51
-  completed_plans: 50
-  percent: 98
+  total_phases: 6
+  completed_phases: 1
+  total_plans: 4
+  completed_plans: 4
+  percent: 17
 ---
 
 # GSD State
