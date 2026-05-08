@@ -16,6 +16,7 @@ from dotmd.core.models import (
     SourceSchemaField,
 )
 from dotmd.core.source_registry import SourceRegistry
+from dotmd.ingestion.source_registry import default_source_registry
 
 
 def _descriptor(namespace: str = "demo") -> SourceDescriptor:
@@ -140,3 +141,54 @@ def test_source_registry_rejects_duplicate_namespace() -> None:
     with pytest.raises(ValueError, match="source namespace already registered: demo"):
         registry.register(_descriptor("demo"))
 
+
+def test_default_registry_contains_filesystem_and_telegram() -> None:
+    namespaces = {
+        descriptor.namespace for descriptor in default_source_registry().list()
+    }
+
+    assert namespaces == {"filesystem", "telegram"}
+
+
+def test_filesystem_descriptor_shape() -> None:
+    descriptor = default_source_registry().require("filesystem")
+    fields = {field.name: field for field in descriptor.config_schema.fields}
+
+    assert descriptor.namespace == "filesystem"
+    assert descriptor.source_kind == "local_filesystem"
+    assert descriptor.display.display_name == "Filesystem Markdown"
+    assert fields["paths"].field_type == "list[str]"
+    assert fields["paths"].required is True
+    assert fields["exclude"].field_type == "list[str]"
+    assert fields["exclude"].required is False
+    assert descriptor.auth_schema.auth_kind == "none"
+    assert descriptor.cursor_schema.cursor_kind == "fingerprint"
+    assert "fingerprint-based change detection" in descriptor.cursor_schema.description
+    assert descriptor.capabilities == [
+        SourceCapability.LOCAL_SYNC,
+        SourceCapability.MATERIALIZATION,
+        SourceCapability.BROWSE_TREE,
+    ]
+
+
+def test_telegram_descriptor_shape() -> None:
+    descriptor = default_source_registry().require("telegram")
+    fields = {field.name: field for field in descriptor.config_schema.fields}
+
+    assert descriptor.namespace == "telegram"
+    assert descriptor.source_kind == "chat"
+    assert descriptor.display.display_name == "Telegram"
+    assert fields["socket_path"].field_type == "path"
+    assert fields["socket_path"].required is False
+    assert descriptor.auth_schema.auth_kind == "delegated"
+    assert descriptor.auth_schema.delegated_to == "mcp-telegram"
+    assert descriptor.cursor_schema.cursor_kind == "provider_checkpoint"
+    assert (
+        "telegram:v1:dialog:<dialog_id>:message:<message_id>"
+        in descriptor.cursor_schema.examples
+    )
+    assert SourceCapability.LOCAL_SYNC in descriptor.capabilities
+    assert SourceCapability.READ_UNIT_WINDOW in descriptor.capabilities
+    assert SourceCapability.INCREMENTAL_CURSOR in descriptor.capabilities
+    assert SourceCapability.FEDERATED_SEARCH in descriptor.capabilities
+    assert SourceCapability.ACL not in descriptor.capabilities
