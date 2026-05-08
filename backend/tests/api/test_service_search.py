@@ -20,6 +20,40 @@ def _get_service(tmp_path: Path):  # type: ignore[no-untyped-def]
     return DotMDService(settings)
 
 
+class _LifecycleFactoryFixture:
+    def __init__(self, provider: object | None) -> None:
+        self.provider = provider
+        self.calls: list[str] = []
+
+    def build_if_configured(self, namespace: str) -> object | None:
+        from dotmd.ingestion.source_registry import default_source_registry
+        from dotmd.ingestion.source_lifecycle import SourceRuntimeBundle
+        from dotmd.ingestion.source_lifecycle import SourceAccess, TelegramSourceConfig
+
+        self.calls.append(namespace)
+        if self.provider is None:
+            return None
+        return SourceRuntimeBundle(
+            descriptor=default_source_registry().require(namespace),
+            config=TelegramSourceConfig(socket_path=Path("/tmp/telegram.sock")),
+            access=SourceAccess(kind="delegated", delegated_to="mcp-telegram"),
+            cursor_store=MagicMock(),
+            provider=self.provider,
+        )
+
+
+def test_build_telegram_provider_uses_lifecycle_factory(tmp_path: Path) -> None:
+    service = _get_service(tmp_path)
+    provider = MagicMock()
+    factory = _LifecycleFactoryFixture(provider)
+    service._source_runtime_factory = factory  # type: ignore[attr-defined]
+
+    built = service._build_telegram_provider()
+
+    assert built is provider
+    assert factory.calls == ["telegram"]
+
+
 def test_format_elapsed_ms_for_human_diagnostics() -> None:
     from dotmd.api.service import format_elapsed_ms
 

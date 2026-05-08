@@ -5,8 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
 import pytest
 
+from dotmd.core.config import Settings
 from dotmd.core.models import SourceDescriptor
 from dotmd.ingestion.source import FilesystemMarkdownSourceAdapter
 from dotmd.ingestion.source_lifecycle import (
@@ -224,6 +226,79 @@ def test_source_config_store_keeps_credential_refs_separate_from_config() -> Non
     payload = stored.config.model_dump()
     assert "credential_ref" not in payload
     assert not {"secret", "token", "password"} & set(payload)
+
+
+def test_source_runtime_factory_from_settings_seeds_telegram_config_when_socket_configured(
+    tmp_path: Path,
+) -> None:
+    socket_path = tmp_path / "daemon.sock"
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        index_dir=tmp_path / "index",
+        embedding_url="http://localhost:18088",
+        telegram_daemon_socket=socket_path,
+    )
+    metadata_store = _metadata_store(tmp_path)
+
+    factory = source_lifecycle.source_runtime_factory_from_settings(
+        settings,
+        metadata_store,
+    )
+
+    record = factory._config_store.get_config("telegram")
+    assert record is not None
+    assert record.config == TelegramSourceConfig(socket_path=socket_path)
+    assert record.credential_ref == SourceCredentialRef(
+        namespace="telegram",
+        credential_ref="mcp-telegram",
+    )
+
+
+def test_telegram_lifecycle_does_not_accept_raw_secret_fields() -> None:
+    with pytest.raises(ValidationError):
+        TelegramSourceConfig(  # type: ignore[call-arg]
+            socket_path=Path("/tmp/telegram.sock"),
+            token="raw-token",
+        )
+    with pytest.raises(ValidationError):
+        SourceCredentialRef(  # type: ignore[call-arg]
+            namespace="telegram",
+            password="raw-password",
+        )
+    with pytest.raises(ValidationError):
+        SourceAccess(  # type: ignore[call-arg]
+            kind="delegated",
+            delegated_to="mcp-telegram",
+            secret="raw-secret",
+        )
+
+
+def test_telegram_access_remains_delegated_to_mcp_telegram(tmp_path: Path) -> None:
+    socket_path = tmp_path / "daemon.sock"
+    factory = SourceRuntimeFactory(
+        registry=default_source_registry(),
+        config_store=InMemorySourceConfigStore(
+            [
+                SourceConfigRecord(
+                    namespace="telegram",
+                    config=TelegramSourceConfig(socket_path=socket_path),
+                    credential_ref=SourceCredentialRef(
+                        namespace="telegram",
+                        credential_ref="mcp-telegram",
+                    ),
+                )
+            ]
+        ),
+        credential_provider=DefaultSourceCredentialProvider(),
+        cursor_store=SQLiteSourceCursorStore(_metadata_store(tmp_path)),
+        telegram_client_factory=FakeTelegramClient,
+    )
+
+    bundle = factory.build("telegram")
+
+    assert bundle.access.kind == "delegated"
+    assert bundle.access.delegated_to == "mcp-telegram"
+    assert bundle.config.model_dump() == {"socket_path": socket_path}
 
 
 def test_source_cursor_store_requires_transaction_for_commit(tmp_path: Path) -> None:

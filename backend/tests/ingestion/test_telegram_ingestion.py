@@ -12,6 +12,12 @@ from dotmd.cli import main
 from dotmd.core.config import Settings
 from dotmd.core.models import Chunk, ExtractDepth
 from dotmd.ingestion.pipeline import IndexingPipeline
+from dotmd.ingestion.source_lifecycle import (
+    SourceAccess,
+    SourceRuntimeBundle,
+    TelegramSourceConfig,
+)
+from dotmd.ingestion.source_registry import default_source_registry
 from dotmd.ingestion.telegram_provider import TelegramApplicationSourceProvider
 from dotmd.storage.metadata import SQLiteMetadataStore
 
@@ -115,6 +121,48 @@ class _KeywordRecorder:
 
     def add_chunks(self, chunks, file_meta=None):  # type: ignore[no-untyped-def]
         raise AssertionError("Telegram ingestion must use add_chunks_with_source_meta")
+
+
+class _RecordingCursorStore:
+    def __init__(self, metadata_store: SQLiteMetadataStore) -> None:
+        self._metadata_store = metadata_store
+        self.get_calls: list[str] = []
+        self.commit_calls: list[tuple[str, str | None]] = []
+        self.error_calls: list[tuple[str, str]] = []
+
+    def get_checkpoint(self, namespace: str) -> dict[str, object] | None:
+        self.get_calls.append(namespace)
+        return self._metadata_store.get_source_checkpoint(namespace)
+
+    def commit_checkpoint(
+        self,
+        namespace: str,
+        checkpoint_cursor: str | None,
+        *,
+        conn: Any,
+        metadata_json: dict[str, object] | None = None,
+    ) -> None:
+        self.commit_calls.append((namespace, checkpoint_cursor))
+        self._metadata_store.commit_source_checkpoint(
+            namespace,
+            checkpoint_cursor,
+            conn=conn,
+            metadata_json=metadata_json,
+        )
+
+    def record_error(
+        self,
+        namespace: str,
+        error: str,
+        *,
+        conn: Any | None = None,
+    ) -> None:
+        self.error_calls.append((namespace, error))
+        self._metadata_store.record_source_checkpoint_error(
+            namespace,
+            error,
+            conn=conn,
+        )
 
 
 def _cursor_for_message(message_id: int | None) -> str | None:
@@ -244,6 +292,20 @@ def _provider(changes: list[dict] | None = None) -> TelegramApplicationSourcePro
     return TelegramApplicationSourceProvider(_TelegramSourceClientFixture(changes))
 
 
+def _runtime_bundle(
+    pipeline: IndexingPipeline,
+    provider: TelegramApplicationSourceProvider,
+    cursor_store: _RecordingCursorStore,
+) -> SourceRuntimeBundle:
+    return SourceRuntimeBundle(
+        descriptor=default_source_registry().require("telegram"),
+        config=TelegramSourceConfig(socket_path=Path("/tmp/telegram.sock")),
+        access=SourceAccess(kind="delegated", delegated_to="mcp-telegram"),
+        cursor_store=cursor_store,
+        provider=provider,
+    )
+
+
 def _telegram_chunks(pipeline: IndexingPipeline) -> list[Chunk]:
     rows = pipeline._conn.execute(
         f"SELECT chunk_id FROM chunks_{STRATEGY} ORDER BY chunk_id"
@@ -307,6 +369,49 @@ def test_ingest_telegram_batch_persists_documents_bindings_units_and_checkpoint(
     assert checkpoint_meta["updated_after"] == "2026-05-07T12:00:02.000000Z"
     assert checkpoint_meta["updated_after_cursor"] == "telegram:v1:dialog:-1001:message:44"
     assert checkpoint_meta["single_batch"] is True
+
+
+def test_ingest_application_source_uses_lifecycle_cursor_store_for_checkpoint(
+    tmp_path: Path,
+) -> None:
+    pipeline = _pipeline(tmp_path)
+    cursor_store = _RecordingCursorStore(pipeline._metadata_store)
+    bundle = _runtime_bundle(pipeline, _provider(), cursor_store)
+
+    result = pipeline.ingest_application_source_runtime(bundle, limit=10)
+
+    assert result.discovered == 3
+    assert cursor_store.get_calls == ["telegram"]
+    assert cursor_store.commit_calls == [
+        ("telegram", "telegram:v1:dialog:-1001:message:44")
+    ]
+    assert cursor_store.error_calls == []
+
+
+def test_lifecycle_cursor_checkpoint_rolls_back_when_index_transaction_fails(
+    tmp_path: Path,
+) -> None:
+    pipeline = _pipeline(tmp_path)
+    cursor_store = _RecordingCursorStore(pipeline._metadata_store)
+    bundle = _runtime_bundle(pipeline, _provider(), cursor_store)
+
+    def fail_vector_store(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise RuntimeError("vector failure")
+
+    pipeline._add_vectors_in_transaction = fail_vector_store  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="vector failure"):
+        pipeline.ingest_application_source_runtime(bundle, limit=10)
+
+    assert cursor_store.get_calls == ["telegram"]
+    assert cursor_store.commit_calls == []
+    assert len(cursor_store.error_calls) == 1
+    assert cursor_store.error_calls[0][0] == "telegram"
+    assert "vector failure" in cursor_store.error_calls[0][1]
+    checkpoint = pipeline._metadata_store.get_source_checkpoint("telegram")
+    assert checkpoint is not None
+    assert checkpoint["checkpoint_cursor"] is None
+    assert checkpoint["last_error"] == "vector failure"
 
 
 def test_ingest_telegram_replay_skips_unchanged_units(tmp_path: Path) -> None:
