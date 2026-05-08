@@ -68,8 +68,9 @@ class TelegramSourceClientProtocol(Protocol):
 class UnixSocketTelegramSourceClient:
     """Synchronous client for the mcp-telegram UNIX-socket JSON API."""
 
-    def __init__(self, socket_path: Path) -> None:
+    def __init__(self, socket_path: Path, *, timeout_seconds: float = 30.0) -> None:
         self._socket_path = socket_path
+        self._timeout_seconds = timeout_seconds
 
     @property
     def socket_path(self) -> Path:
@@ -116,14 +117,18 @@ class UnixSocketTelegramSourceClient:
 
     def _request(self, payload: dict) -> dict:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-            sock.connect(str(self._socket_path))
-            sock.sendall(json.dumps(payload).encode("utf-8") + b"\n")
-            data = b""
-            while not data.endswith(b"\n"):
-                chunk = sock.recv(1024 * 1024)
-                if not chunk:
-                    break
-                data += chunk
+            sock.settimeout(self._timeout_seconds)
+            try:
+                sock.connect(str(self._socket_path))
+                sock.sendall(json.dumps(payload).encode("utf-8") + b"\n")
+                data = b""
+                while not data.endswith(b"\n"):
+                    chunk = sock.recv(1024 * 1024)
+                    if not chunk:
+                        break
+                    data += chunk
+            except TimeoutError as exc:
+                raise RuntimeError("Telegram daemon request timed out") from exc
         if not data:
             raise RuntimeError("Telegram daemon returned no response")
         response = json.loads(data.decode("utf-8"))
@@ -187,6 +192,13 @@ class TelegramApplicationSourceProvider(ApplicationSourceProviderProtocol):
     def _change_from_payload(self, payload: dict) -> ApplicationSourceChange:
         document_payload = payload["document"]
         unit_payload = payload["unit"]
+        if _is_source_document_payload(document_payload) and _is_source_unit_payload(
+            unit_payload
+        ):
+            return ApplicationSourceChange(
+                document=SourceDocument(**document_payload),
+                unit=self._unit_from_payload(unit_payload),
+            )
         return ApplicationSourceChange(
             document=self._document_from_payload(document_payload, unit_payload),
             unit=self._unit_from_payload(unit_payload),
@@ -242,6 +254,23 @@ class TelegramApplicationSourceProvider(ApplicationSourceProviderProtocol):
         )
 
     def _unit_from_payload(self, payload: dict) -> SourceUnit:
+        if _is_source_unit_payload(payload):
+            metadata_json = dict(payload.get("metadata_json", {}))
+            text = str(payload.get("text") or "")
+            metadata_json["standalone_search"] = not is_low_signal_telegram_text(text)
+            return SourceUnit(
+                namespace=payload["namespace"],
+                document_ref=payload["document_ref"],
+                unit_ref=payload["unit_ref"],
+                unit_type=payload["unit_type"],
+                text=text,
+                order_key=payload["order_key"],
+                fingerprint=payload["fingerprint"],
+                updated_at=_parse_datetime(payload["updated_at"]),
+                metadata_json=metadata_json,
+                chunking_hints=payload.get("chunking_hints", {}),
+            )
+
         dialog_id = _coerce_int(payload["dialog_id"])
         message_id = _coerce_int(payload["message_id"])
         unit_ref = _unit_ref(payload)
@@ -327,6 +356,32 @@ def _unit_ref(payload: dict) -> str:
     dialog_id = _coerce_int(payload["dialog_id"])
     message_id = _coerce_int(payload["message_id"])
     return f"dialog:{dialog_id}:message:{message_id}"
+
+
+def _is_source_document_payload(payload: dict) -> bool:
+    return {
+        "namespace",
+        "document_ref",
+        "ref",
+        "title",
+        "source_uri",
+        "updated_at",
+        "content_fingerprint",
+        "metadata_fingerprint",
+    }.issubset(payload)
+
+
+def _is_source_unit_payload(payload: dict) -> bool:
+    return {
+        "namespace",
+        "document_ref",
+        "unit_ref",
+        "unit_type",
+        "text",
+        "order_key",
+        "fingerprint",
+        "updated_at",
+    }.issubset(payload)
 
 
 def _coerce_int(value: object) -> int:

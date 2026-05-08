@@ -138,6 +138,55 @@ def _change(
     }
 
 
+def _canonical_daemon_change() -> dict:
+    return {
+        "document": {
+            "namespace": "telegram",
+            "document_ref": "dialog:-1001",
+            "ref": "telegram:dialog:-1001",
+            "title": "Project Chat",
+            "source_uri": "telegram://dialog/-1001",
+            "media_type": "text/plain",
+            "parser_name": "telegram-message",
+            "document_type": "dialog",
+            "updated_at": "2026-05-07T12:00:00.000000Z",
+            "content_fingerprint": "dialog-content-fingerprint",
+            "metadata_fingerprint": "dialog-metadata-fingerprint",
+            "metadata_json": {
+                "dialog_id": -1001,
+                "dialog_type": "Channel",
+                "username": "project_chat",
+                "sync_status": "synced",
+            },
+        },
+        "unit": {
+            "namespace": "telegram",
+            "document_ref": "dialog:-1001",
+            "unit_ref": "dialog:-1001:message:42",
+            "unit_type": "message",
+            "text": "Deployment checklist is ready",
+            "order_key": "00000000000000000042",
+            "fingerprint": "daemon-message-fingerprint",
+            "updated_at": "2026-05-07T12:00:00.000000Z",
+            "metadata_json": {
+                "dialog_id": -1001,
+                "message_id": 42,
+                "sent_at": "2026-05-07T12:00:00.000000Z",
+                "sender_id": 111,
+                "sender_name": "Alice",
+                "topic_id": 7,
+                "topic_title": "Deployments",
+                "reply_to_msg_id": 41,
+                "edit_date": None,
+                "deleted_at": None,
+                "is_deleted": False,
+                "unit_updated_at": "2026-05-07T12:00:00.000000Z",
+            },
+            "chunking_hints": {},
+        },
+    }
+
+
 def test_provider_maps_structured_export_to_application_source_batch() -> None:
     provider = TelegramApplicationSourceProvider(_TelegramSourceClientFixture())
 
@@ -176,6 +225,23 @@ def test_provider_maps_structured_export_to_application_source_batch() -> None:
     assert metadata["edit_date"] is None
     assert metadata["is_deleted"] is False
     assert metadata["standalone_search"] is True
+
+
+def test_provider_accepts_canonical_daemon_source_model_payload() -> None:
+    provider = TelegramApplicationSourceProvider(
+        _TelegramSourceClientFixture([_canonical_daemon_change()])
+    )
+
+    change = provider.export_changes(None, 10).changes[0]
+
+    assert change.document.title == "Project Chat"
+    assert change.document.metadata_json["sync_status"] == "synced"
+    assert change.unit.unit_ref == "dialog:-1001:message:42"
+    assert change.unit.fingerprint == "daemon-message-fingerprint"
+    assert change.unit.metadata_json["message_id"] == 42
+    assert change.unit.metadata_json["topic_title"] == "Deployments"
+    assert change.unit.metadata_json["standalone_search"] is True
+    assert public_ref_for_unit(change.unit) == "telegram:dialog:-1001:message:42"
 
 
 def test_provider_preserves_low_signal_units_as_distinct_source_units() -> None:
