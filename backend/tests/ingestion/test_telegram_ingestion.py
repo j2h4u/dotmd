@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from click.testing import CliRunner
 import pytest
 
+from dotmd.cli import main
 from dotmd.core.config import Settings
 from dotmd.core.models import Chunk, ExtractDepth
 from dotmd.ingestion.pipeline import IndexingPipeline
@@ -486,3 +488,36 @@ def test_filesystem_and_telegram_chunks_coexist(tmp_path: Path) -> None:
     assert pipeline._conn.execute(
         f"SELECT COUNT(*) FROM chunks_{STRATEGY}"
     ).fetchone()[0] == 3
+
+
+def test_settings_accepts_telegram_daemon_socket_only(tmp_path: Path) -> None:
+    settings = Settings(
+        index_dir=tmp_path / "index",
+        embedding_url="http://localhost:18088",
+        telegram_daemon_socket=tmp_path / "mcp-telegram.sock",
+    )
+
+    assert settings.telegram_daemon_socket == tmp_path / "mcp-telegram.sock"
+    assert not hasattr(settings, "telegram_daemon_url")
+
+
+def test_telegram_ingest_cli_requires_configured_socket(tmp_path: Path) -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(
+        main,
+        [
+            "--index-dir",
+            str(tmp_path / "index"),
+            "telegram",
+            "ingest",
+            "--limit",
+            "10",
+            "--single-batch",
+            "--dry-run",
+        ],
+        env={"DOTMD_EMBEDDING_URL": "http://localhost:18088"},
+    )
+
+    assert result.exit_code != 0
+    assert "Telegram daemon socket is not configured" in result.output
