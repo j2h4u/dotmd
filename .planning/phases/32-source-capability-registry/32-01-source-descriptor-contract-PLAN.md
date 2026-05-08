@@ -37,6 +37,7 @@ registered dotMD source will use.
 | Loose string capabilities drift across phases | HIGH | Add `SourceCapability(StrEnum)` and descriptor tests that reject unknown capability values. |
 | Registry descriptors become runtime factories | HIGH | Keep descriptor models in `core` declarative and do not add provider/client construction methods. |
 | Schema fields become untyped bags | HIGH | Add Pydantic schema models with `extra="forbid"` and concrete field lists. |
+| Schema field type strings become arbitrary values | MEDIUM | Document and test the Phase 32 allowed `field_type` vocabulary so Phase 33 does not inherit made-up type strings. |
 | Phase 32 accidentally owns credentials or cursor commits | HIGH | Model auth/cursor schemas as descriptions only; no secret access, no checkpoint persistence. |
 </threat_model>
 
@@ -67,6 +68,12 @@ Concrete tests:
   `capabilities=["made_up"]` and expects `pydantic.ValidationError`.
 - `test_source_descriptor_forbids_extra_fields` passes an Airweave-only field
   such as `organization_id` and expects `pydantic.ValidationError`.
+- `test_source_schema_field_type_vocabulary_is_documented` asserts the model
+  exposes or documents the Phase 32 field type vocabulary exactly as
+  `str`, `int`, `bool`, `path`, `list[str]`, and `dict[str, Any]`.
+- `test_descriptor_collection_defaults_are_not_mutable` constructs two
+  descriptors, mutates one descriptor's labels/fields/examples/metadata_json,
+  and asserts the second descriptor is unchanged.
 - `test_source_registry_rejects_duplicate_namespace` asserts duplicate
   namespace registration raises `ValueError`.
 </action>
@@ -74,6 +81,7 @@ Concrete tests:
 - `backend/tests/ingestion/test_source_registry.py` contains `test_source_capability_is_closed_enum`.
 - The expected enum value list contains `local_sync`, `federated_search`, `read_unit_window`, `materialization`, `browse_tree`, `acl`, and `incremental_cursor`.
 - The tests import `ValidationError` from `pydantic`.
+- The tests contain `test_descriptor_collection_defaults_are_not_mutable`.
 - `cd backend && uv run pytest tests/ingestion/test_source_registry.py -q` fails before the model implementation and exits 0 after task 2.
 </acceptance_criteria>
 </task>
@@ -102,12 +110,15 @@ Concrete target state:
   - `ACL = "acl"`
   - `INCREMENTAL_CURSOR = "incremental_cursor"`
 - Add strict Pydantic models:
-  - `SourceDisplayMetadata(display_name: str, description: str, labels: list[str] = [], docs_slug: str | None = None)`
-  - `SourceSchemaField(name: str, field_type: str, required: bool = False, description: str = "")`
-  - `SourceConfigSchema(name: str, fields: list[SourceSchemaField] = [], empty: bool = False)`
-  - `SourceAuthSchema(auth_kind: str, methods: list[str] = [], fields: list[SourceSchemaField] = [], delegated_to: str | None = None)`
-  - `SourceCursorSchema(cursor_kind: str, examples: list[str] = [], description: str = "")`
-  - `SourceDescriptor(namespace: str, source_kind: str, display: SourceDisplayMetadata, config_schema: SourceConfigSchema, auth_schema: SourceAuthSchema, cursor_schema: SourceCursorSchema, capabilities: list[SourceCapability], metadata_json: dict = {})`
+  - Every new descriptor model uses `model_config = ConfigDict(extra="forbid")`.
+  - Every collection/dict default uses `Field(default_factory=...)`; do not use `labels: list[str] = []`, `fields: list[...] = []`, `examples: list[str] = []`, or `metadata_json: dict = {}`.
+  - `SOURCE_SCHEMA_FIELD_TYPES = frozenset({"str", "int", "bool", "path", "list[str]", "dict[str, Any]"})`.
+  - `SourceDisplayMetadata(display_name: str, description: str, labels: list[str] = Field(default_factory=list), docs_slug: str | None = None)`.
+  - `SourceSchemaField(name: str, field_type: str, required: bool = False, description: str = "")`; validate `field_type` against `SOURCE_SCHEMA_FIELD_TYPES`.
+  - `SourceConfigSchema(name: str, fields: list[SourceSchemaField] = Field(default_factory=list), empty: bool = False)`.
+  - `SourceAuthSchema(auth_kind: str, methods: list[str] = Field(default_factory=list), fields: list[SourceSchemaField] = Field(default_factory=list), delegated_to: str | None = None)`.
+  - `SourceCursorSchema(cursor_kind: str, examples: list[str] = Field(default_factory=list), description: str = "")`.
+  - `SourceDescriptor(namespace: str, source_kind: str, display: SourceDisplayMetadata, config_schema: SourceConfigSchema, auth_schema: SourceAuthSchema, cursor_schema: SourceCursorSchema, capabilities: list[SourceCapability], metadata_json: dict[str, Any] = Field(default_factory=dict))`.
 - Put `SourceRegistry` in `backend/src/dotmd/core/source_registry.py` with:
   - `register(descriptor: SourceDescriptor) -> None`
   - `get(namespace: str) -> SourceDescriptor | None`
@@ -120,6 +131,10 @@ Concrete target state:
 <acceptance_criteria>
 - `backend/src/dotmd/core/models.py` contains `class SourceCapability(StrEnum)`.
 - `backend/src/dotmd/core/models.py` contains `class SourceDescriptor(BaseModel)`.
+- `backend/src/dotmd/core/models.py` contains `Field(default_factory=list)`.
+- `backend/src/dotmd/core/models.py` contains `Field(default_factory=dict)`.
+- `backend/src/dotmd/core/models.py` contains `ConfigDict(extra="forbid")`.
+- `backend/src/dotmd/core/models.py` contains `SOURCE_SCHEMA_FIELD_TYPES`.
 - `backend/src/dotmd/core/source_registry.py` contains `class SourceRegistry`.
 - `backend/src/dotmd/core/source_registry.py` contains `model_copy(deep=True)`.
 - `backend/src/dotmd/core/source_registry.py` does not contain `airweave`.
@@ -140,4 +155,3 @@ Concrete target state:
 - SRC-03 capability vocabulary is closed and exact.
 - No Phase 33 lifecycle/runtime behavior is implemented.
 </success_criteria>
-

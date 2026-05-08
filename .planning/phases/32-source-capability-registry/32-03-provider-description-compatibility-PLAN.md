@@ -37,7 +37,8 @@ clear bridge to the richer Phase 32 source descriptors.
 |---|---:|---|
 | Runtime providers are forced to return new descriptors before lifecycle exists | HIGH | Preserve `ApplicationSourceProviderProtocol.describe_source()` compatibility. |
 | Descriptor and lightweight description diverge immediately | MEDIUM | Add conversion helpers/tests for descriptor-to-description compatibility. |
-| Existing Telegram ingestion breaks because daemon payload still returns simple capability strings | HIGH | Keep `ApplicationSourceDescription` able to accept current daemon payloads. |
+| Existing Telegram ingestion breaks because daemon payload still returns simple capability strings | HIGH | Keep `ApplicationSourceDescription` able to accept current daemon payloads and add a canonical normalization map for legacy daemon capability strings. |
+| Registry enum values and live daemon capability strings become parallel taxonomies | HIGH | Normalize `unit-window` to `read_unit_window` and `incremental-export` to `incremental_cursor`; keep raw payload strings accepted only as compatibility input. |
 | Compatibility code grows into a lifecycle factory | HIGH | Limit work to model conversion and tests; no construction or cursor persistence. |
 </threat_model>
 
@@ -67,17 +68,23 @@ Concrete tests:
   - namespace `telegram`
   - source_kind `chat`
   - display_name `Telegram`
-  - capabilities include normalized string values from the descriptor.
+  - capabilities include canonical string values from the descriptor:
+    `local_sync`, `read_unit_window`, `incremental_cursor`, and `federated_search`.
 - Add an application-provider test that current simple
   `ApplicationSourceDescription(namespace="telegram", source_kind="chat", display_name="Telegram", capabilities=["incremental-export", "unit-window"])`
   still validates.
+- Add an application-provider test that the same legacy payload normalizes to
+  canonical capability strings `incremental_cursor` and `read_unit_window`.
 - Add a Telegram provider test that `TelegramApplicationSourceProvider(...).describe_source()`
   still accepts daemon payloads using current capability strings
-  `incremental-export` and `unit-window`.
+  `incremental-export` and `unit-window`, and that its normalized capabilities
+  include `incremental_cursor` and `read_unit_window`.
 </action>
 <acceptance_criteria>
 - `backend/tests/ingestion/test_source_registry.py` contains a descriptor-to-description compatibility test.
 - `backend/tests/ingestion/test_application_source_provider.py` still constructs `ApplicationSourceDescription` with current string capabilities.
+- `backend/tests/ingestion/test_application_source_provider.py` contains `unit-window` and `read_unit_window`.
+- `backend/tests/ingestion/test_application_source_provider.py` contains `incremental-export` and `incremental_cursor`.
 - `backend/tests/ingestion/test_telegram_provider.py` still asserts `provider.describe_source().namespace == "telegram"`.
 - `cd backend && uv run pytest tests/ingestion/test_source_registry.py tests/ingestion/test_application_source_provider.py tests/ingestion/test_telegram_provider.py -q` exits 0 after task 2.
 </acceptance_criteria>
@@ -105,13 +112,20 @@ Concrete target state:
 - Keep `ApplicationSourceDescription` fields compatible with current payloads:
   `namespace`, `source_kind`, `display_name`, `capabilities: list[str]`, and
   `metadata_json`.
-- Add one explicit bridge, either:
-  - `ApplicationSourceDescription.from_descriptor(descriptor: SourceDescriptor) -> ApplicationSourceDescription`, or
-  - `source_descriptor_to_application_description(descriptor: SourceDescriptor) -> ApplicationSourceDescription`.
-- The bridge converts `SourceCapability` enum values to their string `.value`.
-- The bridge copies descriptor display metadata into `metadata_json` under a
-  non-conflicting key such as `descriptor_display` if that is useful, but it
-  must not flatten typed config/auth/cursor schemas into runtime settings.
+- Add `ApplicationSourceDescription.from_descriptor(descriptor: SourceDescriptor) -> ApplicationSourceDescription`.
+- The bridge converts `SourceCapability` enum values to canonical string `.value`
+  values and sets `metadata_json` to the descriptor's existing `metadata_json`
+  only; do not add a `descriptor_display` copy because `display_name` is already
+  a top-level description field.
+- Add `LEGACY_CAPABILITY_ALIASES: dict[str, str] = {"unit-window": "read_unit_window", "incremental-export": "incremental_cursor"}` near `ApplicationSourceDescription`.
+- Add `ApplicationSourceDescription.normalized_capabilities(self) -> list[str]`
+  that maps each capability through `LEGACY_CAPABILITY_ALIASES` and leaves
+  canonical strings unchanged. This is the Phase 32 migration bridge: daemon
+  payloads may still validate with legacy strings, but code comparing
+  capabilities must use normalized canonical values.
+- Do not change the raw `capabilities: list[str]` field in Phase 32; preserving
+  raw payload strings avoids a daemon contract change before Phase 33 lifecycle
+  owns provider migration.
 - Do not change `ApplicationSourceProviderProtocol.describe_source()` return
   type away from `ApplicationSourceDescription` in Phase 32.
 - Do not make `TelegramApplicationSourceProvider` construct runtimes from the
@@ -119,6 +133,10 @@ Concrete target state:
 </action>
 <acceptance_criteria>
 - `backend/src/dotmd/core/models.py` contains `from_descriptor` or an explicit descriptor-to-description conversion helper.
+- `backend/src/dotmd/core/models.py` contains `LEGACY_CAPABILITY_ALIASES`.
+- `backend/src/dotmd/core/models.py` contains `unit-window` and `read_unit_window`.
+- `backend/src/dotmd/core/models.py` contains `incremental-export` and `incremental_cursor`.
+- `backend/src/dotmd/core/models.py` contains `def normalized_capabilities`.
 - `backend/src/dotmd/ingestion/source_provider.py` still contains `def describe_source(self) -> ApplicationSourceDescription`.
 - `backend/src/dotmd/ingestion/telegram_provider.py` still calls `ApplicationSourceDescription(**self._client.describe_source())`.
 - `cd backend && uv run pytest tests/ingestion/test_source_registry.py tests/ingestion/test_application_source_provider.py tests/ingestion/test_telegram_provider.py -q` exits 0.
@@ -137,4 +155,3 @@ Concrete target state:
 - New descriptors can produce the lightweight description shape.
 - Phase 33 lifecycle remains untouched.
 </success_criteria>
-

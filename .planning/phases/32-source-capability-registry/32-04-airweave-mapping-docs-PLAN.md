@@ -10,7 +10,6 @@ depends_on:
 files_modified:
   - docs/source-registry-airweave-mapping.md
   - docs/source-adapter-architecture.md
-  - README.md
 autonomous: true
 requirements: ["SRC-04"]
 requirements_addressed: ["SRC-04"]
@@ -90,6 +89,7 @@ Concrete target state:
   - `Temporal orchestration`
   - `organizations/collections/billing`
 - Use status values exactly from this set: `copied`, `adapted`, `rejected`, `deferred`.
+- Every mapping table row must have a non-empty `Reason` cell.
 - Add sections:
   - `## Copied Concepts`
   - `## Adapted Concepts`
@@ -106,6 +106,7 @@ Concrete target state:
 - `docs/source-registry-airweave-mapping.md` contains `organizations/collections/billing`.
 - `docs/source-registry-airweave-mapping.md` contains all four words `copied`, `adapted`, `rejected`, and `deferred`.
 - `rg -n "from airweave|import airweave" backend/src backend/tests docs/source-registry-airweave-mapping.md` returns no backend runtime imports of Airweave.
+- `rg -n "supports_browse_tree|output_entity_definitions|class_name|feature_flag" backend/src backend/tests` returns no Airweave-specific copied runtime identifiers.
 </acceptance_criteria>
 </task>
 
@@ -119,7 +120,6 @@ Concrete target state:
 </read_first>
 <files>
 - `docs/source-adapter-architecture.md`
-- `README.md`
 </files>
 <action>
 Update the main source architecture docs after the registry implementation
@@ -138,6 +138,7 @@ Concrete target state:
   - Airweave mapping lives in `docs/source-registry-airweave-mapping.md`.
 - Add a concise README pointer only if README already has an architecture/docs
   section; otherwise skip README rather than creating a noisy doc index.
+  If README is changed, add it as an extra modified file in the task summary.
 </action>
 <acceptance_criteria>
 - `docs/source-adapter-architecture.md` contains `Phase 32` and `source registry`.
@@ -161,4 +162,3 @@ Concrete target state:
 - Future connector phases can see what was copied, adapted, rejected, and deferred.
 - No runtime Airweave dependency is introduced.
 </success_criteria>
-
