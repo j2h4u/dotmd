@@ -1,7 +1,7 @@
 # mcp-telegram Source Contract for dotMD
 
-Phase 28 defines the structured boundary that Phase 29 should implement. It
-does not ship Telegram ingestion in dotMD.
+Phase 28 defined the structured boundary and Phase 29 implements the initial
+Telegram ingestion/resolver slice in dotMD.
 
 dotMD does not import Telethon, instantiate a Telegram API client, or read
 private `mcp-telegram` SQLite tables. The `mcp-telegram` side owns Telegram
@@ -13,6 +13,12 @@ Required provider methods:
 - `describe_source()`
 - `export_changes(cursor, limit)`
 - `read_unit_window(unit_ref, before, after)`
+
+On the `mcp-telegram` daemon API these are exposed as:
+
+- `describe_source`
+- `export_source_changes`
+- `read_source_unit_window`
 
 ## Telegram Mapping
 
@@ -43,10 +49,9 @@ text, fingerprint, ordering, update time, and source-specific metadata.
 
 ## Change Export
 
-`export_changes(cursor, limit)` returns active records only in Phase 28. It
-carries documents and units together so dotMD can persist source-document,
-source-unit fingerprint, binding/provenance, and index state in one local
-transaction.
+`export_source_changes(cursor, limit)` returns active records. It carries
+documents and units together so dotMD can persist source-document, source-unit
+fingerprint, binding/provenance, and index state in one local transaction.
 
 ```json
 {
@@ -103,9 +108,9 @@ that transaction would risk losing source units after a crash.
 
 ## Unit Window
 
-`read_unit_window(unit_ref, before, after)` returns neighboring source units
-when the source can provide them. Providers without useful neighbors may return
-only the requested unit.
+`read_source_unit_window(unit_ref, before, after)` returns neighboring source
+units when the source can provide them. Providers without useful neighbors may
+return only the requested unit.
 
 ```json
 {
@@ -176,13 +181,35 @@ only the requested unit.
 
 ## Scope Exclusions
 
-Phase 28 does not define a full delete, hidden-message, or tombstone lifecycle
+Phase 29 does not define a full delete, hidden-message, or tombstone lifecycle
 for the common provider contract. That remains source-specific metadata until a
 later phase designs public read/drill behavior for deleted upstream content.
 
-Phase 28 also excludes attachments/media, direct Telegram API ownership in
+Phase 29 also excludes attachments/media, direct Telegram API ownership in
 dotMD, and any generic plugin marketplace. There is no direct Telegram API
 client in dotMD.
 
-No Phase 28 provider-contract work requires `dotmd index --force`, a full
+No Phase 29 Telegram provider work requires `dotmd index --force`, a full
 reindex, TEI re-embedding, FTS rebuild, vector rebuild, or graph rebuild.
+
+## Phase 29 Runtime Boundary
+
+dotMD consumes the existing `mcp-telegram` daemon over newline-delimited JSON
+on a UNIX socket. Phase 29 supports only:
+
+```text
+DOTMD_TELEGRAM_DAEMON_SOCKET=/mcp-telegram-state/daemon.sock
+```
+
+There is no HTTP daemon URL setting in this phase. In the current Docker
+deployment the source socket is created by the `mcp-telegram` container inside
+the `mcp-telegram_state` Docker volume at:
+
+```text
+/root/.local/state/mcp-telegram/daemon.sock
+```
+
+The production dotMD compose layer should mount that volume into the dotMD
+container and set `DOTMD_TELEGRAM_DAEMON_SOCKET` to the in-container path before
+running live ingest smoke. dotMD still does not read private `mcp-telegram`
+SQLite tables; the mount is for the daemon socket only.

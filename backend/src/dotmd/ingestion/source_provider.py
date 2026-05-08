@@ -22,6 +22,8 @@ class ApplicationSourceProviderProtocol(Protocol):
         self,
         cursor: str | None,
         limit: int,
+        updated_after: str | None = None,
+        updated_after_cursor: str | None = None,
     ) -> ApplicationSourceChangeBatch:
         """Export active document/unit changes after an opaque cursor."""
         ...

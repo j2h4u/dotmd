@@ -58,7 +58,10 @@ class FixtureApplicationSourceProvider(ApplicationSourceProviderProtocol):
         self,
         cursor: str | None,
         limit: int,
+        updated_after: str | None = None,
+        updated_after_cursor: str | None = None,
     ) -> ApplicationSourceChangeBatch:
+        _ = (updated_after, updated_after_cursor)
         if limit <= 0:
             raise ValueError("limit must be positive")
 

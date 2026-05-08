@@ -113,7 +113,10 @@ class _ProviderFixture:
         self,
         cursor: str | None,
         limit: int,
+        updated_after: str | None = None,
+        updated_after_cursor: str | None = None,
     ) -> ApplicationSourceChangeBatch:
+        _ = (cursor, limit, updated_after, updated_after_cursor)
         return ApplicationSourceChangeBatch(
             changes=[
                 ApplicationSourceChange(

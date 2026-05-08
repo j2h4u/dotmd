@@ -10,7 +10,7 @@ import logging
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TypedDict, cast
+from typing import Any, NotRequired, TypedDict, cast
 
 from dotmd.core.config import Settings, load_settings
 from dotmd.core.models import (
@@ -47,6 +47,10 @@ class ReadPayload(TypedDict):
     total_chunks: int
     frontmatter: dict[str, Any]
     chunks: list[dict[str, Any]]  # each: {index: int, heading_hierarchy: list[str], text: str}
+    document_ref: NotRequired[str]
+    target_unit_ref: NotRequired[str]
+    units: NotRequired[list[dict[str, Any]]]
+    metadata: NotRequired[dict[str, Any]]
 
 
 class DrillPayload(TypedDict):
@@ -57,6 +61,10 @@ class DrillPayload(TypedDict):
     parser_name: str
     frontmatter: dict[str, Any]
     total_chunks: int
+    document_ref: NotRequired[str]
+    target_unit_ref: NotRequired[str]
+    metadata: NotRequired[dict[str, Any]]
+    target_metadata: NotRequired[dict[str, Any]]
 
 
 class BindingDiagnostics(TypedDict):

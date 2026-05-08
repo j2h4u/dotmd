@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from click.testing import CliRunner
@@ -301,10 +302,11 @@ def test_ingest_telegram_batch_persists_documents_bindings_units_and_checkpoint(
     ) is not None
     checkpoint = pipeline._metadata_store.get_source_checkpoint("telegram")
     assert checkpoint is not None
+    checkpoint_meta = cast(dict[str, Any], checkpoint["metadata_json"])
     assert checkpoint["checkpoint_cursor"] == "telegram:v1:dialog:-1001:message:44"
-    assert checkpoint["metadata_json"]["updated_after"] == "2026-05-07T12:00:02.000000Z"
-    assert checkpoint["metadata_json"]["updated_after_cursor"] == "telegram:v1:dialog:-1001:message:44"
-    assert checkpoint["metadata_json"]["single_batch"] is True
+    assert checkpoint_meta["updated_after"] == "2026-05-07T12:00:02.000000Z"
+    assert checkpoint_meta["updated_after_cursor"] == "telegram:v1:dialog:-1001:message:44"
+    assert checkpoint_meta["single_batch"] is True
 
 
 def test_ingest_telegram_replay_skips_unchanged_units(tmp_path: Path) -> None:
@@ -391,7 +393,7 @@ def test_telegram_fts_and_vector_index_without_fileinfo_frontmatter(
     assert fts_rows
     assert all(title == "Project Chat" for title, _tags in fts_rows)
     assert all("telegram" in tags for _title, tags in fts_rows)
-    vec_meta_table = pipeline._vector_store._META_TABLE
+    vec_meta_table = cast(Any, pipeline._vector_store)._META_TABLE
     assert pipeline._conn.execute(
         f"SELECT COUNT(*) FROM {vec_meta_table} WHERE chunk_id IN "
         f"(SELECT chunk_id FROM chunks_{STRATEGY})"
@@ -424,8 +426,9 @@ def test_telegram_transaction_rolls_back_metadata_fts_vectors_and_checkpoint_on_
         "dialog:-1001",
         "dialog:-1001:message:42",
     ) is None
-    assert pipeline._metadata_store.get_source_checkpoint("telegram") is not None
-    assert pipeline._metadata_store.get_source_checkpoint("telegram")["checkpoint_cursor"] is None
+    checkpoint = pipeline._metadata_store.get_source_checkpoint("telegram")
+    assert checkpoint is not None
+    assert checkpoint["checkpoint_cursor"] is None
     assert pipeline._conn.execute(
         f"SELECT COUNT(*) FROM chunks_{STRATEGY}"
     ).fetchone()[0] == 0
@@ -436,7 +439,7 @@ def test_telegram_transaction_rolls_back_metadata_fts_vectors_and_checkpoint_on_
         f"SELECT COUNT(*) FROM chunks_fts_{STRATEGY}"
     ).fetchone()[0] == 0
     assert pipeline._conn.execute(
-        f"SELECT COUNT(*) FROM {pipeline._vector_store._META_TABLE}"
+        f"SELECT COUNT(*) FROM {cast(Any, pipeline._vector_store)._META_TABLE}"
     ).fetchone()[0] == 0
 
 
@@ -454,7 +457,8 @@ def test_initial_bootstrap_single_batch_semantics_are_explicit(tmp_path: Path) -
     assert client.export_calls[1]["cursor"] == "telegram:v1:dialog:-1001:message:43"
     checkpoint = pipeline._metadata_store.get_source_checkpoint("telegram")
     assert checkpoint is not None
-    assert checkpoint["metadata_json"]["single_batch"] is True
+    checkpoint_meta = cast(dict[str, Any], checkpoint["metadata_json"])
+    assert checkpoint_meta["single_batch"] is True
 
 
 def test_filesystem_and_telegram_chunks_coexist(tmp_path: Path) -> None:

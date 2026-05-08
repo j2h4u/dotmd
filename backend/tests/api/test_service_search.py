@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -563,7 +563,10 @@ class TestReadRefContract:
         )
         service._telegram_provider = provider
 
-        payload = service.read("telegram:dialog:-1001:message:42", start=2, end=4)
+        payload = cast(
+            dict[str, Any],
+            service.read("telegram:dialog:-1001:message:42", start=2, end=4),
+        )
 
         provider.read_unit_window.assert_called_once_with(
             "dialog:-1001:message:42",
@@ -642,7 +645,7 @@ class TestReadRefContract:
         service._pipeline._metadata_store = metadata
         service._telegram_provider = None
 
-        payload = service.read("telegram:dialog:-1001:message:42")
+        payload = cast(dict[str, Any], service.read("telegram:dialog:-1001:message:42"))
 
         metadata.get_chunks_by_source_unit_ref.assert_called_once_with(
             "telegram",
@@ -945,7 +948,7 @@ class TestDrillRefContract:
         metadata.is_resource_binding_active.return_value = True
         service._pipeline._metadata_store = metadata
 
-        payload = service.drill("telegram:dialog:-1001:message:42")
+        payload = cast(dict[str, Any], service.drill("telegram:dialog:-1001:message:42"))
 
         assert payload["ref"] == "telegram:dialog:-1001:message:42"
         assert payload["document_ref"] == "dialog:-1001"

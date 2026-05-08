@@ -33,8 +33,8 @@ LOW_SIGNAL_TEXTS = {
     "ок",
     "окей",
     "спасибо",
-    "ага",
-    "угу",
+    "ага",  # noqa: RUF001 - intentional Cyrillic acknowledgement.
+    "угу",  # noqa: RUF001 - intentional Cyrillic acknowledgement.
 }
 
 

@@ -156,6 +156,53 @@ must consume structured provider payloads and must not read private
 No Phase 28 step requires `dotmd index --force`; the work is additive provider
 models, fixture tests, and SQLite source-state tables.
 
+## Phase 29 Delivered State
+
+Phase 29 delivers the first concrete Telegram application-source slice. Telegram
+data is consumed through the structured `mcp-telegram` daemon API, not by
+importing Telethon, instantiating a Telegram API client inside dotMD, reading
+private `mcp-telegram` SQLite tables, or parsing human-rendered message output.
+
+Telegram maps to the existing source model as:
+
+```text
+namespace = telegram
+SourceDocument.document_ref = dialog:<dialog_id>
+SourceDocument.ref = telegram:dialog:<dialog_id>
+SourceUnit.unit_ref = dialog:<dialog_id>:message:<message_id>
+public message ref = telegram:dialog:<dialog_id>:message:<message_id>
+```
+
+A Telegram dialog, group, channel, or supergroup is a `SourceDocument`. A
+Telegram message is a `SourceUnit`, and message-level fingerprints are the
+recomputation boundary for later incremental sync. Phase 29 persists pathless
+Telegram chunks with source-unit provenance, source-unit fingerprints, active
+dialog resource bindings, FTS5 rows, sqlite-vec rows, and checkpoint metadata in
+one local transaction per single provider batch.
+
+Low-signal messages such as acknowledgements and emoji-only replies are still
+stored as Telegram source units with fingerprints/provenance, but they are
+suppressed as standalone normal chunks. They remain available through
+message-window reads around neighboring substantive messages.
+
+Initial `read(ref)` and `drill(ref)` support now accepts concrete message refs
+such as `telegram:dialog:<dialog_id>:message:<message_id>`. The resolver checks
+the active resource binding at dialog scope (`dialog:<dialog_id>`) and keeps the
+target message ref as the read/drill anchor. If a configured Telegram provider
+is available, `read(ref)` asks the provider for a bounded message window; if not,
+it can return indexed Telegram chunks for the target source unit from local
+provenance.
+
+The live validation boundary for Phase 29 is intentionally limited to:
+
+```text
+mcp-telegram export -> dotMD single-batch ingest -> Telegram metadata/index state exists
+```
+
+Phase 31 still owns full public search/read/drill live smoke, including proving
+that a live `search(query)` returns Telegram refs that round-trip through
+`drill(ref)` and `read(ref, start, end)` with production data.
+
 ## Problem
 
 dotMD currently indexes markdown files from the local filesystem. That is too
