@@ -9,6 +9,7 @@
 - [x] **v1.3 Production Packaging & Background Indexing** — Phases 7-10 (shipped 2026-03-28)
 - [x] **v1.4 Search Quality & Architecture** — Phases 15-26 (shipped 2026-05-06)
 - [x] **v1.5 Telegram Source Adapter** — Phases 27-31 (shipped 2026-05-08)
+- [ ] **v1.6 Unified Source Architecture** — Phases 32-37 (active)
 
 <details>
 <summary>v1.1 Incremental Indexing (Phases 1-3) — SHIPPED 2026-03-26</summary>
@@ -98,6 +99,24 @@ See: `.planning/milestones/v1.5-ROADMAP.md`
 
 </details>
 
+<details open>
+<summary>v1.6 Unified Source Architecture (Phases 32-37) — ACTIVE</summary>
+
+Reference:
+- Upstream: `https://github.com/airweave-ai/airweave`
+- Local checkout: `/home/j2h4u/repos/airweave-ai/airweave`
+
+- [ ] Phase 32: Source capability registry
+- [ ] Phase 33: Source lifecycle/config/auth/cursor boundary
+- [ ] Phase 34: Federated SearchCandidate contract
+- [ ] Phase 35: Filesystem unified source adapter
+- [ ] Phase 36: Telegram unified sync and federated search
+- [ ] Phase 37: Airweave connector compatibility spike
+
+See: `.planning/REQUIREMENTS.md`
+
+</details>
+
 ## Progress
 
 | Phase | Milestone | Status | Completed |
@@ -133,6 +152,12 @@ See: `.planning/milestones/v1.5-ROADMAP.md`
 | 29. Telegram adapter MVP ingestion | 4/4 | Complete    | 2026-05-08 |
 | 30. Incremental Telegram sync and reuse | v1.5 | Deferred to Backlog 999.30 | — |
 | 31. Telegram search/read/drill smoke | 1/1 | Complete | 2026-05-08 |
+| 32. Source capability registry | v1.6 | Not started | — |
+| 33. Source lifecycle/config/auth/cursor boundary | v1.6 | Not started | — |
+| 34. Federated SearchCandidate contract | v1.6 | Not started | — |
+| 35. Filesystem unified source adapter | v1.6 | Not started | — |
+| 36. Telegram unified sync and federated search | v1.6 | Not started | — |
+| 37. Airweave connector compatibility spike | v1.6 | Not started | — |
 
 ### Phase 17: MCP OAuth 2.0 — Claude Desktop remote connector support
 
@@ -1346,6 +1371,129 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [x] 26-03-regression-docs-and-live-smoke-PLAN.md — Regression, documentation, and live smoke
+
+---
+
+### Phase 32: Source capability registry
+
+**Goal:** Introduce a dotMD-native source registry/capability model and seed it
+with filesystem and Telegram so current and future sources are described
+through one vocabulary.
+**Requirements:** SRC-01, SRC-02, SRC-03, SRC-04
+**Depends on:** Phase 31
+**Backlog source:** 999.26
+**Plans:** 0/0 plans complete
+
+Reference:
+- Upstream: `https://github.com/airweave-ai/airweave`
+- Local checkout: `/home/j2h4u/repos/airweave-ai/airweave`
+
+Success criteria:
+1. Source descriptors include source kind, display metadata, config schema,
+   auth schema, cursor schema, and capability flags.
+2. Filesystem and Telegram are present in the registry.
+3. Capability flags distinguish sync, federated search, read-unit windows,
+   materialization, browse trees, ACLs, and incremental cursors.
+4. Docs map Airweave source metadata to dotMD descriptors without a runtime
+   Airweave dependency.
+
+---
+
+### Phase 33: Source lifecycle/config/auth/cursor boundary
+
+**Goal:** Build the lifecycle service that constructs source runtimes from
+registry entries, typed config, credentials, cursor state, and runtime helpers.
+**Requirements:** LIFE-01, LIFE-02, LIFE-03, LIFE-04
+**Depends on:** Phase 32
+**Backlog source:** 999.27
+**Plans:** 0/0 plans complete
+
+Success criteria:
+1. Source runtimes are built through one lifecycle/factory boundary.
+2. Credentials are accessed through a provider interface, not direct secret
+   reads inside adapters.
+3. Cursor commits happen only after local persistence succeeds.
+4. Filesystem and Telegram construction paths use the lifecycle boundary.
+
+---
+
+### Phase 34: Federated SearchCandidate contract
+
+**Goal:** Define one search candidate contract for local dotMD retrieval and
+source-native federated search, then prove it with MCP Telegram native FTS.
+**Requirements:** SEARCH-01, SEARCH-02, SEARCH-03, SEARCH-04
+**Depends on:** Phase 33
+**Backlog source:** 999.28
+**Plans:** 0/0 plans complete
+
+Success criteria:
+1. Local semantic/FTS5/graph hits and source-native hits share one
+   `SearchCandidate` shape.
+2. Candidates include stable ref, source identity, title/snippet, retrieval
+   kind, provenance, source score/rank, `can_read`, and `can_materialize`.
+3. Fusion/ranking handles provider-native scores without treating them as
+   directly comparable.
+4. MCP Telegram native FTS can return candidates that round-trip through
+   `read(ref)` and `drill(ref)`.
+
+---
+
+### Phase 35: Filesystem unified source adapter
+
+**Goal:** Refactor filesystem into a first-class unified source implementation
+without breaking trickle, search, read, parser routing, delete detection, or
+content-addressed reuse.
+**Requirements:** FS-01, FS-02, FS-03
+**Depends on:** Phase 33
+**Backlog source:** 999.29
+**Plans:** 0/0 plans complete
+
+Success criteria:
+1. Filesystem indexing/search/read flows through the source registry and
+   lifecycle where appropriate.
+2. Path-shaped internals remain only where needed for discovery, holder
+   semantics, local reads, display, and delete detection.
+3. Regression coverage proves current filesystem behavior is preserved.
+
+---
+
+### Phase 36: Telegram unified sync and federated search
+
+**Goal:** Bring Telegram fully onto the unified source contract, including the
+deferred incremental sync/reuse behavior and native federated FTS search.
+**Requirements:** TG-01, TG-02, TG-03, TG-04
+**Depends on:** Phase 34 and Phase 35
+**Backlog source:** 999.30 and deferred Phase 30
+**Plans:** 0/0 plans complete
+
+Success criteria:
+1. Telegram declares sync/export, read-unit-window, incremental-cursor, and
+   federated-search capabilities where available.
+2. Repeated sync skips/reuses unchanged source units without rechunking or
+   reembedding unchanged history.
+3. Sync reporting includes discovered, new, changed, rebound, skipped, hidden,
+   failed, and reused counts where practical.
+4. Telegram local-index and native-search results expose the same public
+   `search -> ref -> drill/read` shape.
+
+---
+
+### Phase 37: Airweave connector compatibility spike
+
+**Goal:** Prove dotMD can adapt one Airweave connector-style source into
+dotMD's source contracts without adopting Airweave's indexing/runtime stack.
+**Requirements:** AIR-01, AIR-02, AIR-03
+**Depends on:** Phase 36
+**Backlog source:** 999.31
+**Plans:** 0/0 plans complete
+
+Success criteria:
+1. One pilot connector or connector-like source maps into `SourceDocument`,
+   `SourceUnit`, optional `SourceAsset`, and `SearchCandidate`.
+2. The spike reports reusable Airweave pieces, required shims, and avoided
+   assumptions.
+3. The spike uses the same source registry/lifecycle/search contracts as
+   filesystem and Telegram.
 
 ---
 

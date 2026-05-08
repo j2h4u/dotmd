@@ -1,37 +1,37 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.5
-milestone_name: Telegram Source Adapter
-status: milestone_complete
-last_updated: "2026-05-08T12:00:59.123Z"
+milestone: v1.6
+milestone_name: Unified Source Architecture
+status: ready_to_plan
+last_updated: "2026-05-08T12:06:07.184Z"
 last_activity: 2026-05-08
 progress:
-  total_phases: 21
-  completed_phases: 18
-  total_plans: 47
-  completed_plans: 47
-  percent: 100
+  total_phases: 6
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # GSD State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-07 after v1.5 roadmap creation)
+See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** v1.5 shipped; next milestone not started
+**Current focus:** v1.6 unified source architecture
 
 ## Current Milestone
 
-**v1.5 — Telegram Source Adapter**
+**v1.6 — Unified Source Architecture**
 
-Phase: None active
+Phase: Not started
 Plan: —
-Status: Shipped
+Status: Ready to plan
 Last activity: 2026-05-08
 
-Progress: [██████████] 100%
+Progress: [░░░░░░░░░░] 0%
 
 ## Deferred Items
 
@@ -256,9 +256,9 @@ was moved under `.planning/notes/completed-backlog/`.
 
 ### Blockers/Concerns
 
-No active phase blocker. v1.5 is shipped. Phase 30 is deferred to Backlog
-999.30, and the next milestone can promote the unified source architecture
-backlog line when desired.
+No active phase blocker. v1.6 starts by promoting Backlog 999.26-999.31 into a
+single ordered milestone. Phase 30 remains deferred as part of Phase 36, not as
+a standalone Telegram-specific legacy phase.
 
 ### Quick Tasks Completed
 
@@ -273,11 +273,11 @@ backlog line when desired.
 
 ## Current Position
 
-Phase: Milestone v1.5 complete
+Phase: 32 (source-capability-registry) — READY TO PLAN
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-05-08 — Milestone v1.5 completed and archived
+Status: Ready to plan
+Last activity: 2026-05-08 — Milestone v1.6 roadmap created
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Start Phase 32 with `$gsd-discuss-phase 32` or `$gsd-plan-phase 32`.

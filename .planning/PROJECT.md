@@ -41,10 +41,10 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 
 ### Active
 
-- v1.5 Telegram Source Adapter — shipped 2026-05-08. Next milestone should
-  promote the unified source architecture backlog line when ready: source
-  capability registry, source lifecycle/config/auth/cursor, federated search,
-  filesystem unification, Telegram unification, and connector compatibility.
+- v1.6 Unified Source Architecture — promote the Airweave-inspired source
+  architecture backlog line: source capability registry, source
+  lifecycle/config/auth/cursor, federated search, filesystem unification,
+  Telegram unification, and connector compatibility.
 
 ### Out of Scope
 
@@ -159,6 +159,31 @@ unification, Telegram unification, and connector compatibility.
 
 Root `.planning/REQUIREMENTS.md` was archived for v1.5 and should be recreated
 by the next milestone workflow.
+
+## Current Milestone: v1.6 Unified Source Architecture
+
+**Goal:** Unify filesystem, Telegram, federated/native search providers, and
+future Airweave-compatible connectors behind one dotMD-native source
+capability model, lifecycle boundary, and public search/read/drill contract.
+
+**Target features:**
+- Source capability registry seeded by filesystem and Telegram.
+- Typed source lifecycle boundary for config, auth/credentials, cursors, and
+  runtime construction.
+- Normalized local/federated `SearchCandidate` contract.
+- Filesystem adapter migrated onto the unified source contract.
+- Telegram adapter migrated onto the unified source contract, including
+  deferred incremental sync/reuse and native federated search.
+- Airweave connector compatibility spike after local sources prove the
+  contract.
+
+**Reference repository:**
+- Upstream: `https://github.com/airweave-ai/airweave`
+- Local checkout: `/home/j2h4u/repos/airweave-ai/airweave`
+
+Agents may inspect the local checkout as an architectural reference, but dotMD
+should not adopt Airweave's indexing, chunking, Vespa, Temporal, billing, or
+organization assumptions wholesale.
 
 Phase 999.12 complete (2026-04-27): Dual-encoder unified embedding shipped. Metadata-only changes (tag updates, title renames) now require 1 TEI call per document instead of N calls per chunk. VecComponentStore stores raw e_text/e_meta BLOBs; meta_tracker (title+tags checksum) triggers fast path when only metadata changes. search_log table added. 189 tests pass.
 
