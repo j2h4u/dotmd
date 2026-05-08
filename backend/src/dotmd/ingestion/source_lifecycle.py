@@ -171,6 +171,10 @@ class DefaultSourceCredentialProvider(SourceCredentialProviderProtocol):
                 raise SourceLifecycleConfigError(
                     f"{descriptor.namespace}.auth.delegated_to is required"
                 )
+            if not credential_ref.credential_ref:
+                raise SourceLifecycleConfigError(
+                    f"{descriptor.namespace}.credential_ref is required"
+                )
             return SourceAccess(kind="delegated", delegated_to=delegated_to)
 
         raise SourceLifecycleConfigError(
@@ -260,10 +264,10 @@ class SourceRuntimeFactory:
         descriptor = self._registry.require(namespace)
         record = self._require_config(namespace)
         credential_ref = self._credential_ref(record)
-        access = self._credential_provider.get_access(descriptor, credential_ref)
 
         if namespace == "filesystem":
             config = self._require_filesystem_config(record.config)
+            access = self._credential_provider.get_access(descriptor, credential_ref)
             return SourceRuntimeBundle(
                 descriptor=descriptor,
                 config=config,
@@ -278,6 +282,7 @@ class SourceRuntimeFactory:
             socket_path = config.socket_path
             if socket_path is None:
                 raise SourceLifecycleConfigError("telegram.socket_path is required")
+            access = self._credential_provider.get_access(descriptor, credential_ref)
             client = self._telegram_client_factory(socket_path)
             return SourceRuntimeBundle(
                 descriptor=descriptor,

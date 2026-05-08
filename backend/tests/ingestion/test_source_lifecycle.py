@@ -279,6 +279,27 @@ def test_telegram_lifecycle_does_not_accept_raw_secret_fields() -> None:
         )
 
 
+def test_telegram_lifecycle_requires_delegated_credential_ref(tmp_path: Path) -> None:
+    socket_path = tmp_path / "daemon.sock"
+    factory = SourceRuntimeFactory(
+        registry=default_source_registry(),
+        config_store=InMemorySourceConfigStore(
+            [
+                SourceConfigRecord(
+                    namespace="telegram",
+                    config=TelegramSourceConfig(socket_path=socket_path),
+                )
+            ]
+        ),
+        credential_provider=DefaultSourceCredentialProvider(),
+        cursor_store=SQLiteSourceCursorStore(_metadata_store(tmp_path)),
+        telegram_client_factory=FakeTelegramClient,
+    )
+
+    with pytest.raises(SourceLifecycleConfigError, match="telegram.credential_ref"):
+        factory.build("telegram")
+
+
 def test_telegram_access_remains_delegated_to_mcp_telegram(tmp_path: Path) -> None:
     socket_path = tmp_path / "daemon.sock"
     factory = SourceRuntimeFactory(
