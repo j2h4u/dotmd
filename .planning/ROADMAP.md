@@ -153,7 +153,7 @@ See: `.planning/REQUIREMENTS.md`
 | 30. Incremental Telegram sync and reuse | v1.5 | Deferred to Backlog 999.30 | — |
 | 31. Telegram search/read/drill smoke | 1/1 | Complete | 2026-05-08 |
 | 32. Source capability registry | 4/4 | Complete    | 2026-05-08 |
-| 33. Source lifecycle/config/auth/cursor boundary | 1/3 | In Progress|  |
+| 33. Source lifecycle/config/auth/cursor boundary | 2/3 | In Progress|  |
 | 34. Federated SearchCandidate contract | v1.6 | Not started | — |
 | 35. Filesystem unified source adapter | v1.6 | Not started | — |
 | 36. Telegram unified sync and federated search | v1.6 | Not started | — |
@@ -1417,7 +1417,7 @@ registry entries, typed config, credentials, cursor state, and runtime helpers.
 **Requirements:** LIFE-01, LIFE-02, LIFE-03, LIFE-04
 **Depends on:** Phase 32
 **Backlog source:** 999.27
-**Plans:** 1/3 plans executed
+**Plans:** 2/3 plans executed
 
 Success criteria:
 1. Source runtimes are built through one lifecycle/factory boundary.
@@ -1431,7 +1431,7 @@ Plans:
 - [x] 33-01-lifecycle-runtime-bundle-PLAN.md — Lifecycle runtime bundle contract
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 33-02-filesystem-lifecycle-migration-PLAN.md — Filesystem lifecycle migration
+- [x] 33-02-filesystem-lifecycle-migration-PLAN.md — Filesystem lifecycle migration
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 33-03-telegram-lifecycle-and-cursor-boundary-PLAN.md — Telegram lifecycle and cursor boundary
