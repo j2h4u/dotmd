@@ -358,7 +358,10 @@ def source_runtime_factory_from_settings(
                 config=TelegramSourceConfig(
                     socket_path=settings.telegram_daemon_socket,
                 ),
-                credential_ref=SourceCredentialRef(namespace="telegram"),
+                credential_ref=SourceCredentialRef(
+                    namespace="telegram",
+                    credential_ref="mcp-telegram",
+                ),
             )
         )
 

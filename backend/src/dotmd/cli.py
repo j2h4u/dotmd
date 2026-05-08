@@ -14,10 +14,6 @@ from dotmd.core.config import load_settings
 from dotmd.core.exceptions import IndexingLockError
 from dotmd.core.models import SearchMode, TrickleStatus
 from dotmd.feedback import FeedbackStore
-from dotmd.ingestion.telegram_provider import (
-    TelegramApplicationSourceProvider,
-    UnixSocketTelegramSourceClient,
-)
 from dotmd.utils.logging import setup_logging
 
 
@@ -462,8 +458,11 @@ def telegram_ingest(
     if not socket_path.is_socket():
         raise click.ClickException(f"Telegram daemon socket is not a socket: {socket_path}")
 
-    client = UnixSocketTelegramSourceClient(socket_path)
-    provider = TelegramApplicationSourceProvider(client)
+    service = DotMDService(settings=settings)
+    bundle = service._pipeline.source_runtime_factory.build("telegram")
+    provider = bundle.provider
+    if provider is None:
+        raise click.ClickException("Telegram lifecycle runtime has no provider")
     if dry_run:
         description = provider.describe_source()
         batch = provider.export_changes(None, limit)
@@ -476,8 +475,7 @@ def telegram_ingest(
         )
         return
 
-    service = DotMDService(settings=settings)
-    result = service._pipeline.ingest_application_source(provider, limit=limit)
+    result = service._pipeline.ingest_application_source_runtime(bundle, limit=limit)
     click.echo(
         "telegram_ingest "
         "dry_run=false single_batch=true "

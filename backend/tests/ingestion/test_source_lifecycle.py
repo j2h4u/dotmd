@@ -256,20 +256,26 @@ def test_source_runtime_factory_from_settings_seeds_telegram_config_when_socket_
 
 def test_telegram_lifecycle_does_not_accept_raw_secret_fields() -> None:
     with pytest.raises(ValidationError):
-        TelegramSourceConfig(  # type: ignore[call-arg]
-            socket_path=Path("/tmp/telegram.sock"),
-            token="raw-token",
+        TelegramSourceConfig.model_validate(
+            {
+                "socket_path": Path("/tmp/telegram.sock"),
+                "token": "raw-token",
+            }
         )
     with pytest.raises(ValidationError):
-        SourceCredentialRef(  # type: ignore[call-arg]
-            namespace="telegram",
-            password="raw-password",
+        SourceCredentialRef.model_validate(
+            {
+                "namespace": "telegram",
+                "password": "raw-password",
+            }
         )
     with pytest.raises(ValidationError):
-        SourceAccess(  # type: ignore[call-arg]
-            kind="delegated",
-            delegated_to="mcp-telegram",
-            secret="raw-secret",
+        SourceAccess.model_validate(
+            {
+                "kind": "delegated",
+                "delegated_to": "mcp-telegram",
+                "secret": "raw-secret",
+            }
         )
 
 

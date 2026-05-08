@@ -63,7 +63,13 @@ from dotmd.ingestion.reader import (
     read_file,
 )
 from dotmd.ingestion.source import source_document_to_file_info
-from dotmd.ingestion.source_lifecycle import source_runtime_factory_from_settings
+from dotmd.ingestion.source_lifecycle import (
+    SQLiteSourceCursorStore,
+    SourceCursorStoreProtocol,
+    SourceRuntimeBundle,
+    SourceRuntimeFactory,
+    source_runtime_factory_from_settings,
+)
 from dotmd.ingestion.source_provider import ApplicationSourceProviderProtocol
 from dotmd.search.fts5 import FTS5SearchEngine
 from dotmd.search.semantic import SemanticSearchEngine
@@ -424,9 +430,40 @@ class IndexingPipeline:
         limit: int = 500,
     ) -> ApplicationSourceIngestResult:
         """Ingest exactly one application-source provider batch."""
+        return self._ingest_application_source(
+            provider,
+            SQLiteSourceCursorStore(self._metadata_store),
+            limit=limit,
+        )
+
+    def ingest_application_source_runtime(
+        self,
+        bundle: SourceRuntimeBundle,
+        *,
+        limit: int = 500,
+    ) -> ApplicationSourceIngestResult:
+        """Ingest exactly one lifecycle-built application-source runtime batch."""
+        if bundle.provider is None:
+            raise RuntimeError(
+                f"{bundle.descriptor.namespace} lifecycle runtime has no provider"
+            )
+        return self._ingest_application_source(
+            bundle.provider,
+            bundle.cursor_store,
+            limit=limit,
+        )
+
+    def _ingest_application_source(
+        self,
+        provider: ApplicationSourceProviderProtocol,
+        cursor_store: SourceCursorStoreProtocol,
+        *,
+        limit: int,
+    ) -> ApplicationSourceIngestResult:
+        """Ingest one provider batch using a lifecycle cursor store."""
         description = provider.describe_source()
         namespace = description.namespace
-        checkpoint = self._metadata_store.get_source_checkpoint(namespace)
+        checkpoint = cursor_store.get_checkpoint(namespace)
         checkpoint_cursor = (
             checkpoint.get("checkpoint_cursor") if checkpoint is not None else None
         )
@@ -452,7 +489,7 @@ class IndexingPipeline:
             )
             self._conn.execute("BEGIN")
             try:
-                self._metadata_store.commit_source_checkpoint(
+                cursor_store.commit_checkpoint(
                     namespace,
                     preserved_cursor,
                     conn=self._conn,
@@ -645,7 +682,7 @@ class IndexingPipeline:
             )
             result.chunks_indexed = len(chunks_to_index)
 
-            self._metadata_store.commit_source_checkpoint(
+            cursor_store.commit_checkpoint(
                 namespace,
                 batch.checkpoint_cursor,
                 conn=self._conn,
@@ -659,7 +696,7 @@ class IndexingPipeline:
             self._conn.execute("COMMIT")
         except Exception as exc:
             self._conn.execute("ROLLBACK")
-            self._metadata_store.record_source_checkpoint_error(namespace, str(exc))
+            cursor_store.record_error(namespace, str(exc))
             raise
 
         return result
@@ -1341,6 +1378,11 @@ class IndexingPipeline:
             raise ValueError("filesystem SourceDocument bridge changed FileInfo")
         self._assert_filesystem_document_ref(file_info, source_document)
         return source_document
+
+    @property
+    def source_runtime_factory(self) -> SourceRuntimeFactory:
+        """Return the lifecycle factory used by pipeline call sites."""
+        return self._source_runtime_factory
 
     def _file_info_and_source_document(
         self,

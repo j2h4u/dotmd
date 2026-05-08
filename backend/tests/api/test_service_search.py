@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -26,6 +27,7 @@ class _LifecycleFactoryFixture:
         self.calls: list[str] = []
 
     def build_if_configured(self, namespace: str) -> object | None:
+        from dotmd.ingestion.source_provider import ApplicationSourceProviderProtocol
         from dotmd.ingestion.source_registry import default_source_registry
         from dotmd.ingestion.source_lifecycle import SourceRuntimeBundle
         from dotmd.ingestion.source_lifecycle import SourceAccess, TelegramSourceConfig
@@ -38,7 +40,7 @@ class _LifecycleFactoryFixture:
             config=TelegramSourceConfig(socket_path=Path("/tmp/telegram.sock")),
             access=SourceAccess(kind="delegated", delegated_to="mcp-telegram"),
             cursor_store=MagicMock(),
-            provider=self.provider,
+            provider=cast(ApplicationSourceProviderProtocol, self.provider),
         )
 
 
@@ -282,6 +284,7 @@ class TestFilesystemBindingLifecycle:
         service = DotMDService(
             Settings(
                 data_dir=data_dir,
+                indexing_paths=[str(data_dir)],
                 index_dir=index_dir,
                 embedding_url="http://localhost:18088",
                 vector_backend="sqlite-vec",
@@ -396,6 +399,9 @@ class TestActiveSearchFiltering:
         tmp_path: Path,
         caplog,
     ) -> None:
+        logging.getLogger("dotmd").handlers.clear()
+        logging.getLogger("dotmd").propagate = True
+        caplog.set_level(logging.WARNING, logger="dotmd.api.service")
         service = _get_service(tmp_path)
         metadata = _SearchMetadataStore(
             [f"inactive-{i}" for i in range(40)] + ["active-1"],

@@ -23,11 +23,8 @@ from dotmd.core.models import (
 )
 from dotmd.ingestion.pipeline import IndexingPipeline
 from dotmd.ingestion.reader import parse_frontmatter, read_file
+from dotmd.ingestion.source_lifecycle import SourceRuntimeFactory
 from dotmd.ingestion.source_provider import ApplicationSourceProviderProtocol
-from dotmd.ingestion.telegram_provider import (
-    TelegramApplicationSourceProvider,
-    UnixSocketTelegramSourceClient,
-)
 from dotmd.ingestion.trickle import TrickleIndexer
 from dotmd.search.fusion import build_search_results, fuse_results
 from dotmd.search.graph_direct import GraphDirectEngine
@@ -35,6 +32,7 @@ from dotmd.search.graph_search import GraphSearchEngine
 from dotmd.search.query import QueryExpander
 from dotmd.search.reranker import RerankerFactory
 from dotmd.search.semantic import SemanticSearchEngine
+from dotmd.storage.base import MetadataStoreProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +181,7 @@ class DotMDService:
         self._keyword_engine = self._pipeline.keyword_engine
         self._graph_engine = GraphSearchEngine(
             self._pipeline.graph_store,
-            self._pipeline.metadata_store,
+            cast(MetadataStoreProtocol, self._pipeline.metadata_store),
         )
         self._graph_direct_engine = GraphDirectEngine(
             self._pipeline.graph_store,
@@ -201,14 +199,19 @@ class DotMDService:
         # Background trickle indexer
         self._trickle_indexer = TrickleIndexer(self._settings, self._pipeline)
         self._source_provenance_ready_strategies: set[str] = set()
+        self._source_runtime_factory: SourceRuntimeFactory = (
+            self._pipeline.source_runtime_factory
+        )
         self._telegram_provider = self._build_telegram_provider()
 
     def _build_telegram_provider(self) -> ApplicationSourceProviderProtocol | None:
-        """Build the optional Telegram provider from configured daemon socket."""
-        if self._settings.telegram_daemon_socket is None:
+        """Build the optional Telegram provider from the source lifecycle."""
+        bundle = self._source_runtime_factory.build_if_configured("telegram")
+        if bundle is None:
             return None
-        client = UnixSocketTelegramSourceClient(self._settings.telegram_daemon_socket)
-        return TelegramApplicationSourceProvider(client)
+        if bundle.provider is None:
+            raise RuntimeError("telegram lifecycle runtime has no provider")
+        return bundle.provider
 
     # ------------------------------------------------------------------
     # Public API
@@ -242,7 +245,7 @@ class DotMDService:
         This catches silent search degradation when someone swaps the TEI
         model without re-encoding vectors.
         """
-        vs = self._pipeline.vector_store
+        vs = cast(Any, self._pipeline.vector_store)
         if not hasattr(vs, "get_model_name"):
             return
         stored = vs.get_model_name()
@@ -446,7 +449,7 @@ class DotMDService:
             reranked = reranker.rerank(
                 search_query,
                 chunk_ids,
-                self._pipeline.metadata_store,
+                cast(MetadataStoreProtocol, self._pipeline.metadata_store),
                 top_k=rerank_limit,
             )
             if not reranked:
@@ -500,7 +503,7 @@ class DotMDService:
         results = build_search_results(
             fused[:top_k],
             per_engine=engine_results,
-            metadata_store=self._pipeline.metadata_store,
+            metadata_store=cast(MetadataStoreProtocol, self._pipeline.metadata_store),
             query=original_query,
             top_k=top_k,
             snippet_length=self._settings.snippet_length,
@@ -652,7 +655,7 @@ class DotMDService:
                 reranked = reranker.rerank(
                     search_query,
                     chunk_ids,
-                    self._pipeline.metadata_store,
+                    cast(MetadataStoreProtocol, self._pipeline.metadata_store),
                     top_k=top_k,
                     raise_on_provider_error=True,
                 )
