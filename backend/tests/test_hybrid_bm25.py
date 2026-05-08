@@ -9,6 +9,7 @@ Verifies that all RRF fusion candidates survive through reranking:
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from sqlite3 import Connection
 from typing import TYPE_CHECKING, cast
@@ -36,13 +37,47 @@ def _make_service(tmp_path: Path) -> DotMDService:
 
 def _seed_chunk_provenance(service: DotMDService, chunk_ids: list[str]) -> None:
     """Seed source provenance for synthetic chunks returned by mocked engines."""
-    from dotmd.core.models import ChunkProvenance
+    from dotmd.core.models import ChunkProvenance, ResourceBinding, SourceDocument
 
     strategy = service._settings.chunk_strategy
     store = service._pipeline.metadata_store
     store.ensure_chunk_source_provenance_table(strategy)
+    store.ensure_resource_bindings_table()
+    now = datetime.now(tz=UTC)
+    conn = cast(Connection, store._conn)
     for chunk_id in chunk_ids:
         document_ref = f"/test/{chunk_id}.md"
+        document = SourceDocument(
+            namespace="filesystem",
+            document_ref=document_ref,
+            ref=f"filesystem:{document_ref}",
+            source_uri=document_ref,
+            file_path=Path(document_ref),
+            media_type="text/markdown",
+            parser_name="markdown",
+            document_type="document",
+            title=f"{chunk_id}.md",
+            updated_at=now,
+            content_fingerprint=f"content-{chunk_id}",
+            metadata_fingerprint=f"metadata-{chunk_id}",
+            metadata_json={},
+        )
+        store.upsert_source_document(document, conn=conn)
+        store.upsert_resource_binding(
+            ResourceBinding(
+                namespace="filesystem",
+                resource_ref=document_ref,
+                document_ref=document_ref,
+                ref=f"filesystem:{document_ref}",
+                active=True,
+                bound_at=now,
+                content_fingerprint=f"content-{chunk_id}",
+                metadata_fingerprint=f"metadata-{chunk_id}",
+                source_unit_refs=[],
+                metadata_json={},
+            ),
+            conn=conn,
+        )
         store.add_chunk_provenance(
             strategy,
             ChunkProvenance(
@@ -54,9 +89,9 @@ def _seed_chunk_provenance(service: DotMDService, chunk_ids: list[str]) -> None:
                 parser_name="test",
             ),
             chunk_id,
-            conn=cast(Connection, store._conn),
+            conn=conn,
         )
-    store._conn.commit()
+    conn.commit()
 
 
 class TestMergeBackBeyondPoolSize:
@@ -70,6 +105,10 @@ class TestMergeBackBeyondPoolSize:
         # Semantic returns 15 unique chunks, keyword returns 15 unique (5 overlap)
         semantic_hits = [(f"sem-{i}", 0.9 - i * 0.05) for i in range(15)]
         keyword_hits = [(f"kw-{i}", 8.0 - i * 0.3) for i in range(15)]
+        _seed_chunk_provenance(
+            service,
+            [cid for cid, _score in semantic_hits + keyword_hits],
+        )
 
         # Mock search engines
         service._semantic_engine = MagicMock()
@@ -124,9 +163,9 @@ class TestMergeBackBeyondPoolSize:
             f"Expected > 20 candidates after merge-back, got {len(captured_fused)}"
         )
 
-        # The reranker should have been called with exactly pool_size (20) candidates
+        # The reranker pool expands to satisfy the requested top_k.
         call_args = reranker.rerank.call_args
-        assert len(call_args[0][1]) == 20  # chunk_ids arg
+        assert len(call_args[0][1]) == 30  # chunk_ids arg
 
 
 class TestRerankCandidatePool:
@@ -198,6 +237,7 @@ class TestKeywordSurvivalThroughReranking:
         # Keyword finds "b1", semantic finds "s1" -- no overlap
         semantic_hits = [("s1", 0.9)]
         keyword_hits = [("b1", 5.0)]
+        _seed_chunk_provenance(service, ["s1", "b1"])
 
         service._semantic_engine = MagicMock()
         service._semantic_engine.search.return_value = semantic_hits
@@ -441,6 +481,7 @@ class TestSearchResultContracts:
         service._reranker_factory = MagicMock()
         service._reranker_factory.get.return_value = reranker
         service._pipeline.log_search = MagicMock()
+        _seed_chunk_provenance(service, ["s1", "gx1"])
 
         import dotmd.api.service as svc_module
 
@@ -531,6 +572,7 @@ class TestDiagnosticLogging:
         service._pipeline.metadata_store.get_chunks = MagicMock(
             return_value=[mock_chunk]
         )
+        _seed_chunk_provenance(service, ["s1", "b1"])
 
         captured: list[str] = []
 
