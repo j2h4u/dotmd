@@ -64,10 +64,10 @@ from dotmd.ingestion.reader import (
 )
 from dotmd.ingestion.source import source_document_to_file_info
 from dotmd.ingestion.source_lifecycle import (
-    SQLiteSourceCursorStore,
     SourceCursorStoreProtocol,
     SourceRuntimeBundle,
     SourceRuntimeFactory,
+    SQLiteSourceCursorStore,
     source_runtime_factory_from_settings,
 )
 from dotmd.ingestion.source_provider import ApplicationSourceProviderProtocol

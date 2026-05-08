@@ -5,9 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from pydantic import ValidationError
 import pytest
+from pydantic import ValidationError
 
+import dotmd.ingestion.source_lifecycle as source_lifecycle
 from dotmd.core.config import Settings
 from dotmd.core.models import SourceDescriptor
 from dotmd.ingestion.source import FilesystemMarkdownSourceAdapter
@@ -15,7 +16,6 @@ from dotmd.ingestion.source_lifecycle import (
     DefaultSourceCredentialProvider,
     FilesystemSourceConfig,
     InMemorySourceConfigStore,
-    SQLiteSourceCursorStore,
     SourceAccess,
     SourceConfigRecord,
     SourceCredentialProviderProtocol,
@@ -23,9 +23,9 @@ from dotmd.ingestion.source_lifecycle import (
     SourceCursorStoreProtocol,
     SourceLifecycleConfigError,
     SourceRuntimeFactory,
+    SQLiteSourceCursorStore,
     TelegramSourceConfig,
 )
-import dotmd.ingestion.source_lifecycle as source_lifecycle
 from dotmd.ingestion.source_registry import default_source_registry
 from dotmd.ingestion.telegram_provider import (
     TelegramApplicationSourceProvider,
@@ -169,7 +169,7 @@ def test_build_fails_fast_when_required_filesystem_paths_missing(
         cursor_store=SQLiteSourceCursorStore(_metadata_store(tmp_path)),
     )
 
-    with pytest.raises(SourceLifecycleConfigError, match="filesystem.paths"):
+    with pytest.raises(SourceLifecycleConfigError, match=r"filesystem\.paths"):
         factory.build("filesystem")
 
 
@@ -188,7 +188,7 @@ def test_build_fails_fast_when_telegram_socket_missing(tmp_path: Path) -> None:
         cursor_store=SQLiteSourceCursorStore(_metadata_store(tmp_path)),
     )
 
-    with pytest.raises(SourceLifecycleConfigError, match="telegram.socket_path"):
+    with pytest.raises(SourceLifecycleConfigError, match=r"telegram\.socket_path"):
         factory.build("telegram")
 
 
@@ -296,7 +296,7 @@ def test_telegram_lifecycle_requires_delegated_credential_ref(tmp_path: Path) ->
         telegram_client_factory=FakeTelegramClient,
     )
 
-    with pytest.raises(SourceLifecycleConfigError, match="telegram.credential_ref"):
+    with pytest.raises(SourceLifecycleConfigError, match=r"telegram\.credential_ref"):
         factory.build("telegram")
 
 

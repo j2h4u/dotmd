@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Literal, Protocol, TypeAlias, cast
+from typing import Any, Literal, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field, SkipValidation, model_validator
 
@@ -19,9 +20,6 @@ from dotmd.ingestion.telegram_provider import (
     UnixSocketTelegramSourceClient,
 )
 from dotmd.storage.metadata import SQLiteMetadataStore
-
-
-SourceConfig: TypeAlias = "FilesystemSourceConfig | TelegramSourceConfig"
 
 
 class SourceLifecycleConfigError(ValueError):
@@ -43,6 +41,9 @@ class TelegramSourceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     socket_path: Path | None = None
+
+
+type SourceConfig = FilesystemSourceConfig | TelegramSourceConfig
 
 
 class SourceCredentialRef(BaseModel):

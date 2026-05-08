@@ -27,10 +27,13 @@ class _LifecycleFactoryFixture:
         self.calls: list[str] = []
 
     def build_if_configured(self, namespace: str) -> object | None:
+        from dotmd.ingestion.source_lifecycle import (
+            SourceAccess,
+            SourceRuntimeBundle,
+            TelegramSourceConfig,
+        )
         from dotmd.ingestion.source_provider import ApplicationSourceProviderProtocol
         from dotmd.ingestion.source_registry import default_source_registry
-        from dotmd.ingestion.source_lifecycle import SourceRuntimeBundle
-        from dotmd.ingestion.source_lifecycle import SourceAccess, TelegramSourceConfig
 
         self.calls.append(namespace)
         if self.provider is None:

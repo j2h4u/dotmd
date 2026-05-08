@@ -6,8 +6,8 @@ import pytest
 from pydantic import ValidationError
 
 from dotmd.core.models import (
-    ApplicationSourceDescription,
     SOURCE_SCHEMA_FIELD_TYPES,
+    ApplicationSourceDescription,
     SourceAuthSchema,
     SourceCapability,
     SourceConfigSchema,
@@ -17,8 +17,7 @@ from dotmd.core.models import (
     SourceSchemaField,
 )
 from dotmd.core.source_registry import SourceRegistry
-from dotmd.ingestion.source_registry import default_source_registry
-from dotmd.ingestion.source_registry import telegram_source_descriptor
+from dotmd.ingestion.source_registry import default_source_registry, telegram_source_descriptor
 
 
 def _descriptor(namespace: str = "demo") -> SourceDescriptor:
@@ -91,9 +90,9 @@ def test_source_descriptor_forbids_extra_fields() -> None:
 
 
 def test_source_schema_field_type_vocabulary_is_documented() -> None:
-    assert SOURCE_SCHEMA_FIELD_TYPES == frozenset(
+    assert frozenset(
         {"str", "int", "bool", "path", "list[str]", "dict[str, Any]"}
-    )
+    ) == SOURCE_SCHEMA_FIELD_TYPES
 
     with pytest.raises(ValidationError):
         SourceSchemaField(name="bad", field_type="json")
