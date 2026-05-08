@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.6
 milestone_name: Unified Source Architecture
-status: executing
-last_updated: "2026-05-08T13:41:41.395Z"
+status: ready_to_discuss
+last_updated: "2026-05-08T13:47:00.000Z"
 last_activity: 2026-05-08
 progress:
-  total_phases: 22
-  completed_phases: 18
-  total_plans: 51
-  completed_plans: 50
-  percent: 98
+  total_phases: 6
+  completed_phases: 1
+  total_plans: 4
+  completed_plans: 4
+  percent: 17
 ---
 
 # GSD State
@@ -20,18 +20,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 32 — source-capability-registry
+**Current focus:** Phase 33 — Source lifecycle/config/auth/cursor boundary
 
 ## Current Milestone
 
 **v1.6 — Unified Source Architecture**
 
-Phase: 32 (source-capability-registry)
+Phase: 33 (Source lifecycle/config/auth/cursor boundary)
 Plan: —
-Status: Executing Phase 32
+Status: Ready to discuss Phase 33
 Last activity: 2026-05-08
 
-Progress: [██████████] 98%
+Progress: [██░░░░░░░░] 17%
 
 ## Deferred Items
 
@@ -55,7 +55,7 @@ Items acknowledged and deferred at milestone close:
 
 **Velocity:**
 
-- Total plans completed: 48 (across all milestones)
+- Total plans completed: 52 (across all milestones)
 - Average duration: ~3 min
 - Total execution time: —
 
@@ -277,11 +277,11 @@ a standalone Telegram-specific legacy phase.
 
 ## Current Position
 
-Phase: 32 (source-capability-registry) — EXECUTING
-Plan: 1 of 4
-Status: Executing Phase 32
-Last activity: 2026-05-08 -- Phase 32 execution started
+Phase: 33 (Source lifecycle/config/auth/cursor boundary) — READY TO DISCUSS
+Plan: —
+Status: Ready to discuss Phase 33 after Phase 32 completion
+Last activity: 2026-05-08 -- Phase 32 execution complete
 
 ## Operator Next Steps
 
-- Execute Phase 32 with `$gsd-execute-phase 32`.
+- Discuss Phase 33 with `$gsd-discuss-phase 33`.

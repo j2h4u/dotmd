@@ -152,7 +152,7 @@ See: `.planning/REQUIREMENTS.md`
 | 29. Telegram adapter MVP ingestion | 4/4 | Complete    | 2026-05-08 |
 | 30. Incremental Telegram sync and reuse | v1.5 | Deferred to Backlog 999.30 | — |
 | 31. Telegram search/read/drill smoke | 1/1 | Complete | 2026-05-08 |
-| 32. Source capability registry | 4/4 | Complete   | 2026-05-08 |
+| 32. Source capability registry | 4/4 | Complete    | 2026-05-08 |
 | 33. Source lifecycle/config/auth/cursor boundary | v1.6 | Not started | — |
 | 34. Federated SearchCandidate contract | v1.6 | Not started | — |
 | 35. Filesystem unified source adapter | v1.6 | Not started | — |
