@@ -63,16 +63,21 @@ def _build_post_v16_db(tmp_path: Path) -> tuple[Path, str, str]:
     return db_path, strategy, model_key
 
 
+def _settings(tmp_path: Path):
+    from dotmd.core.config import Settings
+
+    return Settings(index_dir=tmp_path, indexing_paths=[str(tmp_path)])
+
+
 class TestInsertOrIgnoreOnRepeat:
     """INSERT OR IGNORE means re-indexing same file does not duplicate or overwrite rows."""
 
     def test_insert_or_ignore_on_repeat(self, tmp_path: Path) -> None:
         """Indexing the same file twice: chunks_* row count unchanged, text unchanged."""
-        from dotmd.core.config import Settings
         from dotmd.ingestion.pipeline import IndexingPipeline
 
         _, strategy, _model_key = _build_post_v16_db(tmp_path)
-        settings = Settings(index_dir=tmp_path)
+        settings = _settings(tmp_path)
 
         # Build a stub file
         md_file = tmp_path / "doc.md"
@@ -112,11 +117,10 @@ class TestTwoFilesIdenticalContentShareChunk:
 
     def test_two_files_identical_content_share_chunk(self, tmp_path: Path) -> None:
         """Identical content → 1 chunks_* row, 2 chunk_file_paths_* rows."""
-        from dotmd.core.config import Settings
         from dotmd.ingestion.pipeline import IndexingPipeline
 
         _, strategy, _model_key = _build_post_v16_db(tmp_path)
-        settings = Settings(index_dir=tmp_path)
+        settings = _settings(tmp_path)
         pipeline = IndexingPipeline(settings)
 
         body = "# Shared Heading\n\nThis content is identical in both files.\n"
@@ -150,11 +154,10 @@ class TestRepeatedHeadingInSameFile:
         self, tmp_path: Path
     ) -> None:
         """File with repeated heading at chunk_index 0 and 1 → 2 M2M rows sharing chunk_id."""
-        from dotmd.core.config import Settings
         from dotmd.ingestion.pipeline import IndexingPipeline
 
         _, strategy, _model_key = _build_post_v16_db(tmp_path)
-        settings = Settings(index_dir=tmp_path)
+        settings = _settings(tmp_path)
         pipeline = IndexingPipeline(settings)
 
         # Two identical heading blocks in same file at different positions
@@ -185,11 +188,10 @@ class TestVecMetaNotRewrittenOnReindex:
 
     def test_vec_meta_not_rewritten_on_reindex(self, tmp_path: Path) -> None:
         """Second index_file call for the same chunks does not add vec_meta_* rows."""
-        from dotmd.core.config import Settings
         from dotmd.ingestion.pipeline import IndexingPipeline
 
         _, strategy, model_key = _build_post_v16_db(tmp_path)
-        settings = Settings(index_dir=tmp_path)
+        settings = _settings(tmp_path)
         pipeline = IndexingPipeline(settings)
 
         md_file = tmp_path / "cached.md"
@@ -219,12 +221,11 @@ class TestPayloadMismatchLogsWarn:
         self, tmp_path: Path
     ) -> None:
         """Monkeypatched chunker emitting same chunk_id with different text logs WARN; first-writer survives."""
-        from dotmd.core.config import Settings
         from dotmd.core.models import Chunk
         from dotmd.ingestion.pipeline import IndexingPipeline
 
         _, strategy, _model_key = _build_post_v16_db(tmp_path)
-        settings = Settings(index_dir=tmp_path)
+        settings = _settings(tmp_path)
         pipeline = IndexingPipeline(settings)
 
         # Insert the "first writer" row directly into chunks_*
