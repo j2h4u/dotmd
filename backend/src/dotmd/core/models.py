@@ -202,6 +202,8 @@ class ApplicationSourceChangeBatch(BaseModel):
     changes: list[ApplicationSourceChange] = Field(default_factory=list)
     next_cursor: str | None = None
     checkpoint_cursor: str | None = None
+    updated_after: str | None = None
+    updated_after_cursor: str | None = None
 
 
 class ChunkProvenance(BaseModel):
