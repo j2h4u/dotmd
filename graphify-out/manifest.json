@@ -16,8 +16,8 @@
     "hash": "a334ce101d64125ff32903695beae8c5"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/cli.py": {
-    "mtime": 1778068176.7263162,
-    "hash": "87b59f59f7c95668e06766cc643695c8"
+    "mtime": 1778235153.88581,
+    "hash": "bb33cb5ed628c0862e81c49a9ce9c8d4"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/feedback.py": {
     "mtime": 1777449250.5102777,
@@ -48,12 +48,12 @@
     "hash": "1ecaacabe0bf0b82ad5569daffce3d51"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/fusion.py": {
-    "mtime": 1778069240.4217384,
-    "hash": "2bb9b3e3de8a24d5f17fa72be807a326"
+    "mtime": 1778240490.7351813,
+    "hash": "3f822df49bf0fa41ca3a4fa785648da2"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/fts5.py": {
-    "mtime": 1778016347.2020302,
-    "hash": "42160325bcaeb8a64944de0aeb3d6804"
+    "mtime": 1778227159.6381595,
+    "hash": "a5a9522e2b66fafce7af3444cc0eb6c8"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/reranker.py": {
     "mtime": 1777713168.357088,
@@ -124,8 +124,8 @@
     "hash": "9b8ebb49cd56b7a26de78816e106124e"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/storage/metadata.py": {
-    "mtime": 1778068658.3053842,
-    "hash": "fd9ebbe1e9ce9d3c9384369f7747557c"
+    "mtime": 1778227182.7265038,
+    "hash": "c41c74308a873be78d63ba1439aeabf3"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/storage/cache.py": {
     "mtime": 1777459573.6739595,
@@ -146,6 +146,10 @@
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/ingestion/lock.py": {
     "mtime": 1777460017.4560683,
     "hash": "0f19d454f2c22bfaeacd8891a0ed7c84"
+  },
+  "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/ingestion/source_registry.py": {
+    "mtime": 1778247407.5315793,
+    "hash": "d92ee838164d4524fe3cfab448710995"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/ingestion/migrate_fingerprints_to_blake3.py": {
     "mtime": 1777301002.3139515,
@@ -175,9 +179,17 @@
     "mtime": 1777459573.633959,
     "hash": "05f9a1ad9cdf1fd3d4dcbafd5a6a5d83"
   },
+  "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/ingestion/telegram_provider.py": {
+    "mtime": 1778228893.1986322,
+    "hash": "161bc49f2ffa9c175e5e847f909cff49"
+  },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/ingestion/pipeline.py": {
-    "mtime": 1778016888.2537034,
-    "hash": "97a4cbfc25eec8c83bfdf72b847c3cc3"
+    "mtime": 1778235143.48564,
+    "hash": "99fe2f5c5cba45a7588cf1e641e3cd74"
+  },
+  "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/ingestion/source_provider.py": {
+    "mtime": 1778228102.8716602,
+    "hash": "2e14e4fb4e06dc3b3af873489e82a3fa"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/ingestion/content_handlers.py": {
     "mtime": 1777301002.3139515,
@@ -192,8 +204,8 @@
     "hash": "986741db6755edd7a7bf18521c52f4f2"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/api/service.py": {
-    "mtime": 1778071697.9737365,
-    "hash": "4976b67827c59588e4e5400b89430637"
+    "mtime": 1778228109.7637565,
+    "hash": "2663865e5d0189e2091c11923ba98015"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/api/server.py": {
     "mtime": 1777996759.0251703,
@@ -203,9 +215,13 @@
     "mtime": 1774198787.685586,
     "hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
+  "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/core/source_registry.py": {
+    "mtime": 1778247236.277175,
+    "hash": "56ac549bdc0a64ef06d882883ec4e95f"
+  },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/core/config.py": {
-    "mtime": 1777997840.8199117,
-    "hash": "cf7bd138067093e4a7fb7b83113c9b0d"
+    "mtime": 1778227779.415118,
+    "hash": "9baa5724e85a955c3b2635c554948361"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/core/exceptions.py": {
     "mtime": 1775120996.4881768,
@@ -216,8 +232,8 @@
     "hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/core/models.py": {
-    "mtime": 1778067722.2473016,
-    "hash": "78d85d29a580a2d5b1c7c966bf4b985f"
+    "mtime": 1778247510.9648135,
+    "hash": "e03cebce4b362f4403ae2138b91c5a7c"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/conftest.py": {
     "mtime": 1777809137.4179785,
@@ -232,8 +248,8 @@
     "hash": "0fec526f7fd71c6d3ee330ac505f3ac8"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/test_fusion.py": {
-    "mtime": 1778069240.4217384,
-    "hash": "c9b222dbc3361f17fb1236a6be0f3da2"
+    "mtime": 1778240502.051347,
+    "hash": "15df05cbb768d8b7ea7a213fa2595a6a"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/test_graph_search.py": {
     "mtime": 1777629395.2923841,
@@ -312,8 +328,8 @@
     "hash": "0b93dd54d8fbe7112fa82b611eef8ea0"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/storage/test_metadata_m2m.py": {
-    "mtime": 1778015910.0076199,
-    "hash": "0972a2a0b55e65cddf098183c57984e4"
+    "mtime": 1778178524.145261,
+    "hash": "9fd87018da18d8397647ac4c424e38d8"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/storage/test_vec_components.py": {
     "mtime": 1777459645.5789506,
@@ -332,16 +348,24 @@
     "hash": "8320d555736a155f1542c2d754e63fe5"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/ingestion/test_source_filesystem.py": {
-    "mtime": 1778014300.0699623,
-    "hash": "de7bccdab2b82dff70c72fa3ffeafc6a"
+    "mtime": 1778168878.1257699,
+    "hash": "1323940bd01f20e54d9cd50d181adb8e"
+  },
+  "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/ingestion/test_application_source_provider.py": {
+    "mtime": 1778247479.8244545,
+    "hash": "e254a45de9655859de0b84205c1a5df1"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/ingestion/test_meta_checksum.py": {
     "mtime": 1777459629.186725,
     "hash": "22b7bca061dfc8efa25a6c349e2b1ef6"
   },
+  "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/ingestion/test_source_registry.py": {
+    "mtime": 1778247473.584383,
+    "hash": "859ddc88d3960b24430751a41a5160a9"
+  },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/ingestion/test_pipeline_purge.py": {
-    "mtime": 1778017118.82491,
-    "hash": "2bfc8f8cbd12c8a67ccca1255a5c43cd"
+    "mtime": 1778168460.9040074,
+    "hash": "9a410734c56935059c3ecbcd02c5d62c"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/ingestion/test_trickle_metrics.py": {
     "mtime": 1778088591.5502243,
@@ -351,13 +375,29 @@
     "mtime": 1777459573.6859596,
     "hash": "9cd4c4e4c126c906ca156851d91f3484"
   },
+  "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/ingestion/test_telegram_provider.py": {
+    "mtime": 1778247485.460519,
+    "hash": "cdaf5699d353ec4f9b46c028658abd5c"
+  },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/ingestion/test_pipeline_m2m_insert.py": {
     "mtime": 1777459629.186725,
     "hash": "b0f86b0f0e95e859e6b4bbe0536de020"
   },
+  "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/ingestion/test_application_source_ingestion.py": {
+    "mtime": 1778235170.3860786,
+    "hash": "4217f9b9d2a7b8805cacde4613419748"
+  },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/ingestion/test_metadata_only_reindex.py": {
-    "mtime": 1778016612.5658286,
-    "hash": "be265038157a0455f2e2fb3d9309a067"
+    "mtime": 1778165644.289305,
+    "hash": "291420796f25a9bf65516c30a4ff5d72"
+  },
+  "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/ingestion/test_telegram_ingestion.py": {
+    "mtime": 1778234399.3873737,
+    "hash": "a313b3176fa49ea14444e34ab58ba514"
+  },
+  "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/ingestion/application_source_fixtures.py": {
+    "mtime": 1778228245.237646,
+    "hash": "f51ac86d7bd1182a2d5c9c4108c8e688"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/ingestion/test_pipeline_metadata.py": {
     "mtime": 1777809237.2473571,
@@ -368,8 +408,8 @@
     "hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/ingestion/test_pipeline_orphan_sweep.py": {
-    "mtime": 1777459645.5749507,
-    "hash": "3bd7efd94c9e9d92620cf8eff30ebbaa"
+    "mtime": 1778165488.7032154,
+    "hash": "54df25b3d7bdf9be7c36de6ca4a574e0"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/ingestion/test_chunker.py": {
     "mtime": 1778013553.855954,
@@ -392,8 +432,8 @@
     "hash": "80ca4656a19beffe6d3984ed9991966e"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/api/test_service_search.py": {
-    "mtime": 1778071745.8865016,
-    "hash": "ddea4624ddc7d61cfecef94640cab738"
+    "mtime": 1778228240.3975787,
+    "hash": "c42928df983f3d9b5fb90153295796f3"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/api/__init__.py": {
     "mtime": 1777098670.4829655,
@@ -472,8 +512,8 @@
     "hash": "aebad29d6bfd81cd56f9da1ce2f07e72"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/docs/source-adapter-architecture.md": {
-    "mtime": 1778070581.496827,
-    "hash": "d7c5ea291de86cddab97573afa53a183"
+    "mtime": 1778247652.6624947,
+    "hash": "68d0f48d4637a9f69e955740d8bf02b3"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/docs/reranker-benchmark-methodology.md": {
     "mtime": 1778070606.8451867,
@@ -484,12 +524,20 @@
     "hash": "d4f8bbc996770f6a689e51fa3c4af543"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/docs/architecture.md": {
-    "mtime": 1778070624.1694326,
-    "hash": "210b47684e34a73afba8bf592c2e9888"
+    "mtime": 1778178250.5694275,
+    "hash": "3805016050ab243bdc022599b05ef137"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/docs/tailscale-oauth-playbook.md": {
     "mtime": 1777725049.2905822,
     "hash": "7985e8a0609b4150f626f8db02e0b8ce"
+  },
+  "/home/j2h4u/repos/j2h4u/dotmd/docs/source-registry-airweave-mapping.md": {
+    "mtime": 1778247625.586168,
+    "hash": "bb712ef11861f08f446fa432a71d3dc1"
+  },
+  "/home/j2h4u/repos/j2h4u/dotmd/docs/mcp-telegram-source-contract.md": {
+    "mtime": 1778229555.9439745,
+    "hash": "9d198276d7a21ddce396426671fb030a"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/docs/mcp.md": {
     "mtime": 1778070536.408187,
