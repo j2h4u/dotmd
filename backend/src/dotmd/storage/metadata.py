@@ -866,6 +866,102 @@ class SQLiteMetadataStore:
                 )
         return result
 
+    def get_chunks_by_source_unit_ref(
+        self,
+        namespace: str,
+        document_ref: str,
+        source_unit_ref: str,
+        strategy: str,
+    ) -> list[Chunk]:
+        """Return chunks whose provenance contains one source-unit ref."""
+        self.ensure_chunk_source_provenance_table(strategy)
+        provenance_table = f"chunk_source_provenance_{strategy}"
+        chunk_table = f"chunks_{strategy}"
+        rows = self._conn.execute(
+            f"SELECT c.chunk_id, c.heading_hierarchy, c.level, c.text, "
+            f"p.source_unit_refs, p.parser_name "
+            f"FROM {provenance_table} p "
+            f"JOIN {chunk_table} c ON c.chunk_id = p.chunk_id "
+            "WHERE p.namespace = ? AND p.document_ref = ? "
+            "ORDER BY c.chunk_id",
+            (namespace, document_ref),
+        ).fetchall()
+        chunks: list[Chunk] = []
+        for row in rows:
+            source_unit_refs = json.loads(row[4])
+            if source_unit_ref not in source_unit_refs:
+                continue
+            chunks.append(
+                Chunk(
+                    chunk_id=row[0],
+                    file_paths=[],
+                    heading_hierarchy=json.loads(row[1]),
+                    level=row[2],
+                    text=row[3],
+                    chunk_index=len(chunks),
+                    provenance=ChunkProvenance(
+                        namespace=namespace,
+                        document_ref=document_ref,
+                        ref=f"{namespace}:{document_ref}",
+                        source_unit_refs=source_unit_refs,
+                        chunk_strategy=strategy,
+                        parser_name=row[5],
+                    ),
+                )
+            )
+        return chunks
+
+    def delete_chunks_for_source_unit(
+        self,
+        namespace: str,
+        document_ref: str,
+        source_unit_ref: str,
+        strategy: str,
+        *,
+        conn: _SQLiteConn,
+        fts_table_name: str | None = None,
+    ) -> list[str]:
+        """Delete chunk/provenance/holder/FTS rows for one source unit.
+
+        Vector rows are intentionally deleted by the pipeline because the
+        vector table names are model-specific and owned by the vector store.
+        """
+        provenance_table = f"chunk_source_provenance_{strategy}"
+        chunk_table = f"chunks_{strategy}"
+        m2m_table = f"chunk_file_paths_{strategy}"
+        rows = conn.execute(
+            f"SELECT chunk_id, source_unit_refs FROM {provenance_table} "
+            "WHERE namespace = ? AND document_ref = ?",
+            (namespace, document_ref),
+        ).fetchall()
+        chunk_ids = [
+            row[0]
+            for row in rows
+            if source_unit_ref in json.loads(row[1])
+        ]
+        if not chunk_ids:
+            return []
+        placeholders = ",".join("?" for _ in chunk_ids)
+        conn.execute(
+            f"DELETE FROM {provenance_table} "
+            f"WHERE chunk_id IN ({placeholders})",
+            chunk_ids,
+        )
+        conn.execute(
+            f"DELETE FROM {m2m_table} WHERE chunk_id IN ({placeholders})",
+            chunk_ids,
+        )
+        if fts_table_name:
+            conn.execute(
+                f"DELETE FROM {fts_table_name} WHERE chunk_id IN ({placeholders})",
+                chunk_ids,
+            )
+        conn.execute(
+            f"DELETE FROM {chunk_table} WHERE chunk_id IN ({placeholders})",
+            chunk_ids,
+        )
+        return chunk_ids
+
     def get_active_chunk_provenance_for_chunk_ids(
         self,
         strategy: str,

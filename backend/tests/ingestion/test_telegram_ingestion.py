@@ -12,7 +12,6 @@ from dotmd.ingestion.pipeline import IndexingPipeline
 from dotmd.ingestion.telegram_provider import TelegramApplicationSourceProvider
 from dotmd.storage.metadata import SQLiteMetadataStore
 
-
 STRATEGY = "heading_512_50"
 VALID_CHUNK_ID = "a" * 64
 
@@ -47,7 +46,9 @@ class _TelegramSourceClientFixture:
             }
         )
         start = 0
-        if cursor:
+        if updated_after is not None and limit >= len(self._changes):
+            start = 0
+        elif cursor:
             for index, change in enumerate(self._changes):
                 if _cursor_for_message(change["unit"]["message_id"]) == cursor:
                     start = index + 1
@@ -388,8 +389,9 @@ def test_telegram_fts_and_vector_index_without_fileinfo_frontmatter(
     assert fts_rows
     assert all(title == "Project Chat" for title, _tags in fts_rows)
     assert all("telegram" in tags for _title, tags in fts_rows)
+    vec_meta_table = pipeline._vector_store._META_TABLE
     assert pipeline._conn.execute(
-        "SELECT COUNT(*) FROM vec_meta_heading_512_50_bge_small_en_v1 WHERE chunk_id IN "
+        f"SELECT COUNT(*) FROM {vec_meta_table} WHERE chunk_id IN "
         f"(SELECT chunk_id FROM chunks_{STRATEGY})"
     ).fetchone()[0] == 2
     metadata_inputs = [
@@ -432,7 +434,7 @@ def test_telegram_transaction_rolls_back_metadata_fts_vectors_and_checkpoint_on_
         f"SELECT COUNT(*) FROM chunks_fts_{STRATEGY}"
     ).fetchone()[0] == 0
     assert pipeline._conn.execute(
-        "SELECT COUNT(*) FROM vec_meta_heading_512_50_bge_small_en_v1"
+        f"SELECT COUNT(*) FROM {pipeline._vector_store._META_TABLE}"
     ).fetchone()[0] == 0
 
 

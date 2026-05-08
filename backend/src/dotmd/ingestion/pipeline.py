@@ -22,6 +22,7 @@ import json
 import logging
 import re
 import sqlite3
+import struct
 import tempfile
 import time
 import uuid
@@ -46,6 +47,7 @@ from dotmd.core.models import (
     RelationType,
     ResourceBinding,
     SourceDocument,
+    SourceUnit,
 )
 from dotmd.extraction.acronyms import extract_acronyms_from_chunks
 from dotmd.extraction.keyterms import KeyTermExtractor
@@ -62,6 +64,7 @@ from dotmd.ingestion.source import (
     FilesystemMarkdownSourceAdapter,
     source_document_to_file_info,
 )
+from dotmd.ingestion.source_provider import ApplicationSourceProviderProtocol
 from dotmd.search.fts5 import FTS5SearchEngine
 from dotmd.search.semantic import SemanticSearchEngine
 from dotmd.storage.base import GraphStoreProtocol, VectorStoreProtocol
@@ -86,6 +89,20 @@ class _ExtractionBundle:
     relations: list
     total_entities: int
     total_relations: int
+
+
+@_dataclass
+class ApplicationSourceIngestResult:
+    """Counts returned by one application-source ingest batch."""
+
+    discovered: int = 0
+    new_units: int = 0
+    changed_units: int = 0
+    skipped_units: int = 0
+    hidden_units: int = 0
+    failed_units: int = 0
+    reused_units: int = 0
+    chunks_indexed: int = 0
 
 
 def _model_to_table_suffix(model_name: str) -> str:
@@ -373,6 +390,340 @@ class IndexingPipeline:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def ingest_application_source(
+        self,
+        provider: ApplicationSourceProviderProtocol,
+        *,
+        limit: int = 500,
+    ) -> ApplicationSourceIngestResult:
+        """Ingest exactly one application-source provider batch."""
+        description = provider.describe_source()
+        namespace = description.namespace
+        checkpoint = self._metadata_store.get_source_checkpoint(namespace)
+        checkpoint_cursor = (
+            checkpoint.get("checkpoint_cursor") if checkpoint is not None else None
+        )
+        checkpoint_meta = (
+            checkpoint.get("metadata_json") if checkpoint is not None else {}
+        )
+        if not isinstance(checkpoint_meta, dict):
+            checkpoint_meta = {}
+
+        batch = provider.export_changes(
+            checkpoint_cursor if isinstance(checkpoint_cursor, str) else None,
+            limit,
+            updated_after=checkpoint_meta.get("updated_after"),
+            updated_after_cursor=checkpoint_meta.get("updated_after_cursor"),
+        )
+        result = ApplicationSourceIngestResult(discovered=len(batch.changes))
+        if not batch.changes:
+            preserved_cursor = (
+                batch.checkpoint_cursor
+                if batch.checkpoint_cursor is not None
+                else checkpoint_cursor if isinstance(checkpoint_cursor, str)
+                else None
+            )
+            self._conn.execute("BEGIN")
+            try:
+                self._metadata_store.commit_source_checkpoint(
+                    namespace,
+                    preserved_cursor,
+                    conn=self._conn,
+                    metadata_json={
+                        **result.__dict__,
+                        "updated_after": batch.updated_after
+                        or checkpoint_meta.get("updated_after"),
+                        "updated_after_cursor": batch.updated_after_cursor
+                        or checkpoint_meta.get("updated_after_cursor"),
+                        "single_batch": True,
+                    },
+                )
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+            return result
+
+        chunks_to_index: list[Chunk] = []
+        e_text_vectors: list[list[float]] = []
+        e_meta_vectors: list[list[float]] = []
+        text_hashes: dict[str, str] = {}
+        changed_chunk_ids: list[str] = []
+
+        for change in batch.changes:
+            existing = self._metadata_store.get_source_unit_fingerprint(
+                change.unit.namespace,
+                change.unit.document_ref,
+                change.unit.unit_ref,
+            )
+            indexing_needed = (
+                existing is None or existing["fingerprint"] != change.unit.fingerprint
+            )
+            if existing is None:
+                result.new_units += 1
+            elif indexing_needed:
+                result.changed_units += 1
+            else:
+                result.skipped_units += 1
+                continue
+
+            if change.unit.metadata_json.get("standalone_search") is False:
+                result.hidden_units += 1
+                continue
+
+            chunk = self._telegram_chunk_for_unit(change.document, change.unit)
+            chunks_to_index.append(chunk)
+            e_text, hashes = self._embed_chunks([chunk])
+            e_meta = self._embed_source_meta_component(
+                self._telegram_source_meta_text(change.document, change.unit)
+            )
+            e_text_vectors.extend(e_text)
+            e_meta_vectors.append(e_meta)
+            text_hashes.update(hashes)
+
+        weights = self._settings.parsed_embedding_weights
+        e_fused_vectors = [
+            self._fuse_vectors(e_text, e_meta, weights)
+            for e_text, e_meta in zip(e_text_vectors, e_meta_vectors, strict=False)
+        ]
+
+        if e_fused_vectors:
+            self._ensure_vector_tables_for_dimension(len(e_fused_vectors[0]))
+        self._metadata_store.ensure_chunk_source_provenance_table(self._strategy)
+
+        self._conn.execute("BEGIN")
+        try:
+            for change in batch.changes:
+                self._metadata_store.upsert_source_document(
+                    change.document,
+                    conn=self._conn,
+                )
+                self._metadata_store.upsert_resource_binding(
+                    ResourceBinding(
+                        namespace=change.document.namespace,
+                        resource_ref=change.document.document_ref,
+                        document_ref=change.document.document_ref,
+                        ref=change.document.ref,
+                        active=True,
+                        bound_at=change.document.updated_at,
+                        unbound_at=None,
+                        content_fingerprint=change.document.content_fingerprint,
+                        metadata_fingerprint=change.document.metadata_fingerprint,
+                        source_unit_refs=[],
+                        metadata_json={
+                            **change.document.metadata_json,
+                            "unit_count": change.document.metadata_json.get("unit_count"),
+                        },
+                    ),
+                    conn=self._conn,
+                )
+                changed = self._metadata_store.upsert_source_unit_fingerprint(
+                    change.unit,
+                    conn=self._conn,
+                )
+                if changed:
+                    deleted = self._metadata_store.delete_chunks_for_source_unit(
+                        change.unit.namespace,
+                        change.unit.document_ref,
+                        change.unit.unit_ref,
+                        self._strategy,
+                        conn=self._conn,
+                        fts_table_name=self._fts_table,
+                    )
+                    changed_chunk_ids.extend(deleted)
+
+            if changed_chunk_ids:
+                self._delete_vectors_for_chunk_ids_in_transaction(changed_chunk_ids)
+                self._vec_components.delete_by_entity_ids(changed_chunk_ids)
+
+            for chunk in chunks_to_index:
+                self._metadata_store.insert_chunk(
+                    self._strategy,
+                    chunk.chunk_id,
+                    chunk.heading_hierarchy,
+                    chunk.level,
+                    chunk.text,
+                    _commit=False,
+                )
+                if chunk.provenance is not None:
+                    self._metadata_store.add_chunk_provenance(
+                        self._strategy,
+                        chunk.provenance,
+                        chunk.chunk_id,
+                        conn=self._conn,
+                    )
+
+            chunks_by_title_tags: dict[tuple[str, str], list[Chunk]] = {}
+            for chunk in chunks_to_index:
+                assert chunk.provenance is not None
+                document = self._metadata_store.get_source_document(
+                    chunk.provenance.namespace,
+                    chunk.provenance.document_ref,
+                    conn=self._conn,
+                )
+                title = document.title if document is not None else "Telegram"
+                tags = "telegram"
+                chunks_by_title_tags.setdefault((title, tags), []).append(chunk)
+            for (title, tags_csv), chunks in chunks_by_title_tags.items():
+                self._keyword_engine.add_chunks_with_source_meta(
+                    chunks,
+                    title=title,
+                    tags_csv=tags_csv,
+                    conn=self._conn,
+                )
+
+            for chunk, e_text, e_meta in zip(
+                chunks_to_index,
+                e_text_vectors,
+                e_meta_vectors,
+                strict=False,
+            ):
+                self._vec_components.store(chunk.chunk_id, "text", e_text)
+                self._vec_components.store(
+                    f"telegram-meta:{chunk.provenance.source_unit_refs[0]}"
+                    if chunk.provenance is not None
+                    else f"telegram-meta:{chunk.chunk_id}",
+                    "meta",
+                    e_meta,
+                )
+            self._add_vectors_in_transaction(
+                chunks_to_index,
+                e_fused_vectors,
+                text_hashes=text_hashes,
+            )
+            result.chunks_indexed = len(chunks_to_index)
+
+            self._metadata_store.commit_source_checkpoint(
+                namespace,
+                batch.checkpoint_cursor,
+                conn=self._conn,
+                metadata_json={
+                    **result.__dict__,
+                    "updated_after": batch.updated_after,
+                    "updated_after_cursor": batch.updated_after_cursor,
+                    "single_batch": True,
+                },
+            )
+            self._conn.execute("COMMIT")
+        except Exception as exc:
+            self._conn.execute("ROLLBACK")
+            self._metadata_store.record_source_checkpoint_error(namespace, str(exc))
+            raise
+
+        return result
+
+    def _telegram_chunk_for_unit(
+        self,
+        document: SourceDocument,
+        unit: SourceUnit,
+    ) -> Chunk:
+        metadata = unit.metadata_json
+        context_lines = [
+            f"Dialog: {document.title}",
+            f"Sender: {metadata.get('sender_name') or metadata.get('sender_id') or ''}",
+            f"Sent: {metadata.get('sent_at') or ''}",
+        ]
+        if metadata.get("topic_title"):
+            context_lines.append(f"Topic: {metadata['topic_title']}")
+        if metadata.get("reply_to_msg_id") is not None:
+            context_lines.append(f"Reply to: {metadata['reply_to_msg_id']}")
+        text = "\n".join([*context_lines, "", unit.text])
+        chunk_id = blake3.blake3(
+            f"telegram:{unit.unit_ref}:{unit.fingerprint}:{self._strategy}".encode()
+        ).hexdigest()
+        return Chunk(
+            chunk_id=chunk_id,
+            file_paths=[],
+            heading_hierarchy=[document.title],
+            level=1,
+            text=text,
+            chunk_index=0,
+            kind=DocKind.DOCUMENT,
+            provenance=ChunkProvenance(
+                namespace="telegram",
+                document_ref=document.document_ref,
+                ref=f"telegram:{unit.unit_ref}",
+                source_unit_refs=[unit.unit_ref],
+                chunk_strategy=self._strategy,
+                parser_name="telegram-message",
+            ),
+        )
+
+    def _telegram_source_meta_text(
+        self,
+        document: SourceDocument,
+        unit: SourceUnit,
+    ) -> str:
+        metadata = unit.metadata_json
+        parts = [
+            "telegram",
+            document.title,
+            str(metadata.get("sender_name") or metadata.get("sender_id") or ""),
+            str(metadata.get("topic_title") or ""),
+            str(metadata.get("sent_at") or ""),
+            f"reply_to:{metadata.get('reply_to_msg_id')}"
+            if metadata.get("reply_to_msg_id") is not None
+            else "",
+        ]
+        return " ".join(part for part in parts if part).strip()
+
+    def _embed_source_meta_component(self, metadata_text: str) -> list[float]:
+        """Encode non-filesystem metadata into the dual-encoder meta component."""
+        try:
+            return self._semantic_engine.encode_batch([metadata_text])[0]
+        except Exception as exc:
+            raise RuntimeError("encode_batch failed for source metadata") from exc
+
+    def _ensure_vector_tables_for_dimension(self, dim: int) -> None:
+        """Ensure sqlite-vec tables exist before the ingestion transaction starts."""
+        if not isinstance(self._vector_store, SQLiteVecVectorStore):
+            return
+        self._vector_store._create_vec_table(dim)
+
+    def _delete_vectors_for_chunk_ids_in_transaction(
+        self,
+        chunk_ids: list[str],
+    ) -> None:
+        if isinstance(self._vector_store, SQLiteVecVectorStore):
+            self._vector_store.delete_by_chunk_ids(
+                self._strategy,
+                chunk_ids,
+                conn=self._conn,
+            )
+
+    def _add_vectors_in_transaction(
+        self,
+        chunks: list[Chunk],
+        embeddings: list[list[float]],
+        *,
+        text_hashes: dict[str, str],
+    ) -> None:
+        """Insert sqlite-vec rows without committing the caller transaction."""
+        if not chunks:
+            return
+        if not isinstance(self._vector_store, SQLiteVecVectorStore):
+            self._vector_store.add_chunks(
+                chunks,
+                embeddings,
+                overwrite=False,
+                text_hashes=text_hashes,
+            )
+            return
+        vec_meta_table = self._vector_store._META_TABLE
+        vec_table = self._vector_store._VEC_TABLE
+        for chunk, embedding in zip(chunks, embeddings, strict=False):
+            cur = self._conn.execute(
+                f"INSERT OR IGNORE INTO {vec_meta_table} (chunk_id, text_hash) "
+                "VALUES (?, ?)",
+                (chunk.chunk_id, text_hashes.get(chunk.chunk_id)),
+            )
+            if cur.rowcount and cur.lastrowid:
+                blob = struct.pack(f"{len(embedding)}f", *embedding)
+                self._conn.execute(
+                    f"INSERT INTO {vec_table} (rowid, embedding) VALUES (?, ?)",
+                    (cur.lastrowid, blob),
+                )
 
     def index(self, directory: Path, *, force: bool = False) -> IndexStats:
         """Index markdown files under *directory*.

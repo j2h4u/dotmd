@@ -165,6 +165,36 @@ class FTS5SearchEngine:
         self._conn.commit()
         logger.debug("FTS5: added %d chunks", len(chunks))
 
+    def add_chunks_with_source_meta(
+        self,
+        chunks: list[Chunk],
+        *,
+        title: str,
+        tags_csv: str,
+        conn: sqlite3.Connection | None = None,
+    ) -> None:
+        """Insert chunks with application-source metadata in caller transaction."""
+        if not chunks:
+            return
+        write_conn = conn or self._conn
+        chunk_ids = [c.chunk_id for c in chunks]
+        placeholders = ",".join("?" for _ in chunk_ids)
+        write_conn.execute(
+            f"DELETE FROM {self._table} WHERE chunk_id IN ({placeholders})",
+            chunk_ids,
+        )
+        write_conn.executemany(
+            f"INSERT INTO {self._table}(chunk_id, text, title, tags) "
+            f"VALUES (?, ?, ?, ?)",
+            [
+                (chunk.chunk_id, _expand_compounds(chunk.text), title, tags_csv)
+                for chunk in chunks
+            ],
+        )
+        if conn is None:
+            self._conn.commit()
+        logger.debug("FTS5: added %d source-meta chunks", len(chunks))
+
     def remove_chunks(
         self,
         chunk_ids: list[str],
