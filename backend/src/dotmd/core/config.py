@@ -223,6 +223,10 @@ class Settings(BaseSettings):
     # Set DOTMD_BASE_URL in docker-compose env or /opt/docker/dotmd/.env.
     base_url: str | None = None
 
+    # UNIX socket for the existing mcp-telegram daemon JSON API.
+    # DOTMD_TELEGRAM_DAEMON_SOCKET is the only Phase 29 live transport.
+    telegram_daemon_socket: Path | None = None
+
     @field_validator("base_url")
     @classmethod
     def validate_base_url(cls, v: str | None) -> str | None:

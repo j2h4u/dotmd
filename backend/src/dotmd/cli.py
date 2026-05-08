@@ -14,6 +14,10 @@ from dotmd.core.config import load_settings
 from dotmd.core.exceptions import IndexingLockError
 from dotmd.core.models import SearchMode, TrickleStatus
 from dotmd.feedback import FeedbackStore
+from dotmd.ingestion.telegram_provider import (
+    TelegramApplicationSourceProvider,
+    UnixSocketTelegramSourceClient,
+)
 from dotmd.utils.logging import setup_logging
 
 
@@ -421,6 +425,69 @@ def reset_strategy(name: str) -> None:
         click.echo(str(e), err=True)
         raise SystemExit(1) from None
     click.echo(f"Dropped strategy '{name}' and all associated data.")
+
+
+@main.group()
+def telegram() -> None:
+    """Telegram source smoke commands."""
+
+
+@telegram.command("ingest")
+@click.option("--limit", default=100, show_default=True, help="Maximum source units to request.")
+@click.option("--dry-run", is_flag=True, help="Fetch one source batch without writing dotMD state.")
+@click.option("--single-batch/--loop", default=True, help="Run exactly one provider batch.")
+@click.pass_context
+def telegram_ingest(
+    ctx: click.Context,
+    limit: int,
+    dry_run: bool,
+    single_batch: bool,
+) -> None:
+    """Run a bounded Telegram source ingest smoke."""
+    if limit <= 0:
+        raise click.BadParameter("limit must be positive", param_hint="--limit")
+    if not single_batch:
+        raise click.ClickException("Loop mode is not implemented in Phase 29; use --single-batch")
+
+    index_dir = (ctx.obj or {}).get("index_dir")
+    overrides: dict[str, object] = {}
+    if index_dir is not None:
+        overrides["index_dir"] = index_dir
+    settings = load_settings(**overrides)
+    socket_path = settings.telegram_daemon_socket
+    if socket_path is None:
+        raise click.ClickException("Telegram daemon socket is not configured")
+    if not socket_path.exists():
+        raise click.ClickException(f"Telegram daemon socket does not exist: {socket_path}")
+    if not socket_path.is_socket():
+        raise click.ClickException(f"Telegram daemon socket is not a socket: {socket_path}")
+
+    client = UnixSocketTelegramSourceClient(socket_path)
+    provider = TelegramApplicationSourceProvider(client)
+    if dry_run:
+        description = provider.describe_source()
+        batch = provider.export_changes(None, limit)
+        click.echo(
+            "telegram_ingest "
+            f"dry_run=true single_batch=true namespace={description.namespace} "
+            f"discovered={len(batch.changes)} "
+            f"next_cursor={batch.next_cursor or ''} "
+            f"checkpoint_cursor={batch.checkpoint_cursor or ''}"
+        )
+        return
+
+    service = DotMDService(settings=settings)
+    result = service._pipeline.ingest_application_source(provider, limit=limit)
+    click.echo(
+        "telegram_ingest "
+        "dry_run=false single_batch=true "
+        f"discovered={result.discovered} "
+        f"new_units={result.new_units} "
+        f"changed_units={result.changed_units} "
+        f"skipped_units={result.skipped_units} "
+        f"hidden_units={result.hidden_units} "
+        f"failed_units={result.failed_units}"
+    )
 
 
 @main.command()

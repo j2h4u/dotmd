@@ -10,7 +10,7 @@ import logging
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 from dotmd.core.config import Settings, load_settings
 from dotmd.core.models import (
@@ -19,9 +19,15 @@ from dotmd.core.models import (
     SearchMode,
     SearchResult,
     SourceDocument,
+    SourceUnit,
 )
 from dotmd.ingestion.pipeline import IndexingPipeline
 from dotmd.ingestion.reader import parse_frontmatter, read_file
+from dotmd.ingestion.source_provider import ApplicationSourceProviderProtocol
+from dotmd.ingestion.telegram_provider import (
+    TelegramApplicationSourceProvider,
+    UnixSocketTelegramSourceClient,
+)
 from dotmd.ingestion.trickle import TrickleIndexer
 from dotmd.search.fusion import build_search_results, fuse_results
 from dotmd.search.graph_direct import GraphDirectEngine
@@ -33,6 +39,7 @@ from dotmd.search.semantic import SemanticSearchEngine
 logger = logging.getLogger(__name__)
 
 ACTIVE_FILTER_OVERFETCH_FACTOR = 5
+TELEGRAM_REF_PREFIX = "telegram:"
 
 
 class ReadPayload(TypedDict):
@@ -94,6 +101,28 @@ class RerankerComparison(TypedDict):
     rerankers: list[RerankerRunComparison]
     overlap_reference: str | None
     overlap: dict[str, int]
+
+
+def _parse_telegram_message_ref(ref: str) -> tuple[str, str]:
+    """Parse a public Telegram message ref into document and unit refs."""
+    if not ref.startswith(TELEGRAM_REF_PREFIX):
+        raise ValueError(f"Unknown source ref: {ref}")
+    body = ref.removeprefix(TELEGRAM_REF_PREFIX)
+    document_ref, separator, message_id_text = body.rpartition(":message:")
+    if separator == "" or not document_ref.startswith("dialog:"):
+        raise ValueError(f"Unknown source ref: {ref}")
+    dialog_id_text = document_ref.removeprefix("dialog:")
+    try:
+        int(dialog_id_text)
+        int(message_id_text)
+    except ValueError:
+        raise ValueError(f"Unknown source ref: {ref}") from None
+    return document_ref, f"{document_ref}:message:{message_id_text}"
+
+
+def _is_telegram_message_ref(ref: str) -> bool:
+    """Return whether *ref* uses the Telegram message-ref shape."""
+    return ref.startswith("telegram:dialog:") and ":message:" in ref
 
 
 def format_elapsed_ms(elapsed_ms: float) -> str:
@@ -164,6 +193,14 @@ class DotMDService:
         # Background trickle indexer
         self._trickle_indexer = TrickleIndexer(self._settings, self._pipeline)
         self._source_provenance_ready_strategies: set[str] = set()
+        self._telegram_provider = self._build_telegram_provider()
+
+    def _build_telegram_provider(self) -> ApplicationSourceProviderProtocol | None:
+        """Build the optional Telegram provider from configured daemon socket."""
+        if self._settings.telegram_daemon_socket is None:
+            return None
+        client = UnixSocketTelegramSourceClient(self._settings.telegram_daemon_socket)
+        return TelegramApplicationSourceProvider(client)
 
     # ------------------------------------------------------------------
     # Public API
@@ -854,6 +891,22 @@ class DotMDService:
             raise ValueError(f"Unknown source ref: {ref}")
         return self._resolve_source_document(ref)
 
+    def _require_active_telegram_message_ref(self, ref: str) -> tuple[SourceDocument, str]:
+        """Resolve a Telegram message ref through its active dialog binding."""
+        document_ref, unit_ref = _parse_telegram_message_ref(ref)
+        if not self._pipeline.metadata_store.is_resource_binding_active(
+            "telegram",
+            document_ref,
+        ):
+            raise ValueError(f"Unknown source ref: {ref}")
+        document = self._pipeline.metadata_store.get_source_document(
+            "telegram",
+            document_ref,
+        )
+        if document is None or document.namespace != "telegram":
+            raise ValueError(f"Unknown source ref: {ref}")
+        return document, unit_ref
+
     def _filesystem_path_for_source(
         self,
         document: SourceDocument,
@@ -876,6 +929,148 @@ class DotMDService:
             return {}
         return frontmatter
 
+    def _telegram_window_sizes(
+        self,
+        start: int,
+        end: int | None,
+    ) -> tuple[int, int]:
+        before = max(0, min(start, 50))
+        after = 5 if end is None else max(0, min(end, 50))
+        return before, after
+
+    def _telegram_unit_payload(
+        self,
+        unit: SourceUnit,
+        target_unit_ref: str,
+    ) -> dict[str, Any]:
+        metadata = dict(unit.metadata_json)
+        message_id = metadata.get("message_id")
+        if message_id is None:
+            try:
+                message_id = int(unit.unit_ref.rsplit(":message:", 1)[1])
+            except (IndexError, ValueError):
+                message_id = None
+        return {
+            "unit_ref": unit.unit_ref,
+            "message_id": message_id,
+            "text": unit.text,
+            "sender_id": metadata.get("sender_id"),
+            "sender_name": metadata.get("sender_name"),
+            "sent_at": metadata.get("sent_at") or unit.updated_at.isoformat(),
+            "topic_id": metadata.get("topic_id"),
+            "topic_title": metadata.get("topic_title"),
+            "reply_to_msg_id": metadata.get("reply_to_msg_id"),
+            "edit_date": metadata.get("edit_date"),
+            "target": unit.unit_ref == target_unit_ref,
+        }
+
+    def _read_telegram_message(
+        self,
+        ref: str,
+        start: int,
+        end: int | None,
+    ) -> ReadPayload:
+        document, unit_ref = self._require_active_telegram_message_ref(ref)
+        before, after = self._telegram_window_sizes(start, end)
+        if self._telegram_provider is not None:
+            window = self._telegram_provider.read_unit_window(
+                unit_ref,
+                before=before,
+                after=after,
+            )
+            units = [
+                self._telegram_unit_payload(unit, unit_ref)
+                for unit in window.units
+            ]
+            return cast(
+                ReadPayload,
+                {
+                    "ref": ref,
+                    "document_ref": document.document_ref,
+                    "target_unit_ref": unit_ref,
+                    "total_chunks": len(units),
+                    "frontmatter": {},
+                    "units": units,
+                    "chunks": [],
+                    "metadata": {
+                        **document.metadata_json,
+                        **window.metadata_json,
+                    },
+                },
+            )
+
+        chunks = self._pipeline.metadata_store.get_chunks_by_source_unit_ref(
+            "telegram",
+            document.document_ref,
+            unit_ref,
+            self._settings.chunk_strategy,
+        )
+        if not chunks:
+            raise ValueError(f"Unknown source ref: {ref}")
+        chunk_payloads: list[dict[str, Any]] = []
+        for index, chunk in enumerate(chunks):
+            source_unit_refs = (
+                chunk.provenance.source_unit_refs
+                if chunk.provenance is not None
+                else []
+            )
+            chunk_payloads.append(
+                {
+                    "index": index,
+                    "heading_hierarchy": chunk.heading_hierarchy,
+                    "text": chunk.text,
+                    "target": unit_ref in source_unit_refs,
+                    "source_unit_refs": source_unit_refs,
+                }
+            )
+        return cast(
+            ReadPayload,
+            {
+                "ref": ref,
+                "document_ref": document.document_ref,
+                "target_unit_ref": unit_ref,
+                "total_chunks": len(chunk_payloads),
+                "frontmatter": {},
+                "chunks": chunk_payloads,
+                "units": [],
+                "metadata": document.metadata_json,
+            },
+        )
+
+    def _drill_telegram_message(self, ref: str) -> DrillPayload:
+        document, unit_ref = self._require_active_telegram_message_ref(ref)
+        target_metadata: dict[str, Any] = {}
+        if self._telegram_provider is not None:
+            try:
+                window = self._telegram_provider.read_unit_window(
+                    unit_ref,
+                    before=0,
+                    after=0,
+                )
+            except Exception:
+                logger.warning("telegram target metadata lookup failed", exc_info=True)
+            else:
+                for unit in window.units:
+                    if unit.unit_ref == unit_ref:
+                        target_metadata = self._telegram_unit_payload(unit, unit_ref)
+                        break
+        return cast(
+            DrillPayload,
+            {
+                "ref": ref,
+                "document_ref": document.document_ref,
+                "target_unit_ref": unit_ref,
+                "title": document.title,
+                "source_uri": document.source_uri,
+                "document_type": document.document_type,
+                "parser_name": document.parser_name,
+                "frontmatter": {},
+                "metadata": document.metadata_json,
+                "target_metadata": target_metadata,
+                "total_chunks": 0,
+            },
+        )
+
     def read(self, ref: str, start: int = 0, end: int | None = None) -> ReadPayload:
         """Return frontmatter and optionally a chunk range for a source ref.
 
@@ -883,6 +1078,9 @@ class DotMDService:
         mode — cheap, useful for planning a subsequent ranged call).
         When end is provided, also returns chunks[start:end], capped at 50.
         """
+        if _is_telegram_message_ref(ref):
+            return self._read_telegram_message(ref, start, end)
+
         document = self._require_active_source_document(ref)
         file_path = self._filesystem_path_for_source(document, ref)
         path = Path(file_path)
@@ -916,6 +1114,9 @@ class DotMDService:
 
     def drill(self, ref: str) -> DrillPayload:
         """Return structured source metadata for a source ref."""
+        if _is_telegram_message_ref(ref):
+            return self._drill_telegram_message(ref)
+
         document = self._require_active_source_document(ref)
         file_path = self._filesystem_path_for_source(document, ref)
         frontmatter = self._read_frontmatter(Path(file_path))

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import socket
 import unicodedata
 from datetime import datetime
+from pathlib import Path
 from typing import Protocol
 
 from dotmd.core.models import (
@@ -61,6 +63,77 @@ class TelegramSourceClientProtocol(Protocol):
     ) -> dict:
         """Read neighboring structured message units."""
         ...
+
+
+class UnixSocketTelegramSourceClient:
+    """Synchronous client for the mcp-telegram UNIX-socket JSON API."""
+
+    def __init__(self, socket_path: Path) -> None:
+        self._socket_path = socket_path
+
+    @property
+    def socket_path(self) -> Path:
+        return self._socket_path
+
+    def describe_source(self) -> dict:
+        """Describe the structured Telegram source."""
+        return self._request({"method": "describe_source"})
+
+    def export_source_changes(
+        self,
+        cursor: str | None,
+        limit: int,
+        updated_after: str | None = None,
+        updated_after_cursor: str | None = None,
+    ) -> dict:
+        """Export structured message changes."""
+        payload: dict = {
+            "method": "export_source_changes",
+            "cursor": cursor,
+            "limit": limit,
+        }
+        if updated_after is not None:
+            payload["updated_after"] = updated_after
+        if updated_after_cursor is not None:
+            payload["updated_after_cursor"] = updated_after_cursor
+        return self._request(payload)
+
+    def read_source_unit_window(
+        self,
+        unit_ref: str,
+        before: int,
+        after: int,
+    ) -> dict:
+        """Read neighboring structured message units."""
+        return self._request(
+            {
+                "method": "read_source_unit_window",
+                "unit_ref": unit_ref,
+                "before": before,
+                "after": after,
+            }
+        )
+
+    def _request(self, payload: dict) -> dict:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.connect(str(self._socket_path))
+            sock.sendall(json.dumps(payload).encode("utf-8") + b"\n")
+            data = b""
+            while not data.endswith(b"\n"):
+                chunk = sock.recv(1024 * 1024)
+                if not chunk:
+                    break
+                data += chunk
+        if not data:
+            raise RuntimeError("Telegram daemon returned no response")
+        response = json.loads(data.decode("utf-8"))
+        if response.get("ok") is not True:
+            error = response.get("message") or response.get("error") or "unknown error"
+            raise RuntimeError(f"Telegram daemon request failed: {error}")
+        data_payload = response.get("data")
+        if not isinstance(data_payload, dict):
+            raise RuntimeError("Telegram daemon returned malformed data payload")
+        return data_payload
 
 
 class TelegramApplicationSourceProvider(ApplicationSourceProviderProtocol):

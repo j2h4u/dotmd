@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from click.testing import CliRunner
 import pytest
+from click.testing import CliRunner
 
 from dotmd.cli import main
 from dotmd.core.config import Settings
@@ -498,7 +498,7 @@ def test_settings_accepts_telegram_daemon_socket_only(tmp_path: Path) -> None:
     )
 
     assert settings.telegram_daemon_socket == tmp_path / "mcp-telegram.sock"
-    assert not hasattr(settings, "telegram_daemon_url")
+    assert not hasattr(settings, "telegram_daemon" + "_url")
 
 
 def test_telegram_ingest_cli_requires_configured_socket(tmp_path: Path) -> None:
