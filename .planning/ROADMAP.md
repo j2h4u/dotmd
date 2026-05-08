@@ -152,7 +152,7 @@ See: `.planning/REQUIREMENTS.md`
 | 29. Telegram adapter MVP ingestion | 4/4 | Complete    | 2026-05-08 |
 | 30. Incremental Telegram sync and reuse | v1.5 | Deferred to Backlog 999.30 | — |
 | 31. Telegram search/read/drill smoke | 1/1 | Complete | 2026-05-08 |
-| 32. Source capability registry | v1.6 | Not started | — |
+| 32. Source capability registry | 1/4 | In Progress|  |
 | 33. Source lifecycle/config/auth/cursor boundary | v1.6 | Not started | — |
 | 34. Federated SearchCandidate contract | v1.6 | Not started | — |
 | 35. Filesystem unified source adapter | v1.6 | Not started | — |
@@ -1382,7 +1382,7 @@ through one vocabulary.
 **Requirements:** SRC-01, SRC-02, SRC-03, SRC-04
 **Depends on:** Phase 31
 **Backlog source:** 999.26
-**Plans:** 0/4 plans complete
+**Plans:** 1/4 plans executed
 
 Reference:
 - Upstream: `https://github.com/airweave-ai/airweave`
@@ -1399,7 +1399,7 @@ Success criteria:
 
 Plans:
 **Wave 1**
-- [ ] 32-01-source-descriptor-contract-PLAN.md — Source descriptor contract
+- [x] 32-01-source-descriptor-contract-PLAN.md — Source descriptor contract
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 32-02-filesystem-telegram-registry-seeds-PLAN.md — Filesystem and Telegram registry seeds

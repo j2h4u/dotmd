@@ -59,12 +59,12 @@ dotMD unless a later phase explicitly justifies it.
 
 ### Registry
 
-- [ ] **SRC-01**: dotMD can describe every source through a source descriptor
+- [x] **SRC-01**: dotMD can describe every source through a source descriptor
   containing source kind, display metadata, config schema, auth schema, cursor
   schema, and capability flags.
 - [ ] **SRC-02**: Filesystem and Telegram are registered sources, not special
   cases outside the registry.
-- [ ] **SRC-03**: Source capability flags distinguish local sync,
+- [x] **SRC-03**: Source capability flags distinguish local sync,
   federated/native search, read-unit windows, materialization, browse trees,
   ACL support, and incremental cursors.
 - [ ] **SRC-04**: Airweave source metadata can be mapped into the dotMD source
