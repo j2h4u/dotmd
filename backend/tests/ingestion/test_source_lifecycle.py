@@ -116,6 +116,7 @@ def test_filesystem_runtime_bundle_contains_descriptor_config_access_and_source(
     bundle = factory.build("filesystem")
 
     assert bundle.descriptor.namespace == "filesystem"
+    assert isinstance(bundle.config, FilesystemSourceConfig)
     assert bundle.config.paths == [str(tmp_path)]
     assert bundle.access.kind == "none"
     assert isinstance(bundle.source, FilesystemMarkdownSourceAdapter)
@@ -229,7 +230,7 @@ def test_source_cursor_store_requires_transaction_for_commit(tmp_path: Path) -> 
     cursor_store: SourceCursorStoreProtocol = SQLiteSourceCursorStore(metadata_store)
 
     with pytest.raises(TypeError):
-        cursor_store.commit_checkpoint("telegram", "checkpoint:1")
+        cursor_store.commit_checkpoint("telegram", "checkpoint:1")  # type: ignore[reportCallIssue]
 
     conn = metadata_store._conn
     conn.execute("BEGIN")
