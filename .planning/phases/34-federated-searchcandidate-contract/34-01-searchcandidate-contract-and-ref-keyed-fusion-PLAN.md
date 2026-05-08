@@ -25,7 +25,7 @@ must_haves:
     - "D-06: Per-engine weights remain available, default 1.0. Fusion stays rank-only."
     - "D-14: can_materialize=False for all Phase 34 candidates."
     - "D-18: Contract is generic enough that future federated providers add no new fields to SearchCandidate."
-    - "D-IMM: Mutability of container fields (matched_engines list, engine_scores dict, provider_metadata dict) is documented as 'frozen-shallow'; tests pin attribute-rebinding rejection only, not deep immutability. (cycle-2 MEDIUM fold-in)"
+    - "D-IMM: Mutability of container fields (matched_engines list, engine_scores dict, provider_metadata dict) is 'frozen-shallow' — Pydantic frozen=True rejects top-level rebinding but does NOT freeze container contents. Tests deterministically pin BOTH halves: rebinding raises ValidationError; container mutation (.append, key assignment) succeeds without raising. The model docstring documents this as a contract: callers must not mutate container fields. Deep immutability via tuple/MappingProxyType was rejected — too much coercion at construction sites for no compile-time benefit. (cycle-2 MEDIUM fold-in; cycle-3 MEDIUM determinism fix)"
     - "D-REF-COLLAPSE: When multiple local chunks map to the same ref during pre-fusion collapse, the candidate with the highest fused_score wins; ties broken by lowest chunk_id; the resulting SearchCandidate.chunk_id and snippet come from the winning chunk. (cycle-2 MEDIUM fold-in)"
 ---
 
@@ -53,7 +53,7 @@ behavior yet.
 | MCP narrowing reintroduces SearchHit subset (cycle-2 HIGH-2 regression) | HIGH | MCP `search` tool returns `SearchCandidate` directly (or a `SearchResponse` envelope containing full `SearchCandidate` records); no `SearchHit` model exists. Test asserts MCP response includes `can_read`, `can_materialize`, `source_native_score`, `source_native_rank`, `descriptor_key` when the field is set on the underlying candidate. |
 | `descriptor_key` missing or conflated with `source_kind` (cycle-2 HIGH-1) | HIGH | `SearchCandidate.descriptor_key: str` is required (no default). Test pins that two candidates with identical `namespace` + `source_kind` but different `descriptor_key` are distinguishable. `rg -n 'descriptor_key' backend/src/dotmd/core/models.py` returns the field declaration. |
 | Multiple local chunks collapse to one ref losing snippet/metadata | MEDIUM | Deterministic tie-break: highest fused_score wins, ties broken by lowest chunk_id. Test pins exact winning chunk_id when two chunks share a ref. |
-| Frozen=True misrepresents deep immutability of list/dict fields | MEDIUM | Tests pin attribute-rebinding rejection only (`candidate.snippet = "x"` raises). Documentation in plan and field docstrings states list/dict mutability is shallow-frozen; agents must not depend on deep immutability. |
+| Frozen=True misrepresents deep immutability of list/dict fields | MEDIUM | Tests pin BOTH halves of the shallow-freeze contract deterministically (cycle-3 MEDIUM determinism fix): (1) attribute rebinding raises ValidationError for every field including container fields; (2) container mutation (`.append`, key assignment) succeeds without raising. Model docstring documents shallow-freeze as a contract. Deep immutability via tuple/MappingProxyType was considered and rejected — see D-IMM rationale. |
 </threat_model>
 
 <tasks>
@@ -114,20 +114,37 @@ and frozen-shallow semantics**):
   assignment after construction raises `ValidationError` (frozen=True for
   scalar attribute rebinding).
 - `test_search_candidate_frozen_is_shallow_for_container_fields` (**cycle-2
-  MEDIUM fold-in**) constructs a candidate with `matched_engines=["semantic"]`
-  and `provider_metadata={"k": "v"}`. Documents the actual behavior:
-  - Reassignment is rejected: `candidate.matched_engines = []` raises
-    `ValidationError`.
-  - Container content mutation is **not** structurally prevented but is
-    contract-forbidden: callers must treat list/dict fields as read-only.
-    Test mutates `candidate.matched_engines.append("keyword")` and records
-    that this currently does not raise (Pydantic frozen is shallow). The
-    test exists to make this implementation reality explicit so downstream
-    plans (Plan 02 fan-out) do not depend on deep immutability. If the
-    implementer chooses to wrap container fields in tuple/MappingProxyType
-    for true immutability, the test asserts the mutation raises
-    `TypeError`/`AttributeError` instead. Either choice is acceptable; the
-    test pins whichever decision the implementer ships.
+  MEDIUM fold-in; cycle-3 MEDIUM determinism fix**) constructs a candidate
+  with `matched_engines=["semantic"]`, `engine_scores={"semantic": 0.9}`,
+  and `provider_metadata={"k": "v"}`. **Pins ONE contract — Pydantic
+  shallow-freeze, mutation-succeeds — deterministically** (cycle-3 review
+  flagged the previous "either succeeds OR raises" test as
+  non-deterministic). Asserts BOTH halves of the contract:
+  - **Top-level rebinding is rejected (frozen=True for scalar attribute
+    rebinding):** `with pytest.raises(ValidationError): candidate.snippet
+    = "x"`. Same for `candidate.matched_engines = ["other"]`,
+    `candidate.engine_scores = {}`, `candidate.provider_metadata = None`
+    — every container field rejects rebinding.
+  - **Container content mutation succeeds (Pydantic frozen is shallow —
+    documented behavior, not a bug):**
+    `candidate.matched_engines.append("keyword")` succeeds and the list
+    is `["semantic", "keyword"]` afterward. Same for
+    `candidate.engine_scores["keyword"] = 0.5` and
+    `candidate.provider_metadata["new"] = "z"` — both succeed and the
+    dicts contain the new keys. **Why succeed-and-document instead of
+    deep-freeze:** SearchCandidate is constructed once per search and
+    consumed downstream by RRF/rerank/MCP serialization. None of those
+    consumers needs to mutate it, but wrapping `matched_engines` in
+    `tuple` and `engine_scores`/`provider_metadata` in
+    `MappingProxyType` would force every existing call site that builds
+    a candidate (fusion.build_candidates, federated provider
+    constructors) to coerce types and would not catch genuine misuse
+    (callers that *do* try to mutate would fail at runtime, not at
+    type-check time). The contract is therefore documented in the model
+    docstring: "container fields are shallow-frozen; do not mutate after
+    construction" — and this test pins the actual Pydantic behavior so
+    downstream Plan 02/03 work cannot accidentally rely on deep
+    immutability.
 - `test_search_candidate_validates_ref_namespace_separator` asserts
   constructing with `ref="badref"` (no `:`) raises `ValueError` with
   `"ref must be formatted"` in the message (mirroring existing
