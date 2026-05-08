@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from dotmd.core.models import (
+    ApplicationSourceDescription,
     SOURCE_SCHEMA_FIELD_TYPES,
     SourceAuthSchema,
     SourceCapability,
@@ -17,6 +18,7 @@ from dotmd.core.models import (
 )
 from dotmd.core.source_registry import SourceRegistry
 from dotmd.ingestion.source_registry import default_source_registry
+from dotmd.ingestion.source_registry import telegram_source_descriptor
 
 
 def _descriptor(namespace: str = "demo") -> SourceDescriptor:
@@ -192,3 +194,20 @@ def test_telegram_descriptor_shape() -> None:
     assert SourceCapability.INCREMENTAL_CURSOR in descriptor.capabilities
     assert SourceCapability.FEDERATED_SEARCH in descriptor.capabilities
     assert SourceCapability.ACL not in descriptor.capabilities
+
+
+def test_source_descriptor_converts_to_application_source_description() -> None:
+    description = ApplicationSourceDescription.from_descriptor(
+        telegram_source_descriptor()
+    )
+
+    assert description.namespace == "telegram"
+    assert description.source_kind == "chat"
+    assert description.display_name == "Telegram"
+    assert description.capabilities == [
+        "local_sync",
+        "read_unit_window",
+        "incremental_cursor",
+        "federated_search",
+    ]
+    assert description.metadata_json == {"transport": "mcp-telegram-daemon"}

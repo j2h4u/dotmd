@@ -162,6 +162,32 @@ def test_application_source_provider_protocol_shape() -> None:
     ]
 
 
+def test_application_source_description_accepts_legacy_capability_strings() -> None:
+    description = ApplicationSourceDescription(
+        namespace="telegram",
+        source_kind="chat",
+        display_name="Telegram",
+        capabilities=["incremental-export", "unit-window"],
+    )
+
+    assert description.capabilities == ["incremental-export", "unit-window"]
+
+
+def test_application_source_description_normalizes_legacy_capabilities() -> None:
+    description = ApplicationSourceDescription(
+        namespace="telegram",
+        source_kind="chat",
+        display_name="Telegram",
+        capabilities=["incremental-export", "unit-window", "local_sync"],
+    )
+
+    assert description.normalized_capabilities() == [
+        "incremental_cursor",
+        "read_unit_window",
+        "local_sync",
+    ]
+
+
 def _telegram_change(message_id: int, text: str) -> ApplicationSourceChange:
     return ApplicationSourceChange(
         document=_telegram_document(),

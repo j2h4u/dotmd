@@ -191,6 +191,8 @@ def test_provider_maps_structured_export_to_application_source_batch() -> None:
     provider = TelegramApplicationSourceProvider(_TelegramSourceClientFixture())
 
     assert provider.describe_source().namespace == "telegram"
+    assert "incremental_cursor" in provider.describe_source().normalized_capabilities()
+    assert "read_unit_window" in provider.describe_source().normalized_capabilities()
     batch = provider.export_changes(None, 10)
 
     assert isinstance(batch, ApplicationSourceChangeBatch)
