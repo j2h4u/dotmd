@@ -402,9 +402,10 @@ def test_telegram_fts_and_vector_index_without_fileinfo_frontmatter(
         text for text in encoded_texts
         if "telegram" in text and "Project Chat" in text
     ]
-    assert metadata_inputs
-    assert any("Alice" in text and "Deployments" in text for text in metadata_inputs)
+    assert metadata_inputs == ["telegram Project Chat dialog Project Chat -1001"]
     assert "Deployment checklist is ready" not in metadata_inputs[0]
+    assert "Alice" not in metadata_inputs[0]
+    assert "Deployments" not in metadata_inputs[0]
 
 
 def test_application_source_ingest_batches_body_and_metadata_embeddings(
@@ -422,10 +423,10 @@ def test_application_source_ingest_batches_body_and_metadata_embeddings(
     result = pipeline.ingest_application_source(_provider(), limit=10)
 
     assert result.chunks_indexed == 2
-    assert [len(call) for call in encode_calls] == [2, 2]
+    assert [len(call) for call in encode_calls] == [2, 1]
     assert any("Deployment checklist is ready" in text for text in encode_calls[0])
     assert any("Smoke confirms the deployment path" in text for text in encode_calls[0])
-    assert all("Project Chat" in text for text in encode_calls[1])
+    assert encode_calls[1] == ["telegram Project Chat dialog Project Chat -1001"]
     assert all("Deployment checklist is ready" not in text for text in encode_calls[1])
 
 

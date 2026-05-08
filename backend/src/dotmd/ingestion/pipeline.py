@@ -112,7 +112,7 @@ class _ApplicationSourceIndexItem:
 
     change: ApplicationSourceChange
     chunk: Chunk
-    metadata_text: str
+    source_key: tuple[str, str]
 
 
 def _model_to_table_suffix(model_name: str) -> str:
@@ -484,18 +484,31 @@ class IndexingPipeline:
                 _ApplicationSourceIndexItem(
                     change=change,
                     chunk=chunk,
-                    metadata_text=self._application_source_meta_text(
-                        change.document,
-                        change.unit,
-                    ),
+                    source_key=(change.document.namespace, change.document.document_ref),
                 )
             )
 
         chunks_to_index = [item.chunk for item in index_items]
         e_text_vectors, text_hashes = self._embed_chunks(chunks_to_index)
-        e_meta_vectors = self._embed_source_meta_components(
-            [item.metadata_text for item in index_items]
+        documents_by_key: dict[tuple[str, str], SourceDocument] = {}
+        for item in index_items:
+            documents_by_key.setdefault(item.source_key, item.change.document)
+        source_keys = list(documents_by_key)
+        e_meta_by_source_key = dict(
+            zip(
+                source_keys,
+                self._embed_source_meta_components(
+                    [
+                        self._application_source_meta_text(document)
+                        for document in documents_by_key.values()
+                    ]
+                ),
+                strict=False,
+            )
         )
+        e_meta_vectors = [
+            e_meta_by_source_key[item.source_key] for item in index_items
+        ]
 
         weights = self._settings.parsed_embedding_weights
         e_fused_vectors = [
@@ -598,7 +611,7 @@ class IndexingPipeline:
                 assert chunk.provenance is not None
                 meta_entity_id = (
                     f"{chunk.provenance.namespace}-meta:"
-                    f"{chunk.provenance.source_unit_refs[0]}"
+                    f"{chunk.provenance.document_ref}"
                 )
                 self._vec_components.store(
                     meta_entity_id,
@@ -674,18 +687,13 @@ class IndexingPipeline:
     def _application_source_meta_text(
         self,
         document: SourceDocument,
-        unit: SourceUnit,
     ) -> str:
-        metadata = unit.metadata_json
         parts = [
             document.namespace,
             document.title,
-            str(metadata.get("sender_name") or metadata.get("sender_id") or ""),
-            str(metadata.get("topic_title") or ""),
-            str(metadata.get("sent_at") or ""),
-            f"reply_to:{metadata.get('reply_to_msg_id')}"
-            if metadata.get("reply_to_msg_id") is not None
-            else "",
+            document.document_type,
+            str(document.metadata_json.get("dialog_name") or ""),
+            str(document.metadata_json.get("dialog_id") or ""),
         ]
         return " ".join(part for part in parts if part).strip()
 
