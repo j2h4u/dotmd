@@ -63,7 +63,7 @@ def index_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def mock_settings(index_dir: Path):
+def mock_settings(index_dir: Path, md_dir: Path):
     """Return a Settings-like mock with paths pointing to temp dirs."""
     settings = MagicMock()
     settings.index_dir = index_dir
@@ -73,6 +73,9 @@ def mock_settings(index_dir: Path):
     settings.acronyms_path = index_dir / "acronyms.json"
     settings.embedding_model = "test-model"
     settings.embedding_url = "http://test:8088"
+    settings.indexing_paths = [str(md_dir)]
+    settings.effective_indexing_exclude = []
+    settings.telegram_daemon_socket = None
     settings.extract_depth = "structural"  # skip NER for speed
     settings.ner_entity_types = []
     settings.ner_model_name = "urchade/gliner_multi-v2.1"
@@ -259,12 +262,17 @@ class TestDeletedFile:
 
         # No new files to read (b is unchanged)
         assert mock_read_file.call_count == 0
-        # File a's fingerprint should be gone from chunk tracker table
+        # Deleted filesystem resources are retained for reuse but deactivated
+        # from the public binding set.
         cursor = pipeline._metadata_store._conn.execute(
             "SELECT COUNT(*) FROM chunk_fingerprints_heading_512_50 WHERE file_path = ?",
-            (str(md_dir / "a.md"),),
+            (str((md_dir / "a.md").resolve()),),
         )
-        assert cursor.fetchone()[0] == 0
+        assert cursor.fetchone()[0] == 1
+        assert not pipeline._metadata_store.is_resource_binding_active(
+            "filesystem",
+            str((md_dir / "a.md").resolve()),
+        )
 
 
 class TestNewFileAdded:
