@@ -3,8 +3,14 @@
   "mcp": {
     "dotmd": {
       "type": "local",
-      "command": ["./backend/.venv/bin/dotmd", "mcp"],
+      "command": [
+        "./backend/.venv/bin/dotmd",
+        "mcp"
+      ],
       "enabled": true
     }
-  }
+  },
+  "plugin": [
+    ".opencode/plugins/graphify.js"
+  ]
 }
