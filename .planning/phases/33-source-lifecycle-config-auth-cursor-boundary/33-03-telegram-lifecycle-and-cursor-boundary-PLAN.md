@@ -153,6 +153,12 @@ Telegram lifecycle, delegated-auth, service construction, CLI construction, and 
 Complete Telegram lifecycle integration.
 
 Concrete target state:
+- When extending the shared `source_runtime_factory_from_settings()` helper
+  from Plan 02, preserve its filesystem seed exactly against the live
+  `Settings` API:
+  `FilesystemSourceConfig(paths=settings.indexing_paths, exclude=settings.effective_indexing_exclude)`.
+  Do not add or reference a resolved-indexing-paths alias; live
+  `backend/src/dotmd/core/config.py` exposes `indexing_paths`.
 - Extend `source_runtime_factory_from_settings()` from Plan 02 so it seeds:
   - `SourceConfigRecord(namespace="telegram", config=TelegramSourceConfig(socket_path=settings.telegram_daemon_socket), credential_ref=SourceCredentialRef(namespace="telegram", credential_ref="mcp-telegram"))` when `settings.telegram_daemon_socket` is not `None`.
   - No raw token/password/secret fields.
@@ -199,12 +205,15 @@ Concrete target state:
 - `backend/src/dotmd/ingestion/pipeline.py` contains `cursor_store.commit_checkpoint`.
 - `backend/src/dotmd/ingestion/pipeline.py` contains `cursor_store.record_error`.
 - `backend/src/dotmd/ingestion/pipeline.py` still contains `self._conn.execute("BEGIN")` before checkpoint commit.
+- `backend/src/dotmd/ingestion/source_lifecycle.py` contains `settings.indexing_paths`.
+- `rg -n "resolved[_]indexing[_]paths" backend/src/dotmd/ingestion/source_lifecycle.py` returns no matches.
 - `cd backend && uv run pytest tests/ingestion/test_source_lifecycle.py tests/ingestion/test_telegram_ingestion.py tests/ingestion/test_telegram_provider.py tests/api/test_service_search.py tests/storage/test_metadata_m2m.py -q` exits 0.
 - `cd backend && uv run pyright src/dotmd/ingestion/source_lifecycle.py src/dotmd/ingestion/pipeline.py src/dotmd/api/service.py src/dotmd/cli.py tests/ingestion/test_source_lifecycle.py tests/ingestion/test_telegram_ingestion.py tests/ingestion/test_telegram_provider.py tests/api/test_service_search.py tests/storage/test_metadata_m2m.py` exits 0.
 </acceptance_criteria>
 <verify>
 `cd backend && uv run pytest tests/ingestion/test_source_lifecycle.py tests/ingestion/test_telegram_ingestion.py tests/ingestion/test_telegram_provider.py tests/api/test_service_search.py tests/storage/test_metadata_m2m.py -q`
 `cd backend && uv run pyright src/dotmd/ingestion/source_lifecycle.py src/dotmd/ingestion/pipeline.py src/dotmd/api/service.py src/dotmd/cli.py tests/ingestion/test_source_lifecycle.py tests/ingestion/test_telegram_ingestion.py tests/ingestion/test_telegram_provider.py tests/api/test_service_search.py tests/storage/test_metadata_m2m.py`
+`rg -n "resolved[_]indexing[_]paths" backend/src/dotmd/ingestion/source_lifecycle.py` returns no matches.
 </verify>
 <done>
 Telegram service and CLI runtime construction use lifecycle, and application-source checkpoint access goes through the lifecycle cursor store inside the existing transaction.

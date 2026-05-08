@@ -39,7 +39,7 @@ existing filesystem refs, internal holder paths, and retained-artifact behavior.
 | Public filesystem identity regresses to path-first | HIGH | Existing source-ref tests continue to assert `SourceDocument.ref == filesystem:<resolved_path>` and public read/search uses refs. |
 | Filesystem starts claiming provider cursor semantics | HIGH | Runtime metadata can expose fingerprint state, but tests assert filesystem bundle has no application provider and no provider checkpoint cursor commit path. |
 | Direct adapter construction remains in pipeline | MEDIUM | Static acceptance criterion rejects `FilesystemMarkdownSourceAdapter()` in `pipeline.py`. |
-| Discovery config drifts from settings | MEDIUM | Factory builder uses settings-derived `FilesystemSourceConfig(paths=settings.resolved_indexing_paths, exclude=settings.effective_indexing_exclude)`. |
+| Discovery config drifts from settings | MEDIUM | Factory builder uses the live `Settings` API: `FilesystemSourceConfig(paths=settings.indexing_paths, exclude=settings.effective_indexing_exclude)`. Runtime validation already requires `indexing_paths` to be non-empty absolute path specs. |
 | Retained artifact behavior is disturbed | HIGH | Run existing source filesystem tests that cover active bindings, missing files, and holder mechanics. |
 </threat_model>
 
@@ -127,7 +127,8 @@ Concrete target state:
 - The helper builds:
   - `default_source_registry()`
   - `InMemorySourceConfigStore`
-  - filesystem `SourceConfigRecord(namespace="filesystem", config=FilesystemSourceConfig(paths=settings.resolved_indexing_paths, exclude=settings.effective_indexing_exclude), credential_ref=SourceCredentialRef(namespace="filesystem"))`
+  - filesystem `SourceConfigRecord(namespace="filesystem", config=FilesystemSourceConfig(paths=settings.indexing_paths, exclude=settings.effective_indexing_exclude), credential_ref=SourceCredentialRef(namespace="filesystem"))`
+  - Do not add or reference a resolved-indexing-paths alias; live `Settings` exposes `indexing_paths`, and `validate_for_runtime()` already enforces absolute non-empty indexing path specs for runtime startup.
   - Telegram config only if settings has `telegram_daemon_socket`; Plan 03 may complete/extend this.
   - `DefaultSourceCredentialProvider`
   - `SQLiteSourceCursorStore(metadata_store)`
@@ -147,8 +148,9 @@ Concrete target state:
 - `backend/src/dotmd/ingestion/pipeline.py` contains `.build("filesystem")`.
 - `backend/src/dotmd/ingestion/pipeline.py` does not contain `FilesystemMarkdownSourceAdapter()`.
 - `backend/src/dotmd/ingestion/source_lifecycle.py` contains `source_runtime_factory_from_settings`.
-- `backend/src/dotmd/ingestion/source_lifecycle.py` contains `settings.resolved_indexing_paths`.
+- `backend/src/dotmd/ingestion/source_lifecycle.py` contains `settings.indexing_paths`.
 - `backend/src/dotmd/ingestion/source_lifecycle.py` contains `settings.effective_indexing_exclude`.
+- `rg -n "resolved[_]indexing[_]paths" backend/src/dotmd/ingestion/source_lifecycle.py` returns no matches.
 - `cd backend && uv run pytest tests/ingestion/test_source_lifecycle.py tests/ingestion/test_source_filesystem.py -q` exits 0.
 - `cd backend && uv run pyright src/dotmd/ingestion/source_lifecycle.py src/dotmd/ingestion/pipeline.py tests/ingestion/test_source_lifecycle.py tests/ingestion/test_source_filesystem.py` exits 0.
 </acceptance_criteria>
@@ -156,6 +158,7 @@ Concrete target state:
 `cd backend && uv run pytest tests/ingestion/test_source_lifecycle.py tests/ingestion/test_source_filesystem.py -q`
 `cd backend && uv run pyright src/dotmd/ingestion/source_lifecycle.py src/dotmd/ingestion/pipeline.py tests/ingestion/test_source_lifecycle.py tests/ingestion/test_source_filesystem.py`
 `rg -n "FilesystemMarkdownSourceAdapter\\(\\)" backend/src/dotmd/ingestion/pipeline.py` returns no matches.
+`rg -n "resolved[_]indexing[_]paths" backend/src/dotmd/ingestion/source_lifecycle.py` returns no matches.
 </verify>
 <done>
 Filesystem discovery and source-document bridge paths obtain their adapter through lifecycle and preserve source-ref-first behavior.
