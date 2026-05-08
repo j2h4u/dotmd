@@ -17,14 +17,16 @@ requirements: ["SEARCH-01", "SEARCH-02", "SEARCH-03"]
 requirements_addressed: ["SEARCH-01", "SEARCH-02", "SEARCH-03"]
 must_haves:
   truths:
-    - "D-01: SearchCandidate is the single public search-result type. SearchResult is removed (clean break, no compat alias)."
+    - "D-01: SearchCandidate is the single public search-result type at BOTH service and MCP layers. SearchResult is removed (clean break, no compat alias). MCP returns SearchCandidate directly — no narrowing SearchHit subset model. (cycle-2 HIGH-2 fix)"
     - "D-02: Per-engine debug scores collapse into engine_scores: dict[str, float] | None. Federated candidates leave it None."
     - "D-03: Federated-only fields live in provider_metadata: dict[str, Any] | None catch-all."
-    - "D-04: SearchCandidate carries ref, namespace, source_kind, retrieval_kind, title, snippet, fused_score, can_read, can_materialize, optional chunk_id/heading_path/matched_engines/provenance, optional source_native_score/rank, optional engine_scores, optional provider_metadata."
+    - "D-04: SearchCandidate carries ref, namespace, descriptor_key (source descriptor identity), source_kind, retrieval_kind, title, snippet, fused_score, can_read, can_materialize, optional chunk_id/heading_path/matched_engines/provenance, optional source_native_score/rank, optional engine_scores, optional provider_metadata. descriptor_key uniquely identifies the source descriptor (e.g. 'telegram' for the Telegram descriptor, 'filesystem-mnt' for a filesystem descriptor); namespace + descriptor_key together form the source identity required by SEARCH-02. (cycle-2 HIGH-1 fix)"
     - "D-05: Fusion key migrates from chunk_id to ref. Local engines hydrate chunk → ref through provenance BEFORE fusion."
     - "D-06: Per-engine weights remain available, default 1.0. Fusion stays rank-only."
     - "D-14: can_materialize=False for all Phase 34 candidates."
     - "D-18: Contract is generic enough that future federated providers add no new fields to SearchCandidate."
+    - "D-IMM: Mutability of container fields (matched_engines list, engine_scores dict, provider_metadata dict) is documented as 'frozen-shallow'; tests pin attribute-rebinding rejection only, not deep immutability. (cycle-2 MEDIUM fold-in)"
+    - "D-REF-COLLAPSE: When multiple local chunks map to the same ref during pre-fusion collapse, the candidate with the highest fused_score wins; ties broken by lowest chunk_id; the resulting SearchCandidate.chunk_id and snippet come from the winning chunk. (cycle-2 MEDIUM fold-in)"
 ---
 
 # Phase 34 Plan 01: SearchCandidate Contract And Ref-Keyed Local Fusion
@@ -48,7 +50,10 @@ behavior yet.
 | `provider_metadata` accidentally becomes a contract that downstream agents depend on | MEDIUM | Schema test pins `provider_metadata: dict[str, Any] | None`; documented as opaque. |
 | Active-binding gate scope shifts (Phase 27 invariant breaks) | HIGH | Filter still operates on local refs only; ref-keyed test pins existing inactive-drop behavior. |
 | Lifecycle bundle reload cost on every search | MEDIUM | Service init builds and caches lifecycle bundles; test asserts no per-request rebuild (covered fully in Plan 02; Plan 01 keeps existing service init unchanged). |
-| MCP `SearchHit` schema drift breaks Claude Code | MEDIUM | MCP `SearchHit` keeps stable subset of `SearchCandidate` fields; existing MCP `search` tool tests still pass. |
+| MCP narrowing reintroduces SearchHit subset (cycle-2 HIGH-2 regression) | HIGH | MCP `search` tool returns `SearchCandidate` directly (or a `SearchResponse` envelope containing full `SearchCandidate` records); no `SearchHit` model exists. Test asserts MCP response includes `can_read`, `can_materialize`, `source_native_score`, `source_native_rank`, `descriptor_key` when the field is set on the underlying candidate. |
+| `descriptor_key` missing or conflated with `source_kind` (cycle-2 HIGH-1) | HIGH | `SearchCandidate.descriptor_key: str` is required (no default). Test pins that two candidates with identical `namespace` + `source_kind` but different `descriptor_key` are distinguishable. `rg -n 'descriptor_key' backend/src/dotmd/core/models.py` returns the field declaration. |
+| Multiple local chunks collapse to one ref losing snippet/metadata | MEDIUM | Deterministic tie-break: highest fused_score wins, ties broken by lowest chunk_id. Test pins exact winning chunk_id when two chunks share a ref. |
+| Frozen=True misrepresents deep immutability of list/dict fields | MEDIUM | Tests pin attribute-rebinding rejection only (`candidate.snippet = "x"` raises). Documentation in plan and field docstrings states list/dict mutability is shallow-frozen; agents must not depend on deep immutability. |
 </threat_model>
 
 <tasks>
@@ -69,12 +74,15 @@ behavior yet.
 Create `backend/tests/core/test_search_candidate.py` with failing tests for
 the new contract.
 
-Concrete tests:
+Concrete tests (eleven total — each addresses a contract surface; **the eight
+foundational tests plus the three cycle-2 review additions for descriptor_key
+and frozen-shallow semantics**):
 
 - `test_search_candidate_required_fields_pin_local_shape` constructs a
   `SearchCandidate` with only the locally-required fields (`ref`,
-  `namespace`, `source_kind`, `retrieval_kind="semantic"`, `snippet`,
-  `fused_score`, `can_read=True`) and asserts:
+  `namespace`, `descriptor_key="filesystem-mnt"`, `source_kind`,
+  `retrieval_kind="semantic"`, `snippet`, `fused_score`, `can_read=True`)
+  and asserts:
   - `can_materialize is False` by default.
   - `engine_scores is None` by default.
   - `provider_metadata is None` by default.
@@ -82,18 +90,44 @@ Concrete tests:
   - `matched_engines == []`.
 - `test_search_candidate_required_fields_pin_federated_shape` constructs a
   federated candidate with `ref="telegram:dialog:1:message:7"`,
-  `namespace="telegram"`, `source_kind="chat"`, `retrieval_kind="tg:fts"`,
-  `snippet`, `fused_score`, `can_read=True`, `source_native_score=0.93`,
-  `source_native_rank=0`, `provider_metadata={"dialog_id": 1}`. Assert:
+  `namespace="telegram"`, `descriptor_key="telegram"`, `source_kind="chat"`,
+  `retrieval_kind="tg:fts"`, `snippet`, `fused_score`, `can_read=True`,
+  `source_native_score=0.93`, `source_native_rank=0`,
+  `provider_metadata={"dialog_id": 1}`. Assert:
   - `chunk_id is None`.
   - `provenance is None`.
   - `heading_path is None`.
   - `engine_scores is None`.
+- `test_search_candidate_descriptor_key_is_required` (**cycle-2 HIGH-1 fix**)
+  asserts that constructing a `SearchCandidate` without `descriptor_key`
+  raises `ValidationError` (no default value); explicitly pins that
+  `descriptor_key` and `source_kind` are independent fields — two candidates
+  may share `namespace="filesystem"` and `source_kind="markdown"` while
+  having different `descriptor_key` values (e.g. `"filesystem-mnt"` vs
+  `"filesystem-srv"`) and remain distinguishable. Construct two candidates
+  with identical `namespace`, `source_kind`, and `ref` namespace prefix but
+  different `descriptor_key` values; assert they are NOT equal.
 - `test_search_candidate_rejects_extra_fields` asserts
   `SearchCandidate(...extra_field="x")` raises Pydantic `ValidationError`
   containing `extra forbidden` or `extra_forbidden`.
 - `test_search_candidate_is_frozen_after_construction` asserts attribute
-  assignment after construction raises `ValidationError` (frozen=True).
+  assignment after construction raises `ValidationError` (frozen=True for
+  scalar attribute rebinding).
+- `test_search_candidate_frozen_is_shallow_for_container_fields` (**cycle-2
+  MEDIUM fold-in**) constructs a candidate with `matched_engines=["semantic"]`
+  and `provider_metadata={"k": "v"}`. Documents the actual behavior:
+  - Reassignment is rejected: `candidate.matched_engines = []` raises
+    `ValidationError`.
+  - Container content mutation is **not** structurally prevented but is
+    contract-forbidden: callers must treat list/dict fields as read-only.
+    Test mutates `candidate.matched_engines.append("keyword")` and records
+    that this currently does not raise (Pydantic frozen is shallow). The
+    test exists to make this implementation reality explicit so downstream
+    plans (Plan 02 fan-out) do not depend on deep immutability. If the
+    implementer chooses to wrap container fields in tuple/MappingProxyType
+    for true immutability, the test asserts the mutation raises
+    `TypeError`/`AttributeError` instead. Either choice is acceptable; the
+    test pins whichever decision the implementer ships.
 - `test_search_candidate_validates_ref_namespace_separator` asserts
   constructing with `ref="badref"` (no `:`) raises `ValueError` with
   `"ref must be formatted"` in the message (mirroring existing
@@ -119,12 +153,17 @@ Concrete tests:
 Tests must fail before task 2.
 </action>
 <acceptance_criteria>
-- `backend/tests/core/test_search_candidate.py` contains all eight tests
-  named above.
+- `backend/tests/core/test_search_candidate.py` contains all eleven tests
+  named above (eight foundational + three cycle-2 review additions for
+  descriptor_key required-ness, descriptor_key disambiguation, and
+  frozen-shallow container semantics).
 - `cd backend && uv run pytest tests/core/test_search_candidate.py -q` exits
   non-zero before task 2 (model symbols don't exist yet) and exits 0 after
   task 2.
-- Tests reference `SearchCandidate`, `SearchResponse`, `SourceStatus`.
+- Tests reference `SearchCandidate`, `SearchResponse`, `SourceStatus`,
+  `descriptor_key`.
+- `rg -n 'descriptor_key' backend/tests/core/test_search_candidate.py`
+  returns at least one match (cycle-2 HIGH-1 marker).
 </acceptance_criteria>
 <verify>
 `cd backend && uv run pytest tests/core/test_search_candidate.py -q` fails
@@ -160,6 +199,10 @@ Replace `SearchResult` with `SearchCandidate` and add envelope models in
   - `ref: str` (validator mirrors current `_validate_ref` from
     `SearchResult`).
   - `namespace: str`.
+  - `descriptor_key: str` — **required, no default** (cycle-2 HIGH-1 fix).
+    Identifies the source descriptor uniquely within and across namespaces
+    (e.g. `"telegram"`, `"filesystem-mnt"`). Together with `namespace` this
+    forms the source identity required by SEARCH-02 / D-04.
   - `source_kind: str`.
   - `retrieval_kind: str` (e.g. `"semantic"`, `"keyword"`, `"graph_direct"`,
     or a federated engine name like `"tg:fts"`).
@@ -240,21 +283,47 @@ Update `backend/src/dotmd/api/service.py`:
   consumes `chunk_id` from `candidate.chunk_id` (previously
   `result.chunk_id`); when `chunk_id is None`, log the ref instead.
 
-Update `backend/src/dotmd/mcp_server.py`:
+Update `backend/src/dotmd/mcp_server.py` (cycle-2 HIGH-2 fix — MCP exposes
+the full `SearchCandidate` contract; no `SearchHit` narrowing model):
 
-- `_format_result(r)` typed as `SearchCandidate`. The MCP `SearchHit`
-  output model gets new optional fields:
-  - `namespace: str | None = None`
-  - `retrieval_kind: str | None = None`
-  - `provider_metadata: dict[str, Any] | None = None`
-  - existing `ref`, `heading`, `snippet`, `score` retained.
-- Population: from a `SearchCandidate`,
-  `SearchHit(ref=c.ref, namespace=c.namespace, retrieval_kind=c.retrieval_kind,
-  heading=c.heading_path or None, snippet=clean(c.snippet),
-  score=round(c.fused_score, 3), provider_metadata=c.provider_metadata)`.
-- Use existing `_collapse_null` json_schema_extra for new optional fields
-  if surfaced in the schema (only those that are `Optional[T]` per
-  existing pattern).
+- **Remove** `class SearchHit(BaseModel)` from `mcp_server.py`. The MCP
+  `search` tool returns `SearchCandidate` records directly (the full envelope
+  shape, including `SearchResponse`, lands in Plan 34-02 task 4 — Plan 34-01
+  ships the change at the per-result level so SearchHit removal is finished
+  here).
+- The MCP `search` tool's existing return type adapter switches from
+  `list[SearchHit]` to `list[SearchCandidate]`. The schema exposed to MCP
+  clients includes every public field of `SearchCandidate`: `ref`,
+  `namespace`, `descriptor_key`, `source_kind`, `retrieval_kind`, `title`,
+  `snippet`, `fused_score`, `can_read`, `can_materialize`, `chunk_id`
+  (nullable), `heading_path` (nullable), `matched_engines`, `provenance`
+  (nullable), `source_native_score` (nullable), `source_native_rank`
+  (nullable), `engine_scores` (nullable), `provider_metadata` (nullable).
+- The previous helper `_format_result(r) -> SearchHit` is removed; its
+  responsibilities (`heading` derivation, score rounding, snippet whitespace
+  cleanup) move into `SearchCandidate` field-level validators where
+  appropriate (`fused_score` rounding stays in the rendering layer because
+  the canonical model preserves full precision; the MCP tool wraps with a
+  thin renderer that calls `model_dump()` and rounds `fused_score` in the
+  serialized payload only).
+- If a transport projection is required for MCP wire-format (e.g. to
+  collapse `null` fields via the existing `_collapse_null`
+  `json_schema_extra` pattern), the projection MUST be **lossless**: every
+  public `SearchCandidate` field appears in the projection (possibly
+  collapsed when `None`), and a serialization round-trip from
+  `SearchCandidate` → projection → JSON → projection → `SearchCandidate`
+  yields a value `== original`. A round-trip test in task 2 (or task 3)
+  pins this; if the implementer cannot ship a lossless projection, the
+  fallback is to expose `SearchCandidate.model_dump()` directly and
+  rely on Pydantic's default JSON encoder.
+
+Critical no-narrowing rules:
+- `rg -n 'class SearchHit\b' backend/src/dotmd` returns no matches.
+- `rg -n 'SearchHit\b' backend/src/dotmd` returns no matches outside
+  comments referencing the removal.
+- The MCP search tool MUST emit `can_read`, `can_materialize`,
+  `source_native_score`, `source_native_rank`, `descriptor_key` whenever
+  those fields are set on the underlying candidate.
 
 Cross-file cleanup:
 - `rg -n 'SearchResult\b' backend/src/dotmd | grep -v test_` must return
@@ -269,11 +338,20 @@ Cross-file cleanup:
 - `backend/src/dotmd/core/models.py` contains `class SearchResponse(BaseModel)`.
 - `backend/src/dotmd/core/models.py` contains `class SourceStatus(BaseModel)`.
 - `backend/src/dotmd/core/models.py` does NOT contain `class SearchResult`.
+- `backend/src/dotmd/core/models.py` `SearchCandidate` declares
+  `descriptor_key: str` (no default) — `rg -n 'descriptor_key:\s*str'
+  backend/src/dotmd/core/models.py` returns at least one match. (cycle-2
+  HIGH-1 marker)
 - `backend/src/dotmd/search/fusion.py` contains `def build_candidates`.
 - `backend/src/dotmd/search/fusion.py` contains `def hydrate_local_engine_results`.
 - `backend/src/dotmd/search/fusion.py` does NOT contain `def build_search_results`.
 - `backend/src/dotmd/api/service.py` does NOT contain `SearchResult`.
-- `backend/src/dotmd/mcp_server.py` `SearchHit` includes `namespace` and `retrieval_kind` fields.
+- `backend/src/dotmd/mcp_server.py` does NOT contain `class SearchHit`
+  (cycle-2 HIGH-2 fix). `rg -n 'class SearchHit\b' backend/src/dotmd`
+  returns no matches.
+- `backend/src/dotmd/mcp_server.py` MCP search tool returns
+  `list[SearchCandidate]` (or `SearchResponse` per Plan 34-02 task 4) —
+  the per-result type annotation is `SearchCandidate` not `SearchHit`.
 - `cd backend && uv run pytest tests/core/test_search_candidate.py -q` exits 0.
 - `cd backend && uv run pyright src/dotmd/core/models.py src/dotmd/search/fusion.py src/dotmd/api/service.py src/dotmd/mcp_server.py tests/core/test_search_candidate.py` exits 0.
 - `rg -n 'class SearchResult\b' backend/src` returns no matches.
@@ -324,6 +402,17 @@ behavior and migrate the inactive-binding test to the new helper name.
   exactly `{"semantic"}` and not `{"semantic", "keyword"}` even when
   `keyword` ranked other refs.
 - Add `test_build_candidates_sets_can_read_true_and_can_materialize_false_for_local`.
+- Add `test_build_candidates_collapse_tiebreak_highest_score_then_lowest_chunk_id`
+  (**cycle-2 MEDIUM fold-in**). Set up two local chunks both resolving to
+  ref `"filesystem:/tmp/a.md"`:
+  - chunk_id=`"c-1"`, semantic_score=0.9, snippet=`"alpha"`.
+  - chunk_id=`"c-2"`, semantic_score=0.8, snippet=`"bravo"`.
+  Assert the resulting `SearchCandidate.chunk_id == "c-1"` and
+  `snippet == "alpha"` (higher score wins). Then flip to equal scores and
+  assert lowest chunk_id wins (`chunk_id == "c-1"`, `snippet == "alpha"`
+  still). Then run with chunk_id=`"c-3"` and `"c-1"` at equal score; assert
+  `chunk_id == "c-1"` (lowest lexicographic). Documents the deterministic
+  tie-break (D-REF-COLLAPSE).
 
 `backend/tests/api/test_service_search.py`:
 - Add `test_local_only_search_returns_searchcandidate` that asserts
@@ -373,15 +462,23 @@ tests) at this commit.
 </verification>
 
 <success_criteria>
-- SEARCH-01 has a single public `SearchCandidate` shape covering local hits.
-- SEARCH-02 has all required fields (`ref`, source identity, title, snippet,
-  retrieval kind, provenance, `can_read`, `can_materialize`, optional
-  source-native score/rank, optional engine_scores, optional
-  provider_metadata).
+- SEARCH-01 has a single public `SearchCandidate` shape covering local hits,
+  exposed at BOTH service and MCP layers (no `SearchHit` narrowing model —
+  cycle-2 HIGH-2).
+- SEARCH-02 has all required fields including `descriptor_key` for source
+  identity (cycle-2 HIGH-1): `ref`, `namespace`, `descriptor_key`,
+  `source_kind`, `retrieval_kind`, `title`, `snippet`, `fused_score`,
+  `can_read`, `can_materialize`, optional `chunk_id`/`heading_path`/
+  `provenance`/`matched_engines`, optional `source_native_score`/
+  `source_native_rank`, optional `engine_scores`, optional
+  `provider_metadata`.
 - SEARCH-03 has rank-only RRF; key migrated from chunk_id to ref;
   per-engine attribution preserved.
 - `SearchResult` is gone from production code; no compat alias.
+- `SearchHit` is gone from MCP server; MCP returns `SearchCandidate` directly.
 - Active-binding gate continues to filter inactive local refs (Phase 27
   invariant preserved).
 - Federated fan-out is NOT yet integrated; that work is owned by Plan 02.
+- Multiple chunks collapsing to one ref use deterministic tie-break
+  (highest fused_score, then lowest chunk_id).
 </success_criteria>

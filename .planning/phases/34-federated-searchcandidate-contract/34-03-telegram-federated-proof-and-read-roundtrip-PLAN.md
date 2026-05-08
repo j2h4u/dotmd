@@ -14,17 +14,27 @@ files_modified:
   - docs/source-adapter-architecture.md
   - docs/source-registry-airweave-mapping.md
   - docs/mcp-telegram-source-contract.md
-autonomous: true
+autonomous: conditional
+autonomous_resolution: |
+  Tasks 0 (preflight), 1, 2, 3, 4 are autonomous. Task 5 (live container
+  smoke) resolves to autonomous=true ONLY IF preflight (Task 0) confirms
+  mcp-telegram daemon exposes search_messages. Otherwise Task 5 runs as
+  autonomous=false (operator-driven) and a coordination follow-up is
+  recorded in the dotMD GSD backlog. (cycle-2 HIGH-8 fix)
 requirements: ["SEARCH-01", "SEARCH-04"]
 requirements_addressed: ["SEARCH-01", "SEARCH-04"]
 must_haves:
   truths:
-    - "D-13: Federated candidates set can_read=True only when the provider exposes read_unit_window. read(ref) for a federated-only hit routes through the lifecycle bundle and provider's read_unit_window, not the local store."
+    - "D-13: Federated candidates set can_read=True only when the provider exposes read_unit_window. Plan 34-03 derives can_read from a runtime capability check on the provider, not a hard-coded literal. (cycle-2 MEDIUM fold-in)"
     - "D-14: No on-demand materialization in Phase 34. can_materialize=False for all candidates. Trickle stays the single write path."
     - "D-15: When read(ref) for a federated-only hit cannot reach the provider, the read returns a clear provider-attributed error with the same source-status attribution as search."
     - "D-16: Phase 34 proves the contract end-to-end with mcp-telegram's SearchMessages. Telegram candidates carry ref=telegram:dialog:<id>:message:<id> and round-trip through read(ref) (live read_unit_window) and drill(ref) without local indexing."
     - "D-17: dotMD never owns the Telegram client. All Telegram FTS, message fetch, and metadata access goes through the existing mcp-telegram daemon socket. The Phase 33 lifecycle bundle is the construction boundary."
     - "D-18: The contract must be generic enough that gmail/slack/notion/voicenotes federated sources land later through descriptor + provider-implementation work only, with no Phase 34 contract edits."
+    - "D-LOCAL-FIRST-TG-READ: read()/drill() for Telegram refs check the local store FIRST. If a Telegram document exists locally with an ACTIVE binding, it routes through the local read path. If it exists locally but binding is INACTIVE, the call raises PermissionError — does NOT fall through to the federated provider. Only refs with NO local-store presence at all route to the federated provider. This preserves the Phase 27 active-binding gate for locally-backed Telegram refs. (cycle-2 HIGH-7 fix)"
+    - "D-RANK-ZERO-BASED: source_native_rank is zero-based for all federated providers. Documented in plan and in docs/source-adapter-architecture.md. (cycle-2 MEDIUM fold-in)"
+    - "D-METADATA-WHITELIST: provider_metadata for Telegram is restricted to {dialog_id, message_id, sender, sent_at, dialog_name}. Phone numbers, session paths, auth tokens are explicitly forbidden. Negative test pins this. (cycle-2 MEDIUM fold-in)"
+    - "D-PREFLIGHT: Live container smoke is conditional on out-of-repo mcp-telegram search_messages endpoint. Task 0 inspects the daemon source and resolves task 5's autonomous flag. (cycle-2 HIGH-8 fix)"
 ---
 
 # Phase 34 Plan 03: Telegram Federated Proof And Read/Drill Round-trip
@@ -46,7 +56,12 @@ container-restart smoke task at the end.
 |---|---:|---|
 | Federated `read(ref)` hits the local store and 404s | HIGH | `service.read(ref)` for any ref the provider's daemon can resolve via `read_unit_window` MUST take the provider path; integration test with non-indexed Telegram message ref pins this. |
 | Daemon-down `read(ref)` returns ambiguous error | HIGH | Provider failure surfaces as `RuntimeError("telegram: ...")` with provider attribution; test pins error message shape. |
-| Phase 27 active-binding gate blocks federated-only reads | HIGH | Federated-only refs never enter the binding gate; `_require_active_source_document` is bypassed when ref is federated-only. |
+| Phase 27 active-binding gate blocks federated-only reads | HIGH | Federated-only refs (NO local-store presence at all) bypass `_require_active_source_document`. **Locally-indexed-but-inactive** Telegram refs do NOT bypass — they raise `PermissionError`. (cycle-2 HIGH-7 fix) |
+| Inactive locally-indexed Telegram ref bypasses Phase 27 binding gate via federated fallback | HIGH | Routing logic checks local store FIRST: active local doc → local path; inactive local doc → PermissionError; absent from local → federated provider. Test `test_inactive_locally_indexed_telegram_ref_does_not_fall_through_to_provider` mocks the provider and asserts `read_unit_window` call_count == 0 for inactive locally-indexed refs. (cycle-2 HIGH-7 fix) |
+| Live container smoke marked autonomous=true masks out-of-repo dependency | HIGH | Plan-level `autonomous: conditional`; Task 0 (preflight) inspects `/opt/docker/mcp-telegram/` source for `search_messages` endpoint and resolves Task 5's autonomous flag. If endpoint absent, Task 5 runs as `autonomous: false` and coordination follow-up filed in dotMD GSD backlog. (cycle-2 HIGH-8 fix) |
+| `can_read=True` hard-coded; future provider without read_unit_window misrepresents capability | MEDIUM | `can_read` derived at construction time from a runtime check on the provider object: `callable(getattr(bundle.provider, "read_unit_window", None))`. Test asserts a stub provider without `read_unit_window` produces candidates with `can_read=False`. (cycle-2 MEDIUM fold-in) |
+| `provider_metadata` leaks credentials, phone numbers, session paths | MEDIUM | Whitelist enforced at construction: only `{dialog_id, message_id, sender, sent_at, dialog_name}` are allowed. Negative test asserts `phone`, `auth_token`, `session_path`, `api_id`, `api_hash` keys NEVER appear in any candidate's `provider_metadata`. (cycle-2 MEDIUM fold-in) |
+| `source_native_rank` indexing convention undocumented | LOW | Phase 34 fixes rank as zero-based for all federated providers. Documented in `docs/source-adapter-architecture.md` Phase 34 section. Test pins ranks `[0, 1, 2]` for a 3-hit response. |
 | `dotmd` unintentionally imports Telethon, opens Telegram API directly, or queries mcp-telegram's private SQLite | HIGH | Static scan asserts no `Telethon`, no direct Telegram API import, no `sqlite.*telegram` query in Phase 34 code paths. |
 | Provider-side daemon `search_messages` method missing → live smoke fails | MEDIUM | Smoke task `autonomous: false` if endpoint absent. PR description includes the coordination decision. Coordination ticket / note added to mcp-telegram docs. |
 | Federated candidates accidentally written into local index as side effect of `read(ref)` | HIGH | Test asserts no chunks/embeddings/FTS rows are added during a federated `read(ref)` call (count rows before/after). |
@@ -56,6 +71,94 @@ container-restart smoke task at the end.
 </threat_model>
 
 <tasks>
+<task id="0" type="standard">
+<name>Preflight — verify mcp-telegram daemon search_messages endpoint</name>
+<title>Preflight — verify mcp-telegram daemon search_messages endpoint</title>
+<read_first>
+- `/opt/docker/mcp-telegram/AGENTS.md` (project notes for mcp-telegram)
+- `/opt/docker/mcp-telegram/` (source files — read-only inspection)
+- `.planning/phases/34-federated-searchcandidate-contract/34-CONTEXT.md`
+</read_first>
+<files>
+- `.planning/phases/34-federated-searchcandidate-contract/34-PREFLIGHT.md` (output written here)
+</files>
+<action>
+**Cycle-2 HIGH-8 fix.** Determine whether the mcp-telegram daemon already
+exposes `search_messages` as a socket method, and resolve Task 5's
+`autonomous` flag accordingly.
+
+Steps:
+
+1. Inspect `/opt/docker/mcp-telegram/` source files (read-only). Look for
+   any of:
+   - A method named `search_messages` registered with the daemon socket
+     dispatcher.
+   - Documentation in `/opt/docker/mcp-telegram/AGENTS.md` or
+     `/opt/docker/mcp-telegram/README.md` mentioning `search_messages`.
+   - A schema or routing table that lists supported daemon methods.
+2. Optionally probe the live daemon socket if it's already running:
+   ```bash
+   docker exec mcp-telegram /bin/sh -c \
+     'echo "{\"method\":\"search_messages\",\"query\":\"test\",\"limit\":1}" | \
+      nc -U /var/run/mcp-telegram.sock'
+   ```
+   - If the daemon responds with a structured `{"ok": true, "data": {...}}`
+     or even a structured error like `{"ok": false, "error": "..."}`,
+     the endpoint exists.
+   - If the daemon responds with `unknown method` or similar, the endpoint
+     is absent.
+   - If the socket path is different, locate the actual socket via
+     `/opt/docker/mcp-telegram/` config and adapt.
+3. Write findings to
+   `.planning/phases/34-federated-searchcandidate-contract/34-PREFLIGHT.md`
+   with frontmatter:
+   ```yaml
+   ---
+   preflight: search_messages
+   resolved: <ISO-8601 timestamp>
+   endpoint_present: <true|false>
+   evidence: |
+     <2-3 line summary of what was inspected>
+   ---
+   ```
+   Plus a paragraph explaining what was found and where.
+4. **Resolve Task 5 autonomous flag:**
+   - If `endpoint_present=true`: Task 5 stays `autonomous: true`.
+   - If `endpoint_present=false`: Task 5 changes to `autonomous: false`
+     before execution; an entry is added to the dotMD GSD backlog (NOT
+     beads — per project memory `feedback_no_beads.md`) titled "Coordinate
+     mcp-telegram `search_messages` endpoint" with a brief description and
+     a link back to this preflight file.
+5. The dotMD-side Plan 34-03 implementation tasks (1, 2, 3, 4) proceed
+   regardless — they use `FakeTelegramSourceClient` for unit/integration
+   coverage, which is independent of the live daemon. Only Task 5 (live
+   smoke) depends on the daemon endpoint.
+
+This task is `autonomous: true` — it's a read-only inspection of files the
+dotmd container has access to plus an optional probe of an already-running
+daemon socket.
+</action>
+<acceptance_criteria>
+- `.planning/phases/34-federated-searchcandidate-contract/34-PREFLIGHT.md` exists with the structured frontmatter shown above.
+- `endpoint_present` field is either `true` or `false` (not missing or
+  ambiguous).
+- If `endpoint_present=false`, a backlog entry is recorded in
+  `.planning/BACKLOG.md` (or wherever GSD backlog lives in this repo)
+  with the coordination follow-up. (`rg -n 'mcp-telegram.*search_messages'
+  .planning/BACKLOG.md` returns at least one match.)
+- Task 5's `autonomous` field in this PLAN.md is updated to match the
+  preflight finding before Task 5 begins execution.
+</acceptance_criteria>
+<verify>
+`test -f .planning/phases/34-federated-searchcandidate-contract/34-PREFLIGHT.md`
+`grep -E '^endpoint_present:\s*(true|false)' .planning/phases/34-federated-searchcandidate-contract/34-PREFLIGHT.md`
+</verify>
+<done>
+Daemon endpoint presence resolved; Task 5's autonomous flag set
+accordingly; coordination follow-up filed if endpoint absent.
+</done>
+</task>
+
 <task id="1" type="tdd">
 <name>Add Telegram federated provider tests first</name>
 <title>Add Telegram federated provider tests first</title>
@@ -115,16 +218,43 @@ Add tests in `backend/tests/ingestion/test_telegram_provider.py`:
   - `len(result) == 3`.
   - Each candidate has
     `ref == f"telegram:dialog:{dialog_id}:message:{message_id}"`.
-  - `c.namespace == "telegram"`, `c.source_kind == "chat"`,
-    `c.retrieval_kind == "tg:fts"`.
+  - `c.namespace == "telegram"`, `c.descriptor_key == "telegram"`,
+    `c.source_kind == "chat"`, `c.retrieval_kind == "tg:fts"`.
+    (descriptor_key new per cycle-2 HIGH-1)
   - `c.title == "Project Chat"`.
   - `c.snippet` is non-empty and starts with the message text.
-  - `c.can_read is True`, `c.can_materialize is False`.
+  - `c.can_read is True` (derived — provider has `read_unit_window`),
+    `c.can_materialize is False`.
   - `c.source_native_score == 0.93` for the first hit.
   - `c.source_native_rank == 0` for the first hit, `1` for the second,
-    `2` for the third.
-  - `c.provider_metadata` is a dict containing
-    `"dialog_id"`, `"message_id"`, `"sender"`, `"sent_at"`.
+    `2` for the third (zero-based per D-RANK-ZERO-BASED).
+  - `c.provider_metadata` is a dict whose keys are EXACTLY a subset of
+    `{"dialog_id", "message_id", "sender", "sent_at", "dialog_name"}`
+    (D-METADATA-WHITELIST).
+- `test_search_native_can_read_derived_from_provider_capability` (**cycle-2
+  MEDIUM fold-in for can_read derivation**) — construct a stub provider
+  whose object does NOT have a `read_unit_window` attribute (delete it
+  via `del fake._client.read_source_unit_window` or use a lighter stub);
+  call `provider.search_native("foo", 10)`; assert every candidate has
+  `c.can_read is False`. Then add `read_unit_window` back; assert
+  `c.can_read is True`. Pins that `can_read` is a runtime capability
+  check, not a hard-coded literal.
+- `test_search_native_provider_metadata_whitelist` (**cycle-2 MEDIUM
+  fold-in**) — fake client returns hits that include EXTRA fields like
+  `"phone_number": "+1234..."`, `"auth_token": "abc"`,
+  `"session_path": "/tmp/x"`, `"api_id": 12345`, `"api_hash": "deadbeef"`.
+  Call `provider.search_native("foo", 10)`. For every candidate, assert:
+  - `c.provider_metadata` keys are EXACTLY a subset of
+    `{"dialog_id", "message_id", "sender", "sent_at", "dialog_name"}`.
+  - None of `{"phone_number", "auth_token", "session_path", "api_id",
+    "api_hash"}` appear as keys in `c.provider_metadata`.
+  Defense-in-depth: even if the daemon ever leaks credentials in its
+  payload, the dotMD provider strips them before constructing the
+  candidate.
+- `test_search_native_source_native_rank_is_zero_based` (**cycle-2 MEDIUM
+  fold-in**) — fake client returns 5 hits; assert
+  `[c.source_native_rank for c in result] == [0, 1, 2, 3, 4]`. Pins the
+  zero-based convention.
 - `test_search_native_handles_empty_hits` — fake client returns
   `{"hits": []}`; assert `provider.search_native("foo", 10) == []`.
 - `test_search_native_propagates_daemon_failure` — fake client raises
@@ -201,37 +331,57 @@ In `UnixSocketTelegramSourceClient`:
 
 In `TelegramApplicationSourceProvider`:
 
-- Add method (synchronous; the Plan 02 fan-out helper wraps in
+- Define a module-level constant for the metadata whitelist (cycle-2
+  MEDIUM fold-in):
+  ```python
+  TELEGRAM_PROVIDER_METADATA_KEYS: frozenset[str] = frozenset({
+      "dialog_id",
+      "message_id",
+      "sender",
+      "sent_at",
+      "dialog_name",
+  })
+  ```
+- Add method (synchronous; the Plan 02 `_run_federated_engine` wraps in
   `asyncio.to_thread`):
   ```python
   def search_native(self, query: str, limit: int) -> list[SearchCandidate]:
       payload = self._client.search_messages(query=query, limit=limit)
       hits = payload.get("hits", [])
+      # cycle-2 MEDIUM fold-in: derive can_read from provider capability,
+      # not a hard-coded True literal. Future providers without
+      # read_unit_window emit candidates with can_read=False.
+      can_read_local = callable(
+          getattr(self._client, "read_source_unit_window", None),
+      )
       candidates: list[SearchCandidate] = []
       for rank, hit in enumerate(hits):
           dialog_id = _coerce_int(hit["dialog_id"])
           message_id = _coerce_int(hit["message_id"])
           ref = f"telegram:dialog:{dialog_id}:message:{message_id}"
           text = str(hit.get("text", ""))
+          # cycle-2 MEDIUM fold-in: whitelist provider_metadata keys to
+          # prevent credentials/auth tokens from leaking into the public
+          # contract.
+          metadata = {
+              key: hit[key]
+              for key in TELEGRAM_PROVIDER_METADATA_KEYS
+              if key in hit and hit[key] is not None
+          }
           candidates.append(SearchCandidate(
               ref=ref,
               namespace="telegram",
+              descriptor_key="telegram",  # cycle-2 HIGH-1
               source_kind="chat",
               retrieval_kind="tg:fts",
               title=hit.get("dialog_name"),
               snippet=text,
               fused_score=0.0,
-              can_read=True,
+              can_read=can_read_local,  # cycle-2 MEDIUM (derived)
               can_materialize=False,
               source_native_score=hit.get("score"),
-              source_native_rank=rank,
-              provider_metadata={
-                  "dialog_id": dialog_id,
-                  "message_id": message_id,
-                  "sender": hit.get("sender"),
-                  "sent_at": hit.get("sent_at"),
-                  "dialog_name": hit.get("dialog_name"),
-              },
+              source_native_rank=rank,  # zero-based per D-RANK-ZERO-BASED
+              provider_metadata=metadata or None,
           ))
       return candidates
   ```
@@ -258,6 +408,15 @@ description):
 - `backend/src/dotmd/ingestion/telegram_provider.py` `TelegramSourceClientProtocol` declares `def search_messages`.
 - `backend/src/dotmd/ingestion/telegram_provider.py` `UnixSocketTelegramSourceClient.search_messages` issues a `{"method": "search_messages"}` daemon request.
 - `backend/src/dotmd/ingestion/telegram_provider.py` `TelegramApplicationSourceProvider.search_native` returns `list[SearchCandidate]`.
+- `backend/src/dotmd/ingestion/telegram_provider.py` defines
+  `TELEGRAM_PROVIDER_METADATA_KEYS` whitelist (cycle-2 MEDIUM fold-in
+  marker — `rg -n 'TELEGRAM_PROVIDER_METADATA_KEYS' backend/src/dotmd/ingestion/telegram_provider.py` returns matches).
+- `backend/src/dotmd/ingestion/telegram_provider.py` `search_native`
+  derives `can_read` from a runtime capability check on the client
+  (cycle-2 MEDIUM marker — `rg -n 'callable\(getattr\(.*read_source_unit_window' backend/src/dotmd/ingestion/telegram_provider.py` returns matches).
+- `backend/src/dotmd/ingestion/telegram_provider.py` `search_native`
+  passes `descriptor_key="telegram"` to every constructed
+  `SearchCandidate` (cycle-2 HIGH-1 marker — `rg -n 'descriptor_key="telegram"' backend/src/dotmd/ingestion/telegram_provider.py` returns matches).
 - `backend/src/dotmd/ingestion/telegram_provider.py` does NOT contain `Telethon` or `telethon`.
 - `backend/src/dotmd/ingestion/telegram_provider.py` does NOT contain direct sqlite cursors over mcp-telegram tables.
 - `cd backend && uv run pytest tests/ingestion/test_telegram_provider.py -q` exits 0.
@@ -298,6 +457,7 @@ In `backend/tests/ingestion/test_telegram_ingestion.py`:
   fake client's `search_messages` returns one hit at
   `telegram:dialog:42:message:99`. The fake client's
   `read_source_unit_window` returns a window with the corresponding unit.
+  The local store has NO Telegram document for this ref (truly federated).
   Run `service.search("kantine")` → assert one Telegram candidate.
   Then `service.read("telegram:dialog:42:message:99")` → assert the
   returned text matches the daemon payload (the federated read path).
@@ -314,11 +474,39 @@ In `backend/tests/ingestion/test_telegram_ingestion.py`:
   `service.read("telegram:dialog:42:message:99")` raises `RuntimeError`
   whose message contains `"telegram"` (provider-attributed) and the
   underlying daemon failure text.
-- `test_federated_read_does_not_invoke_active_binding_gate` — assert
-  reading a federated-only Telegram ref does NOT call
-  `_require_active_source_document` (mock that helper; assert call_count
-  zero for the federated path). Local-ref read continues to call it
-  (regression).
+- `test_truly_federated_telegram_ref_routes_to_provider` (**cycle-2
+  HIGH-7 fix — POSITIVE case**) — `service.read(ref)` for a Telegram ref
+  with NO local-store presence at all. Mock `provider.read_unit_window`.
+  Assert the provider WAS called once with the right unit_ref. Assert
+  `_require_active_source_document` is NOT called (federated path bypasses
+  the gate when ref is truly absent from local store).
+- `test_inactive_locally_indexed_telegram_ref_does_not_fall_through_to_provider`
+  (**cycle-2 HIGH-7 fix — CRITICAL NEGATIVE case**) — set up `DotMDService`
+  where the local store contains a Telegram document for ref
+  `telegram:dialog:42:message:99` BUT its source binding is INACTIVE
+  (Phase 27 visibility gate semantics). Mock the Telegram provider's
+  `read_unit_window`. Call `service.read("telegram:dialog:42:message:99")`.
+  Assert:
+  - The call raises `PermissionError` (or whatever error type the Phase
+    27 gate raises today; if it's a different type like `LookupError`,
+    pin THAT type — preserve existing semantics).
+  - The provider's `read_unit_window` was NOT called (call_count == 0).
+    The federated path MUST NOT be a fallback for inactive local refs.
+  - This is the load-bearing test for cycle-2 HIGH-7. If this test fails,
+    the active-binding gate is bypassed and Phase 27 invariant is broken.
+- `test_active_locally_indexed_telegram_ref_uses_local_path` (**cycle-2
+  HIGH-7 fix — POSITIVE local case**) — local store has the document
+  with ACTIVE binding. Call `service.read(ref)`. Assert the provider's
+  `read_unit_window` was NOT called (local path used). Assert
+  `_require_active_source_document` WAS called and returned the local
+  document.
+- `test_federated_read_helper_naming` — verify the routing helper is
+  named clearly:
+  - `_resolve_telegram_read_path(ref) -> TelegramReadPath` returns one
+    of: `LocalActive(document)`, `LocalInactive()`,
+    `FederatedOnly()`. The `read()` and `drill()` methods dispatch on
+    this enum. `rg -n 'TelegramReadPath\.|class TelegramReadPath\b'
+    backend/src/dotmd/api/service.py` returns matches.
 
 In `backend/tests/api/test_service_search.py`:
 
@@ -370,25 +558,84 @@ implementation.
 - `backend/src/dotmd/api/service.py`
 </files>
 <action>
-Update `DotMDService.read` and `DotMDService.drill` to dispatch
-federated-only Telegram refs through the lifecycle bundle's provider
-without calling the active-binding gate.
+Update `DotMDService.read` and `DotMDService.drill` to use a
+**local-first three-way routing** that preserves the Phase 27 active-binding
+gate for locally-indexed Telegram refs (cycle-2 HIGH-7 fix).
 
 In `service.py`:
 
-- Refactor `read`:
+- Add a small enum + helper to classify the routing path:
+  ```python
+  from enum import Enum
+  from dataclasses import dataclass
+
+  class TelegramReadPath(Enum):
+      LOCAL_ACTIVE = "local_active"
+      LOCAL_INACTIVE = "local_inactive"
+      FEDERATED_ONLY = "federated_only"
+
+  @dataclass(frozen=True)
+  class _TelegramRouteResult:
+      path: TelegramReadPath
+      document: SourceDocument | None  # only set for LOCAL_ACTIVE
+
+  def _resolve_telegram_read_path(self, ref: str) -> _TelegramRouteResult:
+      """cycle-2 HIGH-7: classify a Telegram ref before dispatching read/drill.
+
+      LOCAL_ACTIVE: ref exists in local store with an active binding.
+                    → local read path (existing).
+      LOCAL_INACTIVE: ref exists in local store but binding is inactive.
+                      → MUST raise PermissionError; do NOT fall back to provider.
+      FEDERATED_ONLY: ref has no local-store presence at all.
+                      → federated provider path.
+      """
+      # Local-presence check independent of binding active-ness.
+      doc = self._maybe_local_source_document(ref)  # returns None if not in local store
+      if doc is None:
+          return _TelegramRouteResult(TelegramReadPath.FEDERATED_ONLY, None)
+      if not self._is_source_binding_active(doc):
+          return _TelegramRouteResult(TelegramReadPath.LOCAL_INACTIVE, None)
+      return _TelegramRouteResult(TelegramReadPath.LOCAL_ACTIVE, doc)
+  ```
+  - `_maybe_local_source_document(ref)` is a new helper that returns
+    `None` if the ref has no local document, regardless of binding status.
+    It does the same lookup as `_require_active_source_document` but
+    without the binding gate and without raising when missing.
+  - `_is_source_binding_active(doc)` wraps the existing Phase 27 binding
+    check (use the same predicate `_require_active_source_document` uses
+    internally; expose it as a separate helper to keep this routing
+    function pure).
+- Refactor `read` (cycle-2 HIGH-7 — local-first three-way dispatch):
   ```python
   def read(self, ref: str, start: int = 0, end: int | None = None) -> ReadPayload:
       if _is_telegram_message_ref(ref):
+          route = self._resolve_telegram_read_path(ref)
+          if route.path is TelegramReadPath.LOCAL_ACTIVE:
+              # Phase 27 invariant — local read path with active binding.
+              assert route.document is not None
+              return self._read_local_telegram_chunks(route.document, start, end)
+          if route.path is TelegramReadPath.LOCAL_INACTIVE:
+              # Phase 27 invariant — must NOT fall through to provider.
+              raise PermissionError(
+                  f"Source ref {ref} exists locally but is not active",
+              )
+          # FEDERATED_ONLY — provider path.
           return self._read_telegram_via_provider(ref, start, end)
       document = self._require_active_source_document(ref)
-      ...  # existing local path unchanged
+      ...  # existing non-Telegram local path unchanged
   ```
-  - `_is_telegram_message_ref(ref)` already exists (lines 129-131).
-- Refactor `drill`:
+- Refactor `drill` with the same three-way routing:
   ```python
   def drill(self, ref: str) -> DrillPayload:
       if _is_telegram_message_ref(ref):
+          route = self._resolve_telegram_read_path(ref)
+          if route.path is TelegramReadPath.LOCAL_ACTIVE:
+              assert route.document is not None
+              return self._drill_local_telegram_message(route.document)
+          if route.path is TelegramReadPath.LOCAL_INACTIVE:
+              raise PermissionError(
+                  f"Source ref {ref} exists locally but is not active",
+              )
           return self._drill_telegram_via_provider(ref)
       document = self._require_active_source_document(ref)
       ...
@@ -409,8 +656,10 @@ In `service.py`:
     the existing `_read_telegram_message` shape (which already routes to
     the provider for indexed Telegram refs); the federated path may reuse
     that helper directly if it does not depend on local provenance.
-  - **Critically**, do NOT call `self._require_active_source_document` on
-    the federated path. Active-binding gate is local-store-only.
+  - **Critically**, this helper is reachable ONLY through the
+    `FEDERATED_ONLY` branch above. It MUST NOT be called for
+    `LOCAL_INACTIVE` refs — the routing function is the gate, and the
+    HIGH-7 test pins this with a `read_unit_window` call_count assertion.
 
 - New helper `_drill_telegram_via_provider(ref) -> DrillPayload`:
   - Same resolution as above, then build a `DrillPayload` using the
@@ -435,13 +684,25 @@ If duplication exists, consolidate so the federated-only and ingested
 paths share one provider object — both go through the same socket.
 </action>
 <acceptance_criteria>
-- `backend/src/dotmd/api/service.py` `read` dispatches Telegram refs
-  through the new federated helper without calling
-  `_require_active_source_document`.
-- `backend/src/dotmd/api/service.py` `drill` does the same.
+- `backend/src/dotmd/api/service.py` defines
+  `class TelegramReadPath(Enum)` with values `LOCAL_ACTIVE`,
+  `LOCAL_INACTIVE`, `FEDERATED_ONLY`. (cycle-2 HIGH-7 marker — `rg -n
+  'class TelegramReadPath\b' backend/src/dotmd/api/service.py` returns
+  matches.)
+- `backend/src/dotmd/api/service.py` defines
+  `_resolve_telegram_read_path(self, ref) -> _TelegramRouteResult`.
+- `backend/src/dotmd/api/service.py` `read` and `drill` use the
+  three-way routing: LOCAL_ACTIVE → local path; LOCAL_INACTIVE → raise
+  PermissionError; FEDERATED_ONLY → provider path. (`rg -n
+  'TelegramReadPath\.' backend/src/dotmd/api/service.py` returns matches
+  in both `read` and `drill`.)
 - `backend/src/dotmd/api/service.py` `_read_telegram_via_provider` and
-  `_drill_telegram_via_provider` exist (or `_read_telegram_message` and
-  `_drill_telegram_message` are refactored to be the federated path).
+  `_drill_telegram_via_provider` exist and are reachable ONLY from the
+  FEDERATED_ONLY branch (no other call sites except tests).
+- `backend/src/dotmd/api/service.py` defines
+  `_maybe_local_source_document(self, ref)` (does NOT raise when ref
+  absent) and `_is_source_binding_active(self, doc)` helpers used by
+  `_resolve_telegram_read_path`.
 - `cd backend && uv run pytest tests/ingestion/test_telegram_ingestion.py tests/api/test_service_search.py -q` exits 0.
 - `cd backend && uv run pyright src/dotmd/api/service.py tests/ingestion/test_telegram_ingestion.py tests/api/test_service_search.py` exits 0.
 - `rg -n 'self\._telegram_provider' backend/src/dotmd/api/service.py` shows the provider attribute is initialized from `self._lifecycle_bundles` (or via Phase 33 lifecycle factory).
@@ -449,7 +710,9 @@ paths share one provider object — both go through the same socket.
 <verify>
 `cd backend && uv run pytest tests/ingestion/test_telegram_ingestion.py tests/api/test_service_search.py -q`
 `cd backend && uv run pyright src/dotmd/api/service.py tests/ingestion/test_telegram_ingestion.py tests/api/test_service_search.py`
-`rg -n '_require_active_source_document' backend/src/dotmd/api/service.py | grep -v 'def _require_active'` — assert call sites only happen on the local path; no call on the Telegram federated branch.
+`rg -n 'class TelegramReadPath\b' backend/src/dotmd/api/service.py` (must return matches — cycle-2 HIGH-7 marker)
+`cd backend && uv run pytest tests/ingestion/test_telegram_ingestion.py -q -k 'inactive_locally_indexed_telegram_ref_does_not_fall_through_to_provider'` exits 0 (load-bearing HIGH-7 test).
+`rg -n '_require_active_source_document' backend/src/dotmd/api/service.py | grep -v 'def _require_active'` — assert call sites only happen on the non-Telegram local path; the Telegram dispatcher uses `_resolve_telegram_read_path` instead.
 </verify>
 <done>
 `read(ref)` / `drill(ref)` for federated-only Telegram refs route through
@@ -459,9 +722,21 @@ errors are provider-attributed.
 </task>
 
 <task id="5" type="standard">
-<name>Update docs and run live container smoke</name>
-<title>Update docs and run live container smoke</title>
+<name>Update docs and run live container smoke (autonomous resolved by Task 0 preflight)</name>
+<title>Update docs and run live container smoke (autonomous resolved by Task 0 preflight)</title>
+<autonomous_note>
+This task's autonomous flag is **conditional** on Task 0 (preflight)
+findings. cycle-2 HIGH-8 fix:
+- If `34-PREFLIGHT.md` reports `endpoint_present: true` →
+  `autonomous: true` (run live smoke end-to-end).
+- If `34-PREFLIGHT.md` reports `endpoint_present: false` →
+  `autonomous: false` (operator-driven; coordination follow-up filed in
+  dotMD GSD backlog before Task 5 is marked done).
+The dotMD-side autonomous portions (docs updates, sub-steps 1-4) run
+regardless; only the live MCP smoke depends on the daemon endpoint.
+</autonomous_note>
 <read_first>
+- `.planning/phases/34-federated-searchcandidate-contract/34-PREFLIGHT.md` (cycle-2 HIGH-8 — reads autonomous resolution from preflight)
 - `docs/source-adapter-architecture.md`
 - `docs/source-registry-airweave-mapping.md`
 - `docs/mcp-telegram-source-contract.md`
@@ -479,14 +754,34 @@ Update three docs and run the live container smoke.
 `docs/source-adapter-architecture.md`:
 - Add a "Phase 34 Federated Search" section describing:
   - `SearchCandidate` / `SearchResponse` / `SourceStatus` envelope.
+  - Public `descriptor_key` field (cycle-2 HIGH-1) — distinct from
+    `source_kind`; identifies the source descriptor uniquely.
   - Always-on fan-out across `FEDERATED_SEARCH`-capable bundles.
-  - Per-source soft timeout (4s default) and soft-skip semantics.
-  - Federated `read(ref)` routing through `read_unit_window` without local
-    indexing.
+  - Local engines run sequentially; only federated providers fan out in
+    parallel (cycle-2 HIGH-4 D-LOCAL-SEQUENTIAL).
+  - `search_async` is the canonical async public method; sync `search()`
+    is a CLI/test wrapper that fails loudly inside a running event loop
+    (cycle-2 HIGH-5 D-ASYNC-CANONICAL).
+  - Per-source soft timeout (4s default) applies ONLY to federated
+    providers; local engines have no soft timeout.
+  - Lifecycle build failures per-source are caught and surfaced as
+    persistent SourceStatus(status="error") — service init never crashes
+    on a single misconfigured source (cycle-2 HIGH-6 D-LIFECYCLE-GRACEFUL).
+  - **Federated `read(ref)` routing — local-first three-way dispatch
+    (cycle-2 HIGH-7):**
+    - LOCAL_ACTIVE: ref exists in local store with active binding →
+      local read path.
+    - LOCAL_INACTIVE: ref exists in local store, binding inactive →
+      `PermissionError`. Phase 27 visibility gate is preserved.
+    - FEDERATED_ONLY: ref absent from local store entirely → provider
+      `read_unit_window`.
   - Mark `can_materialize=False` as the Phase 34 invariant; materialization
     deferred.
   - Document the `tg:fts` engine name convention; future federated engines
     follow `<namespace>:<retrieval_kind>` shape.
+  - **`source_native_rank` is zero-based** for all federated providers.
+    A 5-hit response carries ranks `[0, 1, 2, 3, 4]`. Documented as
+    convention; code enforces (`enumerate(hits)`).
 
 `docs/source-registry-airweave-mapping.md`:
 - Mark `federated_search` capability as Phase 34 implemented for
@@ -501,33 +796,70 @@ Update three docs and run the live container smoke.
     `{"ok": true, "data": {"hits": [{"dialog_id": ..., "message_id": ...,
     "text": ..., "score": ..., "sender": ..., "sent_at": ...,
     "dialog_name": ...}]}}`.
+  - **`source_native_rank` is zero-based** — first hit has rank 0.
+  - **`provider_metadata` whitelist** (cycle-2 MEDIUM fold-in): only
+    `{dialog_id, message_id, sender, sent_at, dialog_name}` are surfaced.
+    Phone numbers, auth tokens, session paths, api_id, api_hash MUST
+    NEVER appear in `provider_metadata` even if the daemon ever leaks
+    them in its payload — dotMD strips them at construction.
+  - **Read routing local-first** (cycle-2 HIGH-7): dotMD checks the
+    local store FIRST for any Telegram ref. Locally-indexed-but-inactive
+    refs raise `PermissionError`; only refs absent from the local store
+    route through `read_unit_window`.
   - Note: this section reflects the **dotMD-side expectation**. If the
     mcp-telegram daemon does not yet expose `search_messages`, the
-    coordination item is recorded in the dotMD backlog (no beads ticket
-    per project memory).
+    coordination item is recorded in the dotMD GSD backlog (no beads
+    ticket per project memory `feedback_no_beads.md`). Task 0 (preflight)
+    resolves this state before Task 5 begins.
 
-Live container smoke (operator step — `autonomous: false` if mcp-telegram
-daemon `search_messages` endpoint is not available):
+Live container smoke — autonomous flag resolved from
+`34-PREFLIGHT.md.endpoint_present` (cycle-2 HIGH-8 fix):
 
-1. `docker compose restart dotmd` (bind-mounted source — no rebuild).
-2. From a host shell:
+**Pre-execution gate:** Read `endpoint_present` from
+`.planning/phases/34-federated-searchcandidate-contract/34-PREFLIGHT.md`.
+- `endpoint_present: true` → run live smoke as `autonomous: true`.
+- `endpoint_present: false` → SKIP live MCP probe; mark Task 5 sub-step 5
+  as `autonomous: false` and record coordination follow-up in dotMD GSD
+  backlog. Task 5 is still considered done after sub-steps 1-4 (docs)
+  and the backlog entry are recorded.
+- If `34-PREFLIGHT.md` is missing entirely, abort Task 5 — Task 0 must
+  run first.
+
+Sub-steps (gated by preflight):
+
+1. **(autonomous=true)** Update the three docs above.
+2. **(autonomous=true regardless of endpoint)** `docker compose restart
+   dotmd` (bind-mounted source — no rebuild).
+3. **(conditional on endpoint_present=true)** From a host shell:
    ```bash
    uv run python -m mcp.client.stdio_test --command "docker exec -i dotmd dotmd mcp" \
      --tool search --args '{"query": "kantine", "top_k": 5}'
    ```
    (or equivalent MCP test harness already used for Phase 33 smoke.)
-3. Confirm the response shape: `{"results": [...], "source_status":
-   [{"name": "semantic", ...}, {"name": "keyword", ...},
-   {"name": "graph_direct", ...}, {"name": "tg:fts", ...}]}`.
-4. If at least one Telegram ref appears in `results`, run
-   `read(ref)` on that ref and confirm the daemon-sourced text comes
-   back without a local-index 404.
-5. If `tg:fts` reports `status="error"` because the daemon endpoint is
-   absent, mark the smoke task complete with `autonomous: false` and
-   record the coordination follow-up in the PR description.
+4. **(conditional)** Confirm the response shape: `{"candidates": [...],
+   "source_status": [{"name": "semantic", ...}, {"name": "keyword", ...},
+   {"name": "graph_direct", ...}, {"name": "tg:fts", ...}]}` (cycle-2
+   HIGH-2 — `candidates` not `results`).
+5. **(conditional)** If at least one Telegram ref appears in
+   `candidates`, run `read(ref)` on that ref and confirm the
+   daemon-sourced text comes back without a local-index 404. Also run
+   `drill(ref)` and confirm the metadata payload.
+6. **(autonomous=false fallback)** If `endpoint_present=false` from
+   preflight: append a coordination entry to `.planning/BACKLOG.md`:
+   ```markdown
+   ## Coordinate mcp-telegram `search_messages` endpoint
 
-If the smoke fails because of a real bug (not a missing daemon endpoint),
-file a Phase 34 bug, do NOT mark this task done.
+   Phase 34 Plan 03 needs the mcp-telegram daemon to expose a
+   `search_messages` daemon-socket method. dotMD-side implementation
+   ships unblocked via `FakeTelegramSourceClient`, but live cross-repo
+   smoke is gated on this endpoint. See
+   `.planning/phases/34-federated-searchcandidate-contract/34-PREFLIGHT.md`
+   for the preflight finding. Owner: operator decides — coordinate with
+   `/opt/docker/mcp-telegram/` maintainer or build the endpoint locally.
+   ```
+
+If the live smoke fails because of a real bug (not a missing daemon
+endpoint), file a Phase 34 bug, do NOT mark this task done.
 </action>
 <acceptance_criteria>
 - `docs/source-adapter-architecture.md` contains a "Phase 34" or
@@ -577,8 +909,20 @@ passed end-to-end or recorded the daemon-coordination follow-up.
   goes through the existing daemon socket.
 - D-18 generic-enough invariant validated: adding Telegram as the second
   federated provider (after the Plan 02 stub) required ZERO edits to
-  `SearchCandidate`, `SearchResponse`, `fanout_search`, or
+  `SearchCandidate`, `SearchResponse`, `fanout_federated`, or
   `FederatedSearchProviderProtocol`. Future gmail/slack/notion lands the
   same way.
-- mcp-telegram daemon coordination state recorded in PR description.
+- **D-LOCAL-FIRST-TG-READ** (cycle-2 HIGH-7): Phase 27 active-binding
+  gate is preserved for locally-indexed Telegram refs. Inactive locally-
+  indexed refs raise `PermissionError`; only refs absent from the local
+  store route to the federated provider.
+- **D-RANK-ZERO-BASED** (cycle-2 MEDIUM): `source_native_rank` documented
+  as zero-based; tests pin `[0, 1, 2, ...]` for federated responses.
+- **D-METADATA-WHITELIST** (cycle-2 MEDIUM): Telegram `provider_metadata`
+  restricted to `{dialog_id, message_id, sender, sent_at, dialog_name}`;
+  negative test pins absence of credential fields.
+- **D-PREFLIGHT** (cycle-2 HIGH-8): mcp-telegram daemon coordination
+  state recorded in `34-PREFLIGHT.md`; Task 5's autonomous flag resolved
+  from preflight finding before execution; coordination follow-up filed
+  in dotMD GSD backlog if endpoint absent.
 </success_criteria>
