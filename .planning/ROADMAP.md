@@ -1417,7 +1417,7 @@ registry entries, typed config, credentials, cursor state, and runtime helpers.
 **Requirements:** LIFE-01, LIFE-02, LIFE-03, LIFE-04
 **Depends on:** Phase 32
 **Backlog source:** 999.27
-**Plans:** 0/0 plans complete
+**Plans:** 0/3 plans complete
 
 Success criteria:
 1. Source runtimes are built through one lifecycle/factory boundary.
@@ -1425,6 +1425,16 @@ Success criteria:
    reads inside adapters.
 3. Cursor commits happen only after local persistence succeeds.
 4. Filesystem and Telegram construction paths use the lifecycle boundary.
+
+Plans:
+**Wave 1**
+- [ ] 33-01-lifecycle-runtime-bundle-PLAN.md — Lifecycle runtime bundle contract
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 33-02-filesystem-lifecycle-migration-PLAN.md — Filesystem lifecycle migration
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 33-03-telegram-lifecycle-and-cursor-boundary-PLAN.md — Telegram lifecycle and cursor boundary
 
 ---
 
