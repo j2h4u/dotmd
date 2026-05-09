@@ -17,7 +17,10 @@ from dotmd.storage.metadata import SQLiteMetadataStore
 def _get_service(tmp_path: Path):  # type: ignore[no-untyped-def]
     from dotmd.api.service import DotMDService
     from dotmd.core.config import Settings
-    settings = Settings(index_dir=tmp_path, embedding_url="http://localhost:8088")
+    # Explicitly disable Telegram socket so env vars from production deployment
+    # (DOTMD_TELEGRAM_DAEMON_SOCKET) do not inject a live lifecycle bundle into
+    # unit tests that only mock local search behavior.
+    settings = Settings(index_dir=tmp_path, embedding_url="http://localhost:8088", telegram_daemon_socket=None)
     return DotMDService(settings)
 
 
@@ -133,7 +136,10 @@ class TestSearchRespectsTopK:
         with patch.object(service, "_execute_search", return_value=stub_results) as execute_search:
             response = service.search("test query", top_k=3)
 
-        assert response.candidates == stub_results
+        # top_k=3 → merge returns at most 3 candidates sorted by fused_score desc.
+        # stub_results has scores [0.0, 0.1, 0.2, 0.3, 0.4]; top 3 are [0.4, 0.3, 0.2].
+        assert len(response.candidates) == 3
+        assert response.candidates == sorted(stub_results, key=lambda c: c.fused_score, reverse=True)[:3]
         kwargs = execute_search.call_args.kwargs
         assert kwargs["top_k"] == 3
         assert kwargs["pool_size"] == max(
@@ -1375,9 +1381,10 @@ class TestSearchApiRerankerSurfaces:
 
     def test_search_endpoint_accepts_reranker_name(self) -> None:
         from dotmd.api import server
+        from dotmd.core.models import SearchResponse
 
         service = MagicMock()
-        service.search.return_value = []
+        service.search.return_value = SearchResponse(candidates=[], source_status=[])
         server._service = service
         client = TestClient(server.app)
 

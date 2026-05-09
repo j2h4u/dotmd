@@ -239,7 +239,7 @@ class TestSearchCandidateRequiredFields:
     def test_search_result_symbol_no_longer_exported(self) -> None:
         """SearchResult is not exported from core.models."""
         with pytest.raises(ImportError):
-            pass  # type: ignore[import-not-found]
+            from dotmd.core.models import SearchResult  # type: ignore[attr-defined]  # noqa: F401
 
         # Defense-in-depth: check the file does not contain SearchResult class
         from pathlib import Path

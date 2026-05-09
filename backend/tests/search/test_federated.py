@@ -181,7 +181,7 @@ class TestRunLocalEngine:
 class TestRunFederatedEngine:
     """Tests for the async federated engine runner (cycle-2 HIGH-4)."""
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_run_federated_engine_ok(self) -> None:
         """Successful federated call returns ok outcome."""
         provider = StubFederatedProvider(
@@ -210,7 +210,7 @@ class TestRunFederatedEngine:
         assert len(outcome.candidates) == 1
         assert outcome.reason is None
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_run_federated_engine_timeout(self) -> None:
         """Timeout yields skipped status (cycle-2 MEDIUM timeout-scope)."""
         provider = StubFederatedProvider(sleep_seconds=10.0)
@@ -226,7 +226,7 @@ class TestRunFederatedEngine:
         assert outcome.reason == "timeout"
         assert outcome.candidates == []
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_run_federated_engine_exception(self) -> None:
         """Exception in provider returns error outcome."""
         provider = StubFederatedProvider(
@@ -254,7 +254,7 @@ class TestRunFederatedEngine:
 class TestFanout:
     """Tests for federated fan-out behavior."""
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_fanout_runs_in_parallel(self) -> None:
         """Multiple providers execute in parallel, not sequentially."""
         providers = {
@@ -278,7 +278,7 @@ class TestFanout:
         assert len(results) == 3
         assert all(r.status == "ok" for r in results)
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_fanout_collects_source_status_for_every_engine_including_local(
         self,
     ) -> None:
@@ -301,7 +301,7 @@ class TestFanout:
         assert len(statuses) == 2
         assert {s.name for s in statuses} == {"stub1", "stub2"}
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_soft_timeout_does_not_block_response(self) -> None:
         """Fast local engine + slow federated within timeout window."""
         provider = StubFederatedProvider(sleep_seconds=0.5)

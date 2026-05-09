@@ -48,11 +48,13 @@ dotmd = "dotmd.cli:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-x --tb=short"
+asyncio_mode = "auto"
 markers = [
     "smoke: smoke tests requiring a running dotMD stack",
     "e2e: E2E tests against the live MCP HTTP server (run inside container)",
     "real_semantic_encode_batch: opt out of _mock_semantic_engine autouse fixture",
     "real_schema_check: opt out of _mock_schema_version_check autouse fixture",
+    "asyncio: marks async test functions for pytest-asyncio",
 ]
 
 [tool.hatch.build.targets.wheel]
