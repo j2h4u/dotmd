@@ -137,7 +137,7 @@ class TestReadSmoke:
     def test_meta_only_returns_without_error(self, mcp_call: Callable):
         """read without end returns frontmatter + total_chunks, no chunk text."""
         search = mcp_call("tools/call", {"name": "search", "arguments": {"query": "встреча", "top_k": 1}})
-        results = _tool_result_structured(search)
+        results = _search_candidates(search)
         assert results, "search returned no results for canonical query 'встреча'"
 
         ref = results[0]["ref"]
@@ -160,7 +160,7 @@ class TestReadSmoke:
     def test_ranged_read_returns_chunks(self, mcp_call: Callable):
         """read with end returns chunk text in [start, end)."""
         search = mcp_call("tools/call", {"name": "search", "arguments": {"query": "встреча", "top_k": 1}})
-        results = _tool_result_structured(search)
+        results = _search_candidates(search)
         assert results, "search returned no results for canonical query 'встреча'"
 
         ref = results[0]["ref"]
@@ -204,7 +204,7 @@ class TestReadSmoke:
     def test_cap_at_50_chunks(self, mcp_call: Callable):
         """end - start > 50 is capped server-side."""
         search = mcp_call("tools/call", {"name": "search", "arguments": {"query": "встреча", "top_k": 1}})
-        results = _tool_result_structured(search)
+        results = _search_candidates(search)
         assert results, "search returned no results for canonical query 'встреча'"
 
         ref = results[0]["ref"]
@@ -221,7 +221,7 @@ class TestReadSmoke:
 class TestDrillSmoke:
     def test_drill_returns_source_metadata(self, mcp_call: Callable):
         search = mcp_call("tools/call", {"name": "search", "arguments": {"query": "встреча", "top_k": 1}})
-        results = _tool_result_structured(search)
+        results = _search_candidates(search)
         assert results, "search returned no results for canonical query 'встреча'"
 
         ref = results[0]["ref"]
