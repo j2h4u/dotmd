@@ -379,7 +379,7 @@ def build_candidates(
                 fused_score=fused_score,
                 can_read=True,
                 can_materialize=False,
-                chunk_id=chunk_id,
+                chunk_id=chunk_lookup_id,
                 heading_path=heading_path,
                 matched_engines=matched_engines,
                 engine_scores=engine_scores_dict,

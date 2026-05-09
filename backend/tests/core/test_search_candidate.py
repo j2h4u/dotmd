@@ -33,7 +33,7 @@ class TestSearchCandidateRequiredFields:
         assert candidate.provider_metadata is None
         assert candidate.source_native_score is None
         assert candidate.source_native_rank is None
-        assert candidate.matched_engines == []
+        assert candidate.matched_engines == ()
 
     def test_search_candidate_required_fields_pin_federated_shape(self) -> None:
         """Construct a SearchCandidate with federated shape."""
@@ -138,7 +138,7 @@ class TestSearchCandidateRequiredFields:
             snippet="Text",
             fused_score=0.9,
             can_read=True,
-            matched_engines=["semantic"],
+            matched_engines=("semantic",),
             engine_scores={"semantic": 0.9},
             provider_metadata={"k": "v"},
         )
@@ -148,7 +148,7 @@ class TestSearchCandidateRequiredFields:
             candidate.snippet = "x"  # type: ignore[misc]
 
         with pytest.raises(ValidationError):
-            candidate.matched_engines = ["other"]  # type: ignore[misc]
+            candidate.matched_engines = ("other",)  # type: ignore[misc]
 
         with pytest.raises(ValidationError):
             candidate.engine_scores = {}  # type: ignore[misc]
@@ -156,10 +156,10 @@ class TestSearchCandidateRequiredFields:
         with pytest.raises(ValidationError):
             candidate.provider_metadata = None  # type: ignore[misc]
 
-        # Container content mutation succeeds (shallow-freeze)
-        candidate.matched_engines.append("keyword")
-        assert candidate.matched_engines == ["semantic", "keyword"]
+        # matched_engines is a tuple — truly immutable, no append
+        assert candidate.matched_engines == ("semantic",)
 
+        # Dict container fields are still shallow-mutable
         assert candidate.engine_scores is not None
         candidate.engine_scores["keyword"] = 0.5
         assert candidate.engine_scores["keyword"] == 0.5

@@ -245,7 +245,7 @@ def test_build_candidates_hydrates_graph_direct_ref_from_provenance() -> None:
     assert results[0].ref == graph_ref
     assert results[0].engine_scores is not None
     assert results[0].engine_scores.get("graph_direct") == 0.95
-    assert results[0].matched_engines == ["graph_direct"]
+    assert results[0].matched_engines == ("graph_direct",)
 
 
 def test_build_candidates_uses_telegram_message_ref_from_unit_provenance() -> None:
@@ -717,7 +717,7 @@ def test_build_candidates_only_attributes_engines_that_scored_the_ref() -> None:
     )
 
     assert len(results) == 1
-    assert results[0].matched_engines == ["keyword", "semantic"]
+    assert results[0].matched_engines == ("keyword", "semantic")
     assert results[0].engine_scores == {"semantic": 0.9, "keyword": 0.7}
 
 
