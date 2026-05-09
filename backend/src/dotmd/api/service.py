@@ -815,7 +815,7 @@ class DotMDService:
 
         for ref, score in fused:
             # Federated refs (telegram:*) bypass active filter
-            if ref.startswith("telegram:"):
+            if isinstance(ref, str) and ref.startswith("telegram:"):
                 filtered_fused.append((ref, score))
                 continue
 
