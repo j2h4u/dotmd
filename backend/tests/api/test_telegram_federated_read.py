@@ -1,0 +1,301 @@
+"""Task 3 (TDD RED): Federated Telegram read/drill tests.
+
+These tests validate the read(ref) and drill(ref) round-trips for federated-only
+Telegram refs, ensuring proper routing through the provider infrastructure.
+"""
+
+import pytest
+from pathlib import Path
+from unittest.mock import MagicMock, AsyncMock
+from dotmd.api.service import DotMDService
+from dotmd.core.config import Settings
+from dotmd.core.models import ExtractDepth, ChunkProvenance
+from dotmd.ingestion.telegram_provider import TelegramApplicationSourceProvider
+
+
+class TestFederatedTelegramRead:
+    """RED phase: add failing tests for federated Telegram read/drill."""
+
+    def test_federated_only_message_round_trip(self, tmp_path: Path) -> None:
+        """Non-indexed Telegram message routes to provider.read_unit_window."""
+        # RED: This test fails because read() doesn't check for federated-only refs yet
+        index_dir = tmp_path / "index"
+        service = DotMDService(
+            Settings(
+                data_dir=tmp_path,
+                indexing_paths=[str(tmp_path)],
+                index_dir=index_dir,
+                embedding_url="http://localhost:18088",
+                vector_backend="sqlite-vec",
+                graph_backend="ladybugdb",
+                extract_depth=ExtractDepth.STRUCTURAL,
+            )
+        )
+
+        # Mock provider to return text for the message
+        provider = MagicMock(spec=TelegramApplicationSourceProvider)
+        provider.read_unit_window = MagicMock(
+            return_value={
+                "chunks": [
+                    {
+                        "text": "Hello from Telegram",
+                        "start": 0,
+                        "end": 18,
+                    }
+                ]
+            }
+        )
+        service._source_runtime_factory._providers["telegram"] = provider
+
+        # Try to read a federated-only Telegram ref
+        telegram_ref = "telegram:me/1234567/12345"
+        result = service.read(telegram_ref, 0, 1)
+
+        # Should route through provider
+        assert result is not None
+        assert "chunks" in result
+        assert len(result["chunks"]) > 0
+        provider.read_unit_window.assert_called_once()
+
+    def test_federated_drill_returns_provider_metadata(self, tmp_path: Path) -> None:
+        """drill(ref) returns provider metadata for federated-only refs."""
+        # RED: drill() doesn't support federated refs yet
+        index_dir = tmp_path / "index"
+        service = DotMDService(
+            Settings(
+                data_dir=tmp_path,
+                indexing_paths=[str(tmp_path)],
+                index_dir=index_dir,
+                embedding_url="http://localhost:18088",
+                vector_backend="sqlite-vec",
+                graph_backend="ladybugdb",
+                extract_depth=ExtractDepth.STRUCTURAL,
+            )
+        )
+
+        # Mock provider metadata
+        provider = MagicMock(spec=TelegramApplicationSourceProvider)
+        provider.drill_unit_metadata = MagicMock(
+            return_value={
+                "total_chunks": 42,
+                "message_date": "2026-05-09T12:34:56Z",
+                "sender_id": 123,
+            }
+        )
+        service._source_runtime_factory._providers["telegram"] = provider
+
+        telegram_ref = "telegram:me/1234567/12345"
+        result = service.drill(telegram_ref)
+
+        # Should return provider metadata
+        assert result is not None
+        assert result["total_chunks"] == 42
+        provider.drill_unit_metadata.assert_called_once()
+
+    def test_federated_read_provider_down_attribution(self, tmp_path: Path) -> None:
+        """Provider down error is clear and attributed."""
+        # RED: Provider error attribution not implemented yet
+        index_dir = tmp_path / "index"
+        service = DotMDService(
+            Settings(
+                data_dir=tmp_path,
+                indexing_paths=[str(tmp_path)],
+                index_dir=index_dir,
+                embedding_url="http://localhost:18088",
+                vector_backend="sqlite-vec",
+                graph_backend="ladybugdb",
+                extract_depth=ExtractDepth.STRUCTURAL,
+            )
+        )
+
+        # Mock provider to raise an error
+        provider = MagicMock(spec=TelegramApplicationSourceProvider)
+        provider.read_unit_window = MagicMock(
+            side_effect=ConnectionError("Telegram provider unreachable")
+        )
+        service._source_runtime_factory._providers["telegram"] = provider
+
+        telegram_ref = "telegram:me/1234567/12345"
+
+        # Should raise error with clear attribution
+        with pytest.raises(ConnectionError, match="provider unreachable"):
+            service.read(telegram_ref, 0, 1)
+
+    def test_truly_federated_telegram_ref_routes_to_provider(
+        self, tmp_path: Path
+    ) -> None:
+        """CRITICAL: No local entry → provider path (Cycle-2 HIGH-7)."""
+        # RED: federated-only routing not implemented
+        index_dir = tmp_path / "index"
+        service = DotMDService(
+            Settings(
+                data_dir=tmp_path,
+                indexing_paths=[str(tmp_path)],
+                index_dir=index_dir,
+                embedding_url="http://localhost:18088",
+                vector_backend="sqlite-vec",
+                graph_backend="ladybugdb",
+                extract_depth=ExtractDepth.STRUCTURAL,
+            )
+        )
+
+        # No local indexing of this message
+        telegram_ref = "telegram:me/1234567/12345"
+
+        # Verify ref doesn't exist in local index
+        store = service._pipeline.metadata_store
+        from dotmd.ingestion.pipeline import SourceDocumentRecord
+
+        # Try to get source document (should not exist)
+        docs = store.list_source_documents_by_namespace("telegram")
+        assert not any(d.document_ref == telegram_ref for d in docs)
+
+        # Mock provider to return text
+        provider = MagicMock(spec=TelegramApplicationSourceProvider)
+        provider.read_unit_window = MagicMock(
+            return_value={
+                "chunks": [
+                    {"text": "Provider content", "start": 0, "end": 15}
+                ]
+            }
+        )
+        service._source_runtime_factory._providers["telegram"] = provider
+
+        # Read should route through provider
+        result = service.read(telegram_ref, 0, 1)
+        assert result is not None
+        provider.read_unit_window.assert_called_once()
+
+    def test_inactive_locally_indexed_telegram_ref_does_not_fall_through_to_provider(
+        self, tmp_path: Path
+    ) -> None:
+        """CRITICAL: Inactive local entry raises PermissionError, no fallthrough (Cycle-2 HIGH-7)."""
+        # RED: binding gate and provider fallthrough not implemented
+        index_dir = tmp_path / "index"
+        service = DotMDService(
+            Settings(
+                data_dir=tmp_path,
+                indexing_paths=[str(tmp_path)],
+                index_dir=index_dir,
+                embedding_url="http://localhost:18088",
+                vector_backend="sqlite-vec",
+                graph_backend="ladybugdb",
+                extract_depth=ExtractDepth.STRUCTURAL,
+            )
+        )
+
+        telegram_ref = "telegram:me/1234567/12345"
+
+        # Manually insert an INACTIVE binding for this ref
+        store = service._pipeline.metadata_store
+        from dotmd.ingestion.pipeline import SourceDocumentRecord, SourceBindingRecord
+
+        doc_record = SourceDocumentRecord(
+            namespace="telegram",
+            document_ref=telegram_ref,
+            chunk_strategy="heading_512_50",
+            parser_name="telegram",
+        )
+        store.save_source_documents([doc_record])
+
+        # Create INACTIVE binding
+        binding = SourceBindingRecord(
+            namespace="telegram",
+            document_ref=telegram_ref,
+            status="INACTIVE",
+            chunk_strategy="heading_512_50",
+        )
+        store.save_resource_bindings([binding])
+
+        # Mock provider
+        provider = MagicMock(spec=TelegramApplicationSourceProvider)
+        service._source_runtime_factory._providers["telegram"] = provider
+
+        # Read should raise PermissionError due to inactive binding, NOT fall through
+        with pytest.raises(PermissionError, match="INACTIVE"):
+            service.read(telegram_ref, 0, 1)
+
+        # Provider should never be called
+        provider.read_unit_window.assert_not_called()
+
+    def test_active_locally_indexed_telegram_ref_uses_local_path(
+        self, tmp_path: Path
+    ) -> None:
+        """Active local entry uses local read path (not provider)."""
+        # RED: binding-aware read routing not implemented
+        index_dir = tmp_path / "index"
+        service = DotMDService(
+            Settings(
+                data_dir=tmp_path,
+                indexing_paths=[str(tmp_path)],
+                index_dir=index_dir,
+                embedding_url="http://localhost:18088",
+                vector_backend="sqlite-vec",
+                graph_backend="ladybugdb",
+                extract_depth=ExtractDepth.STRUCTURAL,
+            )
+        )
+
+        telegram_ref = "telegram:me/1234567/12345"
+
+        # Manually insert an ACTIVE binding and chunk for this ref
+        store = service._pipeline.metadata_store
+        from dotmd.ingestion.pipeline import (
+            SourceDocumentRecord,
+            SourceBindingRecord,
+        )
+
+        doc_record = SourceDocumentRecord(
+            namespace="telegram",
+            document_ref=telegram_ref,
+            chunk_strategy="heading_512_50",
+            parser_name="telegram",
+        )
+        store.save_source_documents([doc_record])
+
+        # Create ACTIVE binding
+        binding = SourceBindingRecord(
+            namespace="telegram",
+            document_ref=telegram_ref,
+            status="ACTIVE",
+            chunk_strategy="heading_512_50",
+        )
+        store.save_resource_bindings([binding])
+
+        # Mock provider
+        provider = MagicMock(spec=TelegramApplicationSourceProvider)
+        service._source_runtime_factory._providers["telegram"] = provider
+
+        # For this test, we expect a different error (no local chunks)
+        # but definitely NOT a provider call
+        try:
+            service.read(telegram_ref, 0, 1)
+        except (ValueError, KeyError):
+            # Expected: local lookup fails with no chunks
+            pass
+
+        # Provider should never be called
+        provider.read_unit_window.assert_not_called()
+
+    def test_federated_read_helper_naming(self, tmp_path: Path) -> None:
+        """Helper method names/signatures correct."""
+        # RED: Helper methods not implemented yet
+        index_dir = tmp_path / "index"
+        service = DotMDService(
+            Settings(
+                data_dir=tmp_path,
+                indexing_paths=[str(tmp_path)],
+                index_dir=index_dir,
+                embedding_url="http://localhost:18088",
+                vector_backend="sqlite-vec",
+                graph_backend="ladybugdb",
+                extract_depth=ExtractDepth.STRUCTURAL,
+            )
+        )
+
+        # Verify helper methods exist and have correct signatures
+        assert hasattr(service, "_resolve_telegram_read_path")
+
+        # The method should be callable with a ref
+        method = getattr(service, "_resolve_telegram_read_path")
+        assert callable(method)
