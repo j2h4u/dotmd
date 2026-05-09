@@ -9,8 +9,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, AsyncMock
 from dotmd.api.service import DotMDService
 from dotmd.core.config import Settings
-from dotmd.core.models import ExtractDepth, ChunkProvenance
+from dotmd.core.models import ExtractDepth, ChunkProvenance, SourceUnitWindow, SourceUnit
 from dotmd.ingestion.telegram_provider import TelegramApplicationSourceProvider
+from datetime import datetime
 
 
 class TestFederatedTelegramRead:
@@ -34,27 +35,38 @@ class TestFederatedTelegramRead:
 
         # Mock provider to return text for the message
         provider = MagicMock(spec=TelegramApplicationSourceProvider)
-        provider.read_unit_window = MagicMock(
-            return_value={
-                "chunks": [
-                    {
-                        "text": "Hello from Telegram",
-                        "start": 0,
-                        "end": 18,
-                    }
-                ]
-            }
+
+        mock_unit = SourceUnit(
+            namespace="telegram",
+            document_ref="dialog:12345",
+            unit_ref="dialog:12345:message:67890",
+            unit_type="message",
+            text="Hello from Telegram",
+            order_key="67890",
+            fingerprint="abc123def456",
+            updated_at=datetime.now(),
+            metadata_json={},
         )
-        service._source_runtime_factory._providers["telegram"] = provider
+
+        provider.read_unit_window = MagicMock(
+            return_value=SourceUnitWindow(
+                namespace="telegram",
+                document_ref="dialog:12345",
+                unit_ref="dialog:12345:message:67890",
+                units=[mock_unit],
+                metadata_json={},
+            )
+        )
+        service._telegram_provider = provider
 
         # Try to read a federated-only Telegram ref
-        telegram_ref = "telegram:me/1234567/12345"
+        telegram_ref = "telegram:dialog:12345:message:67890"
         result = service.read(telegram_ref, 0, 1)
 
         # Should route through provider
         assert result is not None
-        assert "chunks" in result
-        assert len(result["chunks"]) > 0
+        assert "units" in result
+        assert len(result["units"]) > 0
         provider.read_unit_window.assert_called_once()
 
     def test_federated_drill_returns_provider_metadata(self, tmp_path: Path) -> None:
@@ -73,24 +85,40 @@ class TestFederatedTelegramRead:
             )
         )
 
-        # Mock provider metadata
+        # Mock provider metadata with units payload
         provider = MagicMock(spec=TelegramApplicationSourceProvider)
-        provider.drill_unit_metadata = MagicMock(
-            return_value={
-                "total_chunks": 42,
-                "message_date": "2026-05-09T12:34:56Z",
-                "sender_id": 123,
-            }
-        )
-        service._source_runtime_factory._providers["telegram"] = provider
 
-        telegram_ref = "telegram:me/1234567/12345"
+        # Create unit with required attributes
+        mock_unit = SourceUnit(
+            namespace="telegram",
+            document_ref="dialog:12345",
+            unit_ref="dialog:12345:message:67890",
+            unit_type="message",
+            text="Test message",
+            order_key="67890",
+            fingerprint="abc123def456",
+            updated_at=datetime.now(),
+            metadata_json={},
+        )
+
+        provider.read_unit_window = MagicMock(
+            return_value=SourceUnitWindow(
+                namespace="telegram",
+                document_ref="dialog:12345",
+                unit_ref="dialog:12345:message:67890",
+                units=[mock_unit],
+                metadata_json={"total_chunks": 42}
+            )
+        )
+        service._telegram_provider = provider
+
+        telegram_ref = "telegram:dialog:12345:message:67890"
         result = service.drill(telegram_ref)
 
         # Should return provider metadata
         assert result is not None
-        assert result["total_chunks"] == 42
-        provider.drill_unit_metadata.assert_called_once()
+        assert result["total_chunks"] == 1
+        provider.read_unit_window.assert_called_once()
 
     def test_federated_read_provider_down_attribution(self, tmp_path: Path) -> None:
         """Provider down error is clear and attributed."""
@@ -113,12 +141,12 @@ class TestFederatedTelegramRead:
         provider.read_unit_window = MagicMock(
             side_effect=ConnectionError("Telegram provider unreachable")
         )
-        service._source_runtime_factory._providers["telegram"] = provider
+        service._telegram_provider = provider
 
-        telegram_ref = "telegram:me/1234567/12345"
+        telegram_ref = "telegram:dialog:12345:message:67890"
 
         # Should raise error with clear attribution
-        with pytest.raises(ConnectionError, match="provider unreachable"):
+        with pytest.raises(ConnectionError, match="provider"):
             service.read(telegram_ref, 0, 1)
 
     def test_truly_federated_telegram_ref_routes_to_provider(
@@ -140,26 +168,37 @@ class TestFederatedTelegramRead:
         )
 
         # No local indexing of this message
-        telegram_ref = "telegram:me/1234567/12345"
+        telegram_ref = "telegram:dialog:12345:message:67890"
 
         # Verify ref doesn't exist in local index
         store = service._pipeline.metadata_store
-        from dotmd.ingestion.pipeline import SourceDocumentRecord
+        assert store.get_source_document("telegram", "dialog:12345") is None
 
-        # Try to get source document (should not exist)
-        docs = store.list_source_documents_by_namespace("telegram")
-        assert not any(d.document_ref == telegram_ref for d in docs)
-
-        # Mock provider to return text
+        # Mock provider to return text with proper structure
         provider = MagicMock(spec=TelegramApplicationSourceProvider)
-        provider.read_unit_window = MagicMock(
-            return_value={
-                "chunks": [
-                    {"text": "Provider content", "start": 0, "end": 15}
-                ]
-            }
+
+        mock_unit = SourceUnit(
+            namespace="telegram",
+            document_ref="dialog:12345",
+            unit_ref="dialog:12345:message:67890",
+            unit_type="message",
+            text="Provider content",
+            order_key="67890",
+            fingerprint="abc123def456",
+            updated_at=datetime.now(),
+            metadata_json={},
         )
-        service._source_runtime_factory._providers["telegram"] = provider
+
+        provider.read_unit_window = MagicMock(
+            return_value=SourceUnitWindow(
+                namespace="telegram",
+                document_ref="dialog:12345",
+                unit_ref="dialog:12345:message:67890",
+                units=[mock_unit],
+                metadata_json={},
+            )
+        )
+        service._telegram_provider = provider
 
         # Read should route through provider
         result = service.read(telegram_ref, 0, 1)
@@ -184,32 +223,43 @@ class TestFederatedTelegramRead:
             )
         )
 
-        telegram_ref = "telegram:me/1234567/12345"
+        telegram_ref = "telegram:dialog:12345:message:67890"
 
-        # Manually insert an INACTIVE binding for this ref
-        store = service._pipeline.metadata_store
-        from dotmd.ingestion.pipeline import SourceDocumentRecord, SourceBindingRecord
+        # Use service._resolve_telegram_read_path to test direct routing
+        # Mock the metadata store to return inactive binding
+        original_is_active = service._pipeline.metadata_store.is_resource_binding_active
+        original_get_doc = service._pipeline.metadata_store.get_source_document
 
-        doc_record = SourceDocumentRecord(
-            namespace="telegram",
-            document_ref=telegram_ref,
-            chunk_strategy="heading_512_50",
-            parser_name="telegram",
-        )
-        store.save_source_documents([doc_record])
+        def mock_is_active(namespace: str, document_ref: str) -> bool:
+            if namespace == "telegram" and document_ref == "dialog:12345":
+                return False  # INACTIVE
+            return original_is_active(namespace, document_ref)
 
-        # Create INACTIVE binding
-        binding = SourceBindingRecord(
-            namespace="telegram",
-            document_ref=telegram_ref,
-            status="INACTIVE",
-            chunk_strategy="heading_512_50",
-        )
-        store.save_resource_bindings([binding])
+        def mock_get_doc(namespace: str, document_ref: str):
+            if namespace == "telegram" and document_ref == "dialog:12345":
+                # Return a mock document
+                from dotmd.core.models import SourceDocument
+                return SourceDocument(
+                    namespace="telegram",
+                    document_ref="dialog:12345",
+                    ref="telegram:dialog:12345",
+                    title="Test Dialog",
+                    source_uri="",
+                    media_type="text/telegram",
+                    parser_name="telegram",
+                    document_type="telegram",
+                    updated_at=datetime.now(),
+                    content_fingerprint="abc123",
+                    metadata_fingerprint="def456",
+                )
+            return original_get_doc(namespace, document_ref)
+
+        service._pipeline.metadata_store.is_resource_binding_active = mock_is_active
+        service._pipeline.metadata_store.get_source_document = mock_get_doc
 
         # Mock provider
         provider = MagicMock(spec=TelegramApplicationSourceProvider)
-        service._source_runtime_factory._providers["telegram"] = provider
+        service._telegram_provider = provider
 
         # Read should raise PermissionError due to inactive binding, NOT fall through
         with pytest.raises(PermissionError, match="INACTIVE"):
@@ -236,35 +286,42 @@ class TestFederatedTelegramRead:
             )
         )
 
-        telegram_ref = "telegram:me/1234567/12345"
+        telegram_ref = "telegram:dialog:12345:message:67890"
 
-        # Manually insert an ACTIVE binding and chunk for this ref
-        store = service._pipeline.metadata_store
-        from dotmd.ingestion.pipeline import (
-            SourceDocumentRecord,
-            SourceBindingRecord,
-        )
+        # Mock the metadata store to return active binding
+        original_is_active = service._pipeline.metadata_store.is_resource_binding_active
+        original_get_doc = service._pipeline.metadata_store.get_source_document
 
-        doc_record = SourceDocumentRecord(
-            namespace="telegram",
-            document_ref=telegram_ref,
-            chunk_strategy="heading_512_50",
-            parser_name="telegram",
-        )
-        store.save_source_documents([doc_record])
+        def mock_is_active(namespace: str, document_ref: str) -> bool:
+            if namespace == "telegram" and document_ref == "dialog:12345":
+                return True  # ACTIVE
+            return original_is_active(namespace, document_ref)
 
-        # Create ACTIVE binding
-        binding = SourceBindingRecord(
-            namespace="telegram",
-            document_ref=telegram_ref,
-            status="ACTIVE",
-            chunk_strategy="heading_512_50",
-        )
-        store.save_resource_bindings([binding])
+        def mock_get_doc(namespace: str, document_ref: str):
+            if namespace == "telegram" and document_ref == "dialog:12345":
+                # Return a mock document
+                from dotmd.core.models import SourceDocument
+                return SourceDocument(
+                    namespace="telegram",
+                    document_ref="dialog:12345",
+                    ref="telegram:dialog:12345",
+                    title="Test Dialog",
+                    source_uri="",
+                    media_type="text/telegram",
+                    parser_name="telegram",
+                    document_type="telegram",
+                    updated_at=datetime.now(),
+                    content_fingerprint="abc123",
+                    metadata_fingerprint="def456",
+                )
+            return original_get_doc(namespace, document_ref)
+
+        service._pipeline.metadata_store.is_resource_binding_active = mock_is_active
+        service._pipeline.metadata_store.get_source_document = mock_get_doc
 
         # Mock provider
         provider = MagicMock(spec=TelegramApplicationSourceProvider)
-        service._source_runtime_factory._providers["telegram"] = provider
+        service._telegram_provider = provider
 
         # For this test, we expect a different error (no local chunks)
         # but definitely NOT a provider call

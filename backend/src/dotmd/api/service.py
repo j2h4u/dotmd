@@ -1056,6 +1056,37 @@ class DotMDService:
             raise ValueError(f"Unknown source ref: {ref}")
         return self._resolve_source_document(ref)
 
+    def _resolve_telegram_read_path(self, ref: str) -> TelegramReadPath:
+        """Determine routing decision for Telegram message read operations.
+
+        Returns the routing decision:
+        - LOCAL_ACTIVE: local entry with ACTIVE binding → use local chunks
+        - LOCAL_INACTIVE: local entry with INACTIVE binding → raise PermissionError
+        - FEDERATED_ONLY: no local entry → use provider
+        """
+        try:
+            document_ref, _unit_ref = _parse_telegram_message_ref(ref)
+        except ValueError:
+            return TelegramReadPath.FEDERATED_ONLY
+
+        # Check if local entry exists
+        document = self._pipeline.metadata_store.get_source_document(
+            "telegram",
+            document_ref,
+        )
+
+        if document is None:
+            return TelegramReadPath.FEDERATED_ONLY
+
+        # Check binding status
+        if self._pipeline.metadata_store.is_resource_binding_active(
+            "telegram",
+            document_ref,
+        ):
+            return TelegramReadPath.LOCAL_ACTIVE
+        else:
+            return TelegramReadPath.LOCAL_INACTIVE
+
     def _require_active_telegram_message_ref(self, ref: str) -> tuple[SourceDocument, str]:
         """Resolve a Telegram message ref through its active dialog binding."""
         document_ref, unit_ref = _parse_telegram_message_ref(ref)
@@ -1135,14 +1166,30 @@ class DotMDService:
         start: int,
         end: int | None,
     ) -> ReadPayload:
-        document, unit_ref = self._require_active_telegram_message_ref(ref)
-        before, after = self._telegram_window_sizes(start, end)
-        if self._telegram_provider is not None:
-            window = self._telegram_provider.read_unit_window(
-                unit_ref,
-                before=before,
-                after=after,
-            )
+        # Determine routing path
+        path = self._resolve_telegram_read_path(ref)
+
+        # Handle INACTIVE binding gate (Phase 27)
+        if path == TelegramReadPath.LOCAL_INACTIVE:
+            raise PermissionError(f"Telegram ref has INACTIVE binding: {ref}")
+
+        # Handle FEDERATED_ONLY refs
+        if path == TelegramReadPath.FEDERATED_ONLY:
+            if self._telegram_provider is None:
+                raise ValueError(f"Unknown source ref: {ref}")
+            try:
+                document_ref, unit_ref = _parse_telegram_message_ref(ref)
+            except ValueError:
+                raise ValueError(f"Unknown source ref: {ref}") from None
+            before, after = self._telegram_window_sizes(start, end)
+            try:
+                window = self._telegram_provider.read_unit_window(
+                    unit_ref,
+                    before=before,
+                    after=after,
+                )
+            except Exception as e:
+                raise type(e)(f"Telegram provider error: {e}") from e
             units = [
                 self._telegram_unit_payload(unit, unit_ref)
                 for unit in window.units
@@ -1151,27 +1198,29 @@ class DotMDService:
                 ReadPayload,
                 {
                     "ref": ref,
-                    "document_ref": document.document_ref,
-                    "target_unit_ref": unit_ref,
                     "total_chunks": len(units),
                     "frontmatter": {},
                     "units": units,
                     "chunks": [],
-                    "metadata": {
-                        **document.metadata_json,
-                        **window.metadata_json,
-                    },
+                    "metadata": getattr(window, "metadata_json", {}),
                 },
             )
 
+        # Handle LOCAL_ACTIVE refs (existing path)
+        # LOCAL_ACTIVE means we must use local chunks only, never fall through to provider
+        document, unit_ref = self._require_active_telegram_message_ref(ref)
+
+        # Get local chunks (ACTIVE binding uses local path only)
         chunks = self._pipeline.metadata_store.get_chunks_by_source_unit_ref(
             "telegram",
             document.document_ref,
             unit_ref,
             self._settings.chunk_strategy,
         )
+
         if not chunks:
             raise ValueError(f"Unknown source ref: {ref}")
+
         chunk_payloads: list[dict[str, Any]] = []
         for index, chunk in enumerate(chunks):
             source_unit_refs = (
@@ -1203,6 +1252,50 @@ class DotMDService:
         )
 
     def _drill_telegram_message(self, ref: str) -> DrillPayload:
+        # Determine routing path
+        path = self._resolve_telegram_read_path(ref)
+
+        # Handle INACTIVE binding gate (Phase 27)
+        if path == TelegramReadPath.LOCAL_INACTIVE:
+            raise PermissionError(f"Telegram ref has INACTIVE binding: {ref}")
+
+        # Handle FEDERATED_ONLY refs
+        if path == TelegramReadPath.FEDERATED_ONLY:
+            if self._telegram_provider is None:
+                raise ValueError(f"Unknown source ref: {ref}")
+            try:
+                document_ref, unit_ref = _parse_telegram_message_ref(ref)
+            except ValueError:
+                raise ValueError(f"Unknown source ref: {ref}") from None
+            target_metadata: dict[str, Any] = {}
+            try:
+                window = self._telegram_provider.read_unit_window(
+                    unit_ref,
+                    before=0,
+                    after=0,
+                )
+            except Exception as e:
+                raise type(e)(f"Telegram provider error: {e}") from e
+            else:
+                for unit in window.units:
+                    if unit.unit_ref == unit_ref:
+                        target_metadata = self._telegram_unit_payload(unit, unit_ref)
+                        break
+            return cast(
+                DrillPayload,
+                {
+                    "ref": ref,
+                    "title": f"Telegram message {unit_ref}",
+                    "source_uri": "",
+                    "document_type": "telegram_message",
+                    "parser_name": "telegram",
+                    "frontmatter": {},
+                    "total_chunks": 1,
+                    "target_metadata": target_metadata,
+                },
+            )
+
+        # Handle LOCAL_ACTIVE refs (existing path)
         document, unit_ref = self._require_active_telegram_message_ref(ref)
         target_metadata: dict[str, Any] = {}
         if self._telegram_provider is not None:
