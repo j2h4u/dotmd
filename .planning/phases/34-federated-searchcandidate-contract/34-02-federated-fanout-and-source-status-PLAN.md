@@ -21,7 +21,7 @@ requirements_addressed: ["SEARCH-01", "SEARCH-03"]
 must_haves:
   truths:
     - "D-06: Federated providers participate in the same RRF as local engines. Engine names are namespaced (e.g. tg:fts). Per-engine weights remain. Fusion stays rank-only."
-    - "D-07: Cross-encoder reranker is unchanged. Federated candidates without snippet text skip reranking and keep RRF score."
+    - "D-07: Cross-encoder reranker is unchanged. Federated candidates (`chunk_id is None`) skip reranking and keep their RRF score. The `chunk_id is None` predicate is a Phase 34 simplification — it currently coincides with the only federated source (Telegram, short snippet text). When a future phase adds a federated provider that returns long-form text (e.g. Notion pages), the skip predicate must switch to a snippet-length test (`not snippet or len(snippet) < min_rerank_chars`). This phase pins the simpler predicate; the snippet-length variant is owned by the phase that introduces the second federated provider. (cycle-5 opencode LOW: predicate aligned across D-07 + threat model + Stage 6 prose.)"
     - "D-08: Federated fan-out is always-on by default. Every service.search() queries all local engines plus all sources whose descriptor declares FEDERATED_SEARCH and whose lifecycle bundle is currently constructible. Lifecycle build failures per-source are caught and recorded as persistent SourceStatus(status='error') entries — they never crash service init. (cycle-2 HIGH-6 fix)"
     - "D-09: Per-source soft timeout (3-5s default, config-tunable) applies to FEDERATED engines only. Local engines do not share this timeout — they execute on the established sequential path with no soft-skip. Failure detection only — not throughput shaping. (cycle-2 MEDIUM fold-in: separate timeouts)"
     - "D-10: MCP-level source filter parameters are deferred. Always-on fan-out at the MCP surface."
@@ -56,7 +56,7 @@ federated provider — Telegram wiring is owned by Plan 03.
 | Federated source error breaks the query (fail-fast regression) | HIGH | Test stub raises; assert local results survive; `source_status` reports the error. |
 | Provider-native scores leak into RRF as direct comparisons | HIGH | Federated stubs return absurd `source_native_score`; assert RRF rank-only — local hit at rank 1 still beats federated hit at rank 5 regardless of raw scores. |
 | Lifecycle bundle rebuilt per request | HIGH | Service builds bundles once at init; mock asserts `factory.build_if_configured` called only at init. |
-| Reranker called on candidates without snippet → CrossEncoder error | MEDIUM | Skip reranker for candidates whose snippet is empty; assertion test asserts they retain RRF score. |
+| Reranker called on candidates without rerank-eligible text → CrossEncoder error | MEDIUM | In Phase 34, skip reranker when `chunk_id is None` (i.e. federated). Assertion test pins federated candidates retain their RRF score after the rerank stage. The `chunk_id is None` predicate matches D-07 — it is the Phase 34 simplification documented there; future federated providers returning long-form text will switch to a snippet-length predicate. (cycle-5 opencode LOW: predicate now aligned across D-07 + threat model + Stage 6.) |
 | MCP envelope schema regression breaks Claude Code | MEDIUM | Integration test through `mcp.server.fastmcp` test harness; pins schema keys. |
 | Source filter params slip in early | MEDIUM | MCP search tool keeps signature `(query, top_k)`; test pins absence of `sources`/`exclude_sources` params. |
 | `tg:fts` namespacing collides with engine names ("semantic", "keyword", "graph_direct") | MEDIUM | Engine name registry prevents collisions; test asserts federated engines use namespace prefix. |
@@ -65,6 +65,7 @@ federated provider — Telegram wiring is owned by Plan 03.
 | Sync search() inside running event loop deadlocks (cycle-2 HIGH-5) | HIGH | `search_async` is canonical; sync `search()` is a wrapper that calls `asyncio.get_running_loop()` to detect the unsafe condition and raises `RuntimeError("DotMDService.search() called from a running event loop; use search_async() instead")`. MCP and FastAPI surfaces call `search_async` directly. Test pins both the success path (await search_async inside loop) and the loud-fail path (sync search inside loop). |
 | `search_async` blocks the FastMCP/FastAPI event loop during local search, stalling unrelated MCP requests (cycle-3 HIGH) | HIGH | Local engines run sequentially inside ONE worker thread via `await loop.run_in_executor(self._local_executor, self._run_local_search_sequence, query, pool_size)` instead of executing on the event-loop thread. This preserves D-LOCAL-SEQUENTIAL (all three engines share the same worker thread → no concurrent SQLite access) AND unblocks the loop. Federated fan-out tasks are CREATED before the local executor task is awaited and composed via `asyncio.gather(local_task, federated_task)` so federated and local work overlap from the loop's perspective. Regression test `test_search_async_does_not_block_event_loop` interleaves `await asyncio.sleep(0)` at multiple checkpoints during a slow local search and asserts each checkpoint resumes before search_async returns — pins "loop is not blocked" as load-bearing behavior. The interleaver coroutine captures its tick count via a `finally` block at the moment `search_async` completes (cycle-4 MEDIUM fix) so a post-return tick burst cannot mask a pre-return block. |
 | Two concurrent `search_async()` requests run two `_run_local_search_sequence` invocations on different default-executor worker threads, breaking the cross-request single-thread SQLite/metadata/graph invariant (cycle-4 HIGH) | HIGH | Service constructs a dedicated single-worker `ThreadPoolExecutor(max_workers=1, thread_name_prefix="dotmd-local-search")` once in `__init__` and stores it as `self._local_executor`. `search_async` calls `loop.run_in_executor(self._local_executor, self._run_local_search_sequence, ...)` instead of `asyncio.to_thread(...)` (which uses the default global executor with N workers). Because the executor has a hard cap of one worker, two concurrent `search_async` calls SERIALIZE on the executor's queue — invariant by construction, no shared lock or barrier needed. Federated fan-out is unaffected (event-loop-bound, allowed to overlap between requests). Two regression tests pin the choice: `test_local_executor_has_max_workers_one` (asserts `service._local_executor._max_workers == 1` — structural pin) and `test_concurrent_search_async_calls_do_not_overlap_local_sequences` (records `(threading.get_ident(), enter_time, exit_time)` per call, asserts overlapping requests either share the same thread ident OR have disjoint [enter, exit] intervals — behavioral pin). Service shutdown calls `self._local_executor.shutdown(wait=True)` from `DotMDService.close()` to avoid leaked daemon threads. |
+| Stage-2 `_batch_load_provenance` runs on the event-loop thread while another request's `_run_local_search_sequence` runs on the executor thread → same-process cross-thread SQLite reads (cycle-5 opencode MEDIUM) | MEDIUM | Pre-existing pattern (the legacy sync search path already crossed threads); replan-3's executor reifies it but does not introduce it. The search-path SQLite connection is opened with `check_same_thread=False` (already required project-wide for WAL mode) so concurrent reads from the loop thread (Stage-2 provenance load) and the `dotmd-local-search` executor thread (next request's local sequence) are safe per SQLite's threading model. New regression test `test_sqlite_connection_supports_cross_thread_access` exercises one read from the loop thread and one read from a separate worker thread on the same `DotMDService` connection and asserts no `sqlite3.ProgrammingError`. Documentation-and-pin only — no code change. |
 | One misconfigured federated source crashes service init (cycle-2 HIGH-6) | HIGH | Service init catches per-source lifecycle build failures, records them in `self._lifecycle_init_errors: dict[str, str]`, and includes them as persistent `SourceStatus(status="error")` entries in every `SearchResponse`. Test `test_misconfigured_federated_source_does_not_crash_service_init` and `test_misconfigured_federated_source_appears_as_error_status_in_search`. |
 | Federated timeout accidentally soft-skips slow local engines (cycle-2 MEDIUM) | MEDIUM | Local engines have NO soft timeout in Phase 34 (sequential, run to completion). The `federated_timeout_seconds` setting applies ONLY to federated provider calls. Test pins that a 5-second cold semantic call is not soft-skipped when `federated_timeout_seconds=1`. |
 | asyncio.wait_for(asyncio.to_thread(...)) leaves zombie threads after timeout (cycle-2 MEDIUM) | LOW | Documented limitation: a timed-out provider thread keeps running until natural completion; logs may show late completion. No code mitigation in Phase 34 (Python's threading model does not support cooperative cancellation of `to_thread`-wrapped sync code). Comment near `wait_for` references this threat row. |
@@ -254,7 +255,13 @@ Create `backend/tests/search/test_federated.py` with failing tests:
   future change swaps `ThreadPoolExecutor(max_workers=1)` back to the
   default executor (or raises `max_workers`), this test fails before any
   behavioral test even runs. Comment in the test must reference the
-  cycle-4 HIGH so future readers know why the count is structural.
+  cycle-4 HIGH so future readers know why the count is structural. Note
+  that `_max_workers` is a CPython implementation detail (private
+  attribute, not part of the `concurrent.futures` public API). The
+  behavioral test below is the primary guarantee — if `_max_workers` is
+  ever renamed in CPython, only this structural pin breaks; cross-request
+  non-overlap is still enforced. Trade-off accepted as defense-in-depth.
+  (cycle-5 opencode LOW: private-attribute trade-off documented.)
 - `test_concurrent_search_async_calls_do_not_overlap_local_sequences`
   (**cycle-4 HIGH fix — BEHAVIORAL pin for cross-request mutual
   exclusion**) — patch `service._run_local_search_sequence` with a
@@ -288,6 +295,24 @@ Create `backend/tests/search/test_federated.py` with failing tests:
   default executor (or replaces the executor with `max_workers >= 2`),
   this test fails because the two intervals overlap on different
   threads. Comment must reference the cycle-4 HIGH.
+- `test_sqlite_connection_supports_cross_thread_access` (**cycle-5
+  opencode MEDIUM** — Stage-2 `_batch_load_provenance` runs on the
+  event-loop thread while the next request's `_run_local_search_sequence`
+  may already be running on the `dotmd-local-search` executor thread,
+  exercising the search-path SQLite connection from two different threads
+  in the same process). Instantiate `DotMDService` against the test
+  fixture index. Issue one read from the event-loop thread (call
+  `service._batch_load_provenance({...some_chunk_id...})` directly) and,
+  on the same `DotMDService` instance, issue another read driven from a
+  different thread via `await asyncio.to_thread(lambda: service._batch_load_provenance({...}))`.
+  Assert no `sqlite3.ProgrammingError` ("SQLite objects created in a
+  thread can only be used in that same thread") is raised. This pins
+  that the search-path SQLite connection was opened with
+  `check_same_thread=False` — an existing project-wide WAL-mode
+  requirement. Documentation-and-pin only; no code change is expected
+  in task 3 to make this pass (it should already pass once the WAL
+  connection is wired up). Comment must reference the cycle-5 opencode
+  MEDIUM.
 
 Tests must fail before task 2.
 </action>
@@ -296,7 +321,7 @@ Tests must fail before task 2.
   `slow_federated_provider`, `failing_federated_provider`,
   `make_federated_bundle`, plus a `make_misconfigured_federated_factory`
   helper for the lifecycle init failure tests (cycle-2 HIGH-6).
-- `backend/tests/search/test_federated.py` contains all 21+ tests named
+- `backend/tests/search/test_federated.py` contains all 22+ tests named
   above (8 foundational + 8 cycle-2 review additions for outcome split,
   local sequential, async/sync bridge, lifecycle init failure, separate
   timeouts, federated engine_scores=None + 3 cycle-3 review additions:
@@ -306,9 +331,11 @@ Tests must fail before task 2.
   cycle-4 review additions:
   `test_local_executor_has_max_workers_one` (structural pin),
   `test_concurrent_search_async_calls_do_not_overlap_local_sequences`
-  (behavioral pin for cross-request mutual exclusion)).
-- `rg -n 'test_search_async_does_not_block_event_loop|test_search_async_local_engines_share_one_worker_thread|test_federated_fanout_overlaps_with_local_search_sequence|test_local_executor_has_max_workers_one|test_concurrent_search_async_calls_do_not_overlap_local_sequences' backend/tests/search/test_federated.py`
-  returns three matches (cycle-3 HIGH + MEDIUM markers).
+  (behavioral pin for cross-request mutual exclusion) + 1 cycle-5
+  opencode MEDIUM addition:
+  `test_sqlite_connection_supports_cross_thread_access`).
+- `rg -n 'test_search_async_does_not_block_event_loop|test_search_async_local_engines_share_one_worker_thread|test_federated_fanout_overlaps_with_local_search_sequence|test_local_executor_has_max_workers_one|test_concurrent_search_async_calls_do_not_overlap_local_sequences|test_sqlite_connection_supports_cross_thread_access' backend/tests/search/test_federated.py`
+  returns one match per test name above (cycle-3 HIGH/MEDIUM markers + cycle-4 cross-request mutex pins + cycle-5 cross-thread pin).
 - `cd backend && uv run pytest tests/search/test_federated.py -q` exits
   non-zero before task 2 (federated module/protocol does not exist).
 - Tests reference `_run_local_engine`, `_run_federated_engine`,
@@ -554,8 +581,14 @@ failure):
     important during process exit so we don't leave an active SQLite
     transaction half-open.
   - If `DotMDService.close` does not yet exist, add it AND register it
-    via FastAPI/MCP shutdown hooks (out of scope: integration wiring is
-    owned by Plan 03 if it touches the lifecycle layer).
+    via FastAPI/MCP shutdown hooks. **Plan 02 owns this wiring** — both
+    the `close()` method body and its registration into the FastAPI
+    lifespan and the FastMCP server's shutdown hook are in scope here.
+    Plan 03 does not touch service lifecycle (its scope is the Telegram
+    federated provider + read-routing), so the prior "out of scope:
+    owned by Plan 03 if it touches the lifecycle layer" caveat is
+    discarded — there is no overlap to defer. (cycle-5 opencode LOW:
+    shutdown ownership made explicit; no overlap with Plan 03.)
 
 Public sync/async surface (cycle-2 HIGH-5 fix — `search_async` is canonical):
 
@@ -799,7 +832,16 @@ federated fan-out via `asyncio.gather`**):
     table and the `SourceStatus` records. The D-02 invariant is the
     single source of truth for federated candidates' `engine_scores`.
   - Stage 6 — optional reranker: pass through candidates whose
-    `chunk_id is None` AS-IS (skip rerank), keep their RRF score.
+    `chunk_id is None` AS-IS (skip rerank), keep their RRF score. The
+    `chunk_id is None` predicate is the Phase 34 simplification documented
+    in D-07 — it currently coincides with "federated candidate carrying
+    only short Telegram-style snippet text". When a future phase adds a
+    federated provider returning long-form text (e.g. Notion pages),
+    this predicate must switch to a snippet-length test
+    (`not snippet or len(snippet) < min_rerank_chars`); that change is
+    owned by the phase that introduces the second federated provider.
+    (cycle-5 opencode LOW: Phase 34 simplification documented at
+    Stage 6 alongside D-07 and the threat model row.)
   - Stage 7 — assemble:
     ```python
     return SearchResponse(
