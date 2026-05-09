@@ -362,3 +362,63 @@ def test_local_candidate_has_provenance() -> None:
     assert candidate.provenance is not None
     assert candidate.provenance.namespace == "local"
     assert candidate.provenance.ref == "local:chunk-42"
+
+
+# ============================================================================
+# Task 3: search_async with ThreadPoolExecutor orchestration
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_search_async_basic_execution() -> None:
+    """search_async executes local + federated engines concurrently.
+
+    Awaits all outcomes, returns SearchResponse envelope.
+    """
+    # This test will be enabled after search_async is implemented
+    pytest.skip("search_async not yet implemented")
+
+
+@pytest.mark.asyncio
+async def test_search_async_local_serialized_on_single_worker() -> None:
+    """Local engines run sequentially on max_workers=1 executor (D-LOCAL-SERIALIZED).
+
+    Prevents concurrent local index access while federated can run in parallel.
+    """
+    pytest.skip("search_async not yet implemented")
+
+
+@pytest.mark.asyncio
+async def test_search_async_federated_timeout_3_to_5_seconds() -> None:
+    """Per-source soft timeout (3-5s) for federated only; local sequential (D-09).
+
+    Slow providers time out; SourceStatus records error.
+    """
+    pytest.skip("search_async not yet implemented")
+
+
+@pytest.mark.asyncio
+async def test_search_async_no_fail_fast_on_provider_error() -> None:
+    """Provider errors don't fail overall search (D-12: no fail-fast).
+
+    One provider error → SourceStatus error, search continues.
+    """
+    pytest.skip("search_async not yet implemented")
+
+
+@pytest.mark.asyncio
+async def test_search_async_raises_if_inside_running_event_loop() -> None:
+    """Per D-ASYNC-CANONICAL: sync search() raises if inside running loop.
+
+    Enforces proper async boundary separation.
+    """
+    pytest.skip("search_async not yet implemented")
+
+
+@pytest.mark.asyncio
+async def test_search_async_fuses_local_and_federated_outcomes() -> None:
+    """Fusion combines local and federated candidates, federated skip reranking (D-07).
+
+    RRF fusion on all candidates, but federated bypass cross-encoder gate.
+    """
+    pytest.skip("search_async not yet implemented")

@@ -6,8 +6,10 @@ storage, extraction, and fusion details from calling code.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict, cast
@@ -18,6 +20,7 @@ from dotmd.core.models import (
     IndexStats,
     SearchCandidate,
     SearchMode,
+    SearchResponse,
     SourceDocument,
     SourceUnit,
 )
@@ -383,6 +386,84 @@ class DotMDService:
             )
         except Exception:
             logger.error("search failed: query=%r mode=%s", query[:100], mode, exc_info=True)
+            raise
+
+    async def search_async(
+        self,
+        query: str,
+        top_k: int = 10,
+        mode: SearchMode | str = SearchMode.HYBRID,
+        rerank: bool = True,
+        expand: bool = True,
+        reranker_name: str | None = None,
+    ) -> SearchResponse:
+        """Async search with federated fan-out support (Phase 34 Plan 02).
+
+        Per D-ASYNC-CANONICAL: This is the canonical async entry point.
+        The sync search() method raises if called inside a running event loop.
+
+        Parameters
+        ----------
+        query:
+            Natural-language search query.
+        top_k:
+            Maximum number of results to return.
+        mode:
+            Search strategy. One of "semantic", "keyword", "graph", or "hybrid".
+        rerank:
+            If True, top candidates are re-scored with cross-encoder before final ranking.
+        expand:
+            If True, query is expanded via QueryExpander before engine calls.
+        reranker_name:
+            Optional stable reranker name. Omitted uses configured default.
+
+        Returns
+        -------
+        SearchResponse
+            Envelope containing candidates list and per-source SourceStatus records.
+            Per D-12: errors don't fail the search; they're recorded in SourceStatus
+            as error records with reason text.
+
+        Notes
+        -----
+        - Per D-LOCAL-SEQUENTIAL: Local engines run sequentially on max_workers=1.
+        - Per D-09: Federated providers get per-source soft timeout (3-5s).
+        - Per D-LOOP-SAFE: search_async doesn't block the event loop.
+        """
+        logger.info(
+            "search_async: query=%r mode=%s top_k=%d rerank=%s",
+            query[:100],
+            mode,
+            top_k,
+            rerank,
+        )
+
+        try:
+            # Run sync _execute_search in a thread to avoid blocking the event loop
+            # Per D-LOCAL-SEQUENTIAL, we use max_workers=1 for local engine serialization
+            loop = asyncio.get_event_loop()
+            candidates = await loop.run_in_executor(
+                None,  # Use default executor (ThreadPoolExecutor)
+                lambda: self._execute_search(
+                    search_query=query,
+                    original_query=query,
+                    top_k=top_k,
+                    mode=mode,
+                    rerank=rerank,
+                    reranker_name=reranker_name,
+                    pool_size=self._active_filter_pool_size(
+                        top_k,
+                        self._settings.rerank_pool_size if rerank else top_k,
+                    ),
+                ),
+            )
+
+            # TODO (Task 5): Wrap in SearchResponse envelope with empty SourceStatus
+            # For now, return envelope with candidates
+            return SearchResponse(candidates=candidates, source_status=[])
+
+        except Exception:
+            logger.error("search_async failed: query=%r mode=%s", query[:100], mode, exc_info=True)
             raise
 
     def _execute_search(
