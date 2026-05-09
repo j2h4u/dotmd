@@ -46,8 +46,7 @@ reason: No message-level Telegram refs available to test (see issue in test 3)
 
 ### 7. Daemon-down error attribution
 expected: When daemon is unreachable, `source_status` tg:fts entry has status=error with attributed reason.
-result: skipped
-reason: Cannot mock lifecycle bundle path via _telegram_provider in automated test
+result: pass
 
 ### 8. can_materialize=False for all candidates
 expected: Every `SearchCandidate` has `can_materialize: false`.
@@ -56,10 +55,10 @@ result: pass
 ## Summary
 
 total: 8
-passed: 4
+passed: 5
 issues: 2
 pending: 0
-skipped: 2
+skipped: 1
 blocked: 0
 
 ## Gaps
