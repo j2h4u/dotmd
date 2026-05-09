@@ -1,165 +1,231 @@
 ---
 phase: 34
 reviewers: [codex]
-cycle: 4
+cycle: 5
 status: complete
-reviewed_at: 2026-05-08T19:38:08Z
+reviewed_at: 2026-05-09T00:00:00Z
 plans_reviewed:
   - 34-01-searchcandidate-contract-and-ref-keyed-fusion-PLAN.md
   - 34-02-federated-fanout-and-source-status-PLAN.md
   - 34-03-telegram-federated-proof-and-read-roundtrip-PLAN.md
 ---
 
-# Cross-AI Plan Review — Phase 34 (Cycle 4, Post Replan-2)
+# Cross-AI Plan Review — Phase 34 (Cycle 5, FINAL, Post Replan-3)
 
-> Cycle 4 is a **single-reviewer cycle** (codex via `ssh hetz sudo codex
-> exec --skip-git-repo-check`). Opencode remains dropped after two
-> failed cycles 1–2 (32-min hang, then Explore-Agent fanout that never
-> returned). Other CLIs (gemini, cursor, claude, ollama, lm-studio,
-> llama-cpp) are unavailable or excluded for self-review independence
-> reasons. No cross-AI consensus is therefore available — codex's
+> Cycle 5 is the **final cycle** of `/gsd-plan-review-convergence`
+> (`MAX_CYCLES=5`). Single reviewer: **codex** via
+> `ssh hetz sudo codex exec --skip-git-repo-check`. Opencode remained
+> dropped after cycles 1–2 failures; other CLIs unavailable or excluded
+> for independence. No cross-AI consensus is available — codex's
 > findings stand alone.
 >
-> The cycle ran as a **post-replan-2 re-review**: the prompt explicitly
-> told codex what was just fixed in commit `13a39af` on `dev` (the one
-> cycle-3 HIGH about `asyncio.to_thread` per-engine wraps, plus three
-> MEDIUMs/LOWs) and asked codex to verify each fix and surface any NEW
-> concerns introduced by the fix strategy itself. Codex returned a
-> substantive 3.2 KB structured review with explicit closure verdicts.
+> The cycle ran as a **post-replan-3 re-review**: the prompt explicitly
+> told codex what was just fixed in commit `577756a` on `dev` (the one
+> cycle-4 HIGH about cross-request concurrency, plus a MEDIUM around the
+> `interleave_count` capture window and a LOW around D-02 invariant
+> stamping single-pointness) and asked codex to verify each fix and
+> surface any NEW concerns introduced by the fix strategy itself. The
+> prompt also drew an explicit boundary against scope-broadening: the
+> single-process / single-container / single-service-instance scope is
+> the natural ceiling, and reaching past it (cross-process, cross-host,
+> cross-container) signals invariant closure rather than a new HIGH.
 
 ## Codex Review
 
-Codex (hand-run on hetz: `ssh hetz sudo codex exec --skip-git-repo-check -`)
-returned a structured 3.2 KB review at the requested format. The hetz
-sandbox blocks reading `/home/j2h4u` directly, so the review is grounded
-in the embedded prompt context (PROJECT.md head, CONTEXT.md,
-RESEARCH.md, all three PLAN.md files — total 189 KB prompt). The
-verbatim output follows.
+```
+Previous HIGH Status
 
----
+The cycle-4 HIGH is FULLY RESOLVED. Replan-3's dedicated
+ThreadPoolExecutor(max_workers=1, thread_name_prefix="dotmd-local-search")
+makes cross-request local-search overlap structurally impossible as long
+as local work is submitted through self._local_executor. The two new
+tests are load-bearing:
 
-**Summary** — Replan-2 correctly fixes the specific Cycle 3 defect: it replaces three concurrent per-engine `asyncio.to_thread(...)` calls with one off-loop local sequence and overlaps that with federated fan-out. The plan is materially better and preserves local-engine sequencing within a single search call. I do see one new HIGH edge case: concurrent `search_async()` requests can still run multiple local sequences at the same time on the default thread pool, so the broader SQLite/metadata/graph single-access invariant is not globally pinned.
+- test_local_executor_has_max_workers_one fails if max_workers=2, if the
+  executor is removed, or if the implementation stops using the named
+  dedicated executor.
+- test_concurrent_search_async_calls_do_not_overlap_local_sequences
+  fails for the original asyncio.to_thread / default-executor
+  regression when two concurrent search_async() calls overlap on
+  separate worker threads.
 
-**Closure verification of cycle-3 HIGH (event-loop block)**
+No further broader scope remains inside the stated single-process,
+single-container, single-service-instance boundary.
 
-- **FULLY RESOLVED** — Plan 34-02 Task 3 now specifies `asyncio.to_thread(self._run_local_search_sequence, ...)` exactly once, with semantic -> keyword -> graph_direct run sequentially inside that helper and composed with federated fan-out via `asyncio.gather(local_task, federated_task)`.
+.planning/PROJECT.md
 
-**Regression check vs cycle-2 fixes**
+No concerns.
 
-- **Partially preserved** — the single-thread local invariant is preserved **within one `search_async()` call**, and the new thread-ID test pins that; however, the plan does not serialize local search across **multiple concurrent `search_async()` calls**, so shared SQLite/metadata/graph clients can still be touched concurrently by two request-level worker threads.
+Verdict: PASS
 
-**New Concerns**
+34-CONTEXT.md
 
-- **HIGH** — Cross-request local concurrency remains unguarded. Because each `search_async()` call uses `asyncio.to_thread(...)` on the default executor, two simultaneous MCP/FastAPI searches can run two `_run_local_search_sequence(...)` calls concurrently on different worker threads. That is a missed edge case against the Cycle 2 single-thread SQLite/metadata/graph invariant.
+No concerns. The boundary is clear, and the guardrails now correctly
+stop at cross-request concurrency rather than expanding into
+cross-process/container cases.
 
-- **MEDIUM** — `test_search_async_does_not_block_event_loop` needs to explicitly capture `interleave_count` at the moment `search_async` completes. As written in the plan, `await asyncio.gather(service.search_async(...), interleaver())` followed by asserting the final count can pass even if `search_async` blocked first and the interleaver only ran afterward.
+Verdict: PASS
 
-- **LOW** — Task 3 Stage 5 wording is slightly contradictory: it says to merge per-engine attribution from federated engine names, then says federated candidates must have `engine_scores=None`. The D-02 invariant and test are clear, but the implementation instruction should be tightened.
+34-RESEARCH.md
 
-**Suggestions**
+No concerns. It still contains the earlier generic asyncio.gather /
+wait_for patterns, but the concrete plans supersede that with the local
+single-worker executor. No contradiction severe enough to block.
 
-- Add a service-level local-search gate: either an `asyncio.Lock` around the single `to_thread` local sequence, or a dedicated single-worker executor for local search. The goal is no overlapping local sequences across concurrent requests.
+Verdict: PASS
 
-- Add a test like `test_concurrent_search_async_calls_do_not_overlap_local_sequences`: launch two `search_async()` calls, make `_run_local_search_sequence` block briefly, and assert no overlap.
+34-01 Plan
 
-- Fix the event-loop test by wrapping search in a coroutine that records the interleaver count in a `finally` or immediately after `await service.search_async(...)`, then assert that recorded value is >= 15.
+No HIGH concerns.
 
-**Risk Assessment**
+LOW:
+- The MCP projection language is still slightly over-specified for
+  Plan 01: it says MCP returns SearchCandidate directly, while also
+  allowing a "thin renderer" that rounds fused_score. That is probably
+  harmless, but the plan should avoid any renderer that changes
+  canonical field values if round-trip equality is asserted later.
 
-- **MEDIUM** — The targeted Cycle 3 issue is closed, but the cross-request concurrency hole is significant for a server surface. With a local-search lock or single-worker executor plus the adjusted test, risk drops to LOW.
+Verdict: PASS with LOW note
 
----
+34-02 Plan
 
-## Reviewer Outcomes (Operational)
+No HIGH concerns.
 
-| Reviewer | Status      | Wall time | Output bytes | Notes |
-|----------|-------------|-----------|--------------|-------|
-| codex (ssh-hetz) | substantive | ~50s | 3280 | `ssh hetz sudo codex exec --skip-git-repo-check -`. Default model. 189 KB prompt. Output: cycle-3 HIGH FULLY RESOLVED, 1 NEW HIGH (cross-request concurrency), 1 NEW MEDIUM (test capture timing), 1 NEW LOW (stage-5 wording). 65,192 tokens used. Stderr was a thinking-trace duplicate, not an error log. |
+MEDIUM:
+- DotMDService.close() is added, but shutdown integration is partly
+  deferred: "register it via FastAPI/MCP shutdown hooks" is described as
+  out of scope if it touches lifecycle wiring. Because the executor
+  thread is non-daemon by default, production should have a clear
+  lifecycle hook before final verification. This is not a contract
+  blocker, but it is a real operational cleanup risk.
+
+LOW:
+- Task 1 acceptance says the rg for five named tests "returns three
+  matches." That should be corrected to five, otherwise the acceptance
+  text is stale.
+- The behavioral non-overlap test text describes Invariant A and B, but
+  B is effectively the same interval assertion without same-thread
+  identity. The test should implement A as the actual assertion plus a
+  clear failure message; the fallback wording should not weaken the
+  expected single-worker invariant.
+
+MEDIUM fix status:
+- The frozen interleave_count capture is FULLY RESOLVED. Capturing
+  search_finished_count in finally inside search_wrapper() correctly
+  prevents a post-return tick burst from masking event-loop blockage. A
+  pathological scheduler can always create noisy timing, but the
+  threshold >=15 over a 2s blocking simulation is a reasonable
+  regression pin.
+
+LOW fix status:
+- The D-02 stamping prose is FULLY RESOLVED. Stage 5 now has explicit
+  LOCAL and FEDERATED branches, and federated candidates have
+  engine_scores overwritten to None at the builder boundary regardless
+  of provider input. That is a single enforcement point.
+
+Verdict: PASS with MEDIUM/LOW cleanup
+
+34-03 Plan
+
+No HIGH concerns.
+
+MEDIUM:
+- Task 0 writes .planning/phases/.../34-PREFLIGHT.md and may edit
+  .planning/BACKLOG.md, but those files are not listed in
+  files_modified. Add them so execution tools and reviewers expect
+  those writes.
+- The can_read test wording says "stub provider whose object does NOT
+  have a read_unit_window attribute," but the implementation derives
+  from client method read_source_unit_window. That naming mismatch
+  could produce a false-positive test if provider/client capability
+  boundaries are confused. The plan should consistently say the
+  Telegram provider derives can_read from the underlying client/provider
+  capability it actually calls.
+
+LOW:
+- Task 5 says docker compose restart dotmd is autonomous regardless of
+  endpoint. That is consistent with prior constraints, but it should
+  name the compose working directory or rely on existing project
+  scripts; otherwise execution may restart from the wrong cwd.
+
+Verdict: PASS with MEDIUM cleanup
+
+Overall Verdict
+
+PASS. The cycle-4 cross-request concurrency HIGH is fully resolved by
+the single-worker executor design and pinned by both structural and
+behavioral tests. I do not see any new HIGH in the replan itself. The
+remaining issues are cleanup-level: lifecycle shutdown wiring, stale
+acceptance text, file lists for preflight/backlog writes, and one
+capability-naming mismatch in Telegram tests.
+```
+
+## Reviewer Outcomes
+
+| Plan / File   | Verdict (codex)             | Closure of prior cycle-4 items                  |
+|---------------|-----------------------------|-------------------------------------------------|
+| PROJECT.md    | PASS                        | n/a                                             |
+| 34-CONTEXT.md | PASS                        | n/a                                             |
+| 34-RESEARCH.md| PASS                        | n/a                                             |
+| 34-01 PLAN    | PASS with LOW note          | n/a                                             |
+| 34-02 PLAN    | PASS with MEDIUM/LOW cleanup| Cycle-4 MEDIUM (frozen interleave_count) FULLY RESOLVED |
+| 34-03 PLAN    | PASS with MEDIUM cleanup    | n/a                                             |
+| Overall       | **PASS**                    | Cycle-4 HIGH (cross-request concurrency) **FULLY RESOLVED** |
 
 ## Consensus Summary
 
-**Single-reviewer cycle — no cross-AI consensus available.** Cycle 4
-ran with codex only; opencode remains dropped after two prior failed
-runs and no other CLI is available. The summary below reflects codex's
-findings alone and should be treated as raised-by-codex, not
-consensus-blocking.
+**Single-reviewer cycle — final cycle of /gsd-plan-review-convergence.**
 
-### Strengths (codex)
+- The cycle-4 HIGH (cross-request concurrency on the default executor)
+  is **FULLY RESOLVED**. Codex independently verified that the dedicated
+  single-worker `ThreadPoolExecutor` with `_thread_name_prefix=
+  "dotmd-local-search"` makes overlap structurally impossible for any
+  local work routed through `self._local_executor`. Both new tests
+  (`test_local_executor_has_max_workers_one` and
+  `test_concurrent_search_async_calls_do_not_overlap_local_sequences`)
+  are confirmed load-bearing — they fail under the prior
+  `asyncio.to_thread`/default-executor regression.
+- The cycle-4 MEDIUM (frozen `interleave_count` capture) is
+  **FULLY RESOLVED**.
+- The cycle-4 LOW (single-point D-02 invariant stamping) is
+  **FULLY RESOLVED**.
+- **Zero new HIGHs raised.** Codex explicitly notes "No further broader
+  scope remains inside the stated single-process, single-container,
+  single-service-instance boundary." The scope-expansion pattern
+  flagged in cycle 4 (per-engine → per-request → cross-request) has
+  reached its natural ceiling, as predicted by the convergence prompt.
+- Residual issues are cleanup-level only:
+  - 34-01 LOW: tighten language around any "thin renderer" that
+    might round canonical field values vs. round-trip equality.
+  - 34-02 MEDIUM: production lifecycle hook for
+    `DotMDService.close()` (executor thread is non-daemon).
+  - 34-02 LOW: stale "three matches" acceptance text (should be
+    "five"); behavioral non-overlap test wording around
+    Invariant A vs. B fallback.
+  - 34-03 MEDIUM: missing `34-PREFLIGHT.md` / `BACKLOG.md` in
+    `files_modified`; `can_read` test wording naming mismatch
+    against `read_source_unit_window` derivation.
+  - 34-03 LOW: name compose working directory for `docker compose
+    restart dotmd`.
 
-- Cycle-3 HIGH (event-loop block) **FULLY RESOLVED** — single
-  `asyncio.to_thread(_run_local_search_sequence, ...)` overlapping
-  federated fan-out via `asyncio.gather(local_task, federated_task)`.
-- New regression-pin tests (loop-not-blocked, single-worker-thread,
-  local↔federated overlap) directly target the defect class and lock
-  the structural choice.
-- Plan is "materially better" per codex.
+**Total unresolved HIGHs (current_high): 0.**
 
-### Concerns (codex; treat as raised, not consensus-blocking)
+prev_high_count was 1; current_high is 0. **Convergence achieved on the
+final cycle.** Replan-3's "invariant by construction" choice (Option B,
+single-worker executor) was structurally sound and codex confirmed
+closure without raising any successor HIGH at any broader scope. Risk
+profile drops from MEDIUM to LOW: residuals are documentation cleanup
+and a non-blocker lifecycle wiring item that can be addressed during
+execution.
 
-1. **NEW HIGH — Cross-request local concurrency unguarded.** Two
-   simultaneous `search_async()` calls each call `to_thread` on the
-   default executor; two `_run_local_search_sequence(...)` invocations
-   can overlap on different worker threads. Cycle-2 single-thread
-   SQLite/metadata/graph invariant holds **per request** but not
-   **across requests**. Suggested fix: service-level `asyncio.Lock`
-   around the local-sequence `to_thread`, or a dedicated single-worker
-   executor.
-2. **NEW MEDIUM — Event-loop test timing.** `await asyncio.gather(...)`
-   in the test allows the interleaver to keep ticking after
-   `search_async` returns, so the count assertion may pass even if
-   `search_async` itself blocked first. Capture `interleave_count`
-   immediately when `search_async` completes (e.g. via `finally`).
-3. **NEW LOW — Stage 5 wording in Plan 34-02 Task 3.** Reads as if
-   federated engine attribution is merged into `engine_scores`, then
-   immediately says `engine_scores=None` for federated. The D-02
-   invariant and test are right; only the prose contradicts itself.
-
-### Divergent Views
-
-Not applicable — only one reviewer in this cycle.
-
----
-
-## HIGH Concern Counting (Cycle 4)
-
-Per the GSD review-convergence contract:
-
-- **FULLY RESOLVED prior HIGHs (excluded):** 1 — cycle-3 event-loop
-  block (now structurally fixed by single-helper `to_thread` plus
-  `gather`).
-- **NEW HIGHs (counted):** 1 — cross-request local concurrency
-  unguarded. Default executor allows two simultaneous `search_async`
-  calls to run two `_run_local_search_sequence` invocations on
-  different worker threads, breaking the cycle-2 single-thread
-  SQLite/metadata/graph invariant globally.
-
-**Total unresolved HIGHs (current_high): 1.**
-
-prev_high_count was 1; current_high is 1. **Stall trigger fires
-(current_high >= prev_high_count).** This is a concerning signal:
-replan-1 closed 7/8 cycle-2 HIGHs but left a residual that became
-cycle-3's HIGH. Replan-2 closed cycle-3's HIGH but surfaced a new
-cycle-4 HIGH about cross-request concurrency — the **same invariant
-class** (single-thread SQLite/metadata/graph) but at a different scope
-(cross-request rather than per-request). The reviewer scope keeps
-expanding: per-engine → per-request → cross-request.
-
-The orchestrator should weigh:
-
-- The new HIGH is a known fix (service-level `asyncio.Lock` or single-
-  worker executor — codex spelled it out). Replan-3 is small and well-
-  scoped.
-- This is cycle 4 of MAX_CYCLES=5. Replan-3 → cycle 5 review is the
-  last allotted slot. If cycle 5 surfaces yet another invariant scope,
-  convergence has failed and operator review is needed.
-- Alternatively: ship as-is and address cross-request concurrency
-  during execution, since dotMD is single-user localhost and concurrent
-  searches are rare. This is a defensible "known issue, deferred"
-  call given the system's actual usage pattern.
+The phase is **cleared to proceed to execution** under standard
+`/gsd-execute-phase` flow. The MEDIUM/LOW cleanups should be folded into
+the corresponding plan task acceptance during execution rather than
+re-cycled through plan review.
 
 ---
 
-*Cycle 4 of cross-AI review for Phase 34. Single reviewer (codex).
-Replan-2 from commit `13a39af` verified: cycle-3 HIGH fully closed; one
-new HIGH surfaced about cross-request concurrency (same invariant
-class, broader scope). Stall trigger fires. Risk remains MEDIUM.*
+*Cycle 5 of cross-AI review for Phase 34 — FINAL of MAX_CYCLES=5.
+Single reviewer (codex). Replan-3 from commit `577756a` verified:
+cycle-4 HIGH fully closed; zero new HIGHs at any scope. Convergence
+achieved. Risk now LOW.*
