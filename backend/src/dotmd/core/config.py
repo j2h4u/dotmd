@@ -244,6 +244,21 @@ class Settings(BaseSettings):
     (env wiring deferred to future phase).
     """
 
+    federated_result_quota: int = 3
+    """Number of result slots reserved for federated (non-local) sources in each
+    search response. Controls how many federated candidates appear alongside local
+    semantic results.
+
+    Score-based merge is impossible across heterogeneous sources: local uses cosine
+    similarity (0.52-0.96); mcp-telegram returns no scores so fused_score=0.0.
+    Quota is honest — it reserves slots based on what we know (daemon ranking) and
+    avoids fabricating cross-source scores that would silently mislead rerankers.
+
+    The slot count is adaptive: fed_slots = min(fed_quota, len(filtered_fed)).
+    This handles daemon-down (0 fed → full top_k to local), sparse results, and
+    normal operation with one code path.
+    """
+
     @field_validator("base_url")
     @classmethod
     def validate_base_url(cls, v: str | None) -> str | None:

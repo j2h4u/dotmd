@@ -1603,3 +1603,89 @@ class TestSourceProvenanceSafetyGate:
             service._settings.chunk_strategy,
             dry_run=False,
         )
+
+
+class TestMergeWithFederatedQuota:
+    """Unit tests for the module-level _merge_with_federated_quota function."""
+
+    def _local(self, n: int, base_score: float = 0.9) -> list:
+        from dotmd.core.models import SearchCandidate
+        return [
+            SearchCandidate(
+                ref=f"filesystem:/mnt/doc_{i}.md#0",
+                namespace="filesystem",
+                descriptor_key="filesystem-mnt",
+                source_kind="markdown",
+                retrieval_kind="semantic",
+                snippet=f"local result {i} with enough content to pass filters",
+                fused_score=base_score - i * 0.05,
+                can_read=True,
+            )
+            for i in range(n)
+        ]
+
+    def _fed(self, n: int, snippet_template: str = "telegram message about {i}") -> list:
+        from dotmd.core.models import SearchCandidate
+        return [
+            SearchCandidate(
+                ref=f"telegram:dialog:-100123:message:{i}",
+                namespace="telegram",
+                descriptor_key="telegram-dialog--100123",
+                source_kind="telegram_message",
+                retrieval_kind="fts",
+                snippet=snippet_template.format(i=i),
+                fused_score=0.0,  # daemon returns no score
+                can_read=False,
+            )
+            for i in range(n)
+        ]
+
+    def test_federated_quota_candidates_appear_when_local_fills_top_k(self) -> None:
+        """Fed candidates appear even when local results could fill all top_k slots."""
+        from dotmd.api.service import _merge_with_federated_quota
+        local = self._local(10)
+        fed = self._fed(3)
+        result = _merge_with_federated_quota(local, fed, top_k=5, fed_quota=3)
+        assert len(result) == 5
+        fed_refs = {c.ref for c in fed}
+        assert sum(1 for c in result if c.ref in fed_refs) == 3
+
+    def test_federated_quota_adaptive_slots(self) -> None:
+        """When fewer fed candidates exist than quota, local fills the remainder."""
+        from dotmd.api.service import _merge_with_federated_quota
+        local = self._local(10)
+        fed = self._fed(1)  # only 1 fed result, quota is 3
+        result = _merge_with_federated_quota(local, fed, top_k=5, fed_quota=3)
+        assert len(result) == 5
+        fed_refs = {c.ref for c in fed}
+        assert sum(1 for c in result if c.ref in fed_refs) == 1
+        # local fills the 4 remaining slots
+        assert sum(1 for c in result if c.ref not in fed_refs) == 4
+
+    def test_federated_quota_filters_low_signal(self) -> None:
+        """Low-signal fed snippets (short/emoji) are dropped before quota math."""
+        from dotmd.api.service import _merge_with_federated_quota
+        from dotmd.core.models import SearchCandidate
+        low_signal = SearchCandidate(
+            ref="telegram:dialog:-100123:message:99",
+            namespace="telegram",
+            descriptor_key="telegram-dialog--100123",
+            source_kind="telegram_message",
+            retrieval_kind="fts",
+            snippet="ok",  # very short — is_low_signal_telegram_text returns True
+            fused_score=0.0,
+            can_read=False,
+        )
+        local = self._local(5)
+        result = _merge_with_federated_quota(local, [low_signal], top_k=5, fed_quota=3)
+        assert all(c.ref != low_signal.ref for c in result), "low-signal candidate must be excluded"
+
+    def test_federated_quota_empty_fed_returns_sorted_local(self) -> None:
+        """Empty fed list returns local candidates sorted by fused_score descending."""
+        from dotmd.api.service import _merge_with_federated_quota
+        # create local in reverse score order to verify sorting
+        local = self._local(5, base_score=0.5)
+        local_shuffled = list(reversed(local))
+        result = _merge_with_federated_quota(local_shuffled, [], top_k=3, fed_quota=3)
+        assert len(result) == 3
+        assert result[0].fused_score >= result[1].fused_score >= result[2].fused_score
