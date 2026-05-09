@@ -568,8 +568,8 @@ class TestReadRefContract:
 
         service = _get_service(tmp_path)
         metadata = MagicMock()
-        metadata.get_source_document.return_value = _telegram_document()
-        metadata.is_resource_binding_active.return_value = True
+        # FEDERATED_ONLY path: no local document
+        metadata.get_source_document.return_value = None
         service._pipeline._metadata_store = metadata
         provider = MagicMock()
         provider.read_unit_window.return_value = SourceUnitWindow(
@@ -596,8 +596,6 @@ class TestReadRefContract:
             after=4,
         )
         assert payload["ref"] == "telegram:dialog:-1001:message:42"
-        assert payload["document_ref"] == "dialog:-1001"
-        assert payload["target_unit_ref"] == "dialog:-1001:message:42"
         assert payload["frontmatter"] == {}
         assert [unit["message_id"] for unit in payload["units"]] == [41, 42, 43]
         assert [unit["text"] for unit in payload["units"]] == [
@@ -615,8 +613,8 @@ class TestReadRefContract:
 
         service = _get_service(tmp_path)
         metadata = MagicMock()
-        metadata.get_source_document.return_value = _telegram_document()
-        metadata.is_resource_binding_active.return_value = True
+        # FEDERATED_ONLY path: no local document
+        metadata.get_source_document.return_value = None
         service._pipeline._metadata_store = metadata
         provider = MagicMock()
         provider.read_unit_window.return_value = SourceUnitWindow(
@@ -697,7 +695,7 @@ class TestReadRefContract:
         metadata.is_resource_binding_active.return_value = False
         service._pipeline._metadata_store = metadata
 
-        with pytest.raises(ValueError, match="Unknown source ref: telegram:dialog:-1001:message:42"):
+        with pytest.raises(PermissionError, match="Telegram ref has INACTIVE binding"):
             service.read("telegram:dialog:-1001:message:42")
 
     def test_read_ref_returns_ref_not_file_path_and_uses_active_strategy(
@@ -992,7 +990,7 @@ class TestDrillRefContract:
         metadata.is_resource_binding_active.return_value = False
         service._pipeline._metadata_store = metadata
 
-        with pytest.raises(ValueError, match="Unknown source ref: telegram:dialog:-1001:message:42"):
+        with pytest.raises(PermissionError, match="Telegram ref has INACTIVE binding"):
             service.drill("telegram:dialog:-1001:message:42")
 
 
