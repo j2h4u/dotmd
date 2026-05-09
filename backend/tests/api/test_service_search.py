@@ -69,13 +69,13 @@ def test_format_elapsed_ms_for_human_diagnostics() -> None:
 
 
 class TestSearchReturnsFilePaths:
-    """DotMDService.search returns SearchCandidate instances with public refs."""
+    """DotMDService.search returns SearchResponse with SearchCandidate instances."""
 
     def test_local_only_search_returns_searchcandidate(self, tmp_path: Path) -> None:
-        """search() returns SearchCandidate with ref-shaped public interface."""
+        """search() returns SearchResponse envelope with candidates."""
         service = _get_service(tmp_path)
 
-        from dotmd.core.models import SearchCandidate, SearchMode
+        from dotmd.core.models import SearchCandidate, SearchMode, SearchResponse
         stub_result = SearchCandidate(
             ref="filesystem:/mnt/test.md#0",
             namespace="filesystem",
@@ -90,7 +90,7 @@ class TestSearchReturnsFilePaths:
         )
 
         with patch.object(service, "_execute_search", return_value=[stub_result]) as execute_search:
-            results = service.search("test query", top_k=5, rerank=False, expand=False)
+            response = service.search("test query", top_k=5, rerank=False, expand=False)
 
         execute_search.assert_called_once_with(
             search_query="test query",
@@ -101,10 +101,11 @@ class TestSearchReturnsFilePaths:
             reranker_name=None,
             pool_size=55,
         )
-        assert results == [stub_result]
-        assert isinstance(results[0], SearchCandidate)
-        assert results[0].ref == "filesystem:/mnt/test.md#0"
-        assert results[0].can_read is True
+        assert isinstance(response, SearchResponse)
+        assert response.candidates == [stub_result]
+        assert isinstance(response.candidates[0], SearchCandidate)
+        assert response.candidates[0].ref == "filesystem:/mnt/test.md#0"
+        assert response.candidates[0].can_read is True
 
 
 class TestSearchRespectsTopK:
@@ -130,9 +131,9 @@ class TestSearchRespectsTopK:
         ]
 
         with patch.object(service, "_execute_search", return_value=stub_results) as execute_search:
-            results = service.search("test query", top_k=3)
+            response = service.search("test query", top_k=3)
 
-        assert results == stub_results
+        assert response.candidates == stub_results
         kwargs = execute_search.call_args.kwargs
         assert kwargs["top_k"] == 3
         assert kwargs["pool_size"] == max(
@@ -331,15 +332,15 @@ class TestFilesystemBindingLifecycle:
             }
         )
 
-        visible = service.search("lifecycle target", top_k=1, rerank=False, expand=False)
-        assert [result.ref for result in visible] == [ref]
+        visible_response = service.search("lifecycle target", top_k=1, rerank=False, expand=False)
+        assert [result.ref for result in visible_response.candidates] == [ref]
         assert "Retained artifact lifecycle" in service.read(ref, 0, 1)["chunks"][0]["text"]
 
         md_path.unlink()
         service.index(data_dir)
 
-        hidden = service.search("lifecycle target", top_k=1, rerank=False, expand=False)
-        assert hidden == []
+        hidden_response = service.search("lifecycle target", top_k=1, rerank=False, expand=False)
+        assert hidden_response.candidates == []
         with pytest.raises(ValueError, match="Unknown source ref"):
             service.read(ref, 0, 1)
 
@@ -347,8 +348,8 @@ class TestFilesystemBindingLifecycle:
         encode_calls.clear()
         service.index(data_dir)
 
-        rebound = service.search("lifecycle target", top_k=1, rerank=False, expand=False)
-        assert [result.ref for result in rebound] == [ref]
+        rebound_response = service.search("lifecycle target", top_k=1, rerank=False, expand=False)
+        assert [result.ref for result in rebound_response.candidates] == [ref]
         assert "Retained artifact lifecycle" in service.read(ref, 0, 1)["chunks"][0]["text"]
         assert encode_calls == []
 

@@ -32,7 +32,7 @@ from starlette.routing import Route
 from dotmd.api.service import DotMDService
 from dotmd.auth import DotMDOAuthProvider, PairingCodeError
 from dotmd.core.config import load_runtime_settings
-from dotmd.core.models import SearchCandidate
+from dotmd.core.models import SearchCandidate, SearchResponse
 from dotmd.feedback import FeedbackStore
 
 logger = logging.getLogger(__name__)
@@ -595,7 +595,7 @@ def create_app() -> Starlette:
 async def search(
     query: Annotated[str, Field(description="Natural-language search query.")],
     top_k: Annotated[int, Field(description="Maximum results to return.", ge=1, le=100)] = 10,
-) -> list[SearchCandidate]:
+) -> SearchResponse:
     """Search the indexed markdown knowledgebase and return ranked chunks.
 
     Use proactively whenever the user asks about notes, meetings, decisions, people,
@@ -611,11 +611,13 @@ async def search(
     user's personal notes or project files.
     """
     if not query.strip():
-        return []
+        return SearchResponse()
     try:
         service = _get_service()
-        results = await asyncio.to_thread(service.search, query, top_k=top_k)
-        return [_format_result(r) for r in results]
+        response = await asyncio.to_thread(service.search, query, top_k=top_k)
+        # response is already a SearchResponse; format candidates for MCP output
+        formatted_candidates = [_format_result(r) for r in response.candidates]
+        return SearchResponse(candidates=formatted_candidates, source_status=response.source_status)
     except Exception as exc:
         logger.error("search failed: query=%r", query[:100], exc_info=True)
         raise RuntimeError(f"Search failed: {exc}.") from exc

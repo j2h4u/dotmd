@@ -328,7 +328,7 @@ class DotMDService:
         rerank: bool = True,
         expand: bool = True,
         reranker_name: str | None = None,
-    ) -> list[SearchCandidate]:
+    ) -> SearchResponse:
         """Search the index and return ranked results.
 
         Parameters
@@ -352,8 +352,10 @@ class DotMDService:
 
         Returns
         -------
-        list[SearchCandidate]
-            Ranked search candidates, at most *top_k* items.
+        SearchResponse
+            Envelope containing ranked search candidates (at most *top_k* items)
+            and per-source SourceStatus records. Local sources report ok/error,
+            federated sources report ok/error/skipped states.
 
         Side effect: appends one row to ``search_log`` in ``index.db`` on every call.
         """
@@ -375,7 +377,7 @@ class DotMDService:
         active_pool_size = self._active_filter_pool_size(top_k, pool_size)
 
         try:
-            return self._execute_search(
+            candidates = self._execute_search(
                 search_query=search_query,
                 original_query=query,
                 top_k=top_k,
@@ -384,6 +386,8 @@ class DotMDService:
                 reranker_name=reranker_name,
                 pool_size=active_pool_size,
             )
+            # Wrap in SearchResponse envelope (local sources only for now)
+            return SearchResponse(candidates=candidates, source_status=[])
         except Exception:
             logger.error("search failed: query=%r mode=%s", query[:100], mode, exc_info=True)
             raise

@@ -24,8 +24,8 @@
     "hash": "4b0f89505491ebbece06857223dc53ff"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/mcp_server.py": {
-    "mtime": 1778068935.5293772,
-    "hash": "bdf03d01626a09e1f8b9e8210e6e2f68"
+    "mtime": 1778337689.3863642,
+    "hash": "c19d70baea4e94f9786dd3794a90f536"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/auth.py": {
     "mtime": 1777724993.8898222,
@@ -48,12 +48,16 @@
     "hash": "1ecaacabe0bf0b82ad5569daffce3d51"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/fusion.py": {
-    "mtime": 1778337240.4359694,
-    "hash": "0414acfb707fbd513b09f6fdbd2c8d90"
+    "mtime": 1778337646.3537045,
+    "hash": "f6d1fb8148e5a489507cfcd5d0cd7ce7"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/fts5.py": {
     "mtime": 1778227159.6381595,
     "hash": "a5a9522e2b66fafce7af3444cc0eb6c8"
+  },
+  "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/federated.py": {
+    "mtime": 1778338368.2883284,
+    "hash": "fd02511801c09d04bef034a708a11c89"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/reranker.py": {
     "mtime": 1777713168.357088,
@@ -204,16 +208,16 @@
     "hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/api/types.py": {
-    "mtime": 1774198787.685586,
-    "hash": "986741db6755edd7a7bf18521c52f4f2"
+    "mtime": 1778337642.357643,
+    "hash": "91a241f593ca625756a4f2a46e7730a9"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/api/service.py": {
-    "mtime": 1778337261.6842601,
-    "hash": "33f36581ce10d6d03a6f11d6235eb3db"
+    "mtime": 1778338472.9378202,
+    "hash": "ceb4de652b374bbea9907a4d05b7fac6"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/api/server.py": {
-    "mtime": 1777996759.0251703,
-    "hash": "49866413c0ba6ede3f12337e974af6cd"
+    "mtime": 1778337637.4055667,
+    "hash": "96c23186b5e4dd54cbe25f5d60ed5706"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/api/__init__.py": {
     "mtime": 1774198787.685586,
@@ -252,8 +256,8 @@
     "hash": "0fec526f7fd71c6d3ee330ac505f3ac8"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/test_fusion.py": {
-    "mtime": 1778240502.051347,
-    "hash": "15df05cbb768d8b7ea7a213fa2595a6a"
+    "mtime": 1778337980.9067242,
+    "hash": "76c6b978eafae3430043ab5fceea7b93"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/test_graph_search.py": {
     "mtime": 1777629395.2923841,
@@ -298,6 +302,10 @@
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/test_service_force.py": {
     "mtime": 1777459996.8437848,
     "hash": "d767f6d3f80ba0caae9d331d6c5de2fe"
+  },
+  "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/test_federated.py": {
+    "mtime": 1778338438.905336,
+    "hash": "eda872fb2711b6525c239bf15e2f3495"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/__init__.py": {
     "mtime": 1774978536.3604338,
@@ -424,8 +432,8 @@
     "hash": "8e5ef667dfef890681875ae35b3217be"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/cli/test_search_output.py": {
-    "mtime": 1778069040.5788825,
-    "hash": "25ed539980b315650cc69d95d9dc1e91"
+    "mtime": 1778338160.521342,
+    "hash": "4a8e405651bafccecd027d818ed526c6"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/cli/test_status_output.py": {
     "mtime": 1777459629.1907248,
@@ -436,12 +444,12 @@
     "hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/api/test_search_result_shape.py": {
-    "mtime": 1778069240.4217384,
-    "hash": "80ca4656a19beffe6d3984ed9991966e"
+    "mtime": 1778338151.1372063,
+    "hash": "a20fb2542779aafc30f4b617a8430629"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/api/test_service_search.py": {
-    "mtime": 1778256962.1488152,
-    "hash": "f25533df99098a9dc4fd0c8605c00b0c"
+    "mtime": 1778338122.5167913,
+    "hash": "d9b8f2eb685dc812967b21952f9444e8"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/api/__init__.py": {
     "mtime": 1777098670.4829655,
@@ -460,8 +468,8 @@
     "hash": "3274081eeaab2f35fba03b3c999202d1"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/core/test_search_candidate.py": {
-    "mtime": 1778337196.0433617,
-    "hash": "315b243adb1a392731c0476688e58445"
+    "mtime": 1778337734.0310435,
+    "hash": "a04787778ff861fc67e37b5caeae0261"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/core/test_config_separation.py": {
     "mtime": 1777997845.0919693,
