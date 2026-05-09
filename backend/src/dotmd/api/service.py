@@ -30,6 +30,7 @@ from dotmd.ingestion.pipeline import IndexingPipeline
 from dotmd.ingestion.reader import parse_frontmatter, read_file
 from dotmd.ingestion.source_lifecycle import SourceRuntimeFactory
 from dotmd.ingestion.source_provider import ApplicationSourceProviderProtocol
+from dotmd.ingestion.telegram_provider import is_low_signal_telegram_text
 from dotmd.ingestion.trickle import TrickleIndexer
 from dotmd.search.fusion import build_candidates, fuse_results
 from dotmd.search.graph_direct import GraphDirectEngine
@@ -160,6 +161,47 @@ def format_elapsed_ms(elapsed_ms: float) -> str:
     if minutes:
         return f"{minutes}m{seconds:02d}s"
     return f"{seconds}s"
+
+
+def _merge_with_federated_quota(
+    local_candidates: list[SearchCandidate],
+    fed_candidates: list[SearchCandidate],
+    top_k: int,
+    fed_quota: int,
+) -> list[SearchCandidate]:
+    """Merge local and federated candidates using reserved slot quota.
+
+    Score-based merge is impossible here: local candidates use cosine similarity
+    (0.52-0.96), but federated providers such as mcp-telegram return no score
+    field — fused_score is always 0.0. A unified sort would drop every federated
+    result. Fabricating scores (e.g. 1/(1+rank)) would silently mislead
+    downstream consumers and rerankers.
+
+    Quota is the honest alternative: reserve fed_slots positions for federated
+    results based on their daemon-returned ranking (which we trust within a
+    source), fill the rest with the best local results.
+
+    Adaptive quota — fed_slots = min(fed_quota, len(filtered_fed)) — handles
+    three cases uniformly:
+    - Daemon down / no results: fed_slots=0, all top_k go to local.
+    - Sparse fed results: fed_slots shrinks, local gets the freed positions.
+    - Normal operation: fed_slots=fed_quota, standard split.
+
+    The is_low_signal_telegram_text pre-filter removes very short or emoji-only
+    messages that FTS scored well by keyword but carry no semantic content. The
+    filter is already proven in the trickle ingestion pipeline.
+    """
+    filtered_fed = [
+        c for c in fed_candidates
+        if not is_low_signal_telegram_text(c.snippet or "")
+    ]
+    fed_slots = min(fed_quota, len(filtered_fed))
+    local_slots = top_k - fed_slots
+
+    top_local = sorted(local_candidates, key=lambda c: c.fused_score, reverse=True)[:local_slots]
+    top_fed = filtered_fed[:fed_slots]  # daemon ranking is preserved as-is
+
+    return top_local + top_fed
 
 
 class DotMDService:
@@ -567,15 +609,14 @@ class DotMDService:
                     ),
                 )
                 fed_candidates = [c for outcome in fed_outcomes for c in outcome.candidates]
-                all_candidates = sorted(
-                    local_candidates + fed_candidates,
-                    key=lambda c: c.fused_score,
-                    reverse=True,
-                )[:top_k]
+                all_candidates = _merge_with_federated_quota(
+                    local_candidates, fed_candidates, top_k,
+                    self._settings.federated_result_quota,
+                )
                 fed_status = outcomes_to_source_status(fed_outcomes)
             else:
                 local_candidates = await local_coro
-                all_candidates = local_candidates
+                all_candidates = sorted(local_candidates, key=lambda c: c.fused_score, reverse=True)[:top_k]
                 fed_status = []
 
             return SearchResponse(
