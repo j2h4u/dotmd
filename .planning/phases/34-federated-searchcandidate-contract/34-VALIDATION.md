@@ -1,11 +1,11 @@
 ---
 phase: 34
 slug: federated-searchcandidate-contract
-status: created
+status: complete
 nyquist_compliant: true
 wave_0_complete: true
 created: 2026-05-08
-last_audited: 2026-05-08
+last_audited: 2026-05-09
 ---
 
 # Phase 34 - Validation Strategy
@@ -112,6 +112,29 @@ RESEARCH.md.
 All four SEARCH requirements are covered by at least two distinct test
 classes (unit + integration). Threats T-34-01 through T-34-16 each have a
 named mitigation referenced from a Plan task acceptance criterion.
+
+## Adversarial Gap Audit 2026-05-09
+
+Gaps submitted for adversarial coverage: T-34-14 (GAP-04) and T-34-15 (GAP-05).
+
+Test file: `backend/tests/api/test_phase34_gaps.py`
+
+| Gap | Threat | Test | Result | Classification |
+|-----|--------|------|--------|----------------|
+| GAP-04 | T-34-14 | `test_telegram_federated_engine_participates` | FAIL — `source_status` contains only `{'filesystem'}`; `tg:fts` absent | BLOCKER |
+| GAP-05 | T-34-15 | `test_phase_34_candidates_never_materializable` | PASS — all three candidate construction paths confirm `can_materialize=False` | FILLED |
+
+**GAP-04 root cause:** `search_async()` in `src/dotmd/api/service.py` (line 527–553) contains an
+explicit TODO stub: *"For Phase 34, federated fan-out is not yet fully integrated. This stub
+returns local results only via the traditional path. TODO: Stage 1-7 full federated
+orchestration (Plan 03+)"*. The `self._lifecycle_bundles` dict is populated at init (including
+injected `telegram` bundle in the test), but `search_async` never iterates it — fan-out is
+skipped entirely. The returned `SearchResponse.source_status` includes only lifecycle init
+errors, not federated engine outcomes. Requirement SEARCH-01 (D-08: always-on fan-out for
+bundles declaring `FEDERATED_SEARCH`) is unmet by construction.
+
+**Status after 1/3 debug iterations:** Implementation bug confirmed — test assertion is
+correct. Weakening the assertion would paper over an unimplemented requirement. ESCALATE.
 
 ## Audit Evidence
 

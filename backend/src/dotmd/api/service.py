@@ -524,19 +524,31 @@ class DotMDService:
                 for ns, msg in self._lifecycle_init_errors.items()
             ]
 
-            # For Phase 34, federated fan-out is not yet fully integrated.
-            # This stub returns local results only via the traditional path.
-            # TODO: Stage 1-7 full federated orchestration (Plan 03+)
             pool_size = self._settings.rerank_pool_size if rerank else top_k
             active_pool_size = self._active_filter_pool_size(top_k, pool_size)
 
+            expanded_query = (
+                self._query_expander.expand(query).expanded_text or query
+                if expand
+                else query
+            )
+
             loop = asyncio.get_running_loop()
-            candidates = await loop.run_in_executor(
+
+            from dotmd.search.federated import fanout_federated, outcomes_to_source_status
+
+            engine_calls: dict[str, Any] = {
+                self._federated_engine_name(bundle): (
+                    lambda b=bundle: b.provider.search_native(expanded_query, limit=top_k)
+                )
+                for bundle in self._lifecycle_bundles.values()
+                if bundle.supports_federated_search
+            }
+
+            local_coro = loop.run_in_executor(
                 self._local_executor,
                 lambda: self._execute_search(
-                    search_query=query if not expand else (
-                        self._query_expander.expand(query).expanded_text or query
-                    ),
+                    search_query=expanded_query,
                     original_query=query,
                     top_k=top_k,
                     mode=mode,
@@ -546,10 +558,29 @@ class DotMDService:
                 ),
             )
 
-            # Wrap in SearchResponse envelope (local sources + persistent errors)
+            if engine_calls:
+                local_candidates, fed_outcomes = await asyncio.gather(
+                    local_coro,
+                    fanout_federated(
+                        engine_calls,
+                        timeout=self._settings.federated_timeout_seconds,
+                    ),
+                )
+                fed_candidates = [c for outcome in fed_outcomes for c in outcome.candidates]
+                all_candidates = sorted(
+                    local_candidates + fed_candidates,
+                    key=lambda c: c.fused_score,
+                    reverse=True,
+                )[:top_k]
+                fed_status = outcomes_to_source_status(fed_outcomes)
+            else:
+                local_candidates = await local_coro
+                all_candidates = local_candidates
+                fed_status = []
+
             return SearchResponse(
-                candidates=candidates,
-                source_status=persistent_status,
+                candidates=all_candidates,
+                source_status=persistent_status + fed_status,
             )
 
         except Exception:
