@@ -342,9 +342,10 @@ def test_local_candidate_has_provenance() -> None:
     from dotmd.core.models import ChunkProvenance
 
     provenance = ChunkProvenance(
-        file_path="/home/user/docs/note.md",
-        file_checksum="abc123",
-        chunk_hash="def456",
+        namespace="local",
+        document_ref="builtin:doc-1",
+        ref="local:chunk-42",
+        chunk_strategy="semantic",
     )
     candidate = SearchCandidate(
         ref="local:chunk-42",
@@ -359,4 +360,5 @@ def test_local_candidate_has_provenance() -> None:
         provenance=provenance,
     )
     assert candidate.provenance is not None
-    assert candidate.provenance.file_path == "/home/user/docs/note.md"
+    assert candidate.provenance.namespace == "local"
+    assert candidate.provenance.ref == "local:chunk-42"
