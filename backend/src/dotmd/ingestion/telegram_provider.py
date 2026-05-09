@@ -8,7 +8,7 @@ import socket
 import unicodedata
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
 from dotmd.core.models import (
     ApplicationSourceChange,

@@ -7,7 +7,6 @@ Tests cover:
 - Per-source soft timeout and error handling (no fail-fast)
 """
 import time
-from typing import Any
 
 import pytest
 
@@ -15,7 +14,6 @@ from dotmd.core.models import SearchCandidate, SearchResponse, SourceStatus
 from dotmd.search.federated import (
     EngineOutcome,
     FederatedEngineOutcome,
-    FederatedSearchProviderProtocol,
     LocalEngineOutcome,
 )
 

@@ -2,24 +2,24 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any
 
 import pytest
 
 from dotmd.core.models import (
     SearchCandidate,
-    SourceCapability,
-    SourceDescriptor,
-    SourceDisplayMetadata,
     SourceAuthSchema,
+    SourceCapability,
     SourceConfigSchema,
     SourceCursorSchema,
+    SourceDescriptor,
+    SourceDisplayMetadata,
 )
 from dotmd.ingestion.source_lifecycle import (
-    SourceRuntimeBundle,
-    SourceCursorStoreProtocol,
     FilesystemSourceConfig,
     SourceAccess,
+    SourceCursorStoreProtocol,
+    SourceRuntimeBundle,
 )
 
 

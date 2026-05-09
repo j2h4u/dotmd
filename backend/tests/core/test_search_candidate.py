@@ -6,7 +6,6 @@ import pytest
 from pydantic import ValidationError
 
 from dotmd.core.models import (
-    ChunkProvenance,
     SearchCandidate,
     SearchResponse,
     SourceStatus,
@@ -240,7 +239,7 @@ class TestSearchCandidateRequiredFields:
     def test_search_result_symbol_no_longer_exported(self) -> None:
         """SearchResult is not exported from core.models."""
         with pytest.raises(ImportError):
-            from dotmd.core.models import SearchResult  # type: ignore[import-not-found]
+            pass  # type: ignore[import-not-found]
 
         # Defense-in-depth: check the file does not contain SearchResult class
         from pathlib import Path

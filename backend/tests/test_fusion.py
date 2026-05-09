@@ -4,7 +4,6 @@ import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest

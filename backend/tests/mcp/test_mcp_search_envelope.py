@@ -9,8 +9,6 @@ from __future__ import annotations
 import json
 import re
 
-import pytest
-
 from dotmd.core.models import SearchCandidate, SearchResponse, SourceStatus
 
 

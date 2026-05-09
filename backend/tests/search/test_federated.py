@@ -7,29 +7,22 @@ the contract for Plan 34 federated support.
 
 from __future__ import annotations
 
-import asyncio
-import threading
 import time
-from typing import Any
-from unittest.mock import MagicMock, patch
 
 import pytest
+from tests.search.conftest import (
+    StubFederatedProvider,
+)
 
-from dotmd.core.models import SearchCandidate, SearchResponse, SourceStatus
+from dotmd.core.models import SearchCandidate
 from dotmd.search.federated import (
-    LocalEngineOutcome,
     FederatedEngineOutcome,
-    _run_local_engine,
+    LocalEngineOutcome,
     _run_federated_engine,
+    _run_local_engine,
     fanout_federated,
     outcomes_to_source_status,
 )
-from tests.search.conftest import (
-    StubFederatedProvider,
-    make_federated_bundle,
-    make_misconfigured_federated_factory,
-)
-
 
 # ============================================================================
 # LocalEngineOutcome and FederatedEngineOutcome tests

@@ -11,10 +11,7 @@ GAP-05: can_materialize=False for every Phase 34 SearchCandidate; manual
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 
 def _get_service(tmp_path: Path):  # type: ignore[no-untyped-def]
@@ -34,9 +31,8 @@ def test_telegram_federated_engine_participates(tmp_path: Path) -> None:
     The source_status in the returned SearchResponse must contain an entry
     with name="tg:fts" regardless of whether it returned candidates.
     """
+    from dotmd.core.models import SearchCandidate, SearchResponse
     from tests.search.conftest import StubFederatedProvider, make_federated_bundle
-
-    from dotmd.core.models import SearchCandidate, SearchResponse, SourceCapability
 
     service = _get_service(tmp_path)
 

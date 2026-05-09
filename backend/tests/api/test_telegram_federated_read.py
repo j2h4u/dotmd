@@ -4,14 +4,16 @@ These tests validate the read(ref) and drill(ref) round-trips for federated-only
 Telegram refs, ensuring proper routing through the provider infrastructure.
 """
 
-import pytest
+from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
+
+import pytest
+
 from dotmd.api.service import DotMDService
 from dotmd.core.config import Settings
-from dotmd.core.models import ExtractDepth, ChunkProvenance, SourceUnitWindow, SourceUnit
+from dotmd.core.models import ExtractDepth, SourceUnit, SourceUnitWindow
 from dotmd.ingestion.telegram_provider import TelegramApplicationSourceProvider
-from datetime import datetime
 
 
 class TestFederatedTelegramRead:
@@ -352,5 +354,5 @@ class TestFederatedTelegramRead:
         assert hasattr(service, "_resolve_telegram_read_path")
 
         # The method should be callable with a ref
-        method = getattr(service, "_resolve_telegram_read_path")
+        method = service._resolve_telegram_read_path
         assert callable(method)
