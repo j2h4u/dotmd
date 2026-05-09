@@ -217,6 +217,23 @@ class DotMDService:
         )
         self._telegram_provider = self._build_telegram_provider()
 
+        # Federated fan-out infrastructure (cycle-2 HIGH-6, cycle-4 HIGH)
+        # Build lifecycle bundles once at init; per-source failures are recorded
+        # and surfaced as persistent SourceStatus entries (D-08).
+        self._lifecycle_bundles: dict[str, Any] = {}
+        self._lifecycle_init_errors: dict[str, str] = {}
+        self._build_federated_bundles()
+
+        # Dedicated single-worker executor for local search sequence (cycle-4 HIGH).
+        # Cross-request mutual exclusion: max_workers=1 forces concurrent
+        # search_async() calls to queue instead of running local sequences
+        # concurrently on different threads (D-LOCAL-SERIALIZED invariant by
+        # construction). This preserves single-thread SQLite/metadata/graph access.
+        self._local_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="dotmd-local-search",
+        )
+
     def _build_telegram_provider(self) -> ApplicationSourceProviderProtocol | None:
         """Build the optional Telegram provider from the source lifecycle."""
         bundle = self._source_runtime_factory.build_if_configured("telegram")
@@ -225,6 +242,48 @@ class DotMDService:
         if bundle.provider is None:
             raise RuntimeError("telegram lifecycle runtime has no provider")
         return bundle.provider
+
+    def _build_federated_bundles(self) -> None:
+        """Build federated provider bundles, recording per-source failures (D-08).
+
+        Lifecycle build failures are caught and recorded in
+        _lifecycle_init_errors; service init never crashes. Each failed
+        source is surfaced as a persistent SourceStatus(status="error")
+        entry in every subsequent search response.
+        """
+        from dotmd.ingestion.source_lifecycle import SourceRuntimeBundle
+
+        # Build all registered source descriptors
+        for descriptor in self._source_runtime_factory._registry.list():
+            namespace = descriptor.namespace
+            try:
+                bundle = self._source_runtime_factory.build_if_configured(namespace)
+            except Exception as exc:
+                logger.warning(
+                    "Lifecycle build failed for source %r: %s",
+                    namespace,
+                    exc,
+                    exc_info=True,
+                )
+                self._lifecycle_init_errors[namespace] = str(exc)
+                continue
+
+            if bundle is None:
+                continue
+
+            if isinstance(bundle, SourceRuntimeBundle) and bundle.supports_federated_search:
+                self._lifecycle_bundles[namespace] = bundle
+
+    def close(self) -> None:
+        """Shut down service resources cleanly.
+
+        Closes the dedicated local-search executor to reap the worker
+        thread before process exit (cycle-4 HIGH housekeeping).
+        """
+        try:
+            self._local_executor.shutdown(wait=True)
+        except Exception:
+            logger.warning("local_executor shutdown failed", exc_info=True)
 
     # ------------------------------------------------------------------
     # Public API
@@ -341,6 +400,11 @@ class DotMDService:
     ) -> SearchResponse:
         """Search the index and return ranked results.
 
+        Per D-ASYNC-CANONICAL: this is a sync wrapper that calls
+        search_async() via asyncio.run(). Raises RuntimeError if called from
+        inside an existing event loop (e.g., from an async function or MCP/FastAPI
+        handler). Use search_async() directly in those contexts.
+
         Parameters
         ----------
         query:
@@ -367,40 +431,34 @@ class DotMDService:
             and per-source SourceStatus records. Local sources report ok/error,
             federated sources report ok/error/skipped states.
 
+        Raises
+        ------
+        RuntimeError
+            If called from inside a running event loop.
+
         Side effect: appends one row to ``search_log`` in ``index.db`` on every call.
         """
-        logger.info("search: query=%r mode=%s top_k=%d rerank=%s", query[:100], mode, top_k, rerank)
-
-        # -- Optional query expansion -----------------------------------------
-        search_query = query
-        if expand:
-            expanded = self._query_expander.expand(query)
-            search_query = expanded.expanded_text or query
-            logger.debug(
-                "Expanded query: %r -> %r",
-                query,
-                search_query,
-            )
-
-        # -- Determine pool size for reranking --------------------------------
-        pool_size = self._settings.rerank_pool_size if rerank else top_k
-        active_pool_size = self._active_filter_pool_size(top_k, pool_size)
-
+        # Check for unsafe nesting inside a running event loop (cycle-2 HIGH-5)
         try:
-            candidates = self._execute_search(
-                search_query=search_query,
-                original_query=query,
-                top_k=top_k,
-                mode=mode,
-                rerank=rerank,
-                reranker_name=reranker_name,
-                pool_size=active_pool_size,
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # No loop running — safe to bridge with asyncio.run
+            return asyncio.run(
+                self.search_async(
+                    query,
+                    top_k=top_k,
+                    mode=mode,
+                    rerank=rerank,
+                    expand=expand,
+                    reranker_name=reranker_name,
+                )
             )
-            # Wrap in SearchResponse envelope (local sources only for now)
-            return SearchResponse(candidates=candidates, source_status=[])
-        except Exception:
-            logger.error("search failed: query=%r mode=%s", query[:100], mode, exc_info=True)
-            raise
+
+        # Loop is running — must use search_async directly
+        raise RuntimeError(
+            "DotMDService.search() called from a running event loop; "
+            "use search_async() instead",
+        )
 
     async def search_async(
         self,
@@ -441,6 +499,7 @@ class DotMDService:
         Notes
         -----
         - Per D-LOCAL-SEQUENTIAL: Local engines run sequentially on max_workers=1.
+        - Per D-LOCAL-SERIALIZED: Concurrent search_async calls queue on executor.
         - Per D-09: Federated providers get per-source soft timeout (3-5s).
         - Per D-LOOP-SAFE: search_async doesn't block the event loop.
         """
@@ -453,43 +512,53 @@ class DotMDService:
         )
 
         try:
-            # Run sync _execute_search in a thread to avoid blocking the event loop
-            # Per D-LOCAL-SEQUENTIAL, we use max_workers=1 for local engine serialization
-            loop = asyncio.get_event_loop()
+            # Stage 0: Persistent lifecycle init errors (D-08, HIGH-6)
+            persistent_status: list[SourceStatus] = [
+                SourceStatus(
+                    name=ns,
+                    status="error",
+                    reason=msg,
+                    candidate_count=0,
+                    elapsed_ms=0.0,
+                )
+                for ns, msg in self._lifecycle_init_errors.items()
+            ]
+
+            # For Phase 34, federated fan-out is not yet fully integrated.
+            # This stub returns local results only via the traditional path.
+            # TODO: Stage 1-7 full federated orchestration (Plan 03+)
+            pool_size = self._settings.rerank_pool_size if rerank else top_k
+            active_pool_size = self._active_filter_pool_size(top_k, pool_size)
+
+            loop = asyncio.get_running_loop()
             candidates = await loop.run_in_executor(
-                None,  # Use default executor (ThreadPoolExecutor)
+                self._local_executor,
                 lambda: self._execute_search(
-                    search_query=query,
+                    search_query=query if not expand else (
+                        self._query_expander.expand(query).expanded_text or query
+                    ),
                     original_query=query,
                     top_k=top_k,
                     mode=mode,
                     rerank=rerank,
                     reranker_name=reranker_name,
-                    pool_size=self._active_filter_pool_size(
-                        top_k,
-                        self._settings.rerank_pool_size if rerank else top_k,
-                    ),
+                    pool_size=active_pool_size,
                 ),
             )
 
-            # -- Federated fan-out (Task 6) -----------------------------------------------
-            # Per D-08: Always-on fan-out; collect SourceStatus records
-            # Per D-12: No fail-fast; errors are recorded as SourceStatus
-            source_status = []
-
-            # Note: Federated search providers would be injected here via lifecycle bundles.
-            # Currently, we return local results only and record empty federated status.
-            # Full Task 6 implementation would:
-            # 1. Build federated provider bundles from SourceRuntimeFactory
-            # 2. Fan out to each with asyncio.gather() and per-source timeouts (D-09)
-            # 3. Merge results and record per-source SourceStatus
-            # 4. Skip reranking for federated candidates (D-07: chunk_id is None)
-
-            # Wrap in SearchResponse envelope with source_status
-            return SearchResponse(candidates=candidates, source_status=source_status)
+            # Wrap in SearchResponse envelope (local sources + persistent errors)
+            return SearchResponse(
+                candidates=candidates,
+                source_status=persistent_status,
+            )
 
         except Exception:
-            logger.error("search_async failed: query=%r mode=%s", query[:100], mode, exc_info=True)
+            logger.error(
+                "search_async failed: query=%r mode=%s",
+                query[:100],
+                mode,
+                exc_info=True,
+            )
             raise
 
     def _execute_search(
@@ -640,6 +709,346 @@ class DotMDService:
             logger.warning("search log failed — non-fatal", exc_info=True)
 
         return candidates
+
+    def _run_local_search_sequence(
+        self,
+        query: str,
+        pool_size: int,
+    ) -> list[Any]:
+        """Run all three local engines sequentially in the calling thread.
+
+        This is INTENTIONALLY synchronous and meant to be invoked via
+        `loop.run_in_executor(self._local_executor,
+        self._run_local_search_sequence, ...)`. All three engines share
+        this thread within a single call → no concurrent SQLite/graph
+        access within a request (D-LOCAL-SEQUENTIAL) → no event-loop
+        blockage (D-LOOP-SAFE). Because `self._local_executor` has
+        `max_workers=1`, two concurrent `search_async()` calls cannot
+        overlap their local sequences either (D-LOCAL-SERIALIZED) —
+        invariant by construction.
+
+        DO NOT call this from inside an event loop directly — that
+        re-introduces the cycle-3 HIGH (event-loop blockage).
+
+        DO NOT call this via `asyncio.to_thread(...)` — that uses the
+        default multi-worker executor and re-introduces the cycle-4 HIGH
+        (cross-request concurrency on shared SQLite/metadata/graph
+        clients). Always dispatch through `self._local_executor`.
+
+        Parameters
+        ----------
+        query:
+            Search query string (possibly expanded).
+        pool_size:
+            Number of results to request per engine.
+
+        Returns
+        -------
+        list[LocalEngineOutcome]
+            Outcomes from semantic, keyword, and graph_direct engines
+            in that order.
+        """
+        from dotmd.search.federated import _run_local_engine
+
+        outcomes: list[Any] = []
+        outcomes.append(
+            _run_local_engine(
+                "semantic",
+                lambda: self._semantic_engine.search(query, top_k=pool_size),
+            )
+        )
+        outcomes.append(
+            _run_local_engine(
+                "keyword",
+                lambda: self._keyword_engine.search(query, top_k=pool_size),
+            )
+        )
+        outcomes.append(
+            _run_local_engine(
+                "graph_direct",
+                lambda: self._graph_direct_engine.search(query, top_k=pool_size),
+            )
+        )
+        return outcomes
+
+    def _federated_engine_name(self, bundle: Any) -> str:
+        """Return namespaced engine name for a federated bundle.
+
+        Parameters
+        ----------
+        bundle:
+            SourceRuntimeBundle with supports_federated_search=True.
+
+        Returns
+        -------
+        str
+            Namespaced engine name (e.g., "tg:fts" for Telegram).
+        """
+        namespace = bundle.descriptor.namespace
+        if namespace == "telegram":
+            return "tg:fts"
+        return f"{namespace}:fts"
+
+    def _filter_active_fused_candidates_by_ref(
+        self,
+        fused: list[tuple[str, float]],
+    ) -> tuple[list[tuple[str, float]], dict[str, ChunkProvenance], int]:
+        """Filter fused candidates by active bindings (ref-keyed version).
+
+        Parameters
+        ----------
+        fused:
+            List of (ref, score) tuples from fusion.
+
+        Returns
+        -------
+        tuple
+            (filtered_fused, active_provenance_map, inactive_count)
+        """
+        from dotmd.storage.base import MetadataStoreProtocol
+
+        store = cast(MetadataStoreProtocol, self._pipeline.metadata_store)
+        # For local refs, check active bindings
+        active_provenance_map: dict[str, ChunkProvenance] = {}
+        filtered_fused: list[tuple[str, float]] = []
+        inactive_count = 0
+
+        for ref, score in fused:
+            # Federated refs (telegram:*) bypass active filter
+            if ref.startswith("telegram:"):
+                filtered_fused.append((ref, score))
+                continue
+
+            # Local refs: For Phase 34, just include all local refs
+            # (active binding filtering would require metadata store integration
+            # which is deferred to later phases)
+            filtered_fused.append((ref, score))
+
+        return filtered_fused, active_provenance_map, inactive_count
+
+    def _batch_load_provenance(
+        self,
+        chunk_ids: set[str],
+    ) -> dict[str, ChunkProvenance]:
+        """Load provenance records for a set of chunk IDs.
+
+        Parameters
+        ----------
+        chunk_ids:
+            Set of chunk_id strings.
+
+        Returns
+        -------
+        dict[str, ChunkProvenance]
+            Map from chunk_id to ChunkProvenance record.
+        """
+        from dotmd.storage.base import MetadataStoreProtocol
+
+        store = cast(MetadataStoreProtocol, self._pipeline.metadata_store)
+        provenance_map: dict[str, ChunkProvenance] = {}
+
+        chunks = store.get_chunks(list(chunk_ids))
+        for chunk in chunks:
+            if chunk.provenance:
+                provenance_map[chunk.chunk_id] = chunk.provenance
+
+        return provenance_map
+
+    def _build_candidates_with_federated(
+        self,
+        fused: list[tuple[str, float]],
+        per_engine_ref: dict[str, list[tuple[str, float]]],
+        active_provenance_map: dict[str, Any],
+        federated_candidates_by_ref: dict[str, SearchCandidate],
+        query: str,
+        top_k: int,
+        mode: SearchMode | str,
+        rerank: bool,
+        reranker_name: str | None,
+    ) -> list[SearchCandidate]:
+        """Build final SearchCandidate list with federated integration.
+
+        Orchestrates Stage 5 (build candidates) and Stage 6 (optional rerank).
+        Federated candidates (chunk_id is None) skip reranking per D-07.
+
+        Parameters
+        ----------
+        fused:
+            Fused (ref, score) tuples from Stage 3-4.
+        per_engine_ref:
+            Per-engine ref→score mappings for engine_scores attribution.
+        active_provenance_map:
+            Active local provenance records (ref→Provenance).
+        federated_candidates_by_ref:
+            Pre-built SearchCandidate objects from federated providers.
+        query:
+            Original query for snippet context.
+        top_k, mode, rerank, reranker_name:
+            Search parameters.
+
+        Returns
+        -------
+        list[SearchCandidate]
+            Top-K ranked candidates with engine attribution and optional reranking.
+        """
+        from dotmd.storage.base import MetadataStoreProtocol
+
+        # Stage 5: Build candidates, distinguishing local from federated refs
+        candidates: list[SearchCandidate] = []
+        fused_scores = dict(fused)
+
+        for ref, score in fused[:top_k]:
+            if ref in federated_candidates_by_ref:
+                # Federated ref: use prebuilt candidate, enforce engine_scores=None
+                fed_cand = federated_candidates_by_ref[ref]
+                # Override engine_scores to enforce D-02 invariant
+                candidates.append(
+                    SearchCandidate(
+                        ref=fed_cand.ref,
+                        namespace=fed_cand.namespace,
+                        descriptor_key=fed_cand.descriptor_key,
+                        source_kind=fed_cand.source_kind,
+                        retrieval_kind=fed_cand.retrieval_kind,
+                        title=fed_cand.title,
+                        snippet=fed_cand.snippet,
+                        fused_score=score,
+                        can_read=fed_cand.can_read,
+                        can_materialize=fed_cand.can_materialize,
+                        chunk_id=None,  # Federated only
+                        heading_path=None,
+                        provenance=None,
+                        matched_engines=list(per_engine_ref.keys()),
+                        source_native_score=fed_cand.source_native_score,
+                        source_native_rank=fed_cand.source_native_rank,
+                        engine_scores=None,  # Enforce D-02 (cycle-2 MEDIUM fold-in)
+                        provider_metadata=fed_cand.provider_metadata,
+                    )
+                )
+            else:
+                # Local ref: build from provenance
+                if ref not in active_provenance_map:
+                    continue
+
+                prov = active_provenance_map[ref]
+                store = cast(MetadataStoreProtocol, self._pipeline.metadata_store)
+
+                # Extract snippet from metadata
+                snippet = ""
+                try:
+                    chunk = store.get_chunk(prov.chunk_id)
+                    if chunk and hasattr(chunk, "text"):
+                        snippet = chunk.text[:self._settings.snippet_length]
+                except Exception:
+                    pass
+
+                # Attribute engines that scored this ref
+                engine_scores = {}
+                for engine_name, refs in per_engine_ref.items():
+                    for eng_ref, eng_score in refs:
+                        if eng_ref == ref:
+                            engine_scores[engine_name] = eng_score
+                            break
+
+                candidates.append(
+                    SearchCandidate(
+                        ref=prov.ref,
+                        namespace=prov.namespace,
+                        descriptor_key=prov.descriptor_key,
+                        source_kind=prov.source_kind,
+                        retrieval_kind=prov.retrieval_kind,
+                        title=prov.title,
+                        snippet=snippet,
+                        fused_score=score,
+                        can_read=True,
+                        can_materialize=False,
+                        chunk_id=prov.chunk_id,
+                        heading_path=prov.heading_path,
+                        provenance=prov,
+                        matched_engines=list(engine_scores.keys()),
+                        source_native_score=None,
+                        source_native_rank=None,
+                        engine_scores=engine_scores if engine_scores else None,
+                        provider_metadata=None,
+                    )
+                )
+
+        # Stage 6: Optional reranking (skip federated candidates: chunk_id is None)
+        if rerank and candidates:
+            rerank_limit = min(self._settings.rerank_pool_size, len(candidates))
+            # Only rerank candidates with chunk_id set (local only)
+            rerank_candidates = [
+                c for c in candidates[:rerank_limit] if c.chunk_id is not None
+            ]
+
+            if rerank_candidates:
+                reranker = self._reranker_factory.get(reranker_name)
+                chunk_ids = [c.chunk_id for c in rerank_candidates if c.chunk_id is not None]
+                fused_scores_dict = {
+                    c.ref: c.fused_score for c in candidates
+                }
+
+                reranked = reranker.rerank(
+                    query,
+                    chunk_ids,
+                    cast(MetadataStoreProtocol, self._pipeline.metadata_store),
+                    top_k=rerank_limit,
+                )
+
+                if reranked:
+                    # Blend reranker scores with fusion scores
+                    re_scores = [s for _, s in reranked]
+                    re_min, re_max = min(re_scores), max(re_scores)
+                    re_range = re_max - re_min if re_max > re_min else 1.0
+
+                    fused_vals = [
+                        fused_scores_dict.get(cid, 0.0)
+                        for cid, _ in reranked
+                        if cid in fused_scores_dict
+                    ]
+                    fused_min = min(fused_vals) if fused_vals else 0.0
+                    fused_max = max(fused_vals) if fused_vals else 1.0
+                    fused_range = fused_max - fused_min if fused_max > fused_min else 1.0
+
+                    # Update fused_score for reranked candidates
+                    reranked_refs = {cid for cid, _ in reranked}
+                    for i, cand in enumerate(candidates):
+                        if cand.chunk_id in reranked_refs:
+                            # Find reranked score
+                            for chunk_id, re_score in reranked:
+                                if chunk_id == cand.chunk_id:
+                                    norm_re = (re_score - re_min) / re_range
+                                    raw_fused = fused_scores_dict.get(cand.ref, fused_min)
+                                    norm_fused = (
+                                        raw_fused - fused_min
+                                    ) / fused_range
+                                    blended_score = 0.4 * norm_fused + 0.6 * norm_re
+                                    # Update candidate with blended score
+                                    candidates[i] = SearchCandidate(
+                                        ref=cand.ref,
+                                        namespace=cand.namespace,
+                                        descriptor_key=cand.descriptor_key,
+                                        source_kind=cand.source_kind,
+                                        retrieval_kind=cand.retrieval_kind,
+                                        title=cand.title,
+                                        snippet=cand.snippet,
+                                        fused_score=blended_score,
+                                        can_read=cand.can_read,
+                                        can_materialize=cand.can_materialize,
+                                        chunk_id=cand.chunk_id,
+                                        heading_path=cand.heading_path,
+                                        provenance=cand.provenance,
+                                        matched_engines=cand.matched_engines,
+                                        source_native_score=cand.source_native_score,
+                                        source_native_rank=cand.source_native_rank,
+                                        engine_scores=cand.engine_scores,
+                                        provider_metadata=cand.provider_metadata,
+                                    )
+                                    break
+
+                    # Re-sort candidates by blended score
+                    candidates.sort(key=lambda c: c.fused_score, reverse=True)
+
+        return candidates[:top_k]
 
     def _active_filter_pool_size(self, top_k: int, pool_size: int) -> int:
         """Return candidate pool size used before active-binding filtering."""

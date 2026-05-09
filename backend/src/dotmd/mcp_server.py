@@ -614,7 +614,10 @@ async def search(
         return SearchResponse()
     try:
         service = _get_service()
-        response = await asyncio.to_thread(service.search, query, top_k=top_k)
+        # Per D-ASYNC-CANONICAL (cycle-2 HIGH-5): call search_async directly.
+        # MCP tools already run inside the event loop; search_async is the
+        # canonical async entry point.
+        response = await service.search_async(query, top_k=top_k)
         # response is already a SearchResponse; format candidates for MCP output
         formatted_candidates = [_format_result(r) for r in response.candidates]
         return SearchResponse(candidates=formatted_candidates, source_status=response.source_status)
