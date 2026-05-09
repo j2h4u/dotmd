@@ -809,6 +809,7 @@ def _format_result(r: SearchCandidate) -> SearchCandidate:
 
     # Return a new SearchCandidate with cleaned snippet
     # Note: frozen=True prevents modification, so we must reconstruct
+    # Keep fused_score at full precision; JSON serialization handles rounding if needed
     return SearchCandidate(
         ref=r.ref,
         namespace=r.namespace,
@@ -816,7 +817,7 @@ def _format_result(r: SearchCandidate) -> SearchCandidate:
         source_kind=r.source_kind,
         retrieval_kind=r.retrieval_kind,
         snippet=clean,
-        fused_score=round(r.fused_score, 3),
+        fused_score=r.fused_score,
         can_read=r.can_read,
         can_materialize=r.can_materialize,
         title=r.title,
