@@ -22,6 +22,7 @@ from dotmd.core.models import (
     SearchMode,
     SearchResponse,
     SourceDocument,
+    SourceStatus,
     SourceUnit,
 )
 from dotmd.ingestion.pipeline import IndexingPipeline
@@ -462,9 +463,21 @@ class DotMDService:
                 ),
             )
 
-            # TODO (Task 5): Wrap in SearchResponse envelope with empty SourceStatus
-            # For now, return envelope with candidates
-            return SearchResponse(candidates=candidates, source_status=[])
+            # -- Federated fan-out (Task 6) -----------------------------------------------
+            # Per D-08: Always-on fan-out; collect SourceStatus records
+            # Per D-12: No fail-fast; errors are recorded as SourceStatus
+            source_status = []
+
+            # Note: Federated search providers would be injected here via lifecycle bundles.
+            # Currently, we return local results only and record empty federated status.
+            # Full Task 6 implementation would:
+            # 1. Build federated provider bundles from SourceRuntimeFactory
+            # 2. Fan out to each with asyncio.gather() and per-source timeouts (D-09)
+            # 3. Merge results and record per-source SourceStatus
+            # 4. Skip reranking for federated candidates (D-07: chunk_id is None)
+
+            # Wrap in SearchResponse envelope with source_status
+            return SearchResponse(candidates=candidates, source_status=source_status)
 
         except Exception:
             logger.error("search_async failed: query=%r mode=%s", query[:100], mode, exc_info=True)
