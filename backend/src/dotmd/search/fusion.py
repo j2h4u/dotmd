@@ -343,11 +343,14 @@ def build_candidates(
             if chunks:
                 chunk = chunks[0]
         else:
-            # Fallback: search for a chunk with this ref via provenance
-            # (This is slower; prefer ref_to_chunk pre-build in service layer)
+            # Fallback: search for a chunk with this ref/chunk_id via provenance
+            # Note: In the current codebase, 'ref' is actually a chunk_id when
+            # called from service._execute_search (fused contains chunk_ids before
+            # ref hydration). This fallback handles looking up the chunk by
+            # checking active_provenance_map.
             if ref in active_provenance_map:
                 prov = active_provenance_map[ref]
-                chunk_id = prov.ref  # Fallback chunk_id from provenance
+                chunk_id = ref  # The 'ref' passed in is actually the chunk_id
                 chunks = metadata_store.get_chunks([chunk_id])
                 if chunks:
                     chunk = chunks[0]
@@ -363,13 +366,14 @@ def build_candidates(
         if provenance is None:
             raise ValueError(f"missing source provenance for chunk_id={chunk_id}")
 
-        # Determine which engines matched this ref
+        # Determine which engines matched this chunk_id
+        # (In current code, ref is actually chunk_id; use provenance.ref for actual ref)
         matched_engines = sorted(engine_scores_by_ref.get(ref, {}).keys())
         engine_scores_dict = engine_scores_by_ref.get(ref)
 
         candidates.append(
             SearchCandidate(
-                ref=ref,
+                ref=provenance.ref,  # Use actual ref from provenance
                 namespace=provenance.namespace,
                 descriptor_key="filesystem-mnt",  # Local chunks are always filesystem
                 source_kind="markdown",
