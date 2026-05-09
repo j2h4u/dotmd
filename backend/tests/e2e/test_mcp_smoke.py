@@ -73,18 +73,27 @@ class TestToolSurface:
 # ---------------------------------------------------------------------------
 
 
+def _search_candidates(data: dict) -> list:
+    """Extract candidates list from the SearchResponse envelope."""
+    structured = _tool_result_structured(data)
+    if isinstance(structured, dict) and "candidates" in structured:
+        return structured["candidates"]
+    if isinstance(structured, list):
+        return structured
+    return []
+
+
 class TestSearchSmoke:
     def test_returns_results_for_generic_query(self, mcp_call: Callable):
         data = mcp_call("tools/call", {"name": "search", "arguments": {"query": "встреча", "top_k": 3}})
         assert not _is_tool_error(data), f"search returned error: {_tool_result_text(data)}"
-        results = _tool_result_structured(data)
-        assert isinstance(results, list), f"search must return a list, got: {type(results)}"
+        results = _search_candidates(data)
         assert len(results) > 0, "search returned no results — index may be empty"
 
     def test_result_fields_match_pinned(self, mcp_call: Callable):
         """Required fields always present; heading may be absent (optional)."""
         data = mcp_call("tools/call", {"name": "search", "arguments": {"query": "тест"}})
-        results = _tool_result_structured(data)
+        results = _search_candidates(data)
         assert results, "search returned no results for canonical query 'тест'"
         allowed = REQUIRED_SEARCH_RESULT_FIELDS | OPTIONAL_SEARCH_RESULT_FIELDS
         for index, result in enumerate(results):
@@ -103,7 +112,7 @@ class TestSearchSmoke:
 
     def test_ref_is_filesystem_source_ref(self, mcp_call: Callable):
         data = mcp_call("tools/call", {"name": "search", "arguments": {"query": "тест"}})
-        results = _tool_result_structured(data)
+        results = _search_candidates(data)
         assert results, "search returned no results for canonical query 'тест'"
         for index, result in enumerate(results):
             assert isinstance(result["ref"], str), f"result {index} ref must be string"
@@ -113,7 +122,7 @@ class TestSearchSmoke:
 
     def test_score_is_float_in_range(self, mcp_call: Callable):
         data = mcp_call("tools/call", {"name": "search", "arguments": {"query": "тест"}})
-        results = _tool_result_structured(data)
+        results = _search_candidates(data)
         assert results, "search returned no results for canonical query 'тест'"
         for index, result in enumerate(results):
             score = result["score"]
@@ -122,7 +131,7 @@ class TestSearchSmoke:
 
     def test_top_k_respected(self, mcp_call: Callable):
         data = mcp_call("tools/call", {"name": "search", "arguments": {"query": "тест", "top_k": 2}})
-        results = _tool_result_structured(data)
+        results = _search_candidates(data)
         assert len(results) <= 2, f"top_k=2 but got {len(results)} results"
 
 
