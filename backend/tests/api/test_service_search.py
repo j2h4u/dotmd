@@ -69,19 +69,24 @@ def test_format_elapsed_ms_for_human_diagnostics() -> None:
 
 
 class TestSearchReturnsFilePaths:
-    """DotMDService.search returns SearchResult instances with public refs."""
+    """DotMDService.search returns SearchCandidate instances with public refs."""
 
-    def test_search_returns_file_paths_list(self, tmp_path: Path) -> None:
-        """search() forwards contract args and returns results with ref."""
+    def test_local_only_search_returns_searchcandidate(self, tmp_path: Path) -> None:
+        """search() returns SearchCandidate with ref-shaped public interface."""
         service = _get_service(tmp_path)
 
-        from dotmd.core.models import SearchMode, SearchResult
-        stub_result = SearchResult(
-            chunk_id="a" * 64,
-            ref="filesystem:/mnt/test.md",
-            heading_path="# Test",
+        from dotmd.core.models import SearchCandidate, SearchMode
+        stub_result = SearchCandidate(
+            ref="filesystem:/mnt/test.md#0",
+            namespace="filesystem",
+            descriptor_key="filesystem-mnt",
+            source_kind="markdown",
+            retrieval_kind="semantic",
+            title="Test",
             snippet="test snippet",
             fused_score=0.9,
+            can_read=True,
+            can_materialize=False,
         )
 
         with patch.object(service, "_execute_search", return_value=[stub_result]) as execute_search:
@@ -97,8 +102,9 @@ class TestSearchReturnsFilePaths:
             pool_size=55,
         )
         assert results == [stub_result]
-        for r in results:
-            assert r.ref == "filesystem:/mnt/test.md"
+        assert isinstance(results[0], SearchCandidate)
+        assert results[0].ref == "filesystem:/mnt/test.md#0"
+        assert results[0].can_read is True
 
 
 class TestSearchRespectsTopK:
@@ -108,14 +114,17 @@ class TestSearchRespectsTopK:
         """search(top_k=3) forwards top_k and rerank pool_size to execution."""
         service = _get_service(tmp_path)
 
-        from dotmd.core.models import SearchResult
+        from dotmd.core.models import SearchCandidate
         stub_results = [
-            SearchResult(
-                chunk_id=str(i) * 64,
-                ref=f"filesystem:/mnt/test_{i}.md",
-                heading_path=f"# Test {i}",
+            SearchCandidate(
+                ref=f"filesystem:/mnt/test_{i}.md#0",
+                namespace="filesystem",
+                descriptor_key="filesystem-mnt",
+                source_kind="markdown",
+                retrieval_kind="semantic",
                 snippet=f"snippet {i}",
                 fused_score=float(i) / 10,
+                can_read=True,
             )
             for i in range(5)
         ]
@@ -547,7 +556,8 @@ class TestActiveSearchFiltering:
         )
 
         assert [result.ref for result in results] == ["filesystem:/mnt/graph-active.md"]
-        assert results[0].graph_direct_score == 0.8
+        assert results[0].engine_scores is not None
+        assert results[0].engine_scores.get("graph_direct") == 0.8
 
 
 class TestReadRefContract:

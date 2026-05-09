@@ -12,15 +12,19 @@ def _get_cli():  # type: ignore[no-untyped-def]
     return CliRunner, main
 
 
-def _make_search_result(ref: str):  # type: ignore[no-untyped-def]
-    from dotmd.core.models import SearchResult
+def _make_search_candidate(ref: str):  # type: ignore[no-untyped-def]
+    from dotmd.core.models import SearchCandidate
 
-    return SearchResult(
-        chunk_id="a" * 64,
+    return SearchCandidate(
         ref=ref,
+        namespace="filesystem",
+        descriptor_key="filesystem-mnt",
+        source_kind="markdown",
+        retrieval_kind="semantic",
         heading_path="# Test Heading",
         snippet="Test snippet content.",
         fused_score=0.85,
+        can_read=True,
     )
 
 
@@ -31,8 +35,8 @@ class TestRefRendering:
         CliRunner, main = _get_cli()
         from unittest.mock import patch
 
-        ref = "filesystem:/mnt/single/file.md"
-        stub_result = _make_search_result(ref)
+        ref = "filesystem:/mnt/single/file.md#0"
+        stub_result = _make_search_candidate(ref)
 
         runner = CliRunner()
         with patch(
