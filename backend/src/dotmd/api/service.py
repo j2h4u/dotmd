@@ -598,6 +598,9 @@ class DotMDService:
                 )
 
         # -- Build final SearchCandidate list ------------------------------------
+        # Note: fused contains (chunk_id, score) pairs at this point.
+        # build_candidates will hydrate these into full SearchCandidate objects
+        # using the metadata_store and provenance map.
         candidates = build_candidates(
             fused[:top_k],
             per_engine=engine_results,
