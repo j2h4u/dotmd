@@ -30,7 +30,8 @@ must_haves:
     - "D-18: Adding a second federated provider in a later phase requires no Phase 34 contract edits."
     - "D-OUTCOME-SPLIT: EngineOutcome is split by kind. LocalEngineOutcome.ranked_chunks is list[tuple[chunk_id, score]]; FederatedEngineOutcome.candidates is list[SearchCandidate]. The two shapes are NEVER conflated; orchestrator stage-3/4/5 handles them with explicit branches. (cycle-2 HIGH-3 fix)"
     - "D-LOCAL-SEQUENTIAL: Local search engines (semantic, fts5, graph_direct) execute SEQUENTIALLY in ONE worker thread; only federated providers fan out in parallel on the event loop. Phase 34 explicitly does NOT pursue concurrent local engines — shared SQLite/metadata/graph clients are not proven thread-safe. A test pins that local engines never run concurrently during a single service.search() call. (cycle-2 HIGH-4 fix)"
-    - "D-LOOP-SAFE: search_async never blocks the FastMCP/FastAPI event loop. The full local engine sequence runs in ONE worker thread via `await asyncio.to_thread(self._run_local_search_sequence, ...)` (preserving D-LOCAL-SEQUENTIAL — all three engines share the same thread, never overlap), composed with federated fan-out via asyncio.gather so federated tasks progress concurrently with local work. A regression test pins that an unrelated `await asyncio.sleep(0)` interleaved into the test loop completes BEFORE search_async returns even when local engines are slow. (cycle-3 HIGH fix)"
+    - "D-LOCAL-SERIALIZED: Local search sequences are serialized ACROSS concurrent search_async() calls by a dedicated single-worker executor `self._local_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='dotmd-local-search')` constructed once in DotMDService.__init__. search_async dispatches the local sequence via `loop.run_in_executor(self._local_executor, self._run_local_search_sequence, ...)` instead of asyncio.to_thread (which uses the default executor and would let two concurrent requests overlap). Because max_workers=1, it is structurally impossible for two _run_local_search_sequence invocations to overlap — invariant by construction. Federated fan-out is unaffected and proceeds in parallel on the event loop. Two regression tests pin: (a) the executor's max_workers value (`test_local_executor_has_max_workers_one`), and (b) cross-request mutual exclusion (`test_concurrent_search_async_calls_do_not_overlap_local_sequences`). (cycle-4 HIGH fix)"
+    - "D-LOOP-SAFE: search_async never blocks the FastMCP/FastAPI event loop. The full local engine sequence runs in ONE worker thread via `await loop.run_in_executor(self._local_executor, self._run_local_search_sequence, ...)` (preserving D-LOCAL-SEQUENTIAL within a request and D-LOCAL-SERIALIZED across requests — all three engines share the same single worker thread, never overlap with each other or with another request's local sequence), composed with federated fan-out via asyncio.gather so federated tasks progress concurrently with local work. A regression test pins that an unrelated `await asyncio.sleep(0)` interleaved into the test loop completes BEFORE search_async returns even when local engines are slow, capturing interleave_count via a `finally` block immediately after search_async finishes (so a post-return tick burst cannot mask a pre-return block). (cycle-3 HIGH fix; cycle-4 MEDIUM timing fix)"
     - "D-ASYNC-CANONICAL: search_async(query, ...) -> SearchResponse is the canonical async public method. The sync search() wrapper calls asyncio.run(search_async(...)) and fails LOUD with RuntimeError if invoked from inside a running event loop. MCP and FastAPI surfaces call search_async directly. CLI and unit tests use the sync wrapper. (cycle-2 HIGH-5 fix)"
     - "D-MCP-CANDIDATE-DIRECT: MCP search tool returns SearchResponse containing full SearchCandidate records (no SearchHit narrowing). Every public SearchCandidate field is exposed (descriptor_key, can_read, can_materialize, source_native_score, source_native_rank, engine_scores, provider_metadata). (cycle-2 HIGH-2 fix carried into Plan 02)"
 ---
@@ -62,7 +63,8 @@ federated provider — Telegram wiring is owned by Plan 03.
 | EngineOutcome shape conflates local chunk-keyed and federated SearchCandidate-keyed outputs (cycle-2 HIGH-3) | HIGH | Two outcome shapes: `LocalEngineOutcome(name, status, ranked_chunks: list[tuple[str, float]], reason, elapsed_ms)` and `FederatedEngineOutcome(name, status, candidates: list[SearchCandidate], reason, elapsed_ms)`. Type alias `EngineOutcome = LocalEngineOutcome | FederatedEngineOutcome`. Orchestrator stage 3 dispatches by isinstance. |
 | Concurrent local engines corrupt shared SQLite/graph state (cycle-2 HIGH-4) | HIGH | Local engines run SEQUENTIALLY on the existing sync path; ONLY federated providers fan out in parallel. Test `test_local_engines_not_called_concurrently` wraps local engines with a contention-detector and asserts no overlap during a single `service.search()` call. |
 | Sync search() inside running event loop deadlocks (cycle-2 HIGH-5) | HIGH | `search_async` is canonical; sync `search()` is a wrapper that calls `asyncio.get_running_loop()` to detect the unsafe condition and raises `RuntimeError("DotMDService.search() called from a running event loop; use search_async() instead")`. MCP and FastAPI surfaces call `search_async` directly. Test pins both the success path (await search_async inside loop) and the loud-fail path (sync search inside loop). |
-| `search_async` blocks the FastMCP/FastAPI event loop during local search, stalling unrelated MCP requests (cycle-3 HIGH) | HIGH | Local engines run sequentially inside ONE worker thread via `await asyncio.to_thread(self._run_local_search_sequence, query, pool_size)` instead of executing on the event-loop thread. This preserves D-LOCAL-SEQUENTIAL (all three engines share the same worker thread → no concurrent SQLite access) AND unblocks the loop. Federated fan-out tasks are CREATED before the local thread is awaited and composed via `asyncio.gather(local_task, federated_task)` so federated and local work overlap from the loop's perspective. Regression test `test_search_async_does_not_block_event_loop` interleaves `await asyncio.sleep(0)` at multiple checkpoints during a slow local search and asserts each checkpoint resumes before search_async returns — pins "loop is not blocked" as load-bearing behavior. |
+| `search_async` blocks the FastMCP/FastAPI event loop during local search, stalling unrelated MCP requests (cycle-3 HIGH) | HIGH | Local engines run sequentially inside ONE worker thread via `await loop.run_in_executor(self._local_executor, self._run_local_search_sequence, query, pool_size)` instead of executing on the event-loop thread. This preserves D-LOCAL-SEQUENTIAL (all three engines share the same worker thread → no concurrent SQLite access) AND unblocks the loop. Federated fan-out tasks are CREATED before the local executor task is awaited and composed via `asyncio.gather(local_task, federated_task)` so federated and local work overlap from the loop's perspective. Regression test `test_search_async_does_not_block_event_loop` interleaves `await asyncio.sleep(0)` at multiple checkpoints during a slow local search and asserts each checkpoint resumes before search_async returns — pins "loop is not blocked" as load-bearing behavior. The interleaver coroutine captures its tick count via a `finally` block at the moment `search_async` completes (cycle-4 MEDIUM fix) so a post-return tick burst cannot mask a pre-return block. |
+| Two concurrent `search_async()` requests run two `_run_local_search_sequence` invocations on different default-executor worker threads, breaking the cross-request single-thread SQLite/metadata/graph invariant (cycle-4 HIGH) | HIGH | Service constructs a dedicated single-worker `ThreadPoolExecutor(max_workers=1, thread_name_prefix="dotmd-local-search")` once in `__init__` and stores it as `self._local_executor`. `search_async` calls `loop.run_in_executor(self._local_executor, self._run_local_search_sequence, ...)` instead of `asyncio.to_thread(...)` (which uses the default global executor with N workers). Because the executor has a hard cap of one worker, two concurrent `search_async` calls SERIALIZE on the executor's queue — invariant by construction, no shared lock or barrier needed. Federated fan-out is unaffected (event-loop-bound, allowed to overlap between requests). Two regression tests pin the choice: `test_local_executor_has_max_workers_one` (asserts `service._local_executor._max_workers == 1` — structural pin) and `test_concurrent_search_async_calls_do_not_overlap_local_sequences` (records `(threading.get_ident(), enter_time, exit_time)` per call, asserts overlapping requests either share the same thread ident OR have disjoint [enter, exit] intervals — behavioral pin). Service shutdown calls `self._local_executor.shutdown(wait=True)` from `DotMDService.close()` to avoid leaked daemon threads. |
 | One misconfigured federated source crashes service init (cycle-2 HIGH-6) | HIGH | Service init catches per-source lifecycle build failures, records them in `self._lifecycle_init_errors: dict[str, str]`, and includes them as persistent `SourceStatus(status="error")` entries in every `SearchResponse`. Test `test_misconfigured_federated_source_does_not_crash_service_init` and `test_misconfigured_federated_source_appears_as_error_status_in_search`. |
 | Federated timeout accidentally soft-skips slow local engines (cycle-2 MEDIUM) | MEDIUM | Local engines have NO soft timeout in Phase 34 (sequential, run to completion). The `federated_timeout_seconds` setting applies ONLY to federated provider calls. Test pins that a 5-second cold semantic call is not soft-skipped when `federated_timeout_seconds=1`. |
 | asyncio.wait_for(asyncio.to_thread(...)) leaves zombie threads after timeout (cycle-2 MEDIUM) | LOW | Documented limitation: a timed-out provider thread keeps running until natural completion; logs may show late completion. No code mitigation in Phase 34 (Python's threading model does not support cooperative cancellation of `to_thread`-wrapped sync code). Comment near `wait_for` references this threat row. |
@@ -186,33 +188,53 @@ Create `backend/tests/search/test_federated.py` with failing tests:
   candidate in `response.candidates` has `engine_scores is None`. Local
   candidates have `engine_scores` populated for engines that scored them.
 - `test_search_async_does_not_block_event_loop` (**cycle-3 HIGH fix —
-  load-bearing regression test**) — patch `service._run_local_search_sequence`
-  with a sync helper that `time.sleep(2.0)`s before returning empty results
-  (simulating slow local I/O). Define an interleaver coroutine:
+  load-bearing regression test; cycle-4 MEDIUM timing fix**) — patch
+  `service._run_local_search_sequence` with a sync helper that
+  `time.sleep(2.0)`s before returning empty results (simulating slow local
+  I/O). Capture the interleaver count VIA A `finally` BLOCK INSIDE THE
+  SEARCH CALL so the recorded value is frozen at the moment `search_async`
+  completes — NOT after both coroutines drain (which is the cycle-4 MEDIUM
+  trap: post-return ticks could mask pre-return blockage):
   ```python
   interleave_count = 0
+  search_finished_count: int | None = None
+
   async def interleaver() -> None:
       nonlocal interleave_count
       for _ in range(20):
           await asyncio.sleep(0.05)
           interleave_count += 1
+
+  async def search_wrapper() -> SearchResponse:
+      nonlocal search_finished_count
+      try:
+          return await service.search_async("foo")
+      finally:
+          search_finished_count = interleave_count
   ```
-  Run `await asyncio.gather(service.search_async("foo"), interleaver())`.
-  Assert the interleaver completed at least 15 of its 20 ticks BEFORE
-  `search_async` returned (`interleave_count >= 15`). This proves the
-  event loop was not blocked by the 2-second local search. If
+  Run `await asyncio.gather(search_wrapper(), interleaver())`. Assert that
+  `search_finished_count is not None` and `search_finished_count >= 15`
+  (i.e. at least 15 of the 20 interleaver ticks fired BEFORE
+  `search_async` completed). Crucially, do NOT assert on the post-gather
+  `interleave_count` — that value would still be 20 even if the event
+  loop was blocked, because once `search_async` returns the interleaver
+  finishes its remaining iterations freely. This pins "loop unblocked
+  DURING the search call", not "loop unblocked at any point". If
   `_run_local_search_sequence` were called directly inside the awaited
-  coroutine instead of through `asyncio.to_thread`, the interleaver would
-  starve and `interleave_count` would be ≤ 1.
+  coroutine instead of through `loop.run_in_executor(self._local_executor, ...)`,
+  the interleaver would starve and `search_finished_count` would be ≤ 1.
 - `test_search_async_local_engines_share_one_worker_thread` (**cycle-3
   HIGH fix — preserves D-LOCAL-SEQUENTIAL**) — patch each local engine's
   `search` method with a wrapper that records the current thread ID via
   `threading.get_ident()`. Run `await service.search_async("foo")`. Assert
   every recorded local-engine thread ID is identical (one shared worker
-  thread, not three different threads from `to_thread` per-engine) AND
-  none of those thread IDs equals the event-loop thread ID. This pins the
-  exact wrap structure: ONE `to_thread(self._run_local_search_sequence)`
-  call wrapping all three engines, NOT three separate `to_thread` calls
+  thread, not three different threads from per-engine wraps) AND none of
+  those thread IDs equals the event-loop thread ID. Also assert the
+  recorded thread name starts with `"dotmd-local-search"` (the
+  `thread_name_prefix` configured on `self._local_executor` —
+  cycle-4 marker). This pins the exact wrap structure: ONE
+  `loop.run_in_executor(self._local_executor, self._run_local_search_sequence)`
+  call wrapping all three engines, NOT three separate executor submissions
   per engine (which would re-introduce concurrent local access).
 - `test_federated_fanout_overlaps_with_local_search_sequence` (**cycle-3
   MEDIUM fold-in — overlap, not additive timeouts**) — federated stub
@@ -222,6 +244,50 @@ Create `backend/tests/search/test_federated.py` with failing tests:
   local-then-federated). Documents the overlap budget: response time =
   `max(local_duration, federated_timeout)` rather than
   `local_duration + federated_timeout`.
+- `test_local_executor_has_max_workers_one` (**cycle-4 HIGH fix —
+  STRUCTURAL pin**) — construct a `DotMDService` with default
+  configuration and assert
+  `service._local_executor._max_workers == 1`. Also assert
+  `isinstance(service._local_executor, ThreadPoolExecutor)` and
+  `service._local_executor._thread_name_prefix == "dotmd-local-search"`.
+  This is the load-bearing structural pin for D-LOCAL-SERIALIZED — if a
+  future change swaps `ThreadPoolExecutor(max_workers=1)` back to the
+  default executor (or raises `max_workers`), this test fails before any
+  behavioral test even runs. Comment in the test must reference the
+  cycle-4 HIGH so future readers know why the count is structural.
+- `test_concurrent_search_async_calls_do_not_overlap_local_sequences`
+  (**cycle-4 HIGH fix — BEHAVIORAL pin for cross-request mutual
+  exclusion**) — patch `service._run_local_search_sequence` with a
+  recorder that captures `(threading.get_ident(), enter_time, exit_time)`
+  per invocation, sleeps 0.5 seconds while inside, then returns an empty
+  outcome list. Launch two concurrent search calls:
+  ```python
+  results = await asyncio.gather(
+      service.search_async("query_a"),
+      service.search_async("query_b"),
+  )
+  ```
+  Sort the two recorder entries by `enter_time` and assert ONE of the
+  following two equivalent invariants holds (either is sufficient — both
+  prove cross-request mutual exclusion):
+  - **Invariant A — same-thread serialization:** both recorder entries
+    have the same `threading.get_ident()` value, AND the second entry's
+    `enter_time` is `>=` the first entry's `exit_time`. (This is the
+    expected behavior with `max_workers=1` — the second submission waits
+    for the first to release the single worker.)
+  - **Invariant B — disjoint intervals:** the two intervals
+    `[enter_time, exit_time]` are non-overlapping (entry-2.enter_time
+    `>=` entry-1.exit_time). This is a stronger statement of A and works
+    even if a future implementation switches to a different mechanism
+    (e.g. an `asyncio.Lock`).
+  Implementation note: prefer Invariant A as the primary assertion (it
+  doubly pins both serialization AND single-thread identity); use B as
+  a fallback comment for readers. With `max_workers=1` the two
+  invocations land on the same worker by construction. If a regression
+  removes the executor and re-introduces `asyncio.to_thread(...)` on the
+  default executor (or replaces the executor with `max_workers >= 2`),
+  this test fails because the two intervals overlap on different
+  threads. Comment must reference the cycle-4 HIGH.
 
 Tests must fail before task 2.
 </action>
@@ -230,14 +296,18 @@ Tests must fail before task 2.
   `slow_federated_provider`, `failing_federated_provider`,
   `make_federated_bundle`, plus a `make_misconfigured_federated_factory`
   helper for the lifecycle init failure tests (cycle-2 HIGH-6).
-- `backend/tests/search/test_federated.py` contains all 19+ tests named
+- `backend/tests/search/test_federated.py` contains all 21+ tests named
   above (8 foundational + 8 cycle-2 review additions for outcome split,
   local sequential, async/sync bridge, lifecycle init failure, separate
   timeouts, federated engine_scores=None + 3 cycle-3 review additions:
   `test_search_async_does_not_block_event_loop`,
   `test_search_async_local_engines_share_one_worker_thread`,
-  `test_federated_fanout_overlaps_with_local_search_sequence`).
-- `rg -n 'test_search_async_does_not_block_event_loop|test_search_async_local_engines_share_one_worker_thread|test_federated_fanout_overlaps_with_local_search_sequence' backend/tests/search/test_federated.py`
+  `test_federated_fanout_overlaps_with_local_search_sequence` + 2
+  cycle-4 review additions:
+  `test_local_executor_has_max_workers_one` (structural pin),
+  `test_concurrent_search_async_calls_do_not_overlap_local_sequences`
+  (behavioral pin for cross-request mutual exclusion)).
+- `rg -n 'test_search_async_does_not_block_event_loop|test_search_async_local_engines_share_one_worker_thread|test_federated_fanout_overlaps_with_local_search_sequence|test_local_executor_has_max_workers_one|test_concurrent_search_async_calls_do_not_overlap_local_sequences' backend/tests/search/test_federated.py`
   returns three matches (cycle-3 HIGH + MEDIUM markers).
 - `cd backend && uv run pytest tests/search/test_federated.py -q` exits
   non-zero before task 2 (federated module/protocol does not exist).
@@ -446,6 +516,46 @@ failure):
     failure becomes a recorded error status, not a startup crash.
 - Compute `self._federated_bundles: list[SourceRuntimeBundle]` once at
   init by filtering `bundle.supports_federated_search`.
+- **Construct the dedicated single-worker local-search executor (cycle-4
+  HIGH fix — D-LOCAL-SERIALIZED).** Add to `__init__`:
+  ```python
+  from concurrent.futures import ThreadPoolExecutor
+
+  # Cross-request mutual exclusion for the local search sequence.
+  # max_workers=1 makes it STRUCTURALLY IMPOSSIBLE for two concurrent
+  # search_async() calls to overlap their _run_local_search_sequence
+  # invocations — they queue on the executor instead. asyncio.to_thread
+  # would use the default executor (multiple workers) and could overlap
+  # two requests on different worker threads, breaking the cross-request
+  # single-thread SQLite/metadata/graph invariant. (cycle-4 HIGH)
+  self._local_executor = ThreadPoolExecutor(
+      max_workers=1,
+      thread_name_prefix="dotmd-local-search",
+  )
+  ```
+  - The executor is constructed ONCE at service init and reused for the
+    lifetime of the service — never re-created per request.
+  - **Test pin:** `test_local_executor_has_max_workers_one` asserts
+    `service._local_executor._max_workers == 1` and the
+    `_thread_name_prefix == "dotmd-local-search"` so a future code change
+    that reverts to `asyncio.to_thread` (default executor) or raises
+    `max_workers` fails the test before any behavior runs.
+- **Add `def close(self)` (or extend the existing one if present) to
+  shut the executor down cleanly:**
+  ```python
+  def close(self) -> None:
+      # Existing teardown (graph clients, sqlite handles, etc.) ...
+      try:
+          self._local_executor.shutdown(wait=True)
+      except Exception:
+          logger.warning("local_executor shutdown failed", exc_info=True)
+  ```
+  - `wait=True` blocks until any in-flight local search drains —
+    important during process exit so we don't leave an active SQLite
+    transaction half-open.
+  - If `DotMDService.close` does not yet exist, add it AND register it
+    via FastAPI/MCP shutdown hooks (out of scope: integration wiring is
+    owned by Plan 03 if it touches the lifecycle layer).
 
 Public sync/async surface (cycle-2 HIGH-5 fix — `search_async` is canonical):
 
@@ -486,9 +596,15 @@ federated fan-out via `asyncio.gather`**):
     ]
     ```
   - Stage 1 — concurrent local-thread + federated fan-out (**cycle-3 HIGH
-    fix**). Local engines run sequentially in ONE worker thread (preserves
-    D-LOCAL-SEQUENTIAL — single-threaded SQLite/graph access). Federated
-    fan-out runs on the event loop. Both proceed in parallel, gathered:
+    fix; cycle-4 HIGH cross-request serialization**). Local engines run
+    sequentially in ONE worker thread on the dedicated single-worker
+    executor (`self._local_executor`, max_workers=1, constructed in
+    `__init__`). This preserves D-LOCAL-SEQUENTIAL within a single request
+    AND D-LOCAL-SERIALIZED across concurrent requests — two simultaneous
+    `search_async` calls queue on the executor rather than running
+    `_run_local_search_sequence` concurrently on different default-pool
+    threads. Federated fan-out runs on the event loop. Both proceed in
+    parallel, gathered:
     ```python
     # Build federated calls dict (cycle-2 HIGH-4 keeps federated parallelism)
     federated_calls: dict[str, Callable[[], list[SearchCandidate]]] = {}
@@ -498,13 +614,27 @@ federated fan-out via `asyncio.gather`**):
             query, limit=pool_size,
         )
 
-    # Local sequence runs off the event loop in ONE worker thread.
-    # `_run_local_search_sequence` is a SYNC method that runs semantic →
-    # keyword → graph_direct in order. All three engines share the SAME
-    # worker thread (NOT three separate `to_thread` calls) — this is what
-    # preserves D-LOCAL-SEQUENTIAL while unblocking the loop.
-    local_task = asyncio.to_thread(
-        self._run_local_search_sequence, query, pool_size,
+    # Local sequence runs off the event loop in ONE worker thread on
+    # the SHARED single-worker executor. `_run_local_search_sequence` is
+    # a SYNC method that runs semantic → keyword → graph_direct in order.
+    # All three engines share the SAME worker thread (NOT three separate
+    # executor submissions) — preserving D-LOCAL-SEQUENTIAL within the
+    # request — AND because the executor has max_workers=1, two
+    # concurrent search_async() calls cannot overlap their local
+    # sequences either, preserving D-LOCAL-SERIALIZED across requests.
+    # (cycle-3 HIGH event-loop fix + cycle-4 HIGH cross-request fix.)
+    #
+    # IMPORTANT: do NOT use asyncio.to_thread(self._run_local_search_sequence, ...).
+    # That dispatches to the default executor (typically max_workers =
+    # min(32, os.cpu_count()+4)) and lets two concurrent requests run two
+    # local sequences on two different worker threads — exactly the
+    # cycle-4 HIGH defect. Always go through self._local_executor.
+    loop = asyncio.get_running_loop()
+    local_task = loop.run_in_executor(
+        self._local_executor,
+        self._run_local_search_sequence,
+        query,
+        pool_size,
     )
     federated_task = fanout_federated(
         federated_calls,
@@ -528,12 +658,22 @@ federated fan-out via `asyncio.gather`**):
         """Run all three local engines sequentially in the calling thread.
 
         This is INTENTIONALLY synchronous and meant to be invoked via
-        `asyncio.to_thread(self._run_local_search_sequence, ...)`. All
-        three engines share this thread → no concurrent SQLite/graph
-        access (D-LOCAL-SEQUENTIAL) → no event-loop blockage (D-LOOP-SAFE).
+        `loop.run_in_executor(self._local_executor,
+        self._run_local_search_sequence, ...)`. All three engines share
+        this thread within a single call → no concurrent SQLite/graph
+        access within a request (D-LOCAL-SEQUENTIAL) → no event-loop
+        blockage (D-LOOP-SAFE). Because `self._local_executor` has
+        `max_workers=1`, two concurrent `search_async()` calls cannot
+        overlap their local sequences either (D-LOCAL-SERIALIZED) —
+        invariant by construction.
 
         DO NOT call this from inside an event loop directly — that
         re-introduces the cycle-3 HIGH (event-loop blockage).
+
+        DO NOT call this via `asyncio.to_thread(...)` — that uses the
+        default multi-worker executor and re-introduces the cycle-4 HIGH
+        (cross-request concurrency on shared SQLite/metadata/graph
+        clients). Always dispatch through `self._local_executor`.
         """
         outcomes: list[LocalEngineOutcome] = []
         outcomes.append(_run_local_engine(
@@ -556,14 +696,42 @@ federated fan-out via `asyncio.gather`**):
     timeout-scope fixes preserved.) Federated `wait_for` timeout is
     unchanged and applies only to federated providers.
 
-    **Why one `to_thread` not three:** wrapping each local engine in its
-    own `asyncio.to_thread(self._semantic_engine.search, ...)` would put
-    the three engines on three different worker threads from
-    `asyncio`'s default thread pool, re-introducing concurrent
-    SQLite/graph access (regressing cycle-2 HIGH-4). One `to_thread`
-    wrapping the whole sequence keeps all three engines on the same
-    thread by construction. `test_search_async_local_engines_share_one_worker_thread`
-    pins this structural choice.
+    **Why one executor submission, not three (cycle-3 HIGH-4 preserved):**
+    wrapping each local engine in its own
+    `loop.run_in_executor(self._local_executor, self._semantic_engine.search, ...)`
+    submission would queue three jobs on the executor and run them one at
+    a time on the same single worker — equivalent in safety, but worse:
+    each job pays the queue handoff overhead and the federated `gather`
+    only completes after all three sequential jobs drain. ONE submission
+    that wraps the entire sync sequence keeps all three engines on the
+    same thread within ONE atomic executor job by construction.
+    `test_search_async_local_engines_share_one_worker_thread` pins this
+    structural choice.
+
+    **Why a dedicated single-worker executor, not `asyncio.to_thread`
+    (cycle-4 HIGH fix):** `asyncio.to_thread(...)` uses the default
+    `loop.run_in_executor(None, ...)` executor — typically a
+    `ThreadPoolExecutor(max_workers=min(32, os.cpu_count()+4))`. With
+    multiple workers, two concurrent `search_async()` requests would
+    each get a different default-pool worker thread and run two
+    `_run_local_search_sequence` invocations concurrently — exactly the
+    cycle-4 defect. Hard-capping our private executor at `max_workers=1`
+    forces concurrent requests to QUEUE on the executor instead, making
+    cross-request mutual exclusion structurally impossible to violate.
+    `test_local_executor_has_max_workers_one` pins the cap;
+    `test_concurrent_search_async_calls_do_not_overlap_local_sequences`
+    pins the resulting non-overlap invariant.
+
+    **Why a dedicated executor and not an `asyncio.Lock`:** an
+    `asyncio.Lock` would also serialize cross-request local sequences,
+    but the lock object lives in user-space and a future maintainer
+    could accidentally drop the lock acquire (e.g. when refactoring the
+    `gather` shape) without any structural failure mode catching it.
+    The single-worker executor is a structural primitive: any code path
+    that submits work to it inherits the serialization guarantee. This
+    aligns with the project motto "invariant by construction" (project
+    memory: `feedback_invariant_by_construction.md`). The `asyncio.Lock`
+    alternative was considered and rejected for this reason.
   - Stage 2 — assemble per-engine ranked-ref dict by branching on outcome
     kind:
     ```python
@@ -601,11 +769,35 @@ federated fan-out via `asyncio.gather`**):
     follow the existing inactive drop logic.
   - Stage 5 — build candidates: `build_candidates_with_federated(fused,
     per_engine_ref, ref_to_local_metadata, federated_candidates_by_ref,
-    query, top_k)` (extend `build_candidates` from Plan 01 to accept a
-    `federated_candidates_by_ref: dict[str, SearchCandidate]` and merge
-    per-engine score attribution from federated engine names). Federated
-    candidates emerge with `engine_scores=None` (D-02 invariant — pinned
-    by `test_federated_candidates_leave_engine_scores_none`).
+    query, top_k)`. This extends `build_candidates` from Plan 01 to
+    accept a `federated_candidates_by_ref: dict[str, SearchCandidate]`.
+    The merge logic distinguishes LOCAL refs from FEDERATED refs by
+    membership in `federated_candidates_by_ref`, and applies different
+    `engine_scores` policies per branch (cycle-4 LOW prose fix —
+    previously this paragraph implied a single merge that was contradicted
+    by D-02; the two branches are now stated explicitly):
+    - **LOCAL refs** (refs absent from `federated_candidates_by_ref`):
+      populate `engine_scores` from the per-local-engine RRF
+      contributions in `per_engine_ref` exactly as Plan 01 does. Local
+      candidates get `engine_scores={"semantic": rrf_a, "keyword": rrf_b,
+      "graph_direct": rrf_c}` (any subset, depending on which engines
+      retrieved that ref).
+    - **FEDERATED refs** (refs present in `federated_candidates_by_ref`):
+      take the prebuilt `SearchCandidate` from the federated outcome AS-IS
+      and OVERWRITE its `engine_scores` field with `None` regardless of
+      what the federated provider sent. The D-02 invariant ("federated
+      candidates have `engine_scores=None`") is enforced ONE-WAY at the
+      builder level — the builder is the single point where
+      `engine_scores=None` is stamped, so no upstream code path can leak
+      a non-None value. `test_federated_candidates_leave_engine_scores_none`
+      pins this invariant: every federated candidate emerging from
+      `_search_async` has `engine_scores is None`, even if the stub
+      provider returned a non-None value.
+
+    Per-engine attribution for federated engines is NOT merged into
+    `engine_scores` — it lives only in the upstream `per_engine_ref`
+    table and the `SourceStatus` records. The D-02 invariant is the
+    single source of truth for federated candidates' `engine_scores`.
   - Stage 6 — optional reranker: pass through candidates whose
     `chunk_id is None` AS-IS (skip rerank), keep their RRF score.
   - Stage 7 — assemble:
@@ -666,15 +858,31 @@ In `backend/tests/api/test_service_search.py`:
   `graph_direct` in order. (cycle-3 HIGH marker — `rg -n
   'def _run_local_search_sequence' backend/src/dotmd/api/service.py`
   returns at least one match.)
+- `backend/src/dotmd/api/service.py` `DotMDService.__init__` constructs
+  `self._local_executor = ThreadPoolExecutor(max_workers=1,
+  thread_name_prefix="dotmd-local-search")` (cycle-4 HIGH marker —
+  D-LOCAL-SERIALIZED). Verify with `rg`:
+  - `rg -n 'self\._local_executor\s*=\s*ThreadPoolExecutor' backend/src/dotmd/api/service.py` returns at least one match.
+  - `rg -n 'max_workers=1' backend/src/dotmd/api/service.py` returns at least one match for the local executor.
+  - `rg -n 'thread_name_prefix=.dotmd-local-search.' backend/src/dotmd/api/service.py` returns at least one match.
+  - `rg -n 'from concurrent\.futures import ThreadPoolExecutor' backend/src/dotmd/api/service.py` returns at least one match.
 - `backend/src/dotmd/api/service.py` `search_async` invokes
-  `asyncio.to_thread(self._run_local_search_sequence, ...)` exactly ONCE
-  (the whole local sequence in one worker thread, NOT three per-engine
-  `to_thread` calls). Verify with `rg`:
-  - `rg -n 'asyncio\.to_thread\(self\._run_local_search_sequence' backend/src/dotmd/api/service.py` returns at least one match (cycle-3 HIGH).
-  - `rg -n 'asyncio\.to_thread.*semantic|asyncio\.to_thread.*keyword|asyncio\.to_thread.*graph_direct' backend/src/dotmd/api/service.py` returns NO matches (cycle-2 HIGH-4 + cycle-3 structural choice — three per-engine wraps would regress single-threaded local access).
+  `loop.run_in_executor(self._local_executor, self._run_local_search_sequence, ...)`
+  exactly ONCE (the whole local sequence in one worker thread on the
+  dedicated single-worker executor, NOT three per-engine submissions or
+  any `asyncio.to_thread` call on the default pool). Verify with `rg`:
+  - `rg -n 'run_in_executor\(\s*self\._local_executor' backend/src/dotmd/api/service.py` returns at least one match (cycle-4 HIGH structural marker).
+  - `rg -n 'self\._run_local_search_sequence' backend/src/dotmd/api/service.py` returns matches both at the executor dispatch site AND at the helper definition (cycle-3 HIGH preserved).
+  - `rg -n 'asyncio\.to_thread\(' backend/src/dotmd/api/service.py` returns NO matches in `search_async` (cycle-4 HIGH — the default-executor path is the defect class).
+  - `rg -n 'asyncio\.to_thread.*semantic|asyncio\.to_thread.*keyword|asyncio\.to_thread.*graph_direct' backend/src/dotmd/api/service.py` returns NO matches (cycle-2 HIGH-4 + cycle-3 + cycle-4 structural choice — per-engine wraps OR default-pool wraps would regress single-threaded local access).
 - `backend/src/dotmd/api/service.py` `search_async` composes local + federated
   via `asyncio.gather(local_task, federated_task)` (cycle-3 MEDIUM fold-in
   — overlap, not additive). `rg -n 'asyncio\.gather' backend/src/dotmd/api/service.py`
+  returns at least one match.
+- `backend/src/dotmd/api/service.py` `DotMDService.close()` calls
+  `self._local_executor.shutdown(wait=True)` so the dedicated worker
+  thread is reaped at process exit (cycle-4 HIGH housekeeping). `rg -n
+  'self\._local_executor\.shutdown' backend/src/dotmd/api/service.py`
   returns at least one match.
 - `rg -n 'fanout_search\b' backend/src/dotmd/api/service.py` returns no
   matches (cycle-2 HIGH-3 — old conflated helper is gone).
@@ -848,15 +1056,35 @@ records and `source_status`; no source filter parameters present.
   failures are caught at service init and surfaced as persistent
   `SourceStatus(status="error")` entries; service init never crashes on
   one bad source.
-- **D-LOOP-SAFE** (cycle-3 HIGH): `search_async` never blocks the
-  FastMCP/FastAPI event loop. The full local engine sequence runs in
-  one worker thread via `asyncio.to_thread(self._run_local_search_sequence,
-  ...)`, composed with federated fan-out via `asyncio.gather`. Regression
-  test `test_search_async_does_not_block_event_loop` and
+- **D-LOOP-SAFE** (cycle-3 HIGH; cycle-4 MEDIUM timing fix): `search_async`
+  never blocks the FastMCP/FastAPI event loop. The full local engine
+  sequence runs in one worker thread on the dedicated single-worker
+  executor via `loop.run_in_executor(self._local_executor,
+  self._run_local_search_sequence, ...)`, composed with federated fan-out
+  via `asyncio.gather`. Regression test
+  `test_search_async_does_not_block_event_loop` (with `finally`-block
+  capture of `interleave_count` at search completion — cycle-4 MEDIUM
+  fix, not at gather completion) and
   `test_search_async_local_engines_share_one_worker_thread` pin both
-  "loop is unblocked" and "all three local engines share the same
-  worker thread". Overlap test
+  "loop is unblocked DURING the search call" and "all three local
+  engines share the same worker thread". Overlap test
   `test_federated_fanout_overlaps_with_local_search_sequence` pins
   response time = `max(local_duration, federated_timeout)`, not
   additive (cycle-3 MEDIUM fold-in).
+- **D-LOCAL-SERIALIZED** (cycle-4 HIGH): two concurrent `search_async()`
+  calls cannot run two `_run_local_search_sequence` invocations
+  simultaneously — the dedicated `self._local_executor` has
+  `max_workers=1`, queueing concurrent submissions. Structural pin
+  `test_local_executor_has_max_workers_one` asserts `_max_workers == 1`
+  and `_thread_name_prefix == "dotmd-local-search"`. Behavioral pin
+  `test_concurrent_search_async_calls_do_not_overlap_local_sequences`
+  asserts two simultaneous searches either share the same worker thread
+  (Invariant A — same-thread serialization, expected with
+  `max_workers=1`) OR have disjoint `[enter, exit]` intervals (Invariant
+  B — also passes if a future maintainer swaps in a different
+  serialization mechanism). The single-worker executor was chosen over
+  an `asyncio.Lock` for "invariant by construction" — any code path
+  that submits to `self._local_executor` inherits the cross-request
+  serialization guarantee, so accidental refactors that drop a lock
+  acquire cannot regress this invariant.
 </success_criteria>

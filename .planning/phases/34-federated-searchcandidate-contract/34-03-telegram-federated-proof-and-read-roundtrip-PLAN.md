@@ -757,8 +757,11 @@ Update three docs and run the live container smoke.
   - Public `descriptor_key` field (cycle-2 HIGH-1) — distinct from
     `source_kind`; identifies the source descriptor uniquely.
   - Always-on fan-out across `FEDERATED_SEARCH`-capable bundles.
-  - Local engines run sequentially; only federated providers fan out in
-    parallel (cycle-2 HIGH-4 D-LOCAL-SEQUENTIAL).
+  - Local engines run sequentially within a request (cycle-2 HIGH-4
+    D-LOCAL-SEQUENTIAL) AND are serialized across concurrent requests
+    via a dedicated `ThreadPoolExecutor(max_workers=1)` named
+    `dotmd-local-search` (cycle-4 HIGH D-LOCAL-SERIALIZED) — only
+    federated providers fan out in parallel.
   - `search_async` is the canonical async public method; sync `search()`
     is a CLI/test wrapper that fails loudly inside a running event loop
     (cycle-2 HIGH-5 D-ASYNC-CANONICAL).
