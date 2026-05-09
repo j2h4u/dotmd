@@ -5,7 +5,7 @@ status: complete
 nyquist_compliant: true
 wave_0_complete: true
 created: 2026-05-08
-last_audited: 2026-05-09
+last_audited: 2026-05-10
 ---
 
 # Phase 34 - Validation Strategy
@@ -135,6 +135,18 @@ bundles declaring `FEDERATED_SEARCH`) is unmet by construction.
 
 **Status after 1/3 debug iterations:** Implementation bug confirmed — test assertion is
 correct. Weakening the assertion would paper over an unimplemented requirement. ESCALATE.
+
+## Validation Audit 2026-05-10
+
+| Metric | Count |
+|--------|-------|
+| Gaps found | 5 |
+| Resolved | 5 |
+| Escalated | 0 |
+
+Gaps resolved: (1) FakeClient `"hits"` key stale after search_native fix; (2) `@pytest.mark.asyncio` unusable without pytest-asyncio — replaced with `@pytest.mark.anyio`; (3) `pytest.raises(ImportError): pass` never raises — replaced with actual import attempt; (4) top_k=3 assertion expected all 5 unsorted results — corrected to top-3 desc-sorted; (5) `service.search.return_value = []` — server route accesses `.candidates`, fixed mock to return `SearchResponse`. Also: `_get_service` now explicitly passes `telegram_daemon_socket=None` to isolate unit tests from the production env var.
+
+All 125 tests pass, 14 skipped (smoke/e2e requiring live stack).
 
 ## Audit Evidence
 
