@@ -215,3 +215,85 @@ The production dotMD compose layer should mount that volume into the dotMD
 container and set `DOTMD_TELEGRAM_DAEMON_SOCKET` to the in-container path before
 running live ingest smoke. dotMD still does not read private `mcp-telegram`
 SQLite tables; the mount is for the daemon socket only.
+
+## Phase 34: Federated FTS Search
+
+Phase 34 adds a `search_messages` daemon-socket method to enable federated FTS
+search without requiring messages to be indexed locally. The method allows dotMD
+to present Telegram search results directly from the daemon's FTS index.
+
+### search_messages Method
+
+Request (daemon method):
+
+```json
+{
+  "method": "search_messages",
+  "query": "kantine",
+  "limit": 20,
+  "dialog_id": null
+}
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "hits": [
+      {
+        "dialog_id": 12345,
+        "dialog_name": "Project Chat",
+        "message_id": 67,
+        "text": "The kantine has been refurbished.",
+        "sender": "alice",
+        "sent_at": "2026-04-12T08:11:00+00:00",
+        "score": 0.93
+      }
+    ]
+  }
+}
+```
+
+### SearchCandidate Mapping
+
+Telegram FTS search results map to `SearchCandidate`:
+
+- **ref:** `"telegram:dialog:<dialog_id>:message:<message_id>"`
+- **namespace:** `"telegram"`
+- **descriptor_key:** `"telegram"` (identifies the source descriptor)
+- **source_kind:** `"chat"`
+- **retrieval_kind:** `"tg:fts"`
+- **title:** `dialog_name` from the hit
+- **snippet:** `text` from the hit (message preview)
+- **can_read:** `True` if the provider supports `read_unit_window`
+- **can_materialize:** `False` (Phase 34 invariant)
+- **source_native_score:** `score` from the hit (FTS score)
+- **source_native_rank:** Zero-based rank (0, 1, 2, ... for a 5-hit response)
+- **provider_metadata:** Whitelist only `{dialog_id, message_id, sender, sent_at, dialog_name}`. Credentials, phone numbers, auth tokens, session paths, api_id, api_hash MUST NOT appear.
+
+### Read Routing (Local-First)
+
+When `read(ref)` is called for a Telegram ref:
+
+1. Check local store: if the ref exists locally with an **active** binding,
+   use the local chunks path (existing behavior).
+2. Check local store: if the ref exists locally with an **inactive** binding,
+   raise `PermissionError`. Phase 27 visibility gate is preserved; DO NOT
+   fall back to the federated provider.
+3. No local presence: call `provider.read_unit_window(unit_ref, before, after)`
+   to fetch context from the daemon. Returns a `SourceUnitWindow` with units
+   and metadata.
+
+Error handling: If `read_unit_window` fails, wrap as:
+`RuntimeError("telegram: <original error message>")`
+
+This preserves provider attribution while staying compatible with the Phase 26
+public error contract.
+
+### No Materialization in Phase 34
+
+Federated search results have `can_materialize=False`. The Phase 34 contract
+does not add write-back semantics. Materialization (storing Telegram messages
+into the local index for offline access) is deferred to a future phase.

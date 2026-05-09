@@ -255,6 +255,132 @@ vectors, vector components, and checkpoint metadata succeed inside the same
 local transaction. `next_cursor` remains only a provider continuation hint.
 This construction-path migration does not require a full reindex.
 
+## Phase 34 Delivered Federated Search Contract
+
+Phase 34 extends the search and read contracts to support federated providers
+alongside local indexing. Federated providers expose message-level search
+results without requiring local full-text indexing, and return read context
+for message refs that exist only in the provider's data store.
+
+### SearchCandidate Envelope
+
+The `SearchCandidate` model now includes:
+
+- **`descriptor_key`** (new, cycle-2 HIGH-1): Stable identifier for the source
+  descriptor. Distinct from `namespace` (which identifies the adapter tier) and
+  `source_kind` (which identifies the logical content type). Enables
+  future UI/filtering by specific source configuration without parsing
+  `namespace` strings.
+- **`provider_metadata`**: Optional dict of source-specific attributes
+  (e.g., Telegram: dialog_id, message_id, sender, sent_at, dialog_name).
+  Whitelist enforced at provider construction prevents leaking credentials,
+  phone numbers, or auth tokens.
+- **`source_native_rank`**: Zero-based rank for hits from a federated provider
+  (e.g., FTS rank 0, 1, 2, ... for a 5-hit response).
+- **`can_materialize`**: Phase 34 enforces `False` for all federated candidates.
+  Materialization (storing search results back to local index) is deferred.
+
+### Search Execution (Local + Federated)
+
+`search_async()` is the canonical async method. `search()` is a synchronous
+wrapper for CLI/test use only; it fails loudly if called from an active event
+loop (cycle-2 HIGH-5 D-ASYNC-CANONICAL).
+
+Local search engines (semantic, FTS, graph) run sequentially within a request,
+protected by a single-worker `ThreadPoolExecutor` (max_workers=1) named
+`dotmd-local-search` (cycle-2 HIGH-4, cycle-4 HIGH D-LOCAL-SERIALIZED). This
+ensures SQLite metadata/graph access is single-threaded per request. Concurrent
+search_async() calls across different requests queue instead of running in
+parallel.
+
+Federated providers fan out in parallel via `asyncio.gather()`. Each provider
+has a soft timeout (4s default, configurable); local engines have no soft
+timeout.
+
+Lifecycle build failures are caught per-source and surfaced as persistent
+`SourceStatus(status="error")` entries in every subsequent `SearchResponse`.
+Service initialization never crashes due to a single misconfigured source
+(cycle-2 HIGH-6 D-LIFECYCLE-GRACEFUL).
+
+Source status envelope (cycle-2 HIGH-2):
+
+```python
+source_status = [
+    {"name": "semantic", "status": "ok", "elapsed_ms": 123},
+    {"name": "keyword", "status": "ok", "elapsed_ms": 45},
+    {"name": "graph_direct", "status": "ok", "elapsed_ms": 78},
+    {"name": "tg:fts", "status": "ok", "elapsed_ms": 234},  # federated provider
+]
+```
+
+Engine naming convention: local engines use their operation name (semantic, keyword,
+graph_direct); federated providers use `<namespace>:<retrieval_kind>`
+(e.g., `tg:fts` for Telegram FTS search).
+
+### Read/Drill Routing (Local-First, Three-Way Dispatch)
+
+Federated `read(ref)` and `drill(ref)` use a **local-first three-way routing**
+that preserves the Phase 27 active-binding gate for locally-indexed sources
+(cycle-2 HIGH-7 D-LOCAL-FIRST-TG-READ):
+
+1. **LOCAL_ACTIVE**: ref exists in local store with active binding → use local
+   chunks path (existing).
+2. **LOCAL_INACTIVE**: ref exists in local store but binding is inactive
+   → raise `PermissionError`. Phase 27 visibility gate is preserved; refs
+   with inactive local bindings do NOT fall back to federated providers.
+3. **FEDERATED_ONLY**: ref has no local-store presence at all → call provider's
+   `read_unit_window(unit_ref, before, after)` to fetch context from the
+   provider. No local chunks involved.
+
+Error handling: Provider failures are attributed via `RuntimeError("telegram: ...")`
+containing the provider name and the underlying error (D-15).
+
+### Telegram Federated Provider
+
+The Telegram provider implements `search_native()` to expose FTS search via the
+mcp-telegram daemon socket. The daemon method `search_messages` returns:
+
+```json
+{
+  "hits": [
+    {
+      "dialog_id": 12345,
+      "dialog_name": "Project Chat",
+      "message_id": 67,
+      "text": "...",
+      "sender": "alice",
+      "sent_at": "2026-04-12T08:11:00+00:00",
+      "score": 0.93
+    }
+  ]
+}
+```
+
+Telegram refs follow the shape `telegram:dialog:<id>:message:<id>`. The provider
+derives `can_read` at construction time from a runtime capability check:
+`callable(getattr(provider, "read_unit_window", None))` (cycle-2 MEDIUM fold-in
+D-13). Future providers without `read_unit_window` emit candidates with
+`can_read=False`.
+
+`source_native_rank` is **zero-based** for all federated providers.
+A 3-hit response carries ranks [0, 1, 2]. This convention is documented in
+provider implementations and test suites.
+
+### Generic Federated Contract
+
+The Telegram federated contract is structured to be reusable for gmail/slack/
+notion/voice sources without Phase 34 edits:
+
+- `SearchCandidate`, `SearchResponse`, `SourceStatus` envelopes are source-
+  agnostic.
+- `FederatedSearchProviderProtocol` (base protocol) abstracts `search_native()`
+  behavior.
+- Service fan-out is implemented once in `_run_federated_engine()` for all
+  providers.
+- New federated sources add a descriptor in the registry + provider implementation,
+  then register through `SourceRuntimeFactory.build_if_configured()`.
+  Zero changes to search envelope or fan-out glue required.
+
 ## Problem
 
 dotMD currently indexes markdown files from the local filesystem. That is too
