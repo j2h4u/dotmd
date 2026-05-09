@@ -142,11 +142,10 @@ class TestMergeBackBeyondPoolSize:
         )
 
 
-        # Patch build_search_results to capture fused list before it's truncated
-        original_build = None
-        import dotmd.api.service as svc_module
+        # Patch build_candidates to capture fused list before it's truncated
+        import dotmd.search.fusion as fusion_module
 
-        original_build = svc_module.build_search_results
+        original_build = fusion_module.build_candidates
 
         captured_fused = []
 
@@ -154,7 +153,7 @@ class TestMergeBackBeyondPoolSize:
             captured_fused.extend(fused)
             return original_build(fused, **kwargs)
 
-        with patch.object(svc_module, "build_search_results", side_effect=capture_build):
+        with patch.object(fusion_module, "build_candidates", side_effect=capture_build):
             service.search("test query", top_k=30, mode="hybrid", rerank=True)
 
         # The fused list passed to build_search_results should contain more
@@ -263,9 +262,9 @@ class TestKeywordSurvivalThroughReranking:
         service._reranker_factory.get.return_value = reranker
 
         # Capture fused list
-        import dotmd.api.service as svc_module
+        import dotmd.search.fusion as fusion_module
 
-        original_build = svc_module.build_search_results
+        original_build = fusion_module.build_candidates
         captured_fused = []
 
         def capture_build(fused, **kwargs):
@@ -280,7 +279,7 @@ class TestKeywordSurvivalThroughReranking:
             return_value=[mock_chunk]
         )
 
-        with patch.object(svc_module, "build_search_results", side_effect=capture_build):
+        with patch.object(fusion_module, "build_candidates", side_effect=capture_build):
             service.search("test query", top_k=10, mode="hybrid", rerank=True)
 
         fused_ids = {cid for cid, _ in captured_fused}
@@ -375,7 +374,7 @@ class TestRerankerFactorySearchWiring:
             reranker_name="msmarco-minilm",
         )
 
-        assert [result.chunk_id for result in results] == ["s1"]
+        assert [result.chunk_id for result in results.candidates] == ["s1"]
         service._reranker_factory.get.assert_called_once_with("msmarco-minilm")
 
     def test_default_reranker_name_calls_factory_with_none(self, tmp_path: Path) -> None:
@@ -455,7 +454,7 @@ class TestRerankerFactorySearchWiring:
             reranker_name="msmarco-minilm",
         )
 
-        assert [result.chunk_id for result in results] == ["s1", "gx1"]
+        assert [result.chunk_id for result in results.candidates] == ["s1", "gx1"]
         service._reranker_factory.get.assert_not_called()
 
 

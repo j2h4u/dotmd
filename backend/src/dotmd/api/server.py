@@ -157,7 +157,8 @@ async def search(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return SearchResponse(query=q, results=results, count=len(results))
+    candidates = results.candidates
+    return SearchResponse(query=q, results=candidates, count=len(candidates))
 
 
 @app.get("/rerank/compare", response_model=RerankerComparisonResponse)

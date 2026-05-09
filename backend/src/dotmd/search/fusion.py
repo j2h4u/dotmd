@@ -363,7 +363,7 @@ def build_candidates(
             raise ValueError(f"missing source provenance for chunk_id={chunk_lookup_id}")
 
         # Determine which engines matched this chunk_id
-        matched_engines = sorted(engine_scores_by_ref.get(chunk_id, {}).keys())
+        matched_engines = tuple(sorted(engine_scores_by_ref.get(chunk_id, {}).keys()))
         engine_scores_dict = engine_scores_by_ref.get(chunk_id)
 
         candidates.append(

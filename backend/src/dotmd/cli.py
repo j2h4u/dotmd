@@ -137,11 +137,12 @@ def search(
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
 
-    if not results:
+    candidates = results.candidates
+    if not candidates:
         click.echo("No results found.")
         return
 
-    for i, r in enumerate(results, 1):
+    for i, r in enumerate(candidates, 1):
         click.echo(f"\n{'─' * 60}")
         click.echo(f"  [{i}] {r.ref}")
         if r.heading_path:
