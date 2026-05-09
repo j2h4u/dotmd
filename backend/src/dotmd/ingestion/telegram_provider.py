@@ -8,12 +8,13 @@ import socket
 import unicodedata
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from dotmd.core.models import (
     ApplicationSourceChange,
     ApplicationSourceChangeBatch,
     ApplicationSourceDescription,
+    SearchCandidate,
     SourceDocument,
     SourceUnit,
     SourceUnitWindow,
@@ -36,6 +37,15 @@ LOW_SIGNAL_TEXTS = {
     "ага",  # noqa: RUF001 - intentional Cyrillic acknowledgement.
     "угу",  # noqa: RUF001 - intentional Cyrillic acknowledgement.
 }
+
+# Metadata whitelist for federated search candidates (cycle-2 MEDIUM fold-in)
+TELEGRAM_PROVIDER_METADATA_KEYS: frozenset[str] = frozenset({
+    "dialog_id",
+    "message_id",
+    "sender",
+    "sent_at",
+    "dialog_name",
+})
 
 
 class TelegramSourceClientProtocol(Protocol):
@@ -62,6 +72,15 @@ class TelegramSourceClientProtocol(Protocol):
         after: int,
     ) -> dict:
         """Read neighboring structured message units."""
+        ...
+
+    def search_messages(
+        self,
+        query: str,
+        limit: int,
+        dialog_id: int | None = None,
+    ) -> dict:
+        """Search Telegram messages via daemon FTS. Returns {hits: [...]}"""
         ...
 
 
@@ -114,6 +133,22 @@ class UnixSocketTelegramSourceClient:
                 "after": after,
             }
         )
+
+    def search_messages(
+        self,
+        query: str,
+        limit: int,
+        dialog_id: int | None = None,
+    ) -> dict:
+        """Search Telegram messages via daemon FTS. Returns {hits: [...]}"""
+        payload: dict = {
+            "method": "search_messages",
+            "query": query,
+            "limit": limit,
+        }
+        if dialog_id is not None:
+            payload["dialog_id"] = dialog_id
+        return self._request(payload)
 
     def _request(self, payload: dict) -> dict:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
@@ -188,6 +223,54 @@ class TelegramApplicationSourceProvider(ApplicationSourceProviderProtocol):
             units=[self._unit_from_payload(unit) for unit in payload["units"]],
             metadata_json=payload.get("metadata_json", {}),
         )
+
+    def search_native(self, query: str, limit: int) -> list[SearchCandidate]:
+        """Search Telegram messages and return SearchCandidate list.
+
+        Returns candidates with federated-specific fields (source_native_score,
+        source_native_rank, provider_metadata). can_read is derived from
+        provider capability at runtime.
+        """
+        payload = self._client.search_messages(query=query, limit=limit)
+        hits = payload.get("hits", [])
+
+        # Derive can_read from provider capability (cycle-2 MEDIUM fold-in)
+        can_read_local = callable(
+            getattr(self._client, "read_source_unit_window", None),
+        )
+
+        candidates: list[SearchCandidate] = []
+        for rank, hit in enumerate(hits):
+            dialog_id = _coerce_int(hit["dialog_id"])
+            message_id = _coerce_int(hit["message_id"])
+            ref = f"telegram:dialog:{dialog_id}:message:{message_id}"
+            text = str(hit.get("text", ""))
+
+            # Whitelist provider_metadata keys (cycle-2 MEDIUM fold-in)
+            metadata = {
+                key: hit[key]
+                for key in TELEGRAM_PROVIDER_METADATA_KEYS
+                if key in hit and hit[key] is not None
+            }
+
+            candidates.append(
+                SearchCandidate(
+                    ref=ref,
+                    namespace="telegram",
+                    descriptor_key="telegram",  # cycle-2 HIGH-1
+                    source_kind="chat",
+                    retrieval_kind="tg:fts",
+                    title=hit.get("dialog_name"),
+                    snippet=text,
+                    fused_score=0.0,
+                    can_read=can_read_local,  # cycle-2 MEDIUM (derived)
+                    can_materialize=False,
+                    source_native_score=hit.get("score"),
+                    source_native_rank=rank,  # zero-based per D-RANK-ZERO-BASED
+                    provider_metadata=metadata or None,
+                )
+            )
+        return candidates
 
     def _change_from_payload(self, payload: dict) -> ApplicationSourceChange:
         document_payload = payload["document"]

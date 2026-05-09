@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dotmd.core.models import ApplicationSourceChangeBatch
+from dotmd.core.models import ApplicationSourceChangeBatch, SearchCandidate
 from dotmd.ingestion.telegram_provider import (
     TelegramApplicationSourceProvider,
     is_low_signal_telegram_text,
@@ -13,9 +13,14 @@ from dotmd.ingestion.telegram_provider import (
 
 
 class _TelegramSourceClientFixture:
-    def __init__(self, changes: list[dict] | None = None) -> None:
+    def __init__(
+        self,
+        changes: list[dict] | None = None,
+        search_hits: list[dict] | None = None,
+    ) -> None:
         self.export_calls: list[dict] = []
         self._changes = changes or _telegram_changes()
+        self._search_hits = search_hits if search_hits is not None else _default_search_hits()
 
     def describe_source(self) -> dict:
         return {
@@ -62,6 +67,48 @@ class _TelegramSourceClientFixture:
             "units": [change["unit"] for change in self._changes],
             "metadata_json": {"dialog_id": -1001},
         }
+
+    def search_messages(
+        self,
+        query: str,
+        limit: int,
+        dialog_id: int | None = None,
+    ) -> dict:
+        """Search Telegram messages via daemon FTS. Returns {hits: [...]}"""
+        return {"hits": list(self._search_hits[:limit])}
+
+
+def _default_search_hits() -> list[dict]:
+    """Default search hits for federated search testing."""
+    return [
+        {
+            "dialog_id": 12345,
+            "dialog_name": "Project Chat",
+            "message_id": 67,
+            "text": "Kantine is open on Monday",
+            "sender": "alice",
+            "sent_at": "2026-04-12T08:11:00+00:00",
+            "score": 0.93,
+        },
+        {
+            "dialog_id": 12345,
+            "dialog_name": "Project Chat",
+            "message_id": 68,
+            "text": "Kantine menu updated",
+            "sender": "bob",
+            "sent_at": "2026-04-12T08:15:00+00:00",
+            "score": 0.87,
+        },
+        {
+            "dialog_id": 12345,
+            "dialog_name": "Project Chat",
+            "message_id": 69,
+            "text": "Don't forget kantine lunch time",
+            "sender": "carol",
+            "sent_at": "2026-04-12T08:20:00+00:00",
+            "score": 0.81,
+        },
+    ]
 
 
 def _telegram_changes() -> list[dict]:
@@ -353,3 +400,163 @@ def test_provider_source_does_not_depend_on_telegram_runtime_internals() -> None
     assert "telethon" not in source.lower()
     assert "sync_db" not in source
     assert "list_messages" not in source
+
+
+# Task 1 tests: Federated search contract
+
+
+def test_telegram_source_client_protocol_includes_search_messages() -> None:
+    """TelegramSourceClientProtocol defines search_messages method."""
+    from inspect import signature
+
+    from dotmd.ingestion.telegram_provider import TelegramSourceClientProtocol
+
+    protocol_methods = {
+        name for name, _ in vars(TelegramSourceClientProtocol).items()
+        if not name.startswith("_")
+    }
+    assert "search_messages" in protocol_methods
+    # Verify signature has expected parameters
+    sig = signature(vars(TelegramSourceClientProtocol)["search_messages"])
+    params = list(sig.parameters.keys())
+    assert "query" in params
+    assert "limit" in params
+
+
+def test_unix_socket_search_messages_request_shape() -> None:
+    """UnixSocketTelegramSourceClient.search_messages builds correct request."""
+    client = _TelegramSourceClientFixture()
+
+    # Test basic request
+    result = client.search_messages("kantine", limit=20)
+    assert isinstance(result, dict)
+    assert "hits" in result
+
+    # Test with dialog_id
+    result = client.search_messages("kantine", limit=20, dialog_id=42)
+    assert isinstance(result, dict)
+    assert "hits" in result
+
+
+def test_search_native_returns_searchcandidate_list() -> None:
+    """TelegramApplicationSourceProvider.search_native returns SearchCandidate list."""
+    client = _TelegramSourceClientFixture()
+    provider = TelegramApplicationSourceProvider(client)
+
+    result = provider.search_native("kantine", limit=10)
+
+    assert isinstance(result, list)
+    assert len(result) == 3
+    assert all(isinstance(c, SearchCandidate) for c in result)
+
+    # Check first candidate structure
+    c = result[0]
+    assert c.ref == "telegram:dialog:12345:message:67"
+    assert c.namespace == "telegram"
+    assert c.descriptor_key == "telegram"
+    assert c.source_kind == "chat"
+    assert c.retrieval_kind == "tg:fts"
+    assert c.title == "Project Chat"
+    assert "Kantine is open" in c.snippet
+    assert c.can_read is True
+    assert c.can_materialize is False
+    assert c.source_native_score == 0.93
+    assert c.source_native_rank == 0
+
+    # Check second candidate rank
+    assert result[1].source_native_rank == 1
+    assert result[2].source_native_rank == 2
+
+
+def test_search_native_can_read_derived_from_provider_capability() -> None:
+    """can_read is derived from runtime check on read_source_unit_window capability."""
+    client = _TelegramSourceClientFixture()
+    provider = TelegramApplicationSourceProvider(client)
+
+    result = provider.search_native("kantine", limit=10)
+    assert result[0].can_read is True
+
+    # Test with a stub client that lacks read_source_unit_window
+    class StubClientWithoutRead:
+        def search_messages(self, query: str, limit: int, dialog_id: int | None = None) -> dict:
+            return {"hits": _default_search_hits()[:limit]}
+
+    provider_no_read = TelegramApplicationSourceProvider(StubClientWithoutRead())  # type: ignore
+    result_no_read = provider_no_read.search_native("kantine", limit=10)
+    assert result_no_read[0].can_read is False
+
+
+def test_search_native_provider_metadata_whitelist() -> None:
+    """provider_metadata only contains whitelisted keys."""
+    hits_with_extra = [
+        {
+            "dialog_id": 12345,
+            "message_id": 67,
+            "text": "Message",
+            "sender": "alice",
+            "sent_at": "2026-04-12T08:11:00+00:00",
+            "dialog_name": "Chat",
+            "score": 0.93,
+            # Extra fields that should be filtered out
+            "phone_number": "+1234567890",
+            "auth_token": "secret123",
+            "session_path": "/tmp/session",
+            "api_id": 12345,
+            "api_hash": "deadbeef",
+        }
+    ]
+    client = _TelegramSourceClientFixture(search_hits=hits_with_extra)
+    provider = TelegramApplicationSourceProvider(client)
+
+    result = provider.search_native("test", limit=10)
+    assert len(result) == 1
+
+    metadata = result[0].provider_metadata
+    assert metadata is not None
+    # Check whitelisted keys are present
+    assert "dialog_id" in metadata
+    assert "message_id" in metadata
+    assert "sender" in metadata
+    assert "sent_at" in metadata
+    assert "dialog_name" in metadata
+    # Check forbidden keys are absent
+    assert "phone_number" not in metadata
+    assert "auth_token" not in metadata
+    assert "session_path" not in metadata
+    assert "api_id" not in metadata
+    assert "api_hash" not in metadata
+
+
+def test_search_native_source_native_rank_is_zero_based() -> None:
+    """source_native_rank is zero-based for all hits."""
+    client = _TelegramSourceClientFixture()
+    provider = TelegramApplicationSourceProvider(client)
+
+    result = provider.search_native("kantine", limit=10)
+
+    ranks = [c.source_native_rank for c in result]
+    assert ranks == [0, 1, 2]
+
+
+def test_search_native_handles_empty_hits() -> None:
+    """search_native handles empty search results gracefully."""
+    client = _TelegramSourceClientFixture(search_hits=[])
+    provider = TelegramApplicationSourceProvider(client)
+
+    result = provider.search_native("nonexistent", limit=10)
+
+    assert result == []
+
+
+def test_search_native_propagates_daemon_failure() -> None:
+    """search_native propagates RuntimeError from daemon."""
+    import pytest
+
+    class FailingClient:
+        def search_messages(self, query: str, limit: int, dialog_id: int | None = None) -> dict:
+            raise RuntimeError("Telegram daemon request failed: socket disconnected")
+
+    provider = TelegramApplicationSourceProvider(FailingClient())  # type: ignore
+
+    with pytest.raises(RuntimeError, match="Telegram daemon request failed"):
+        provider.search_native("test", limit=10)
