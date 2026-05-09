@@ -4,7 +4,7 @@ milestone: v1.6
 milestone_name: Unified Source Architecture
 status: executing
 last_updated: "2026-05-09T15:54:59.455Z"
-last_activity: 2026-05-09
+last_activity: 2026-05-10
 progress:
   total_phases: 6
   completed_phases: 2
@@ -271,6 +271,7 @@ a standalone Telegram-specific legacy phase.
 | 260402-vua | Phase 14: Frontmatter-Driven Indexing | 2026-04-02 | af1794a | [260402-vua-phase-14-frontmatter-driven-indexing](./quick/260402-vua-phase-14-frontmatter-driven-indexing/) |
 | 260425-rel | Убрать serve из start.sh — trickle lifespan в mcp_server.py, /health на 8080 | 2026-04-25 | 98c6b99 | [260425-rel-serve-start-sh-trickle-lifespan-mcp-serv](./quick/260425-rel-serve-start-sh-trickle-lifespan-mcp-serv/) |
 | 260502-scv | Normalize dotMD .planning docs: separate active roadmap from backlog/done 999.x items, fix progress/health warnings where safe, keep historical phase artifacts intact | 2026-05-02 | this commit | [260502-scv-normalize-dotmd-planning-docs-separate-a](./quick/260502-scv-normalize-dotmd-planning-docs-separate-a/) |
+| 260510-0nb | Adaptive slot quota for federated search merge — ensures tg:fts candidates appear in results despite heterogeneous score spaces | 2026-05-10 | 654cdf1 | [260510-0nb-adaptive-slot-quota-for-federated-search](./quick/260510-0nb-adaptive-slot-quota-for-federated-search/) |
 
 ---
 *Last updated: 2026-05-08*
