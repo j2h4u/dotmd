@@ -836,9 +836,6 @@ class DotMDService:
         tuple
             (filtered_fused, active_provenance_map, inactive_count)
         """
-        from dotmd.storage.base import MetadataStoreProtocol
-
-        store = cast(MetadataStoreProtocol, self._pipeline.metadata_store)
         # For local refs, check active bindings
         active_provenance_map: dict[str, ChunkProvenance] = {}
         filtered_fused: list[tuple[str, float]] = []
@@ -926,7 +923,6 @@ class DotMDService:
 
         # Stage 5: Build candidates, distinguishing local from federated refs
         candidates: list[SearchCandidate] = []
-        fused_scores = dict(fused)
 
         for ref, score in fused[:top_k]:
             if ref in federated_candidates_by_ref:

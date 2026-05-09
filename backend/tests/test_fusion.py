@@ -629,7 +629,7 @@ def test_fuse_results_math_equivalence_ref_keys_vs_chunk_keys() -> None:
 
     # Verify same math: RRF is position-based, not key-based
     assert len(chunk_fused) == len(ref_fused)
-    for (chunk_key, chunk_score), (ref_key, ref_score) in zip(chunk_fused, ref_fused):
+    for (_chunk_key, chunk_score), (_ref_key, ref_score) in zip(chunk_fused, ref_fused, strict=True):
         assert abs(chunk_score - ref_score) < 1e-9
 
 
