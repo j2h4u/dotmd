@@ -902,6 +902,12 @@ class DotMDService:
                 # Federated ref: use prebuilt candidate, enforce engine_scores=None
                 fed_cand = federated_candidates_by_ref[ref]
                 # Override engine_scores to enforce D-02 invariant
+                # Only include engines that actually scored this ref
+                matched_engines = tuple(
+                    engine_name
+                    for engine_name, refs in per_engine_ref.items()
+                    if any(eng_ref == ref for eng_ref, _ in refs)
+                )
                 candidates.append(
                     SearchCandidate(
                         ref=fed_cand.ref,
@@ -917,7 +923,7 @@ class DotMDService:
                         chunk_id=None,  # Federated only
                         heading_path=None,
                         provenance=None,
-                        matched_engines=list(per_engine_ref.keys()),
+                        matched_engines=matched_engines,
                         source_native_score=fed_cand.source_native_score,
                         source_native_rank=fed_cand.source_native_rank,
                         engine_scores=None,  # Enforce D-02 (cycle-2 MEDIUM fold-in)
