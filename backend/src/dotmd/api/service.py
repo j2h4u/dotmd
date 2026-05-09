@@ -11,6 +11,7 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict, cast
 
@@ -42,6 +43,14 @@ logger = logging.getLogger(__name__)
 
 ACTIVE_FILTER_OVERFETCH_FACTOR = 5
 TELEGRAM_REF_PREFIX = "telegram:"
+
+
+class TelegramReadPath(Enum):
+    """Routing decision for Telegram message read operations."""
+
+    LOCAL_ACTIVE = "local_active"  # Local entry with ACTIVE binding
+    LOCAL_INACTIVE = "local_inactive"  # Local entry with INACTIVE binding
+    FEDERATED_ONLY = "federated_only"  # No local entry, use provider
 
 
 class ReadPayload(TypedDict):

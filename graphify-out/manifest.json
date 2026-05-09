@@ -212,8 +212,8 @@
     "hash": "91a241f593ca625756a4f2a46e7730a9"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/api/service.py": {
-    "mtime": 1778338917.752105,
-    "hash": "106dfdc1932e4227801623a0db874c23"
+    "mtime": 1778339842.993536,
+    "hash": "15ffad79e2cef2895cc9469edd2d296c"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/api/server.py": {
     "mtime": 1778337637.4055667,
@@ -443,13 +443,17 @@
     "mtime": 1777098670.4829655,
     "hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
+  "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/api/test_telegram_federated_read.py": {
+    "mtime": 1778339893.8383243,
+    "hash": "57ef33c559c5123545613be3e500656a"
+  },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/api/test_search_result_shape.py": {
     "mtime": 1778338151.1372063,
     "hash": "a20fb2542779aafc30f4b617a8430629"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/api/test_service_search.py": {
-    "mtime": 1778338813.3026354,
-    "hash": "048157a90ef1b28a00fe5dc313047bd4"
+    "mtime": 1778339842.993536,
+    "hash": "c3d127c90c06a6405ab1aa36be2c48b3"
   },
   "/home/j2h4u/repos/j2h4u/dotmd/backend/tests/api/__init__.py": {
     "mtime": 1777098670.4829655,
