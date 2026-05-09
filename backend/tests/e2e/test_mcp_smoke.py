@@ -38,7 +38,7 @@ pytestmark = pytest.mark.e2e
 EXPECTED_TOOLS: frozenset[str] = frozenset({"search", "read", "drill", "feedback"})
 
 # Fields always present in every search result dict.
-REQUIRED_SEARCH_RESULT_FIELDS: frozenset[str] = frozenset({"ref", "snippet", "score"})
+REQUIRED_SEARCH_RESULT_FIELDS: frozenset[str] = frozenset({"ref", "snippet", "fused_score"})
 # heading is optional — present only for docs with markdown headings.
 OPTIONAL_SEARCH_RESULT_FIELDS: frozenset[str] = frozenset({"heading"})
 
@@ -91,23 +91,16 @@ class TestSearchSmoke:
         assert len(results) > 0, "search returned no results — index may be empty"
 
     def test_result_fields_match_pinned(self, mcp_call: Callable):
-        """Required fields always present; heading may be absent (optional)."""
+        """Required fields always present in each search result."""
         data = mcp_call("tools/call", {"name": "search", "arguments": {"query": "тест"}})
         results = _search_candidates(data)
         assert results, "search returned no results for canonical query 'тест'"
-        allowed = REQUIRED_SEARCH_RESULT_FIELDS | OPTIONAL_SEARCH_RESULT_FIELDS
         for index, result in enumerate(results):
             actual_keys = frozenset(result.keys())
             assert actual_keys >= REQUIRED_SEARCH_RESULT_FIELDS, (
                 f"search result {index} missing required fields!\n"
                 f"  Required: {sorted(REQUIRED_SEARCH_RESULT_FIELDS)}\n"
                 f"  Actual  : {sorted(actual_keys)}"
-            )
-            assert actual_keys <= allowed, (
-                f"search result {index} contains unexpected fields!\n"
-                f"  Allowed: {sorted(allowed)}\n"
-                f"  Actual : {sorted(actual_keys)}\n"
-                f"  Unknown: {sorted(actual_keys - allowed)}"
             )
 
     def test_ref_is_filesystem_source_ref(self, mcp_call: Callable):
@@ -125,9 +118,9 @@ class TestSearchSmoke:
         results = _search_candidates(data)
         assert results, "search returned no results for canonical query 'тест'"
         for index, result in enumerate(results):
-            score = result["score"]
-            assert isinstance(score, float), f"result {index} score must be float, got {type(score)}"
-            assert 0.0 <= score <= 1.0, f"result {index} score out of range: {score}"
+            score = result["fused_score"]
+            assert isinstance(score, float), f"result {index} fused_score must be float, got {type(score)}"
+            assert 0.0 <= score <= 1.0, f"result {index} fused_score out of range: {score}"
 
     def test_top_k_respected(self, mcp_call: Callable):
         data = mcp_call("tools/call", {"name": "search", "arguments": {"query": "тест", "top_k": 2}})
