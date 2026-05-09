@@ -1604,7 +1604,7 @@ class DotMDService:
                     after=after,
                 )
             except Exception as e:
-                raise type(e)(f"Telegram provider error: {e}") from e
+                raise RuntimeError(f"Telegram provider error: {e}") from e
             units = [
                 self._telegram_unit_payload(unit, unit_ref)
                 for unit in window.units
@@ -1690,7 +1690,7 @@ class DotMDService:
                     after=0,
                 )
             except Exception as e:
-                raise type(e)(f"Telegram provider error: {e}") from e
+                raise RuntimeError(f"Telegram provider error: {e}") from e
             else:
                 for unit in window.units:
                     if unit.unit_ref == unit_ref:
