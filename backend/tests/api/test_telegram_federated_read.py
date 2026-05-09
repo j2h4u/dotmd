@@ -325,11 +325,9 @@ class TestFederatedTelegramRead:
 
         # For this test, we expect a different error (no local chunks)
         # but definitely NOT a provider call
-        try:
+        import contextlib
+        with contextlib.suppress(ValueError, KeyError):
             service.read(telegram_ref, 0, 1)
-        except (ValueError, KeyError):
-            # Expected: local lookup fails with no chunks
-            pass
 
         # Provider should never be called
         provider.read_unit_window.assert_not_called()

@@ -1620,7 +1620,7 @@ class DotMDService:
             if self._telegram_provider is None:
                 raise ValueError(f"Unknown source ref: {ref}")
             try:
-                document_ref, unit_ref = _parse_telegram_message_ref(ref)
+                _document_ref, unit_ref = _parse_telegram_message_ref(ref)
             except ValueError:
                 raise ValueError(f"Unknown source ref: {ref}") from None
             before, after = self._telegram_window_sizes(start, end)
@@ -1706,7 +1706,7 @@ class DotMDService:
             if self._telegram_provider is None:
                 raise ValueError(f"Unknown source ref: {ref}")
             try:
-                document_ref, unit_ref = _parse_telegram_message_ref(ref)
+                _document_ref, unit_ref = _parse_telegram_message_ref(ref)
             except ValueError:
                 raise ValueError(f"Unknown source ref: {ref}") from None
             target_metadata: dict[str, Any] = {}

@@ -346,7 +346,6 @@ def build_candidates(
             # Fallback: search for a chunk with this chunk_id via provenance.
             # This handles looking up the chunk by checking active_provenance_map.
             if chunk_id in active_provenance_map:
-                prov = active_provenance_map[chunk_id]
                 chunk_lookup_id = chunk_id
                 chunks = metadata_store.get_chunks([chunk_lookup_id])
                 if chunks:

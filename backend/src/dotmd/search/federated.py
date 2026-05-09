@@ -201,7 +201,7 @@ async def _run_federated_engine(
             reason=None,
             elapsed_ms=(time.time() - start) * 1000,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.debug(
             "Federated engine %r timed out after %.1f seconds",
             name,
