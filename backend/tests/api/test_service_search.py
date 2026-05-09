@@ -36,7 +36,7 @@ class _LifecycleFactoryFixture:
         from dotmd.ingestion.source_registry import default_source_registry
 
         self.calls.append(namespace)
-        if self.provider is None:
+        if namespace != "telegram" or self.provider is None:
             return None
         return SourceRuntimeBundle(
             descriptor=default_source_registry().require(namespace),
