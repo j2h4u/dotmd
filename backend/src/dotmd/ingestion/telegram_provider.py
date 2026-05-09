@@ -408,7 +408,7 @@ def is_low_signal_telegram_text(text: str) -> bool:
         return True
     return (
         not any(ch.isalnum() for ch in stripped)
-        and any(unicodedata.category(ch).startswith("S") for ch in stripped)
+        or any(unicodedata.category(ch).startswith("S") for ch in stripped)
     )
 
 
