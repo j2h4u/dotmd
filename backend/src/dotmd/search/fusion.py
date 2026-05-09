@@ -283,7 +283,7 @@ def build_candidates(
     top_k: int = 10,
     snippet_length: int = 300,
 ) -> list[SearchCandidate]:
-    """Convert fused ref-keyed scores into fully hydrated SearchCandidate objects.
+    """Convert fused (chunk_id, score) tuples into fully hydrated SearchCandidate objects.
 
     For each of the *top_k* fused results the corresponding chunk is
     looked up in *metadata_store* to populate the heading path, snippet,
@@ -292,16 +292,16 @@ def build_candidates(
     Parameters
     ----------
     fused:
-        Output of :func:`fuse_results` (list of (ref, fused_score) pairs).
+        Output of :func:`fuse_results` (list of (chunk_id, fused_score) tuples).
     per_engine:
-        Dict mapping engine name to list of (ref, score) pairs, after
-        ref-keying via hydrate_local_engine_results.
+        Dict mapping engine name to list of (chunk_id, score) pairs, after
+        hydration via hydrate_local_engine_results.
     metadata_store:
         A store satisfying :class:`MetadataStoreProtocol`.
     query:
         Original query string for snippet extraction.
     ref_to_chunk:
-        Pre-built mapping from ref to (chunk_id, text). If None, looks up
+        Pre-built mapping from chunk_id to (chunk_id, text). If None, looks up
         via metadata_store.
     active_provenance_map:
         Pre-built mapping from chunk_id to ChunkProvenance. If None, looks up
@@ -330,28 +330,25 @@ def build_candidates(
             engine_scores_by_ref[ref][engine] = score
 
     candidates: list[SearchCandidate] = []
-    for ref, fused_score in fused[:top_k]:
-        # Look up chunk for this ref (might need multiple chunks in case of
-        # multiple chunks mapping to same ref; use highest fused_score winner).
-        chunk_id: str | None = None
+    for chunk_id, fused_score in fused[:top_k]:
+        # Look up chunk for this chunk_id (might need multiple chunks in case of
+        # multiple chunks mapping to same chunk_id; use highest fused_score winner).
+        chunk_lookup_id: str | None = None
         chunk = None
 
         # If ref_to_chunk is provided, use it
-        if ref in ref_to_chunk:
-            chunk_id, _text = ref_to_chunk[ref]
-            chunks = metadata_store.get_chunks([chunk_id])
+        if chunk_id in ref_to_chunk:
+            chunk_lookup_id, _text = ref_to_chunk[chunk_id]
+            chunks = metadata_store.get_chunks([chunk_lookup_id])
             if chunks:
                 chunk = chunks[0]
         else:
-            # Fallback: search for a chunk with this ref/chunk_id via provenance
-            # Note: In the current codebase, 'ref' is actually a chunk_id when
-            # called from service._execute_search (fused contains chunk_ids before
-            # ref hydration). This fallback handles looking up the chunk by
-            # checking active_provenance_map.
-            if ref in active_provenance_map:
-                prov = active_provenance_map[ref]
-                chunk_id = ref  # The 'ref' passed in is actually the chunk_id
-                chunks = metadata_store.get_chunks([chunk_id])
+            # Fallback: search for a chunk with this chunk_id via provenance.
+            # This handles looking up the chunk by checking active_provenance_map.
+            if chunk_id in active_provenance_map:
+                prov = active_provenance_map[chunk_id]
+                chunk_lookup_id = chunk_id
+                chunks = metadata_store.get_chunks([chunk_lookup_id])
                 if chunks:
                     chunk = chunks[0]
 
@@ -362,14 +359,13 @@ def build_candidates(
         heading_path = " > ".join(chunk.heading_hierarchy) if chunk.heading_hierarchy else ""
         snippet = _extract_best_snippet(chunk.text, query, snippet_length)
 
-        provenance = active_provenance_map.get(chunk_id) if chunk_id else None
+        provenance = active_provenance_map.get(chunk_lookup_id) if chunk_lookup_id else None
         if provenance is None:
-            raise ValueError(f"missing source provenance for chunk_id={chunk_id}")
+            raise ValueError(f"missing source provenance for chunk_id={chunk_lookup_id}")
 
         # Determine which engines matched this chunk_id
-        # (In current code, ref is actually chunk_id; use provenance.ref for actual ref)
-        matched_engines = sorted(engine_scores_by_ref.get(ref, {}).keys())
-        engine_scores_dict = engine_scores_by_ref.get(ref)
+        matched_engines = sorted(engine_scores_by_ref.get(chunk_id, {}).keys())
+        engine_scores_dict = engine_scores_by_ref.get(chunk_id)
 
         candidates.append(
             SearchCandidate(
