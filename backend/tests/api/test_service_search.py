@@ -321,15 +321,22 @@ class TestFilesystemBindingLifecycle:
         assert chunk_ids
         ref = f"filesystem:{md_path.resolve()}"
 
-        service._collect_candidate_pool = MagicMock(
-            return_value={
-                "fused": [(chunk_ids[0], 1.0)],
-                "engine_results": {"keyword": [(chunk_ids[0], 1.0)]},
-                "semantic_hits": [],
-                "keyword_hits": [(chunk_ids[0], 1.0)],
-                "graph_direct_hits": [],
-                "pool_size": 1,
-            }
+        service._collect_active_candidate_pool = MagicMock(
+            return_value=(
+                {
+                    "search_query": "lifecycle target",
+                    "original_query": "lifecycle target",
+                    "fused": [(chunk_ids[0], 1.0)],
+                    "engine_results": {"keyword": [(chunk_ids[0], 1.0)]},
+                    "semantic_hits": [],
+                    "keyword_hits": [(chunk_ids[0], 1.0)],
+                    "graph_direct_hits": [],
+                    "pool_size": 1,
+                },
+                [(chunk_ids[0], 1.0)],  # filtered_fused
+                {},  # active_provenance_map
+                0,  # inactive_count
+            )
         )
 
         visible_response = service.search("lifecycle target", top_k=1, rerank=False, expand=False)
@@ -368,27 +375,34 @@ class TestActiveSearchFiltering:
         )
         service._pipeline._metadata_store = cast(SQLiteMetadataStore, metadata)
         service._pipeline.log_search = MagicMock()
-        service._collect_candidate_pool = MagicMock(
-            return_value={
-                "fused": [
-                    ("inactive-1", 0.9),
-                    ("inactive-2", 0.8),
-                    ("active-1", 0.7),
-                    ("active-2", 0.6),
-                ],
-                "engine_results": {
-                    "semantic": [
+        service._collect_active_candidate_pool = MagicMock(
+            return_value=(
+                {
+                    "search_query": "target",
+                    "original_query": "target",
+                    "fused": [
                         ("inactive-1", 0.9),
                         ("inactive-2", 0.8),
                         ("active-1", 0.7),
                         ("active-2", 0.6),
                     ],
+                    "engine_results": {
+                        "semantic": [
+                            ("inactive-1", 0.9),
+                            ("inactive-2", 0.8),
+                            ("active-1", 0.7),
+                            ("active-2", 0.6),
+                        ],
+                    },
+                    "semantic_hits": [],
+                    "keyword_hits": [],
+                    "graph_direct_hits": [],
+                    "pool_size": 4,
                 },
-                "semantic_hits": [],
-                "keyword_hits": [],
-                "graph_direct_hits": [],
-                "pool_size": 4,
-            }
+                [("active-1", 0.7), ("active-2", 0.6)],  # filtered_fused (only active)
+                {},  # active_provenance_map
+                2,  # inactive_count
+            )
         )
 
         results = service._execute_search(
