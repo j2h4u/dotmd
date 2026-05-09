@@ -1,7 +1,7 @@
 ---
 phase: 35
 reviewers: [codex, opencode]
-reviewed_at: 2026-05-09T22:46:26Z
+reviewed_at: 2026-05-10T00:00:00Z
 plans_reviewed: [35-01-PLAN.md, 35-02-PLAN.md]
 ---
 
@@ -9,123 +9,118 @@ plans_reviewed: [35-01-PLAN.md, 35-02-PLAN.md]
 
 Plans reviewed: PLAN 01 (rename `_from_file_info` → `document_for_file_info`), PLAN 02 (public boundary + D-04 round-trip TDD tests).
 
+> **Cycle 2 — 2026-05-10**: Fresh independent reviews from Codex and OpenCode. See Consensus Summary for resolved/outstanding items.
+
 ---
 
 ## Codex Review
 
 ### Summary
 
-Overall, both plans are well-scoped and aligned with the Phase 35 boundary. Plan 01 is a low-risk mechanical rename that directly addresses the private adapter bypass. Plan 02 adds the right kind of behavioral proof without expanding into trickle or pipeline restructuring. The main gap is that Plan 02 proves the public filesystem conversion path, but only lightly proves the broader FS-03 lifecycle claim; that may be acceptable given the phase decisions, but the verification wording should be tightened.
+The plans are sound and appropriately narrow for the decisions captured in `CONTEXT.md`. I verified the current code shape: `_from_file_info` exists only in `source.py`, one pipeline call site, and one test double. Renaming it plus adding lifecycle-boundary tests directly addresses the FS-03 public-boundary concern without pulling filesystem-specific APIs into `SourceAdapterProtocol`. Main gap: the phase success criteria mention search/read preservation, but the plan's explicit verification is mostly ingestion/source-boundary oriented.
 
 ### Strengths
 
-- Clear dependency order: Plan 02 correctly depends on Plan 01.
-- The rename avoids polluting `SourceAdapterProtocol` with filesystem-only `FileInfo`, which preserves ISP/LSP for Telegram and future adapters.
-- Keeping `source_document_to_file_info` in `source.py` is sound because it enforces the document-ref/file-path invariant, not just data conversion.
-- The plans avoid pipeline/trickle restructuring, matching the phase boundary.
-- Tests are targeted and behavioral, not brittle grep-only guards.
-- Existing pipeline bridge already validates round-trip fields, so Plan 02 complements existing coverage instead of duplicating everything.
+- Keeps `SourceAdapterProtocol` clean: no filesystem-only `FileInfo` method forced onto Telegram or future adapters.
+- Preserves dependency direction: adapter builds `SourceDocument`; pipeline owns orchestration, binding, retained docs, and validation.
+- Correctly treats trickle `index_file(Path)` as an OS-event boundary, not a lifecycle bypass.
+- Good sequencing: rename first, then add tests against the new public boundary.
+- Tests focus on behavior through direct adapter and `SourceRuntimeFactory`, not brittle implementation policing.
 
 ### Concerns
 
-- **MEDIUM:** Plan 02's lifecycle test only proves `SourceRuntimeFactory.build("filesystem")` exposes the adapter method. It does not directly prove that production indexing/search/read/delete flows no longer bypass lifecycle. Existing tests may cover much of FS-01, but the plan should name which existing tests are relied on.
-- **MEDIUM:** Verification says "Full test suite green." That is good as a final gate, but the actionable minimum should include `tests/ingestion/test_source_filesystem.py` and `tests/ingestion/test_source_lifecycle.py`; otherwise failures elsewhere could obscure whether this phase is correct.
-- **LOW:** Plan 01 says `rg "_from_file_info" backend/` should return no output. The intent is right, but the acceptance criterion should be "no symbol references" rather than any string anywhere.
-- **LOW:** Plan 02 test 1 directly instantiates `FilesystemMarkdownSourceAdapter()`. That is fine for adapter unit coverage, but it should be explicitly framed as a unit test exception so it is not confused with production lifecycle bypass.
-- **LOW:** The "GREEN: fix assertion mismatches without changing assertions" wording is awkward. Better to say assertions may only change if they contradict established adapter contract.
+- **MEDIUM:** Plan verification does not explicitly prove filesystem search/read still work, although the phase success criteria mention indexing/search/read. If existing tests cover this, name and run them; otherwise add a small existing-regression selection to verification.
+- **LOW:** `Plan 01` grep count checks are useful locally but brittle as formal acceptance. A future comment/docstring could skew counts. The important checks are behavior and absence of the private call in production.
+- **LOW:** `Plan 02` lifecycle factory test depends on constructing `SQLiteMetadataStore`; this is fine with `tmp_path`, but the test should avoid relying on global state and should close/let fixtures clean up cleanly if the suite has leakage issues.
+- **LOW:** Because `document_for_file_info` intentionally stays off `SourceAdapterProtocol`, the pipeline depends on the filesystem-specific `SourceRuntimeBundle.source` type. That is acceptable now, but worth making explicit in the test/assertion names so future generalization does not accidentally erase the filesystem-specific boundary.
 
 ### Suggestions
 
-- Add explicit verification for lifecycle construction in Plan 02: `assert isinstance(bundle.source, FilesystemMarkdownSourceAdapter)` and `assert callable(bundle.source.document_for_file_info)`.
-- Add or preserve a pipeline-level assertion that `_source_document_for_file_info()` calls the lifecycle factory and records the file info through the lifecycle adapter.
-- Run focused checks before the full suite: `pytest backend/tests/ingestion/test_source_filesystem.py backend/tests/ingestion/test_source_lifecycle.py`
-- Keep the grep check, but phrase it as: `rg "\\b_from_file_info\\b" backend/src backend/tests` returns no symbol references.
-- In the round-trip test, assert `document.document_ref == str(md_path.resolve())` before converting back to directly exercise D-04's invariant surface.
+- Add explicit verification for existing read/search preservation — name the smallest relevant tests around filesystem provenance/search, or current ingestion-to-read regression tests if they exist.
+- Replace "exactly N grep lines" acceptance with semantic checks: no `_from_file_info` under `backend/src`, pipeline calls `document_for_file_info`, and targeted pytest suite passes.
+- In Test 1, assert `source_uri` and `document_type` too, since those are part of the parser/read/display contract.
+- In Test 2, assert `bundle.source is not None` before calling the method. It documents the lifecycle expectation and gives clearer failures.
+- In Test 3, keep the D-04 invariant focused: use a real markdown file and real checksums, then round-trip through `source_document_to_file_info` and assert path/title/kind/frontmatter.
 
 ### Risk Assessment
 
-**Overall risk: LOW.**
-
-The change is mostly a public-method rename plus focused tests. It does not alter source identity, parser routing, storage schema, trickle event handling, search, or read behavior. The only meaningful risk is false confidence around FS-03 if the lifecycle boundary is interpreted more broadly than the tests prove.
+**Overall risk: LOW.** The implementation change is a rename plus one pipeline call-site update, with no storage, trickle, parser, MCP, API, or search behavior changes. The largest risk is not runtime breakage but under-proving the broader phase wording around search/read. Add or name the relevant existing regression tests, and the plan is strong enough to execute as written.
 
 ---
 
 ## OpenCode Review
 
-### PLAN 01 — Rename _from_file_info and update callers
+### Plan 01 Review: Rename `_from_file_info` → `document_for_file_info`
 
-**Summary:** A clean mechanical rename touching 4 call sites across 3 files with grep-based verification. Low complexity, single concern — appropriate for Wave 1 with no dependencies.
-
-**Strengths:**
-
-- **Correct call site count.** The research confirmed exactly 4 references (2 self-calls in `discover()`/`discover_multi()`, 1 external in `pipeline.py:1371` via `bundle.source._from_file_info(file_info)`, 1 test double override at `test_source_filesystem.py:268`). All are accounted for in the tasks.
-- **Phase 33 dependency honoured.** The pipeline call site already accesses through the lifecycle bundle, so the rename propagates correctly through the Phase 33 boundary without wiring changes.
-- **Verification strategy is appropriate.** `rg "_from_file_info" backend/` + full test suite is sufficient for a rename.
-- **Pure behavioral no-op.** The method body, signature, return type, and all semantics are unchanged — only visibility changes from `_private` to `public`.
-
-**Concerns:**
-
-- **[HIGH] Verification grep is scoped to `backend/src/` only.** Task 35-01-03 updates `_RecordingLifecycleAdapter` in tests, but the verification step `grep -rn "_from_file_info" backend/src/` excludes `backend/tests/`. Any other test file referencing `_from_file_info` would survive undetected. The grep should cover `backend/` (or `backend/src/` + `backend/tests/` separately).
-- **[MEDIUM] No handling of `_source_document_for_file_info` renaming.** The pipeline method is also `_`-prefixed. While D-01 permits private pipeline orchestration methods, this is worth flagging as potential follow-up.
-- **[LOW] No semantic change, only visibility.** The FS-03 "no bypass" guarantee depends on convention, not compiler enforcement. Aligned with D-02.
-
-**Suggestions:**
-
-- Expand the final grep verification to `grep -rn "_from_file_info" backend/` to catch test-only references.
-- Consider running the existing test `test_pipeline_source_document_for_file_info_uses_lifecycle_adapter` after Task 35-01-01 (before the test double is updated) as a RED check.
-
-**Risk Assessment: LOW** — A pure rename with 4 call sites and no behavioral change.
-
-### PLAN 02 — Add public boundary and D-04 round-trip tests (TDD)
-
-**Summary:** Three targeted TDD tests: direct adapter call, lifecycle factory path, and `FileInfo → SourceDocument → FileInfo` round-trip idempotency check. Together they validate FS-03 and D-04. The RED/GREEN structure is sound and the tests complement existing recording adapter tests.
+**Summary:** A minimal, mechanical rename across 4 files (definition, 2 internal calls, 1 pipeline call site, 1 test double). Risk is near-zero — it's a find-and-replace with no behavioral change. This is exactly the right scope for what it does.
 
 **Strengths:**
 
-- **Test 1 (direct adapter instantiation) is a valid unit-level boundary test.** Proves the method is callable and returns correct fields.
-- **Test 2 (lifecycle factory path) validates FS-03.** Going through `SourceRuntimeFactory.build("filesystem")` is the "no bypass" proof.
-- **Test 3 (round-trip idempotency) directly encodes D-04.** Covers `path`, `title`, `kind`, and `frontmatter` — exactly the fields production code validates.
-- **RED phase before GREEN.** Correct TDD discipline.
-- **All imports verified to exist.** All referenced classes are importable.
+- **Zero behavioral change**: the rename is purely cosmetic — code continues to work identically.
+- **Correct scope**: only touches the 4 locations that reference the private name. There are no other references to `_from_file_info` in the codebase (confirmed by `rg`).
+- **Clear verification**: `rg "_from_file_info" backend/` returning empty output is a strong, one-command completeness check.
+- **No protocol change**: correctly avoids `SourceAdapterProtocol` per D-03 (ISP).
 
 **Concerns:**
 
-- **[HIGH] D-04 validation invariant (`source_document_to_file_info`) was untested in prior plan versions.** The current Plan 02 (as updated) adds this round-trip test — good. But the test description should clarify it tests both the conversion AND the invariant guard: namespace must be `"filesystem"`, `file_path` must not be `None`, `file_path` must exist on disk, and `document_ref` must match the resolved file path.
-- **[MEDIUM] Test 2 may need more setup than the task description implies.** `SQLiteSourceCursorStore` likely requires a database connection or path. If it can't be constructed without a real SQLite database, the test will fail at setup, not at assertion. Use `tmp_path / "cursors.db"` or a minimal stub.
-- **[MEDIUM] Test 1's assertion on fingerprints may be fragile.** `content_fingerprint` and `metadata_fingerprint` are computed by checksum functions that read the actual file. The test must create a real `.md` file before constructing `FileInfo` — otherwise `FileNotFoundError` in the RED phase.
-- **[MEDIUM] FS-01 regression scope is narrower than the requirement.** Plan 02 tests only the adapter construction + document creation path. Trickle indexing, delete detection, content-addressed reuse are deferred to existing integration tests per D-06 — but the plan should explicitly name which existing tests are relied on.
-- **[LOW] Test 2 assertion on `document_for_file_info` access underspecified.** Should call `bundle.source.document_for_file_info(file_info)` and verify the result, not just check `hasattr`.
-- **[LOW] FS-02 coverage.** The requirement "Filesystem internals keep paths only where they are still required" is not directly addressed by these two plans.
+- **MEDIUM**: The acceptance criterion for Task 35-01-01 says "at least 3 lines" for `grep -n "document_for_file_info" source.py`. There are exactly 3 occurrences (definition + 2 `self.*` calls in `discover`/`discover_multi`). Using "at least 3" instead of "exactly 3" is slightly weaker — a docstring example could skew the count and mask incomplete rename. Consider "exactly 3" for production code verification.
+- **LOW**: The verification criteria #1 (`rg "_from_file_info" backend/ returns no output`) runs across the entire codebase. If any planning document or ADR in `backend/` happened to reference the old name, this check would fail incorrectly. Since `backend/` is the Python source root, this is probably fine.
+- **LOW**: The `_RecordingLifecycleAdapter` in the test file currently overrides `_from_file_info` as a recording proxy. After the rename, this will be `document_for_file_info`. The plan correctly identifies this.
 
 **Suggestions:**
 
-- For Test 2, use `tmp_path / "cursors.db"` for `SQLiteSourceCursorStore` or create a minimal stub.
-- For Test 1, explicitly create a small `.md` file in `tmp_path` before constructing the `FileInfo`.
-- For Test 2, assert by calling `bundle.source.document_for_file_info(file_info)` and checking the result, not just `hasattr`.
-- Consider adding an error-path test: `document_for_file_info(FileInfo(path=nonexistent_path, ...))` to verify error originates from checksum functions.
+1. Tighten the acceptance criterion from "at least 3" to "exactly 3" in source.py.
+2. Consider scoping verification #1 to `rg "_from_file_info" backend/src/ backend/tests/` to be explicit.
+3. Verify `super()._from_file_info(file_info)` in the test double also gets renamed — the plan mentions updating the override but should explicitly confirm the `super()` call line.
 
-**Risk Assessment: MEDIUM** — Test design is sound and imports are verified. Medium risk from unspecified `SQLiteSourceCursorStore` constructor requirements and missing explicit file-creation steps for fingerprint assertions.
+**Risk Assessment: LOW** — A single-method rename with exactly 6 locations changed. No dependencies, no behavioral edge cases. Verifiable with a single grep.
+
+### Plan 02 Review: Public `document_for_file_info` boundary tests
+
+**Summary:** Adds three behavior-focused tests that prove the public boundary: direct adapter access, lifecycle-factory path, and round-trip invariant. Test structure is sound — it covers the exact access patterns that matter for FS-03 compliance. However, the test construction is under-specified in one critical place (file creation before `chunk_checksum`), which will cause a RED-phase failure that needs fixing in GREEN.
+
+**Strengths:**
+
+- **Well-structured coverage**: Test 1 proves direct adapter access, Test 2 proves lifecycle factory path, Test 3 proves the D-04 round-trip invariant. Each tests a distinct boundary.
+- **Correct dependency on Plan 01**: the tests naturally require the rename to exist first.
+- **Existing regression coverage respected (D-06)**: the plan relies on existing integration tests (`test_pipeline_source_document_for_file_info_uses_lifecycle_adapter`, `test_source_lifecycle.py`).
+- **No grep-based guard tests (D-08)**: correctly avoids brittle structural assertions in favor of behavioral tests.
+- **Imports are well-understood**: all types come from existing modules (`source_lifecycle`, `source_registry`, `storage.metadata`).
+
+**Concerns:**
+
+- **HIGH**: Test 1 and Test 2 are under-specified about file creation. `document_for_file_info()` calls `chunk_checksum(file_info.path)` and `meta_checksum(file_info.path)` — both of which read the file. If the test constructs a `FileInfo(path=tmp_path / "test.md", ...)` without first writing the file to disk, `chunk_checksum` will raise `FileNotFoundError`. Task 35-02-02 mentions `_write_markdown` in its common checks list, but without an explicit connection to Test 1's setup. The RED→GREEN flow is correct (tests fail first, then fix), but this is the expected failure mode.
+- **MEDIUM**: `SQLiteSourceCursorStore` requires an `SQLiteMetadataStore` for construction. The `db_path` should be a `Path` object, e.g. `tmp_path / "test.db"`, not a string representation. Task 35-02-02 handles this in the GREEN phase but the spec is ambiguous.
+- **MEDIUM**: `source_document_to_file_info` (used in Test 3) raises `FileNotFoundError` if `document.file_path` doesn't exist on disk. The round-trip test must ensure the source markdown file exists before converting. The plan mentions `_write_markdown` for round-trip but the connection is implicit.
+- **LOW**: Test 1 "construct a `FileInfo`" — `FileInfo` requires `last_modified: datetime` and `size_bytes: int`. The plan doesn't specify what values to use. GREEN phase notes should address these defaults.
+
+**Suggestions:**
+
+1. **Explicitly describe Test 1 setup**: write the file with `_write_markdown(md_path, 'Test', ['tag'], 'body')` before constructing `FileInfo`.
+2. **For Test 2**: use `db_path=tmp_path / "cursors.db"` for `SQLiteMetadataStore` to avoid ambiguity.
+3. **For Test 3 round-trip**: make explicit that `source_document_to_file_info` re-reads `stat()` from disk, so `size_bytes` in the recovered `FileInfo` will be the actual file size.
+4. **Add `from datetime import UTC, datetime`** to the import list if not already present.
+
+**Risk Assessment: LOW** — Three isolated behavioral tests with well-understood dependencies. The under-specification of file creation will cause a RED-phase failure, but Task 35-02-02 explicitly exists to handle this. No production code changes, no schema modifications, no new dependencies.
 
 ### OpenCode Cross-Plan Summary
 
 | Requirement | Plan 01 | Plan 02 | Notes |
 |-------------|---------|---------|-------|
 | FS-01 (everything works through unified contract) | Indirect (rename preserves behaviour) | Test 2 (lifecycle factory path) | Existing integration tests are primary per D-06 |
-| FS-02 (paths only where needed) | Not addressed | Not addressed | Needs additional plan(s) |
+| FS-02 (paths only where needed) | Not addressed | Not addressed | Accepted per CONTEXT.md scope |
 | FS-03 (no lifecycle bypass) | Public method name (D-02) | Test 2 (factory path) | Good coverage |
-
-**The phase requires additional plans beyond these two** to fully address FS-02.
 
 ---
 
 ## Consensus Summary
 
-Two reviewers (Codex and OpenCode) independently reviewed Plans 01 and 02 for Phase 35. Both verified plans against the actual codebase before reviewing.
+Two reviewers (Codex, OpenCode) independently reviewed Plans 01 and 02 for Phase 35 on 2026-05-10. Both reviewers inspected actual codebase files before reviewing.
 
 ### Agreed Strengths
 
 - Plan 01 is a minimal, correctly-scoped rename that closes the FS-03 bypass without touching `SourceAdapterProtocol` or moving orchestration out of the pipeline (D-01, D-03).
-- The call-site audit in Plan 01 is complete: definition, two internal callers, pipeline call site, and test double.
+- The call-site audit in Plan 01 is complete: definition, two internal callers, pipeline call site, and test double — all accounted for.
 - Plan 02 tests map directly to D-07's specified goals (direct adapter access + lifecycle factory path + D-04 round-trip).
 - Verification gates are concrete and measurable (grep + pytest exits).
 - The approach correctly avoids grep-based guard tests (D-08) in favor of behavioral tests.
@@ -133,21 +128,20 @@ Two reviewers (Codex and OpenCode) independently reviewed Plans 01 and 02 for Ph
 
 ### Agreed Concerns
 
-- **[HIGH] Verification grep scope too narrow (Plan 01).** Both reviewers flag that the verification grep for `_from_file_info` excludes `backend/tests/`. Any surviving test reference would go undetected. Fix: expand to `rg "_from_file_info" backend/` covering both `src/` and `tests/`.
-- **[MEDIUM] Test 2 SQLiteSourceCursorStore setup requirements unspecified.** Both reviewers flagged potential test setup issues — `SQLiteSourceCursorStore` may need a real SQLite database path. Resolution: use `tmp_path / "cursors.db"` or a minimal stub.
-- **[MEDIUM] Plan 02 verification list should name specific existing tests that prove FS-01 coverage.** "Full test suite green" is too broad. Should explicitly reference `test_pipeline_source_document_for_file_info_uses_lifecycle_adapter` and `test_source_lifecycle.py` as the primary FS-01 regression proofs.
-- **[MEDIUM] FS-02 not addressed by either plan.** Both reviewers independently noted that FS-02 ("paths only where still required") is unaddressed. Phase is incomplete without additional plan(s).
+- **MEDIUM (both)**: Plan 02 test setup under-specifies file creation. `document_for_file_info()` reads the file for checksums, so all three tests must call `_write_markdown` before constructing `FileInfo`. The GREEN task (35-02-02) exists to fix this, but executors should know the expected RED failure mode: `FileNotFoundError` from `chunk_checksum`, not an assertion error.
+- **MEDIUM (both)**: Plan 02 verification should explicitly name the FS-01 primary regression proofs. "Full test suite green" is too broad — should explicitly call out `test_pipeline_source_document_for_file_info_uses_lifecycle_adapter` and `test_source_lifecycle.py` as the named FS-01 gates.
+- **MEDIUM (Codex)**: Plan verification does not explicitly prove filesystem search/read still work. Either name the relevant existing tests or add them to the final verification gate.
+- **MEDIUM (OpenCode)**: Plan 01 acceptance criterion uses "at least 3 lines" for the grep count; "exactly 3" would be tighter.
 
 ### Divergent Views
 
-- **OpenCode rates Plan 01 verification gap as HIGH** (grep scope too narrow); Codex rates it LOW. Given that a missed reference would silently survive, HIGH is the more cautious and appropriate rating.
-- **OpenCode raised D-04 round-trip test absence as HIGH** in prior review cycle; the current Plan 02 now includes Test 3 (the round-trip test), addressing this concern. This is now a RESOLVED item.
-- **Overall phase risk:** Codex rates LOW overall; OpenCode rates Plan 02 at MEDIUM due to setup risks. Both agree fixes are lightweight.
+- **Codex** rates overall risk as LOW throughout; **OpenCode** rated Plan 02 medium initially due to setup risks, but both agree the fixes are lightweight and self-correcting via TDD.
+- **FS-02 coverage**: OpenCode flagged it as "needs additional plan(s)"; Codex did not raise it explicitly. Per CONTEXT.md, FS-02 ("paths only where still required") is addressed by the design decisions themselves (D-01, D-04, D-05) — paths stay in pipeline orchestration and `source_document_to_file_info`. The reviewers disagree on whether this requires an explicit test or plan task. Given the CONTEXT.md decisions are authoritative, this is not a blocking concern.
 
 ### Top Priority Action Items for Executor
 
-1. **Expand Plan 01 verification grep** to cover `backend/` not just `backend/src/`: `rg "_from_file_info" backend/` must return no output.
-2. **Fix Test 2 cursor store setup** in Plan 02: use `SQLiteSourceCursorStore(SQLiteMetadataStore(db_path=tmp_path / "cursors.db", table_name="..."))` pattern from `test_source_lifecycle.py`.
-3. **Ensure Test 1 creates a real `.md` file** in `tmp_path` before constructing `FileInfo` — fingerprint assertions require the file to exist on disk.
-4. **Test 2 assertion should call `bundle.source.document_for_file_info(file_info)`** and verify the result, not just check attribute existence.
-5. **Add additional plan(s)** to address FS-02 (paths only where still required) — not covered by Plans 01 or 02.
+1. **File creation before FileInfo construction (Tests 1, 2, 3)**: call `_write_markdown(md_path, ...)` before building `FileInfo` in all three Plan 02 tests. Expected RED failure without this: `FileNotFoundError` from `chunk_checksum`.
+2. **Cursor store db_path**: use `tmp_path / "cursors.db"` for `SQLiteMetadataStore` in Test 2.
+3. **Plan 02 verification block**: explicitly name `test_pipeline_source_document_for_file_info_uses_lifecycle_adapter` and `test_source_lifecycle.py` as the primary FS-01 regression proofs.
+4. **Plan 01 grep count**: tighten "at least 3" to "exactly 3" for the `document_for_file_info` occurrence count in source.py.
+5. **`super()` call in test double**: confirm both the method name and the `super()._from_file_info` call inside it are renamed in `_RecordingLifecycleAdapter`.
