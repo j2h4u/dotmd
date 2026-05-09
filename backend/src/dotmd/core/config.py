@@ -227,6 +227,23 @@ class Settings(BaseSettings):
     # DOTMD_TELEGRAM_DAEMON_SOCKET is the only Phase 29 live transport.
     telegram_daemon_socket: Path | None = None
 
+    # Federated search settings (Phase 34)
+    federated_timeout_seconds: float = 4.0
+    """Per-source soft timeout for federated providers (3-5s default range, D-09).
+
+    Applies only to federated providers running via asyncio.to_thread, not to local
+    engines which run sequentially with no timeout. Configurable via
+    DOTMD_FEDERATED_TIMEOUT_SECONDS env var.
+    """
+
+    federated_engine_weights: dict[str, float] = {}
+    """Per-federated-engine weights for RRF fusion (D-06, Phase 34).
+
+    Format: {"tg:fts": 1.0, "gmail:native": 1.2, ...}. Default 1.0 for any
+    unspecified engine. Parsed from env if convenient; currently config-only
+    (env wiring deferred to future phase).
+    """
+
     @field_validator("base_url")
     @classmethod
     def validate_base_url(cls, v: str | None) -> str | None:

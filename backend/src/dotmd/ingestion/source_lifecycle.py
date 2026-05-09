@@ -9,7 +9,7 @@ from typing import Any, Literal, Protocol, cast
 from pydantic import BaseModel, ConfigDict, Field, SkipValidation, model_validator
 
 from dotmd.core.config import Settings
-from dotmd.core.models import SourceDescriptor
+from dotmd.core.models import SourceCapability, SourceDescriptor
 from dotmd.core.source_registry import SourceRegistry
 from dotmd.ingestion.source import FilesystemMarkdownSourceAdapter
 from dotmd.ingestion.source_provider import ApplicationSourceProviderProtocol
@@ -237,6 +237,22 @@ class SourceRuntimeBundle(BaseModel):
     source: FilesystemMarkdownSourceAdapter | None = None
     provider: SkipValidation[ApplicationSourceProviderProtocol | None] = None
     metadata_json: dict[str, object] = Field(default_factory=dict)
+
+    @property
+    def supports_federated_search(self) -> bool:
+        """Check if this bundle supports federated search (Phase 34).
+
+        A bundle supports federated search if:
+        1. The descriptor declares FEDERATED_SEARCH capability
+        2. A provider is present
+        3. The provider has a search_native method (duck-type check)
+        """
+        if SourceCapability.FEDERATED_SEARCH not in self.descriptor.capabilities:
+            return False
+        provider = self.provider
+        if provider is None:
+            return False
+        return callable(getattr(provider, "search_native", None))
 
 
 class SourceRuntimeFactory:
