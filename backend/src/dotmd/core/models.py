@@ -435,7 +435,7 @@ class SearchCandidate(BaseModel):
     provenance: ChunkProvenance | None = None
 
     # Matched engines and per-engine scores
-    matched_engines: list[str] = Field(default_factory=list)
+    matched_engines: tuple[str, ...] = Field(default_factory=tuple)
     engine_scores: dict[str, float] | None = None
 
     # Federated-specific fields
