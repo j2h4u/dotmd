@@ -16,8 +16,8 @@ from dotmd.core.config import Settings, load_settings
 from dotmd.core.models import (
     ChunkProvenance,
     IndexStats,
+    SearchCandidate,
     SearchMode,
-    SearchResult,
     SourceDocument,
     SourceUnit,
 )
@@ -26,7 +26,7 @@ from dotmd.ingestion.reader import parse_frontmatter, read_file
 from dotmd.ingestion.source_lifecycle import SourceRuntimeFactory
 from dotmd.ingestion.source_provider import ApplicationSourceProviderProtocol
 from dotmd.ingestion.trickle import TrickleIndexer
-from dotmd.search.fusion import build_search_results, fuse_results
+from dotmd.search.fusion import build_candidates, fuse_results
 from dotmd.search.graph_direct import GraphDirectEngine
 from dotmd.search.graph_search import GraphSearchEngine
 from dotmd.search.query import QueryExpander
@@ -325,7 +325,7 @@ class DotMDService:
         rerank: bool = True,
         expand: bool = True,
         reranker_name: str | None = None,
-    ) -> list[SearchResult]:
+    ) -> list[SearchCandidate]:
         """Search the index and return ranked results.
 
         Parameters
@@ -349,8 +349,8 @@ class DotMDService:
 
         Returns
         -------
-        list[SearchResult]
-            Ranked search results, at most *top_k* items.
+        list[SearchCandidate]
+            Ranked search candidates, at most *top_k* items.
 
         Side effect: appends one row to ``search_log`` in ``index.db`` on every call.
         """
@@ -394,7 +394,7 @@ class DotMDService:
         rerank: bool,
         reranker_name: str | None,
         pool_size: int,
-    ) -> list[SearchResult]:
+    ) -> list[SearchCandidate]:
         """Core retrieval + fusion + reranking pipeline.
 
         Separated from :meth:`search` so tests can patch this method to inject
@@ -499,15 +499,15 @@ class DotMDService:
                     kw_in_final,
                 )
 
-        # -- Build final SearchResult list ------------------------------------
-        results = build_search_results(
+        # -- Build final SearchCandidate list ------------------------------------
+        candidates = build_candidates(
             fused[:top_k],
             per_engine=engine_results,
             metadata_store=cast(MetadataStoreProtocol, self._pipeline.metadata_store),
             query=original_query,
+            active_provenance_map=active_provenance_map,
             top_k=top_k,
             snippet_length=self._settings.snippet_length,
-            provenance_map=active_provenance_map,
         )
 
         # Log search for observability and future auto-calibration (Phase 999.12)
@@ -517,11 +517,11 @@ class DotMDService:
                 weights_used=self._settings.parsed_embedding_weights,
                 top_results=[
                     {
-                        "chunk_id": r.chunk_id,
-                        "score": float(r.fused_score),
-                        "engine": r.matched_engines[0] if r.matched_engines else "unknown",
+                        "chunk_id": c.chunk_id or c.ref,
+                        "score": float(c.fused_score),
+                        "engine": c.matched_engines[0] if c.matched_engines else "unknown",
                     }
-                    for r in results[:top_k]
+                    for c in candidates[:top_k]
                 ],
                 mode=mode if isinstance(mode, str) else str(mode),
                 reranked=reranked_applied,
@@ -529,7 +529,7 @@ class DotMDService:
         except Exception:
             logger.warning("search log failed — non-fatal", exc_info=True)
 
-        return results
+        return candidates
 
     def _active_filter_pool_size(self, top_k: int, pool_size: int) -> int:
         """Return candidate pool size used before active-binding filtering."""

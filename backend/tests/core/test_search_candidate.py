@@ -66,7 +66,8 @@ class TestSearchCandidateRequiredFields:
                 snippet="Text",
                 fused_score=0.9,
                 can_read=True,
-            )
+                # Intentionally omit descriptor_key to test it's required
+            )  # type: ignore[call-arg]
         assert "descriptor_key" in str(exc_info.value).lower()
 
     def test_search_candidate_descriptor_key_distinguishes_sources(self) -> None:
@@ -159,9 +160,11 @@ class TestSearchCandidateRequiredFields:
         candidate.matched_engines.append("keyword")
         assert candidate.matched_engines == ["semantic", "keyword"]
 
+        assert candidate.engine_scores is not None
         candidate.engine_scores["keyword"] = 0.5
         assert candidate.engine_scores["keyword"] == 0.5
 
+        assert candidate.provider_metadata is not None
         candidate.provider_metadata["new"] = "z"
         assert candidate.provider_metadata["new"] == "z"
 
@@ -193,6 +196,7 @@ class TestSearchCandidateRequiredFields:
             can_read=True,
             engine_scores={"semantic": 0.9},
         )
+        assert candidate.engine_scores is not None
         assert "semantic" in candidate.engine_scores
         assert len(candidate.engine_scores) == 1
 

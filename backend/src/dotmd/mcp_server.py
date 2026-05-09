@@ -32,6 +32,7 @@ from starlette.routing import Route
 from dotmd.api.service import DotMDService
 from dotmd.auth import DotMDOAuthProvider, PairingCodeError
 from dotmd.core.config import load_runtime_settings
+from dotmd.core.models import SearchCandidate
 from dotmd.feedback import FeedbackStore
 
 logger = logging.getLogger(__name__)
@@ -70,20 +71,6 @@ def _collapse_null(schema: dict) -> None:
 # ---------------------------------------------------------------------------
 # Output models (enable outputSchema auto-generation)
 # ---------------------------------------------------------------------------
-
-
-class SearchHit(BaseModel):
-    ref: str
-    heading: str | None = None
-    snippet: str
-    score: float
-
-    @model_serializer
-    def _serialize(self) -> dict:
-        d: dict = {"ref": self.ref, "snippet": self.snippet, "score": self.score}
-        if self.heading:
-            d["heading"] = self.heading
-        return d
 
 
 class ReadChunk(BaseModel):
@@ -608,7 +595,7 @@ def create_app() -> Starlette:
 async def search(
     query: Annotated[str, Field(description="Natural-language search query.")],
     top_k: Annotated[int, Field(description="Maximum results to return.", ge=1, le=100)] = 10,
-) -> list[SearchHit]:
+) -> list[SearchCandidate]:
     """Search the indexed markdown knowledgebase and return ranked chunks.
 
     Use proactively whenever the user asks about notes, meetings, decisions, people,
@@ -616,8 +603,8 @@ async def search(
     relying on your own knowledge for facts about this person's work or life.
 
     Each result contains: ref (the stable source key for read/drill), a cleaned
-    text snippet, a relevance score, and an optional heading (present only for
-    structured docs with markdown headings).
+    text snippet, a relevance score, namespace, source kind, and optional metadata
+    from the underlying source.
 
     Once search identifies a relevant file, switch to read for deeper access.
     Do not call search for general knowledge questions that don't involve the
@@ -805,15 +792,37 @@ _FRONTMATTER_RE = re.compile(r"\A---\n.*?\n---\n?", re.DOTALL)
 _TIMESTAMP_RE = re.compile(r"\[\d{2}:\d{2}:\d{2}\]\s*")
 
 
-def _format_result(r: Any) -> SearchHit:
+def _format_result(r: SearchCandidate) -> SearchCandidate:
+    """Clean up snippet for MCP serialization.
+
+    The SearchCandidate model preserves full precision on fused_score.
+    For wire format, we round to 3 decimals to reduce payload size,
+    but the canonical model retains full precision.
+    """
     clean = _FRONTMATTER_RE.sub("", r.snippet).strip()
     clean = _TIMESTAMP_RE.sub("", clean).strip()
 
-    return SearchHit(
+    # Return a new SearchCandidate with cleaned snippet
+    # Note: frozen=True prevents modification, so we must reconstruct
+    return SearchCandidate(
         ref=r.ref,
-        heading=r.heading_path or None,
+        namespace=r.namespace,
+        descriptor_key=r.descriptor_key,
+        source_kind=r.source_kind,
+        retrieval_kind=r.retrieval_kind,
         snippet=clean,
-        score=round(r.fused_score, 3),
+        fused_score=round(r.fused_score, 3),
+        can_read=r.can_read,
+        can_materialize=r.can_materialize,
+        title=r.title,
+        chunk_id=r.chunk_id,
+        heading_path=r.heading_path,
+        provenance=r.provenance,
+        matched_engines=r.matched_engines,
+        source_native_score=r.source_native_score,
+        source_native_rank=r.source_native_rank,
+        engine_scores=r.engine_scores,
+        provider_metadata=r.provider_metadata,
     )
 
 

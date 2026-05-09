@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from dotmd.api.service import DotMDService
 from dotmd.core.config import load_runtime_settings
-from dotmd.core.models import ExtractDepth, IndexStats, SearchMode, SearchResult
+from dotmd.core.models import ExtractDepth, IndexStats, SearchCandidate, SearchMode
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ class IndexRequest(BaseModel):
 
 class SearchResponse(BaseModel):
     query: str
-    results: list[SearchResult]
+    results: list[SearchCandidate]
     count: int
 
 

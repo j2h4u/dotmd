@@ -6,11 +6,11 @@ instead of reaching into ``dotmd.core.models`` directly.
 
 from __future__ import annotations
 
-from dotmd.core.models import Chunk, ExpandedQuery, IndexStats, SearchResult
+from dotmd.core.models import Chunk, ExpandedQuery, IndexStats, SearchCandidate
 
 __all__ = [
     "Chunk",
     "ExpandedQuery",
     "IndexStats",
-    "SearchResult",
+    "SearchCandidate",
 ]

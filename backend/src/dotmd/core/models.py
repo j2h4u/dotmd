@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -402,19 +402,46 @@ class ExpandedQuery(BaseModel):
     expanded_text: str = ""
 
 
-class SearchResult(BaseModel):
-    """A single search result after fusion and optional reranking."""
+class SearchCandidate(BaseModel):
+    """A single search candidate from local or federated sources.
 
-    chunk_id: str
+    This is the unified public search result type at both service and MCP layers.
+
+    Container fields (matched_engines, engine_scores, provider_metadata) are
+    shallow-frozen by Pydantic's frozen=True: attribute rebinding is rejected,
+    but container content mutation (list.append, dict assignment) succeeds. This
+    is documented behavior and callers must not mutate after construction.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    # Core identity and content
     ref: str
-    heading_path: str
+    namespace: str
+    descriptor_key: str  # Required — identifies the source descriptor
+    source_kind: str
+    retrieval_kind: str
+    title: str | None = None
     snippet: str
     fused_score: float
-    semantic_score: float | None = None
-    keyword_score: float | None = None
-    graph_score: float | None = None
-    graph_direct_score: float | None = None
+
+    # Readability and materialization
+    can_read: bool
+    can_materialize: bool = False
+
+    # Local-specific provenance
+    chunk_id: str | None = None
+    heading_path: str | None = None
+    provenance: ChunkProvenance | None = None
+
+    # Matched engines and per-engine scores
     matched_engines: list[str] = Field(default_factory=list)
+    engine_scores: dict[str, float] | None = None
+
+    # Federated-specific fields
+    source_native_score: float | None = None
+    source_native_rank: int | None = None
+    provider_metadata: dict[str, Any] | None = None
 
     @field_validator("ref")
     @classmethod
@@ -425,6 +452,27 @@ class SearchResult(BaseModel):
                 "ref must be formatted as '<namespace>:<document_ref>'"
             )
         return value
+
+
+class SourceStatus(BaseModel):
+    """Status report for a single source engine during search."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str
+    status: Literal["ok", "skipped", "error"]
+    reason: str | None = None
+    candidate_count: int = 0
+    elapsed_ms: float | None = None
+
+
+class SearchResponse(BaseModel):
+    """Envelope for search results including per-source status."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    candidates: list[SearchCandidate] = Field(default_factory=list)
+    source_status: list[SourceStatus] = Field(default_factory=list)
 
 
 class IndexStats(BaseModel):

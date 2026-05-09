@@ -1,11 +1,13 @@
 """Reciprocal Rank Fusion and search-result construction.
 
-This module provides two functions:
+This module provides three functions:
 
 - :func:`fuse_results` -- merge ranked lists from multiple search engines
   using Reciprocal Rank Fusion (RRF).
-- :func:`build_search_results` -- hydrate fused scores into full
-  :class:`SearchResult` objects by looking up chunk metadata.
+- :func:`hydrate_local_engine_results` -- convert chunk-keyed engine results
+  to ref-keyed results using provenance mapping.
+- :func:`build_candidates` -- hydrate fused scores into full
+  :class:`SearchCandidate` objects by looking up chunk metadata.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ import re
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Protocol, cast
 
-from dotmd.core.models import ChunkProvenance, SearchResult
+from dotmd.core.models import ChunkProvenance, SearchCandidate
 
 if TYPE_CHECKING:
     from dotmd.storage.base import MetadataStoreProtocol
@@ -177,13 +179,6 @@ def _truncate(text: str, length: int) -> str:
     return truncated + "..."
 
 
-# Score field names on SearchResult keyed by canonical engine name.
-_ENGINE_SCORE_FIELDS: dict[str, str] = {
-    "semantic": "semantic_score",
-    "keyword": "keyword_score",
-    "graph": "graph_score",
-    "graph_direct": "graph_direct_score",
-}
 
 
 def _public_ref_for_provenance(provenance: ChunkProvenance) -> str:
@@ -199,18 +194,18 @@ def fuse_results(
 ) -> list[tuple[str, float]]:
     """Merge multiple ranked lists using Reciprocal Rank Fusion.
 
-    For every chunk that appears in at least one list the fused score is
+    For every ref that appears in at least one list the fused score is
     computed as::
 
         score = sum(weight_i / (k + rank_i))
 
-    where *rank_i* is the **1-based** position of the chunk in each
+    where *rank_i* is the **1-based** position of the ref in each
     engine's result list and *weight_i* is the engine weight (default 1.0).
 
     Parameters
     ----------
     ranked_lists:
-        A mapping of ``engine_name`` to a list of ``(chunk_id, score)``
+        A mapping of ``engine_name`` to a list of ``(ref, score)``
         pairs, ordered by descending relevance.
     k:
         The RRF constant (default ``60``).  Higher values dampen the
@@ -223,7 +218,7 @@ def fuse_results(
     Returns
     -------
     list[tuple[str, float]]
-        A list of ``(chunk_id, fused_score)`` pairs sorted by
+        A list of ``(ref, fused_score)`` pairs sorted by
         descending fused score.
     """
     weights = engine_weights or {}
@@ -238,16 +233,57 @@ def fuse_results(
     return sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
 
 
-def build_search_results(
+def hydrate_local_engine_results(
+    per_engine_chunk: dict[str, list[tuple[str, float]]],
+    provenance_map: dict[str, ChunkProvenance],
+) -> dict[str, list[tuple[str, float]]]:
+    """Convert per-engine chunk-keyed results to ref-keyed results.
+
+    For each engine's ranked list of (chunk_id, score) pairs, resolve
+    chunk_id to public ref using the provenance map. Drop entries without
+    provenance.
+
+    Parameters
+    ----------
+    per_engine_chunk:
+        Dict mapping engine name to list of (chunk_id, score) pairs.
+    provenance_map:
+        Dict mapping chunk_id to ChunkProvenance.
+
+    Returns
+    -------
+    dict[str, list[tuple[str, float]]]
+        Same structure but with refs instead of chunk_ids; duplicates
+        drop the lower-ranked occurrence (keep first).
+    """
+    result: dict[str, list[tuple[str, float]]] = {}
+    for engine, chunk_results in per_engine_chunk.items():
+        ref_results: list[tuple[str, float]] = []
+        seen_refs: set[str] = set()
+        for chunk_id, score in chunk_results:
+            provenance = provenance_map.get(chunk_id)
+            if provenance is None:
+                continue
+            ref = _public_ref_for_provenance(provenance)
+            if ref not in seen_refs:
+                ref_results.append((ref, score))
+                seen_refs.add(ref)
+        if ref_results:
+            result[engine] = ref_results
+    return result
+
+
+def build_candidates(
     fused: list[tuple[str, float]],
     per_engine: dict[str, list[tuple[str, float]]],
     metadata_store: MetadataStoreProtocol,
     query: str = "",
+    ref_to_chunk: dict[str, tuple[str, str]] | None = None,
+    active_provenance_map: dict[str, ChunkProvenance] | None = None,
     top_k: int = 10,
     snippet_length: int = 300,
-    provenance_map: dict[str, ChunkProvenance] | None = None,
-) -> list[SearchResult]:
-    """Convert fused scores into fully hydrated :class:`SearchResult` objects.
+) -> list[SearchCandidate]:
+    """Convert fused ref-keyed scores into fully hydrated SearchCandidate objects.
 
     For each of the *top_k* fused results the corresponding chunk is
     looked up in *metadata_store* to populate the heading path, snippet,
@@ -256,78 +292,99 @@ def build_search_results(
     Parameters
     ----------
     fused:
-        Output of :func:`fuse_results`.
+        Output of :func:`fuse_results` (list of (ref, fused_score) pairs).
     per_engine:
-        The same ``ranked_lists`` dict passed to :func:`fuse_results`,
-        used to attribute per-engine scores.
+        Dict mapping engine name to list of (ref, score) pairs, after
+        ref-keying via hydrate_local_engine_results.
     metadata_store:
         A store satisfying :class:`MetadataStoreProtocol`.
+    query:
+        Original query string for snippet extraction.
+    ref_to_chunk:
+        Pre-built mapping from ref to (chunk_id, text). If None, looks up
+        via metadata_store.
+    active_provenance_map:
+        Pre-built mapping from chunk_id to ChunkProvenance. If None, looks up
+        via metadata_store.
     top_k:
         Maximum number of results to return.
     snippet_length:
         Maximum length for the text snippet (default 300 characters).
-        Truncation is word-aware to avoid cutting mid-word.
 
     Returns
     -------
-    list[SearchResult]
-        Up to *top_k* search results, ordered by descending fused score.
+    list[SearchCandidate]
+        Up to *top_k* search candidates, ordered by descending fused score.
     """
-    # Pre-index per-engine scores for O(1) lookup.
-    engine_scores: dict[str, dict[str, float]] = {}
-    for engine, engine_results in per_engine.items():
-        engine_scores[engine] = dict(engine_results)
+    if ref_to_chunk is None:
+        ref_to_chunk = {}
+    if active_provenance_map is None:
+        active_provenance_map = {}
 
-    top_ids = [cid for cid, _ in fused[:top_k]]
-    chunks_by_id = {c.chunk_id: c for c in metadata_store.get_chunks(top_ids)}
+    # Pre-index per-engine scores for O(1) ref lookup.
+    engine_scores_by_ref: dict[str, dict[str, float]] = {}
+    for engine, ref_results in per_engine.items():
+        for ref, score in ref_results:
+            if ref not in engine_scores_by_ref:
+                engine_scores_by_ref[ref] = {}
+            engine_scores_by_ref[ref][engine] = score
 
-    strategy = getattr(metadata_store, "_table", "").removeprefix("chunks_")
-    if (
-        provenance_map is None
-        and strategy
-        and hasattr(metadata_store, "get_chunk_provenance_for_chunk_ids")
-    ):
-        batch_store = cast(_ChunkProvenanceBatchStore, metadata_store)
-        provenance_map = batch_store.get_chunk_provenance_for_chunk_ids(
-            strategy,
-            top_ids,
-        )
-    if provenance_map is None:
-        provenance_map = {}
+    candidates: list[SearchCandidate] = []
+    for ref, fused_score in fused[:top_k]:
+        # Look up chunk for this ref (might need multiple chunks in case of
+        # multiple chunks mapping to same ref; use highest fused_score winner).
+        chunk_id: str | None = None
+        chunk = None
 
-    results: list[SearchResult] = []
-    for chunk_id, fused_score in fused[:top_k]:
-        chunk = chunks_by_id.get(chunk_id)
+        # If ref_to_chunk is provided, use it
+        if ref in ref_to_chunk:
+            chunk_id, _text = ref_to_chunk[ref]
+            chunks = metadata_store.get_chunks([chunk_id])
+            if chunks:
+                chunk = chunks[0]
+        else:
+            # Fallback: search for a chunk with this ref via provenance
+            # (This is slower; prefer ref_to_chunk pre-build in service layer)
+            if ref in active_provenance_map:
+                prov = active_provenance_map[ref]
+                chunk_id = prov.ref  # Fallback chunk_id from provenance
+                chunks = metadata_store.get_chunks([chunk_id])
+                if chunks:
+                    chunk = chunks[0]
+
         if chunk is None:
+            # Skip candidates we can't hydrate
             continue
 
         heading_path = " > ".join(chunk.heading_hierarchy) if chunk.heading_hierarchy else ""
-
         snippet = _extract_best_snippet(chunk.text, query, snippet_length)
 
-        provenance = provenance_map.get(chunk_id)
+        provenance = active_provenance_map.get(chunk_id) if chunk_id else None
         if provenance is None:
             raise ValueError(f"missing source provenance for chunk_id={chunk_id}")
 
-        # Determine which engines matched and their individual scores.
-        matched_engines: list[str] = []
-        per_engine_kwargs: dict[str, float | None] = {}
-        for engine_name, field_name in _ENGINE_SCORE_FIELDS.items():
-            score = engine_scores.get(engine_name, {}).get(chunk_id)
-            per_engine_kwargs[field_name] = score
-            if score is not None:
-                matched_engines.append(engine_name)
+        # Determine which engines matched this ref
+        matched_engines = sorted(engine_scores_by_ref.get(ref, {}).keys())
+        engine_scores_dict = engine_scores_by_ref.get(ref)
 
-        results.append(
-            SearchResult(
-                chunk_id=chunk_id,
-                ref=_public_ref_for_provenance(provenance),
-                heading_path=heading_path,
+        candidates.append(
+            SearchCandidate(
+                ref=ref,
+                namespace=provenance.namespace,
+                descriptor_key="filesystem-mnt",  # Local chunks are always filesystem
+                source_kind="markdown",
+                retrieval_kind="semantic",  # Will be updated by service layer
+                title=None,
                 snippet=snippet,
                 fused_score=fused_score,
-                matched_engines=sorted(matched_engines),
-                **per_engine_kwargs,  # type: ignore[arg-type]
+                can_read=True,
+                can_materialize=False,
+                chunk_id=chunk_id,
+                heading_path=heading_path,
+                matched_engines=matched_engines,
+                engine_scores=engine_scores_dict,
+                provenance=provenance,
             )
         )
 
-    return results
+    return candidates
