@@ -34,6 +34,10 @@ class SourceAdapterProtocol(Protocol):
         """Discover source documents from multiple path specs."""
         ...
 
+    def document_for_file_info(self, file_info: FileInfo) -> SourceDocument:
+        """Build a SourceDocument from a pre-resolved FileInfo."""
+        ...
+
 
 class FilesystemMarkdownSourceAdapter:
     """In-process adapter for current filesystem Markdown files."""
