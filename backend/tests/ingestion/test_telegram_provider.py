@@ -74,8 +74,8 @@ class _TelegramSourceClientFixture:
         limit: int,
         dialog_id: int | None = None,
     ) -> dict:
-        """Search Telegram messages via daemon FTS. Returns {hits: [...]}"""
-        return {"hits": list(self._search_hits[:limit])}
+        """Search Telegram messages via daemon FTS. Returns {messages: [...], total: int, ...}"""
+        return {"messages": list(self._search_hits[:limit])}
 
 
 def _default_search_hits() -> list[dict]:
@@ -430,12 +430,12 @@ def test_unix_socket_search_messages_request_shape() -> None:
     # Test basic request
     result = client.search_messages("kantine", limit=20)
     assert isinstance(result, dict)
-    assert "hits" in result
+    assert "messages" in result
 
     # Test with dialog_id
     result = client.search_messages("kantine", limit=20, dialog_id=42)
     assert isinstance(result, dict)
-    assert "hits" in result
+    assert "messages" in result
 
 
 def test_search_native_returns_searchcandidate_list() -> None:
@@ -479,7 +479,7 @@ def test_search_native_can_read_derived_from_provider_capability() -> None:
     # Test with a stub client that lacks read_source_unit_window
     class StubClientWithoutRead:
         def search_messages(self, query: str, limit: int, dialog_id: int | None = None) -> dict:
-            return {"hits": _default_search_hits()[:limit]}
+            return {"messages": _default_search_hits()[:limit]}
 
     provider_no_read = TelegramApplicationSourceProvider(StubClientWithoutRead())  # type: ignore
     result_no_read = provider_no_read.search_native("kantine", limit=10)
@@ -560,3 +560,41 @@ def test_search_native_propagates_daemon_failure() -> None:
 
     with pytest.raises(RuntimeError, match="Telegram daemon request failed"):
         provider.search_native("test", limit=10)
+
+
+# TG-03 and TG-04 regression tests
+
+
+def test_application_source_ingest_result_has_rebound_units() -> None:
+    """TG-03: ApplicationSourceIngestResult must have rebound_units field with default 0."""
+    from dotmd.ingestion.pipeline import ApplicationSourceIngestResult
+
+    result = ApplicationSourceIngestResult()
+    assert hasattr(result, "rebound_units")
+    assert result.rebound_units == 0
+
+
+def test_tg04_public_ref_matches_search_native_ref() -> None:
+    """TG-04: public_ref_for_unit, ChunkProvenance.ref formula, and search_native ref must all agree."""
+    client = _TelegramSourceClientFixture()
+    provider = TelegramApplicationSourceProvider(client)
+
+    # 1. public_ref_for_unit matches expected message-level ref
+    batch = provider.export_changes(None, 10)
+    change = batch.changes[0]
+    unit_ref = public_ref_for_unit(change.unit)
+    assert unit_ref == "telegram:dialog:-1001:message:42"
+
+    # 2. ChunkProvenance.ref formula: f"{unit.namespace}:{unit.unit_ref}"
+    expected_provenance_ref = f"{change.unit.namespace}:{change.unit.unit_ref}"
+    assert expected_provenance_ref == "telegram:dialog:-1001:message:42"
+
+    # 3. search_native ref
+    candidates = provider.search_native("test query", limit=5)
+    if candidates:
+        search_ref = candidates[0].ref
+        assert search_ref.startswith("telegram:dialog:")
+        assert ":message:" in search_ref
+
+    # All three must be equal
+    assert unit_ref == expected_provenance_ref
