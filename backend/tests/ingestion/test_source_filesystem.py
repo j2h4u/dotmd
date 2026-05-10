@@ -265,9 +265,9 @@ class _RecordingLifecycleAdapter(FilesystemMarkdownSourceAdapter):
         self.discover_multi_calls.append((paths, exclude))
         return []
 
-    def _from_file_info(self, file_info: FileInfo) -> SourceDocument:
+    def document_for_file_info(self, file_info: FileInfo) -> SourceDocument:
         self.file_infos.append(file_info)
-        return super()._from_file_info(file_info)
+        return super().document_for_file_info(file_info)
 
 
 class _RecordingLifecycleFactory:
