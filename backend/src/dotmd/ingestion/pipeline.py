@@ -1368,7 +1368,7 @@ class IndexingPipeline:
         bundle = self._source_runtime_factory.build("filesystem")
         if bundle.source is None:
             raise RuntimeError("filesystem lifecycle runtime has no source adapter")
-        source_document = bundle.source._from_file_info(file_info)
+        source_document = bundle.source.document_for_file_info(file_info)
         bridged_file_info = source_document_to_file_info(source_document)
         if (
             bridged_file_info.path != file_info.path
