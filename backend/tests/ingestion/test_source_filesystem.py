@@ -989,7 +989,8 @@ def test_discover_multi_excludes_empty_and_non_markdown_files(
 
 
 def test_source_module_keeps_future_runtime_concepts_deferred() -> None:
-    source_text = Path("src/dotmd/ingestion/source.py").read_text(encoding="utf-8")
+    source_path = Path(__file__).parents[2] / "src" / "dotmd" / "ingestion" / "source.py"
+    source_text = source_path.read_text(encoding="utf-8")
 
     deferred_terms = [
         "tele" + "gram",
