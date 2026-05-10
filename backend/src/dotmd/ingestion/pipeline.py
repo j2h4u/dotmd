@@ -1375,6 +1375,7 @@ class IndexingPipeline:
             or bridged_file_info.title != file_info.title
             or bridged_file_info.kind != file_info.kind
             or bridged_file_info.frontmatter != file_info.frontmatter
+            or bridged_file_info.last_modified != file_info.last_modified
         ):
             raise ValueError("filesystem SourceDocument bridge changed FileInfo")
         self._assert_filesystem_document_ref(file_info, source_document)
