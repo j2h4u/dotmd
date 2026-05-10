@@ -45,6 +45,7 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
   architecture backlog line: source capability registry, source
   lifecycle/config/auth/cursor, federated search, filesystem unification,
   Telegram unification, and connector compatibility.
+  - ✓ Phase 35: FilesystemMarkdownSourceAdapter._from_file_info renamed to public `document_for_file_info`; behavioral tests prove public lifecycle boundary — Validated in Phase 35
 
 ### Out of Scope
 
