@@ -96,13 +96,13 @@ dotMD unless a later phase explicitly justifies it.
 
 ### Filesystem
 
-- [ ] **FS-01**: Filesystem discovery, trickle indexing, local file reads,
+- [x] **FS-01**: Filesystem discovery, trickle indexing, local file reads,
   delete detection, parser routing, and content-addressed reuse continue to
   work through the unified source contract.
-- [ ] **FS-02**: Filesystem internals keep paths only where they are still
+- [x] **FS-02**: Filesystem internals keep paths only where they are still
   required for discovery, holder semantics, local reads, display, and delete
   detection.
-- [ ] **FS-03**: The filesystem adapter no longer bypasses source registry or
+- [x] **FS-03**: The filesystem adapter no longer bypasses source registry or
   lifecycle when participating in indexing/search/read.
 
 ### Telegram

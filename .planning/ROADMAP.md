@@ -152,7 +152,7 @@ See: `.planning/REQUIREMENTS.md`
 | 32. Source capability registry | 4/4 | Complete    | 2026-05-08 |
 | 33. Source lifecycle/config/auth/cursor boundary | 3/3 | Complete    | 2026-05-08 |
 | 34. Federated SearchCandidate contract | v1.6 | Not started | — |
-| 35. Filesystem unified source adapter | 2/2 | Complete   | 2026-05-10 |
+| 35. Filesystem unified source adapter | 2/2 | Complete    | 2026-05-10 |
 | 36. Telegram unified sync and federated search | v1.6 | Not started | — |
 | 37. Airweave connector compatibility spike | v1.6 | Not started | — |
 
