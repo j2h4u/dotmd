@@ -108,7 +108,7 @@ Reference:
 - [ ] Phase 32: Source capability registry
 - [ ] Phase 33: Source lifecycle/config/auth/cursor boundary
 - [ ] Phase 34: Federated SearchCandidate contract
-- [ ] Phase 35: Filesystem unified source adapter
+- [x] Phase 35: Filesystem unified source adapter (completed 2026-05-10)
 - [ ] Phase 36: Telegram unified sync and federated search
 - [ ] Phase 37: Airweave connector compatibility spike
 
@@ -152,7 +152,7 @@ See: `.planning/REQUIREMENTS.md`
 | 32. Source capability registry | 4/4 | Complete    | 2026-05-08 |
 | 33. Source lifecycle/config/auth/cursor boundary | 3/3 | Complete    | 2026-05-08 |
 | 34. Federated SearchCandidate contract | v1.6 | Not started | — |
-| 35. Filesystem unified source adapter | v1.6 | Not started | — |
+| 35. Filesystem unified source adapter | 2/2 | Complete   | 2026-05-10 |
 | 36. Telegram unified sync and federated search | v1.6 | Not started | — |
 | 37. Airweave connector compatibility spike | v1.6 | Not started | — |
 
@@ -1173,7 +1173,7 @@ content-addressed reuse.
 **Requirements:** FS-01, FS-02, FS-03
 **Depends on:** Phase 33
 **Backlog source:** 999.29
-**Plans:** 0/0 plans complete
+**Plans:** 2/2 plans complete
 
 Success criteria:
 1. Filesystem indexing/search/read flows through the source registry and
