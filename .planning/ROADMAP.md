@@ -109,7 +109,7 @@ Reference:
 - [ ] Phase 33: Source lifecycle/config/auth/cursor boundary
 - [ ] Phase 34: Federated SearchCandidate contract
 - [x] Phase 35: Filesystem unified source adapter (completed 2026-05-10)
-- [ ] Phase 36: Telegram unified sync and federated search
+- [x] Phase 36: Telegram unified sync and federated search (completed 2026-05-10)
 - [ ] Phase 37: Airweave connector compatibility spike
 
 See: `.planning/REQUIREMENTS.md`
@@ -153,7 +153,7 @@ See: `.planning/REQUIREMENTS.md`
 | 33. Source lifecycle/config/auth/cursor boundary | 3/3 | Complete    | 2026-05-08 |
 | 34. Federated SearchCandidate contract | v1.6 | Not started | — |
 | 35. Filesystem unified source adapter | 2/2 | Complete    | 2026-05-10 |
-| 36. Telegram unified sync and federated search | v1.6 | Not started | — |
+| 36. Telegram unified sync and federated search | 2/2 | Complete   | 2026-05-10 |
 | 37. Airweave connector compatibility spike | v1.6 | Not started | — |
 
 ### Backlog 999.2: Pipeline parallelism — overlap GLiNER and TEI across files
@@ -1191,7 +1191,7 @@ deferred incremental sync/reuse behavior and native federated FTS search.
 **Requirements:** TG-01, TG-02, TG-03, TG-04
 **Depends on:** Phase 34 and Phase 35
 **Backlog source:** 999.30 and deferred Phase 30
-**Plans:** 0/0 plans complete
+**Plans:** 2/2 plans complete
 
 Success criteria:
 1. Telegram declares sync/export, read-unit-window, incremental-cursor, and
