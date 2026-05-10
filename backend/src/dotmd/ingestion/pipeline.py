@@ -109,6 +109,7 @@ class ApplicationSourceIngestResult:
     hidden_units: int = 0
     failed_units: int = 0
     reused_units: int = 0
+    rebound_units: int = 0
     chunks_indexed: int = 0
 
 
@@ -585,6 +586,12 @@ class IndexingPipeline:
                     change.document,
                     conn=self._conn,
                 )
+                existing_binding = self._metadata_store.get_resource_binding(
+                    change.document.namespace,
+                    change.document.document_ref,
+                )
+                if existing_binding is not None and not existing_binding.active:
+                    result.rebound_units += 1
                 self._metadata_store.upsert_resource_binding(
                     ResourceBinding(
                         namespace=change.document.namespace,
