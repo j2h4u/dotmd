@@ -483,9 +483,11 @@ def telegram_ingest(
         f"discovered={result.discovered} "
         f"new_units={result.new_units} "
         f"changed_units={result.changed_units} "
+        f"rebound_units={result.rebound_units} "
         f"skipped_units={result.skipped_units} "
         f"hidden_units={result.hidden_units} "
-        f"failed_units={result.failed_units}"
+        f"failed_units={result.failed_units} "
+        f"reused_units={result.reused_units}"
     )
 
 
