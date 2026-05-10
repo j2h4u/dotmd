@@ -478,6 +478,39 @@ def init_service() -> None:
 _init_for_stdio = init_service
 
 
+async def _run_telegram_poller(
+    svc: DotMDService,
+    bundle: Any,
+    interval_seconds: float,
+    shutdown_event: asyncio.Event,
+) -> None:
+    """Background Telegram sync task — cursor-based polling at fixed interval."""
+    loop = asyncio.get_running_loop()
+    while not shutdown_event.is_set():
+        try:
+            result = await loop.run_in_executor(
+                svc._local_executor,
+                lambda: svc._pipeline.ingest_application_source_runtime(bundle),
+            )
+            logger.info(
+                "telegram_sync discovered=%d new=%d changed=%d skipped=%d "
+                "rebound=%d failed=%d reused=%d",
+                result.discovered,
+                result.new_units,
+                result.changed_units,
+                result.skipped_units,
+                result.rebound_units,
+                result.failed_units,
+                result.reused_units,
+            )
+        except Exception:
+            logger.exception("telegram_sync error during ingest")
+        try:
+            await asyncio.wait_for(shutdown_event.wait(), timeout=interval_seconds)
+        except TimeoutError:
+            pass
+
+
 def create_app() -> Starlette:
     """Build the Starlette ASGI app with a server-wide lifespan.
 
@@ -508,12 +541,34 @@ def create_app() -> Starlette:
         shutdown_event = asyncio.Event()
         indexer_task = asyncio.create_task(svc.trickle_indexer.run(shutdown_event))
 
+        telegram_task: asyncio.Task | None = None
+        telegram_bundle = svc._source_runtime_factory.build_if_configured("telegram")
+        if telegram_bundle is not None:
+            telegram_task = asyncio.create_task(
+                _run_telegram_poller(
+                    svc,
+                    telegram_bundle,
+                    settings.telegram_sync_interval_seconds,
+                    shutdown_event,
+                )
+            )
+
         # session_manager.run() initialises the task group that handles all
         # MCP HTTP sessions — must stay alive for the full server lifetime.
         async with mcp.session_manager.run():
             yield
 
         shutdown_event.set()
+        if telegram_task is not None:
+            try:
+                await asyncio.wait_for(telegram_task, timeout=30)
+            except TimeoutError:
+                logger.warning("Telegram poller did not stop within 30s — cancelling")
+                telegram_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await telegram_task
+            except Exception:
+                logger.exception("Telegram poller task failed during shutdown")
         try:
             await asyncio.wait_for(indexer_task, timeout=120)
         except TimeoutError:
