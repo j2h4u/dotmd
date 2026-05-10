@@ -107,13 +107,13 @@ dotMD unless a later phase explicitly justifies it.
 
 ### Telegram
 
-- [ ] **TG-01**: Telegram registers sync/export, read-unit-window,
+- [x] **TG-01**: Telegram registers sync/export, read-unit-window,
   incremental-cursor, and federated-search capabilities where available.
-- [ ] **TG-02**: Repeated Telegram sync processes only new or changed source
+- [x] **TG-02**: Repeated Telegram sync processes only new or changed source
   units; unchanged history is not rechunked/reembedded.
-- [ ] **TG-03**: Telegram sync reporting exposes discovered, new, changed,
+- [x] **TG-03**: Telegram sync reporting exposes discovered, new, changed,
   rebound, skipped, hidden, failed, and reused counts where practical.
-- [ ] **TG-04**: A Telegram result has the same API shape whether it came from
+- [x] **TG-04**: A Telegram result has the same API shape whether it came from
   local dotMD indexing or MCP Telegram native search.
 
 ### Compatibility

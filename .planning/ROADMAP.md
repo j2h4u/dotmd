@@ -153,7 +153,7 @@ See: `.planning/REQUIREMENTS.md`
 | 33. Source lifecycle/config/auth/cursor boundary | 3/3 | Complete    | 2026-05-08 |
 | 34. Federated SearchCandidate contract | v1.6 | Not started | — |
 | 35. Filesystem unified source adapter | 2/2 | Complete    | 2026-05-10 |
-| 36. Telegram unified sync and federated search | 2/2 | Complete   | 2026-05-10 |
+| 36. Telegram unified sync and federated search | 2/2 | Complete    | 2026-05-10 |
 | 37. Airweave connector compatibility spike | v1.6 | Not started | — |
 
 ### Backlog 999.2: Pipeline parallelism — overlap GLiNER and TEI across files
