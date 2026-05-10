@@ -227,6 +227,10 @@ class Settings(BaseSettings):
     # DOTMD_TELEGRAM_DAEMON_SOCKET is the only Phase 29 live transport.
     telegram_daemon_socket: Path | None = None
 
+    # Background Telegram sync polling interval (Phase 36).
+    # DOTMD_TELEGRAM_SYNC_INTERVAL_SECONDS overrides the default.
+    telegram_sync_interval_seconds: float = 300.0
+
     # Federated search settings (Phase 34)
     federated_timeout_seconds: float = 4.0
     """Per-source soft timeout for federated providers (3-5s default range, D-09).

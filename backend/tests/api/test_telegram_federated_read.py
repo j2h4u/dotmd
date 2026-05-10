@@ -147,8 +147,8 @@ class TestFederatedTelegramRead:
 
         telegram_ref = "telegram:dialog:12345:message:67890"
 
-        # Should raise error with clear attribution
-        with pytest.raises(ConnectionError, match="provider"):
+        # Should raise error with clear attribution (service wraps in RuntimeError)
+        with pytest.raises(RuntimeError, match="Telegram provider error"):
             service.read(telegram_ref, 0, 1)
 
     def test_truly_federated_telegram_ref_routes_to_provider(
