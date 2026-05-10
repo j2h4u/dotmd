@@ -103,7 +103,7 @@ def test_phase_34_candidates_never_materializable(tmp_path: Path) -> None:
     class _FakeClient:
         def search_messages(self, query: str, limit: int, dialog_id: int | None = None) -> dict:
             return {
-                "hits": [
+                "messages": [
                     {
                         "dialog_id": 42,
                         "dialog_name": "Project Chat",

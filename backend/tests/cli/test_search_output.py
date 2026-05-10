@@ -35,13 +35,16 @@ class TestRefRendering:
         CliRunner, main = _get_cli()
         from unittest.mock import patch
 
+        from dotmd.core.models import SearchResponse
+
         ref = "filesystem:/mnt/single/file.md#0"
         stub_result = _make_search_candidate(ref)
+        stub_response = SearchResponse(candidates=[stub_result])
 
         runner = CliRunner()
         with patch(
             "dotmd.api.service.DotMDService.search",
-            return_value=[stub_result],
+            return_value=stub_response,
         ):
             result = runner.invoke(
                 main,
