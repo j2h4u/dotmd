@@ -19,6 +19,16 @@ from dotmd.ingestion.source import (
     filesystem_document_ref,
     source_document_to_file_info,
 )
+from dotmd.ingestion.source_lifecycle import (
+    DefaultSourceCredentialProvider,
+    FilesystemSourceConfig,
+    InMemorySourceConfigStore,
+    SourceConfigRecord,
+    SourceRuntimeFactory,
+    SQLiteSourceCursorStore,
+)
+from dotmd.ingestion.source_registry import default_source_registry
+from dotmd.storage.metadata import SQLiteMetadataStore
 
 
 def _write_markdown(
@@ -992,3 +1002,107 @@ def test_source_module_keeps_future_runtime_concepts_deferred() -> None:
     ]
     for term in deferred_terms:
         assert term not in source_text
+
+
+def test_filesystem_adapter_document_for_file_info_is_public_and_correct(
+    tmp_path: Path,
+) -> None:
+    """document_for_file_info is public and produces a correct SourceDocument."""
+    md_path = tmp_path / "note.md"
+    _write_markdown(md_path, "My Note", ["tag"], "Body content.")
+    adapter = FilesystemMarkdownSourceAdapter()
+    file_info = FileInfo(
+        path=md_path,
+        title="My Note",
+        last_modified=datetime.fromtimestamp(md_path.stat().st_mtime, tz=UTC),
+        size_bytes=md_path.stat().st_size,
+        frontmatter={"title": "My Note", "tags": ["tag"]},
+        kind="document",
+    )
+
+    document = adapter.document_for_file_info(file_info)
+
+    assert document.namespace == "filesystem"
+    assert document.document_ref == str(md_path.resolve())
+    assert document.ref == f"filesystem:{md_path.resolve()}"
+    assert document.source_uri == str(md_path.resolve())
+    assert document.document_type == "document"
+    assert document.file_path == md_path
+    assert document.media_type == "text/markdown"
+    assert document.parser_name == "markdown"
+    assert document.content_fingerprint != ""
+    assert document.metadata_fingerprint != ""
+
+
+def test_lifecycle_factory_exposes_document_for_file_info_through_bundle(
+    tmp_path: Path,
+) -> None:
+    """SourceRuntimeFactory.build produces a bundle whose source exposes document_for_file_info."""
+    md_path = tmp_path / "note.md"
+    _write_markdown(md_path, "Lifecycle Note", [], "Content.")
+    config_store = InMemorySourceConfigStore(
+        [
+            SourceConfigRecord(
+                namespace="filesystem",
+                config=FilesystemSourceConfig(paths=[str(tmp_path)]),
+            )
+        ]
+    )
+    metadata_store = SQLiteMetadataStore(
+        db_path=tmp_path / "metadata.db",
+        table_name="chunks_heading_512_50",
+    )
+    factory = SourceRuntimeFactory(
+        registry=default_source_registry(),
+        config_store=config_store,
+        credential_provider=DefaultSourceCredentialProvider(),
+        cursor_store=SQLiteSourceCursorStore(metadata_store),
+    )
+    bundle = factory.build("filesystem")
+    assert bundle.source is not None
+
+    file_info = FileInfo(
+        path=md_path,
+        title="Lifecycle Note",
+        last_modified=datetime.fromtimestamp(md_path.stat().st_mtime, tz=UTC),
+        size_bytes=md_path.stat().st_size,
+        frontmatter={},
+        kind="document",
+    )
+    document = bundle.source.document_for_file_info(file_info)
+
+    assert document.namespace == "filesystem"
+    assert document.document_ref == str(md_path.resolve())
+    assert document.ref == f"filesystem:{md_path.resolve()}"
+
+
+def test_document_for_file_info_and_source_document_to_file_info_round_trip(
+    tmp_path: Path,
+) -> None:
+    """D-04: FileInfo → document_for_file_info → source_document_to_file_info is idempotent.
+
+    document_ref must match the resolved file_path after the round-trip, and
+    key fields (path, title, kind, frontmatter) must be preserved.
+    """
+    md_path = tmp_path / "note.md"
+    _write_markdown(md_path, "Round Trip", ["src"], "Body.")
+    adapter = FilesystemMarkdownSourceAdapter()
+    original_file_info = FileInfo(
+        path=md_path,
+        title="Round Trip",
+        last_modified=datetime.fromtimestamp(md_path.stat().st_mtime, tz=UTC),
+        size_bytes=md_path.stat().st_size,
+        frontmatter={"title": "Round Trip", "tags": ["src"]},
+        kind="document",
+    )
+
+    document = adapter.document_for_file_info(original_file_info)
+    recovered_file_info = source_document_to_file_info(document)
+
+    # D-04 invariant: document_ref must match resolved file_path
+    assert document.document_ref == str(md_path.resolve())
+    assert recovered_file_info.path == md_path
+    # Key fields preserved through round-trip
+    assert recovered_file_info.title == original_file_info.title
+    assert recovered_file_info.kind == original_file_info.kind
+    assert recovered_file_info.frontmatter == original_file_info.frontmatter
