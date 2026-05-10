@@ -1,115 +1,126 @@
 # Technology Stack
 
-**Analysis Date:** 2026-03-23
+**Analysis Date:** 2026-05-10
 
 ## Languages
 
 **Primary:**
-- Python 3.12+ - Core application, CLI, API, MCP server. Requires Python 3.12 minimum due to Pydantic v2
+- Python 3.12+ — entire backend (`backend/src/dotmd/`)
 
 **Secondary:**
-- YAML - Docker Compose configuration
-- Markdown - Source documents for indexing
+- TOML — package manifests and optional user config (`~/.dotmd/config.toml`)
 
 ## Runtime
 
 **Environment:**
-- Python 3.12-slim (Docker base image)
-- No external runtime dependencies beyond Python standard library
+- CPython 3.12 (pinned via `requires-python = ">=3.12"` in `backend/pyproject.toml`)
+- CPU-only deployment target (Xeon E3 V2 — AVX but NOT AVX2; constrains PyTorch to `<2.5`)
 
 **Package Manager:**
-- pip (standard Python package manager)
-- Lockfile: `pyproject.toml` with `build-system` using hatchling
+- `uv` (modal workspace) / `pip` / `hatch` (backend build)
+- Lockfile: `modal/uv.lock` present; backend has no lockfile (managed via `.venv` at `backend/.venv/`)
 
 ## Frameworks
 
 **Core:**
-- FastAPI 0.110+ - REST API framework for `api/server.py`
-- Pydantic v2.0+ - Data models and configuration validation
-- Pydantic Settings 2.0+ - Environment variable configuration management
-- Click 8.0+ - CLI framework for `cli.py`
+- FastAPI `>=0.110` — REST API layer (`backend/src/dotmd/api/server.py`)
+- Uvicorn `>=0.29` (standard extras) — ASGI server
+- FastMCP / `mcp[cli] >=1.0` — MCP server (`backend/src/dotmd/mcp_server.py`); supports stdio and streamable-http transports
+- Starlette — used directly in `mcp_server.py` for middleware/routing alongside FastMCP
+- Click `>=8.0` — CLI entrypoint (`backend/src/dotmd/cli.py`)
+- Pydantic v2 `>=2.0` — all models (`backend/src/dotmd/core/models.py`)
+- pydantic-settings `>=2.0` (with toml extras) — settings with env/TOML/init priority chain (`backend/src/dotmd/core/config.py`)
 
-**ML/Search:**
-- sentence-transformers 3.0+ - Embedding generation (local or via TEI-compatible server)
-- GLiNER 0.2+ - Zero-shot named-entity recognition (urchade/gliner_multi-v2.1 model)
-- rank-bm25 0.2+ - BM25 keyword search implementation
-- cross-encoder/ms-marco-MiniLM-L-6-v2 - Cross-encoder reranking model
+**ML / NLP:**
+- `sentence-transformers >=3.0` — local embedding and CrossEncoder reranking (lazy-loaded)
+- `transformers >=4.45,<5` — backbone for sentence-transformers and GLiNER
+- `torch <2.5` — CPU-only constraint (AVX2 absent on deployment hardware)
+- `einops >=0.8` — tensor ops for transformer models
+- `gliner >=0.2` — zero-shot NER via `urchade/gliner_multi-v2.1` (`backend/src/dotmd/extraction/ner.py`)
 
-**MCP (Model Context Protocol):**
-- mcp[cli] 1.0+ - MCP server framework via FastMCP
-- httpx 0.27+ - HTTP client for remote embedding server calls
+**Storage:**
+- `sqlite-vec >=0.1.6` — SQLite extension for vector similarity search (`backend/src/dotmd/storage/sqlite_vec.py`); no AVX2 requirement
+- `FalkorDB >=1.6.0` — Redis-protocol graph database client (`backend/src/dotmd/storage/falkordb_graph.py`)
+- `real_ladybug >=0.1` — embedded graph DB for local dev (no container needed)
+- `pandas >=2.0` — used in pipeline data processing
 
-**Testing & Utilities:**
-- PyYAML 6.0+ - Configuration file parsing
-- pandas 2.0+ - DataFrame operations for graph query results
+**Utilities:**
+- `blake3 >=1.0` — content hashing for chunk fingerprints (`backend/src/dotmd/ingestion/`)
+- `watchdog >=6.0` — filesystem event watcher for trickle indexer (`backend/src/dotmd/ingestion/trickle.py`)
+- `pyyaml >=6.0` — YAML frontmatter parsing
+- `httpx >=0.27` — async HTTP client for TEI embedding API calls
+
+**Build/Dev:**
+- `hatchling` — build backend (`[build-system]` in `backend/pyproject.toml`)
+- `ruff >=0.6` — linter + formatter (line-length 100, target py312)
+- `pyright >=1.1.380` — type checker (standard mode)
+- `pytest >=8.0` — test runner
+- `pytest-asyncio >=0.24` — async test support (asyncio_mode = "auto")
+- `modal >=0.73` — GPU cloud functions in `modal/` workspace (separate package `dotmd-modal`)
 
 ## Key Dependencies
 
 **Critical:**
-- `real_ladybug 0.1` - Embedded knowledge graph store (forked from Kuzu). Cypher-based graph database for entity/relation queries
-- `sqlite-vec 0.1.6` - SQLite extension for vector similarity search. CPU-only (no AVX2 required), alternative to LanceDB
-- `lancedb 0.6` (optional) - Vector database for embeddings. File-based, embedded. Installed separately via `[lancedb]` extra
-- `sentence-transformers 3.0+` - Used by default with model `BAAI/bge-small-en-v1.5` (384-dim embeddings, retrieval-optimized)
+- `sqlite-vec` — replaces LanceDB for vector storage; no AVX2 needed; embedded in unified `index.db`
+- `FalkorDB` — production graph backend (Redis protocol, external container)
+- `real_ladybug` — embedded graph backend for local dev; kept as alternative
+- `mcp[cli]` — MCP protocol implementation; both stdio and HTTP transports exposed
+- `sentence-transformers` + `torch` — local fallback for embeddings (TEI preferred in prod)
+- `gliner` — zero-shot NER, loaded lazily on first extraction call
 
 **Infrastructure:**
-- `uvicorn[standard] 0.29+` - ASGI server for FastAPI
-- sqlite3 (Python stdlib) - Metadata storage (`metadata.db`). Built-in, no separate installation
+- `pydantic-settings[toml]` — settings loaded from env vars (`DOTMD_*` prefix), TOML file, or programmatic init
+- `blake3` — content fingerprinting enabling embedding reuse via `text_hash` column
+- `watchdog` — drives trickle background indexer (poll interval default 3600s)
+- `httpx` — TEI HTTP client with auto-tuning batch size (down on 413 errors)
+
+**Optional / Conditional:**
+- `lancedb >=0.6` — legacy vector backend, available as optional extra `[lancedb]`; not used in production
+- `modal` — GPU embedding offload (`modal/embed.py`); separate workspace, not part of main package
 
 ## Configuration
 
 **Environment:**
-- All settings use `DOTMD_` prefix (e.g., `DOTMD_DATA_DIR`, `DOTMD_INDEX_DIR`)
-- Managed via `pydantic_settings.BaseSettings` in `core/config.py`
-- Defaults: index stored in `~/.dotmd/`, data in current directory
+- All settings via `DOTMD_*` env vars (prefix defined in `backend/src/dotmd/core/config.py`)
+- TOML file fallback: `~/.dotmd/config.toml`
+- Priority: programmatic init > env vars > TOML > defaults
+- Required at runtime: `DOTMD_EMBEDDING_URL`, `DOTMD_INDEXING_PATHS` (absolute), `data_dir=/mnt`, `index_dir=/dotmd-index`
+- Optional OAuth: `DOTMD_BASE_URL` (HTTPS), `DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES`
+- Telegram source: `DOTMD_TELEGRAM_DAEMON_SOCKET` (UNIX socket path)
+- Federated search: `DOTMD_FEDERATED_TIMEOUT_SECONDS` (default 4.0)
+
+**Key config fields** (`backend/src/dotmd/core/config.py`):
+- `embedding_model` — HuggingFace model ID (TEI ignores this; TEI determines actual model)
+- `embedding_url` — required; TEI server base URL
+- `embedding_weights` — dual-encoder fusion weights, format `"text=0.7,meta=0.3"` (must sum to 1.0)
+- `graph_backend` — `"ladybugdb"` (default/dev) or `"falkordb"` (prod)
+- `chunk_strategy` — default `"heading_512_50"`
+- `reranker_model` — default `"cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"`
+- `ner_model_name` — default `"urchade/gliner_multi-v2.1"`
+- `vector_backend` — `"sqlite-vec"` (default) or `"lancedb"` (legacy)
 
 **Build:**
-- `pyproject.toml` - Project metadata, dependencies, build system (hatchling)
-- `Dockerfile` - Multi-stage Docker build (builder + runtime)
-  - Layer 1: PyTorch CPU-only pinned to <2.5 (for AVX-only CPUs without AVX2)
-  - Layer 2: Dependencies (cache-friendly, rebuilds only on pyproject.toml change)
-  - Layer 3: Application code (frequent rebuilds)
-- `docker-compose.yml` - Two services: `api` (REST on port 8000), `mcp` (MCP server)
+- `backend/pyproject.toml` — hatchling build, ruff config, pyright config, pytest config
+- `docker-compose.yml` — three services: `dotmd`, `tei` (bundled profile), `falkordb` (bundled profile)
 
 ## Platform Requirements
 
 **Development:**
 - Python 3.12+
-- pip + hatchling
-- For embeddings: either local GPU/CPU or HTTP access to TEI-compatible server
-- Optional: Docker + Docker Compose for containerized deployment
+- SQLite with sqlite-vec extension loadable
+- TEI server required (no embedded fallback in production config)
+- LadybugDB for graph in dev (no separate container)
 
 **Production:**
-- Python 3.12+ runtime
-- 512MB+ RAM for embedding models (sentence-transformers)
-- ~2-3GB disk for vector/graph indexes at typical scale
-- For remote embeddings: HTTP connectivity to TEI server (e.g., `http://embeddings:8088`)
-
-**CPU Constraints:**
-- PyTorch pinned to <2.5 in Docker to support CPUs with AVX but not AVX2 (e.g., Intel Xeon E3 V2)
-- If AVX2 available, PyTorch can be upgraded but SIGILL errors occur with newer versions on AVX-only CPUs
-
-## Model Downloads
-
-**Embeddings:**
-- Default: `BAAI/bge-small-en-v1.5` (384-dim, ~33MB, HuggingFace Hub)
-- Alternative: `sentence-transformers/all-MiniLM-L6-v2` (384-dim, ~27MB)
-- Configurable: `DOTMD_EMBEDDING_MODEL` environment variable
-
-**Reranker:**
-- Default: `cross-encoder/ms-marco-MiniLM-L-6-v2` (~32MB, HuggingFace Hub)
-- Lazy-loaded on first search if reranking enabled
-
-**NER:**
-- Default: `urchade/gliner_multi-v2.1` (multilingual zero-shot NER, ~440MB)
-- Lazy-loaded on first index operation with extraction depth "ner"
-- Entity types configurable: `DOTMD_NER_ENTITY_TYPES`
-
-## Optional Dependencies
-
-**For evaluation/benchmarking:**
-- `openai 1.0+` - For evaluation scripts (optional `[eval]` extra)
-- `tqdm 4.60+` - Progress bars (optional `[eval]` extra)
+- Docker container `dotmd` (bind-mount source for hot-reload without rebuild)
+- External TEI container: `ghcr.io/huggingface/text-embeddings-inference:cpu-1.9` on port 8088
+- External FalkorDB container: `falkordb/falkordb:latest` (Redis protocol)
+- Docker volume `dotmd_dotmd-index` → `/dotmd-index/` (unified `index.db` + `feedback.db`)
+- Docker volume `dotmd_dotmd-hf-models` → `/root/.cache/huggingface` (shared HF model cache)
+- MCP HTTP entrypoint: `dotmd mcp --transport streamable-http --host 0.0.0.0 --port 8080`
+- Health endpoint: `GET /health` on port 8080
+- Source code bind-mounted — restart (not rebuild) for code changes; rebuild only for `pyproject.toml`/`start.sh` changes
 
 ---
 
-*Stack analysis: 2026-03-23*
+*Stack analysis: 2026-05-10*

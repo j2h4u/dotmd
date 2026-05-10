@@ -1,237 +1,237 @@
 # Codebase Structure
 
-**Analysis Date:** 2026-03-23
+**Analysis Date:** 2026-05-10
 
 ## Directory Layout
 
 ```
-dotmd/
-├── backend/                    # Python package (main codebase)
-│   ├── pyproject.toml          # Package metadata, dependencies, build config
-│   ├── src/dotmd/              # Importable package (src layout)
-│   │   ├── __init__.py
-│   │   ├── __main__.py         # Entry point when run as module: python -m dotmd
-│   │   ├── cli.py              # Click CLI commands (index, search, status)
-│   │   ├── mcp_server.py       # FastMCP server for Claude integration
-│   │   ├── core/               # Domain models and configuration
-│   │   │   ├── __init__.py
-│   │   │   ├── config.py       # Settings class (DOTMD_* env vars)
-│   │   │   ├── exceptions.py   # Custom exception types
-│   │   │   └── models.py       # Pydantic models: Chunk, Entity, Relation, SearchResult, IndexStats
-│   │   ├── api/                # Service facade and HTTP server
-│   │   │   ├── __init__.py
-│   │   │   ├── service.py      # DotMDService: main public API
-│   │   │   ├── server.py       # FastAPI app (HTTP endpoints)
-│   │   │   └── types.py        # API request/response types
-│   │   ├── ingestion/          # File discovery, reading, chunking
-│   │   │   ├── __init__.py
-│   │   │   ├── reader.py       # discover_files(), read_file()
-│   │   │   ├── chunker.py      # chunk_file() — markdown-aware token-based chunking
-│   │   │   └── pipeline.py     # IndexingPipeline: orchestrates full indexing workflow
-│   │   ├── extraction/         # Information extraction (entities, relations)
-│   │   │   ├── __init__.py
-│   │   │   ├── base.py         # ExtractorProtocol
-│   │   │   ├── structural.py   # StructuralExtractor: wikilinks, tags, YAML, links, headings
-│   │   │   ├── ner.py          # NERExtractor: GLiNER zero-shot entity recognition
-│   │   │   ├── keyterms.py     # KeyTermExtractor: TF-IDF + acronyms + heading terms
-│   │   │   └── acronyms.py     # extract_acronyms_from_chunks()
-│   │   ├── search/             # Search engines and fusion
-│   │   │   ├── __init__.py
-│   │   │   ├── base.py         # SearchEngineProtocol
-│   │   │   ├── semantic.py     # SemanticSearchEngine: dense vectors (local or remote TEI)
-│   │   │   ├── bm25.py         # BM25SearchEngine: sparse keyword ranking
-│   │   │   ├── graph_search.py # GraphSearchEngine: entity/relation traversal
-│   │   │   ├── query.py        # QueryExpander: synonym/acronym expansion
-│   │   │   ├── reranker.py     # Reranker: cross-encoder rescoring
-│   │   │   └── fusion.py       # fuse_results(): Reciprocal Rank Fusion, build_search_results()
-│   │   ├── storage/            # Storage backends for embeddings, graph, metadata
-│   │   │   ├── __init__.py
-│   │   │   ├── base.py         # VectorStoreProtocol, GraphStoreProtocol, MetadataStoreProtocol
-│   │   │   ├── vector.py       # LanceDBVectorStore: vector similarity search
-│   │   │   ├── sqlite_vec.py   # SQLiteVecVectorStore: vector store backed by sqlite-vec
-│   │   │   ├── graph.py        # LadybugDBGraphStore: knowledge graph (forked Kuzu)
-│   │   │   └── metadata.py     # SQLiteMetadataStore: chunks and index statistics
-│   │   └── utils/              # Shared utilities
+dotmd/                              # Repo root
+├── backend/                        # Python package (src layout)
+│   ├── pyproject.toml              # Package definition, dependencies, tool config
+│   ├── start.sh                    # Container entrypoint
+│   ├── benchmarks/                 # Performance benchmarks (not part of test suite)
+│   ├── devtools/                   # Developer utilities (mcp_client/, reranker bench)
+│   │   └── mcp_client/             # Streamable-HTTP MCP test client
+│   ├── src/
+│   │   └── dotmd/                  # Importable package root
 │   │       ├── __init__.py
-│   │       ├── text.py         # tokenize(), estimate_tokens(), split_sentences()
-│   │       └── logging.py      # setup_logging()
-│   └── eval/                   # Evaluation framework (optional, not core)
-│       ├── __init__.py
-│       ├── __main__.py
-│       ├── metrics.py          # Evaluation metrics
-│       ├── run_hotpotqa.py     # HotpotQA benchmark
-│       ├── data_prep.py        # Test data preparation
-│       └── utils.py            # Evaluation utilities
-├── data/                       # Sample markdown files for testing
-│   └── *.md
-└── README.md                   # Project overview
+│   │       ├── __main__.py         # `python -m dotmd` entry
+│   │       ├── cli.py              # Click CLI (thin DotMDService wrapper)
+│   │       ├── mcp_server.py       # FastMCP server + Starlette ASGI app
+│   │       ├── auth.py             # OAuth provider (DotMDOAuthProvider)
+│   │       ├── feedback.py         # FeedbackStore (feedback.db)
+│   │       ├── api/                # Service facade + FastAPI stubs
+│   │       │   ├── service.py      # DotMDService — all business logic
+│   │       │   ├── server.py       # FastAPI REST app (thin, wraps service)
+│   │       │   └── types.py        # Shared API type aliases
+│   │       ├── core/               # Domain models, config, registry
+│   │       │   ├── models.py       # All Pydantic domain types
+│   │       │   ├── config.py       # Settings (pydantic-settings)
+│   │       │   ├── exceptions.py   # IndexingLockError, etc.
+│   │       │   └── source_registry.py  # SourceRegistry class
+│   │       ├── ingestion/          # Indexing pipeline and source adapters
+│   │       │   ├── pipeline.py     # IndexingPipeline (main orchestrator)
+│   │       │   ├── trickle.py      # TrickleIndexer (watchdog background indexer)
+│   │       │   ├── source_lifecycle.py  # SourceRuntimeFactory + SourceRuntimeBundle
+│   │       │   ├── source_registry.py   # default_source_registry() factory
+│   │       │   ├── source.py       # FilesystemMarkdownSourceAdapter
+│   │       │   ├── source_provider.py   # ApplicationSourceProviderProtocol
+│   │       │   ├── telegram_provider.py # TelegramApplicationSourceProvider
+│   │       │   ├── chunker.py      # Content-aware chunking strategies
+│   │       │   ├── content_handlers.py  # DocKind-specific content handlers
+│   │       │   ├── reader.py       # File reading, frontmatter, file discovery
+│   │       │   ├── file_tracker.py # FileTracker + FileDiff (mtime/hash diff)
+│   │       │   ├── lock.py         # fcntl.flock exclusive indexing lock
+│   │       │   ├── migration.py    # Schema migrations
+│   │       │   └── migrate_fingerprints_to_blake3.py  # One-time migration script
+│   │       ├── extraction/         # Entity/keyword extraction
+│   │       │   ├── base.py         # ExtractorProtocol
+│   │       │   ├── structural.py   # StructuralExtractor (frontmatter tags)
+│   │       │   ├── ner.py          # NERExtractor (GLiNER zero-shot)
+│   │       │   ├── acronyms.py     # Acronym extraction from chunks
+│   │       │   └── keyterms.py     # KeyTermExtractor
+│   │       ├── search/             # Search engines, fusion, reranking
+│   │       │   ├── base.py         # SearchEngineProtocol
+│   │       │   ├── semantic.py     # SemanticSearchEngine (TEI + sqlite-vec)
+│   │       │   ├── fts5.py         # FTS5SearchEngine (SQLite BM25)
+│   │       │   ├── graph_direct.py # GraphDirectEngine (entity catalog → chunks)
+│   │       │   ├── graph_search.py # GraphSearchEngine (post-fusion enrichment)
+│   │       │   ├── federated.py    # LocalEngineOutcome, FederatedEngineOutcome, fanout_federated
+│   │       │   ├── fusion.py       # RRF fusion + build_candidates()
+│   │       │   ├── reranker.py     # RerankerFactory + cross-encoder scoring
+│   │       │   └── query.py        # QueryExpander (acronym expansion)
+│   │       ├── storage/            # Persistence backends
+│   │       │   ├── base.py         # Protocol definitions (VectorStore, GraphStore, MetadataStore)
+│   │       │   ├── metadata.py     # SQLiteMetadataStore (chunks, FTS5, fingerprints, bindings)
+│   │       │   ├── sqlite_vec.py   # SQLiteVecVectorStore (sqlite-vec)
+│   │       │   ├── vec_components.py  # VecComponentStore (low-level vec table ops)
+│   │       │   ├── falkordb_graph.py  # FalkorDBGraphStore (production)
+│   │       │   ├── graph.py        # LadybugDBGraphStore (local dev, embedded)
+│   │       │   ├── cache.py        # EmbeddingCache + ExtractionCache
+│   │       │   └── vector.py       # Shared vector helpers
+│   │       └── utils/              # Shared utilities
+│   │           ├── logging.py      # setup_logging()
+│   │           └── text.py         # Text manipulation helpers
+│   └── tests/                      # Test suite (mirrors src layout)
+│       ├── conftest.py             # Shared fixtures
+│       ├── api/                    # Service and lifecycle tests
+│       ├── cli/                    # CLI output tests
+│       ├── core/                   # Config, model tests
+│       ├── devtools/               # Reranker bench tests
+│       ├── e2e/                    # MCP smoke tests
+│       ├── fixtures/               # Test data factories
+│       ├── ingestion/              # Pipeline, chunker, provider tests
+│       ├── mcp/                    # MCP server tests
+│       ├── search/                 # Engine tests (via top-level test_*.py)
+│       └── storage/                # Storage backend tests
+├── data/                           # Sample markdown files for dev/testing
+├── .mcp.json                       # Claude Code MCP config (stdio via docker exec)
+├── graphify-out/                   # Generated dependency graph output (not committed normally)
+└── AGENTS.md                       # Project documentation for agents
 ```
 
 ## Directory Purposes
 
-**`backend/`:**
-- Purpose: Self-contained Python package with full indexing and search implementation
-- Packaging: Standard layout with `pyproject.toml`, `src/dotmd/` as importable package
-- Deployment: Installable via `pip install -e .` or published to PyPI
+**`backend/src/dotmd/api/`:**
+- Purpose: Service facade and optional REST API
+- Contains: `DotMDService` (the only public API), `server.py` (FastAPI thin layer), `types.py`
+- Key files: `service.py` (2035 lines — largest file after pipeline.py)
 
-**`src/dotmd/`:**
-- Purpose: Root of importable package (src-layout pattern)
-- Convention: All imports are `from dotmd.X import Y`, never relative imports
+**`backend/src/dotmd/core/`:**
+- Purpose: Shared domain vocabulary; no business logic
+- Contains: All Pydantic models, env-var configuration, exceptions, source registry class
+- Key files: `models.py` (all enums and domain types), `config.py` (Settings)
 
-**`src/dotmd/core/`:**
-- Purpose: Shared domain layer — types and configuration
-- Stability: Very stable; changes here affect all layers
-- Key exports: `Chunk`, `Entity`, `Relation`, `SearchResult`, `IndexStats`, `Settings`
+**`backend/src/dotmd/ingestion/`:**
+- Purpose: Everything that touches files on disk and produces indexed artifacts
+- Contains: Pipeline orchestrator, trickle watcher, source adapters, chunking, fingerprinting
+- Key files: `pipeline.py` (3777 lines — largest file in the codebase), `source_lifecycle.py`
 
-**`src/dotmd/api/`:**
-- Purpose: Public-facing interfaces (DotMDService, HTTP server, types)
-- Stability: Stable — main API boundary
-- Used by: CLI, MCP server, FastAPI, direct Python imports
+**`backend/src/dotmd/extraction/`:**
+- Purpose: Knowledge extraction from document content (entities, tags, acronyms)
+- Contains: Protocol + three concrete extractors
+- Key files: `structural.py` (frontmatter-based, always on), `ner.py` (GLiNER, controlled by `DOTMD_EXTRACT_DEPTH=ner`)
 
-**`src/dotmd/ingestion/`:**
-- Purpose: One-directional input processing: files → chunks
-- Dependencies: Core models, utilities (text processing)
-- Used by: Indexing pipeline only
+**`backend/src/dotmd/search/`:**
+- Purpose: All retrieval, ranking, and federated orchestration
+- Contains: Four search engines, RRF fusion, cross-encoder reranker, federated outcome types
+- Key files: `federated.py` (outcome types and fan-out), `fusion.py` (RRF + candidate hydration)
 
-**`src/dotmd/extraction/`:**
-- Purpose: Post-chunking information extraction
-- Pattern: Multiple extractors (structural, NER, key-terms) run independently, results combined
-- Extensibility: Implement `ExtractorProtocol` to add new extraction strategies
+**`backend/src/dotmd/storage/`:**
+- Purpose: Persistence abstractions and concrete backends
+- Contains: Three Protocol definitions and their implementations; two graph backends
+- Key files: `base.py` (contracts for all backends), `metadata.py` (1705 lines — most complex storage file)
 
-**`src/dotmd/search/`:**
-- Purpose: Retrieval strategies and query processing
-- Pattern: Engines run in parallel, fused via RRF, optionally reranked
-- Extensibility: Implement `SearchEngineProtocol` to add new search engines (e.g., hybrid BM25+semantic fusion within single engine)
-
-**`src/dotmd/storage/`:**
-- Purpose: Data persistence abstractions and implementations
-- Pattern: Three independent storage concerns (vectors, graph, metadata) with protocol-based backends
-- Extensibility: Implement protocols to swap backends (e.g., Pinecone instead of LanceDB for vectors)
-
-**`src/dotmd/utils/`:**
-- Purpose: Shared utilities — text processing, tokenization, logging
-- Stability: Very stable; used everywhere
-- No dependencies on other `dotmd.*` modules (only stdlib + external libs)
-
-**`eval/`:**
-- Purpose: Evaluation framework for benchmarking retrieval quality
-- Stability: Separate from core; can be refactored independently
-- Entry: Run `python -m dotmd.eval --help` for benchmark commands
+**`backend/tests/`:**
+- Purpose: All automated tests, mirroring the `src/dotmd/` package structure
+- Contains: Unit tests co-located by domain, integration tests in `ingestion/`, e2e MCP tests in `e2e/`
+- Key files: `conftest.py` (shared fixtures), `ingestion/application_source_fixtures.py`
 
 ## Key File Locations
 
 **Entry Points:**
-- `src/dotmd/__main__.py` — Module execution: `python -m dotmd`
-- `src/dotmd/cli.py` — CLI commands: `dotmd index`, `dotmd search`
-- `src/dotmd/mcp_server.py` — MCP tools for Claude
-- `src/dotmd/api/server.py` — FastAPI HTTP server
+- `backend/start.sh`: Container entrypoint — `exec dotmd mcp --transport streamable-http --host 0.0.0.0 --port 8080`
+- `backend/src/dotmd/__main__.py`: `python -m dotmd` entry
+- `backend/src/dotmd/cli.py`: Click CLI root group `main`
+- `backend/src/dotmd/mcp_server.py`: `create_app()` (HTTP) and `init_service()` (stdio)
 
 **Configuration:**
-- `src/dotmd/core/config.py` — `Settings` class (environment variables, defaults)
-- `pyproject.toml` — Package metadata, dependencies, build config, script entry points
+- `backend/pyproject.toml`: Package metadata, all dependencies, ruff/mypy config
+- `/opt/docker/dotmd/.env` (server): Production env vars (not in repo)
+- `backend/src/dotmd/core/config.py`: `Settings` class — all env var definitions
 
 **Core Logic:**
-- `src/dotmd/api/service.py` — `DotMDService` (main facade)
-- `src/dotmd/ingestion/pipeline.py` — `IndexingPipeline` (orchestrates indexing)
-- `src/dotmd/search/fusion.py` — `fuse_results()` (RRF merging)
+- `backend/src/dotmd/api/service.py`: `DotMDService` — all public operations
+- `backend/src/dotmd/ingestion/pipeline.py`: `IndexingPipeline` — full indexing orchestration
+- `backend/src/dotmd/search/federated.py`: Search concurrency model and outcome types
+- `backend/src/dotmd/storage/base.py`: Backend contracts
 
-**Domain Models:**
-- `src/dotmd/core/models.py` — All Pydantic models (Chunk, Entity, Relation, SearchResult, IndexStats, ExpandedQuery, FileInfo)
-
-**Storage Protocols:**
-- `src/dotmd/storage/base.py` — `VectorStoreProtocol`, `GraphStoreProtocol`, `MetadataStoreProtocol`
-
-**Search Protocols:**
-- `src/dotmd/search/base.py` — `SearchEngineProtocol`
-
-**Extraction Protocols:**
-- `src/dotmd/extraction/base.py` — `ExtractorProtocol`
+**Testing:**
+- `backend/tests/conftest.py`: Shared pytest fixtures
+- `backend/tests/ingestion/application_source_fixtures.py`: Source adapter test factories
+- `backend/tests/e2e/test_mcp_smoke.py`: Full MCP integration smoke test
 
 ## Naming Conventions
 
 **Files:**
-- Lowercase with underscores: `reader.py`, `bm25.py`, `graph_search.py`
-- Protocol definitions: `*_protocol.py` or `base.py` (e.g., `base.py` for protocols, used in search/, storage/, extraction/)
-- Implementation files match concrete class names: `LanceDBVectorStore` → `vector.py` (generic), `SQLiteVecVectorStore` → `sqlite_vec.py` (specific backend)
-
-**Directories:**
-- Lowercase plural for packages containing multiple related modules: `search/`, `storage/`, `extraction/`, `ingestion/`
-- Single-module packages use singular: `core/`, `api/`, `utils/`
+- `snake_case.py` throughout — no exceptions
+- Protocols/interfaces: `*_protocol.py` suffix not used; instead the Protocol class is defined in a `base.py` file per package (e.g., `storage/base.py`, `search/base.py`, `extraction/base.py`, `ingestion/source_provider.py`)
+- Test files: `test_<domain>.py` or `test_<feature>.py`
 
 **Classes:**
-- PascalCase: `DotMDService`, `LanceDBVectorStore`, `StructuralExtractor`
-- Protocols: `VectorStoreProtocol`, `SearchEngineProtocol`, `ExtractorProtocol`
-- Implementation classes: `LanceDBVectorStore`, `SQLiteVecVectorStore`, `LadybugDBGraphStore`, `SQLiteMetadataStore`
+- Concrete implementations: `<Backend><Domain>` (e.g., `SQLiteMetadataStore`, `FalkorDBGraphStore`, `SQLiteVecVectorStore`)
+- Protocols: `<Domain>Protocol` (e.g., `MetadataStoreProtocol`, `GraphStoreProtocol`, `SearchEngineProtocol`)
+- Pydantic models: PascalCase noun (e.g., `SearchCandidate`, `SourceDocument`, `SourceRuntimeBundle`)
+- Enums: `StrEnum` subclasses with UPPER_CASE members (e.g., `SearchMode.HYBRID`, `DocKind.MEETING_TRANSCRIPT`)
 
-**Functions:**
-- Snake_case: `chunk_file()`, `discover_files()`, `fuse_results()`, `tokenize()`
-- Private (internal) functions: `_split_with_overlap()`, `_make_chunk_id()`, `_extract_best_snippet()`
-
-**Variables:**
-- Module-level constants (regex, SQL): `_HEADING_RE`, `_CREATE_CHUNKS`, `_ENGINE_SCORE_FIELDS`
-- Private module data: `_service` (in mcp_server.py for singleton)
+**Directories:**
+- Flat package structure — one directory per domain layer, no nesting within a layer
+- Test directories mirror source: `tests/ingestion/` mirrors `src/dotmd/ingestion/`
 
 ## Where to Add New Code
 
-**New Feature (end-to-end):**
-- Primary code: Implement in logical layer (e.g., new search mode in `search/`, new extraction strategy in `extraction/`)
-- Tests: Add `test_feature.py` or extend existing test in `/tests/`
-- Models: If new domain types needed, add to `core/models.py`
+**New search engine:**
+- Implement `SearchEngineProtocol` from `backend/src/dotmd/search/base.py`
+- Place implementation in `backend/src/dotmd/search/<name>.py`
+- Wire into `DotMDService.__init__` in `backend/src/dotmd/api/service.py`
+- Add to `_collect_candidate_pool()` and the local search sequence in `service.py`
+- Tests: `backend/tests/search/` or `backend/tests/api/`
 
-**New Search Engine:**
-- Implementation: Create class in `src/dotmd/search/` implementing `SearchEngineProtocol`
-- Example: `class MySearchEngine: def search(self, query: str, top_k: int) -> list[tuple[str, float]]: ...`
-- Integration: Import in `api/service.py`, instantiate in `DotMDService.__init__()`, add to search pipeline in `search()` method
-- File naming: If simple/experimental: add method to existing file (e.g., `semantic.py`). If complex: new file `my_search.py`
+**New source adapter (ingestion):**
+1. Register a `SourceDescriptor` in `backend/src/dotmd/ingestion/source_registry.py` → `default_source_registry()`
+2. Add a `SourceConfig` subclass in `backend/src/dotmd/ingestion/source_lifecycle.py`
+3. Implement `ApplicationSourceProviderProtocol` (for federated) or `SourceAdapterProtocol` (for local sync) in a new file under `backend/src/dotmd/ingestion/`
+4. Handle the namespace branch in `SourceRuntimeFactory.build()` in `source_lifecycle.py`
+5. If federated search: add `SourceCapability.FEDERATED_SEARCH` to the descriptor's `capabilities`
+6. Tests: `backend/tests/ingestion/`
 
-**New Extractor:**
-- Implementation: Create class in `src/dotmd/extraction/` implementing `ExtractorProtocol`
-- Example: `class MyExtractor: def extract(self, chunks: list[Chunk]) -> ExtractionResult: ...`
-- Integration: Instantiate in `IndexingPipeline.__init__()`, call in `index()` method, combine results with other extractors
-- File naming: `my_extractor.py` or add to `structural.py` if closely related
+**New storage backend:**
+- Implement the relevant Protocol(s) from `backend/src/dotmd/storage/base.py`
+- Place in `backend/src/dotmd/storage/<name>.py`
+- Wire in `IndexingPipeline.__init__` in `backend/src/dotmd/ingestion/pipeline.py` (graph_backend config switch is the pattern to follow)
+- Tests: `backend/tests/storage/`
 
-**New Storage Backend:**
-- Implementation: Create class in `src/dotmd/storage/` implementing relevant protocol (`VectorStoreProtocol`, `GraphStoreProtocol`, `MetadataStoreProtocol`)
-- Example for vector store: `class PineconeVectorStore: def add_chunks(...): ... def search(...): ...`
-- Integration: Import in `ingestion/pipeline.py`, instantiate in `_create_vector_store()` based on `Settings.vector_backend`
-- File naming: `my_backend.py` (e.g., `pinecone.py`, `milvus.py`)
+**New extractor:**
+- Implement `ExtractorProtocol` from `backend/src/dotmd/extraction/base.py`
+- Place in `backend/src/dotmd/extraction/<name>.py`
+- Call from `IndexingPipeline._extract()` in `backend/src/dotmd/ingestion/pipeline.py`
+- Tests: `backend/tests/ingestion/` or a new `backend/tests/extraction/`
 
-**Utilities:**
-- Shared helpers: `src/dotmd/utils/text.py` (text processing), `src/dotmd/utils/logging.py` (setup)
-- Avoid circular imports: utilities should not depend on other `dotmd.*` modules
+**New MCP tool:**
+- Add `@mcp.tool(name="...")` decorated async function in `backend/src/dotmd/mcp_server.py`
+- Add corresponding method to `DotMDService` in `backend/src/dotmd/api/service.py`
+- Tests: `backend/tests/mcp/`
 
-**Configuration:**
-- New settings: Add fields to `Settings` class in `src/dotmd/core/config.py`
-- Environment variables: Auto-prefixed with `DOTMD_` by pydantic-settings
-- Defaults: Set directly in class definition
-- Example: `my_option: str = "default_value"` becomes `DOTMD_MY_OPTION=value`
+**New domain model:**
+- Add Pydantic class to `backend/src/dotmd/core/models.py`
+- Export via `core/__init__.py` if needed by multiple layers
+
+**New utility:**
+- Shared text/string helpers: `backend/src/dotmd/utils/text.py`
+- Logging helpers: `backend/src/dotmd/utils/logging.py`
 
 ## Special Directories
 
-**`~/.dotmd/` (Runtime Index Storage):**
-- Purpose: Persists all indexed data across sessions
-- Generated: Yes (created by `IndexingPipeline` if not exists)
-- Committed: No (user data, not source code)
-- Contents:
-  - `lancedb/` or `vec.db` — Vector embeddings (depends on `Settings.vector_backend`)
-  - `graphdb/` — Knowledge graph (LadybugDB)
-  - `metadata.db` — SQLite chunks and statistics
-  - `bm25_index.pkl` — Pickled BM25 index
-  - `acronyms.json` — Extracted acronym dictionary
-
-**`eval/` (Evaluation/Benchmarking):**
-- Purpose: Separate benchmark suite for retrieval quality assessment
-- Generated: No (source code)
-- Committed: Yes (part of repo)
-- Used for: Testing on HotpotQA, measuring MRR/NDCG/etc.
-- Entry: `python -m dotmd.eval`
-
-**`data/` (Test Data):**
-- Purpose: Sample markdown files for testing and demos
-- Generated: No (hand-written examples)
+**`backend/devtools/`:**
+- Purpose: Developer-only scripts and utilities (MCP test client, reranker latency/quality benchmarks)
+- Generated: No
 - Committed: Yes
-- Used by: Tests, examples, manual verification
+
+**`backend/benchmarks/`:**
+- Purpose: Performance benchmarks not run in CI
+- Generated: No
+- Committed: Yes
+
+**`graphify-out/`:**
+- Purpose: Output from the `graphify` dependency graph tool
+- Generated: Yes (by `/graphify` skill)
+- Committed: Partially (in `.gitignore` or ignored in working tree)
+
+**`data/`:**
+- Purpose: Sample markdown files for local development and testing
+- Generated: No
+- Committed: Yes
 
 ---
 
-*Structure analysis: 2026-03-23*
+*Structure analysis: 2026-05-10*

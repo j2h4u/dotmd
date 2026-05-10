@@ -1,292 +1,349 @@
 # Testing Patterns
 
-**Analysis Date:** 2026-03-23
+**Analysis Date:** 2026-05-10
 
 ## Test Framework
 
-**Status:** No automated test suite currently implemented.
-
 **Runner:**
-- Not detected. No `pytest.ini`, `pyproject.toml` test configuration, or `conftest.py` found.
+- pytest 8.x (declared `pytest>=8.0` in `backend/pyproject.toml`)
+- Config: `backend/pyproject.toml` `[tool.pytest.ini_options]`
+
+**Async support:**
+- pytest-asyncio 0.24+ with `asyncio_mode = "auto"` — all `async def` test functions run automatically without `@pytest.mark.asyncio`
 
 **Assertion Library:**
-- Not applicable (no tests present)
+- pytest's built-in `assert` (no third-party assertion library)
 
 **Run Commands:**
-- Testing infrastructure not yet set up
+```bash
+cd backend
+# Run all tests (stops on first failure by default — addopts = "-x --tb=short")
+python -m pytest
+
+# Run a specific subdir
+python -m pytest tests/ingestion/
+
+# Run a specific file
+python -m pytest tests/ingestion/test_pipeline_metadata.py
+
+# Run with verbose output
+python -m pytest -v
+
+# Disable fail-fast for full run
+python -m pytest --no-header -p no:cacheprovider
+
+# E2E inside container (must run as docker exec)
+docker exec dotmd sh -c "cd /mnt/home/repos/j2h4u/dotmd/backend && python -m pytest tests/e2e/ -v -p no:cacheprovider"
+```
 
 ## Test File Organization
 
-**Current State:**
-- No `test_*.py` or `*_test.py` files found in codebase
-- Evaluation code exists in `backend/eval/` for external benchmarking (HotpotQA dataset), separate from unit tests
-- Evaluation is ad-hoc, not integrated into testing framework
+**Location:** Separate `backend/tests/` tree, NOT co-located with source.
 
-**Recommended Pattern (when tests are added):**
-- Location: Co-located with source code
-  - Example: `src/dotmd/search/test_semantic.py` for `src/dotmd/search/semantic.py`
-  - Or: `tests/unit/search/test_semantic.py` for cleaner separation
-- Naming: `test_<module>.py` convention
-- Structure: One test file per module or logical group
-
-## Manual Testing Patterns (Current Approach)
-
-**CLI-Based:**
-The project uses manual CLI testing during development:
-```bash
-# Index sample data
-dotmd index ./data/
-
-# Perform searches
-dotmd search "your query"
-
-# Check index stats
-dotmd status
-
-# Test with options
-dotmd search "query" --mode hybrid --no-rerank --no-expand
+**Structure mirrors `src/dotmd/`:**
+```
+backend/tests/
+├── conftest.py               # Global autouse fixtures (env, mock semantic, mock schema check)
+├── ingestion/                # Mirrors src/dotmd/ingestion/
+│   ├── conftest.py           # (not present — uses root conftest)
+│   ├── test_pipeline_metadata.py
+│   ├── test_incremental_pipeline.py
+│   ├── test_telegram_provider.py
+│   └── application_source_fixtures.py  # Shared helper module (not a conftest)
+├── search/
+│   ├── conftest.py           # search-specific fixtures (StubFederatedProvider, bundles)
+│   └── test_federated.py
+├── storage/
+│   └── test_metadata_m2m.py
+├── api/
+│   └── test_service_search.py
+├── mcp/
+│   └── test_search_tool.py
+├── cli/
+│   └── test_search_output.py
+├── core/
+│   └── test_search_candidate.py
+├── e2e/
+│   ├── conftest.py           # MCP transport fixtures (http + stdio parametrize)
+│   └── test_mcp_smoke.py
+└── devtools/
+    └── test_reranker_latency_bench.py
 ```
 
-**Evaluation Scripts (`backend/eval/`):**
-External evaluation harness for benchmarking against HotpotQA dataset:
-- `eval/run_hotpotqa.py` — Main evaluation runner
-- `eval/data_prep.py` — Dataset preparation
-- `eval/metrics.py` — Metrics computation (MRR, NDCG, etc.)
-- `eval/models.py` — Evaluation data structures
+**Naming:**
+- Test files: `test_<module_or_feature>.py`
+- Test classes: `Test<FeatureName>` (e.g., `TestFirstIndex`, `TestToolSurface`)
+- Test functions: `test_<what_it_asserts>` — descriptive, full sentence style
+  (e.g., `test_metadata_only_change_calls_encode_batch_once`, `test_no_change_skips_encode_batch`)
 
-Usage pattern (inferred from codebase):
-```bash
-cd backend
-python -m eval --dataset hotpotqa --top-k 10
+## Test Structure
+
+**Suite organization:**
+```python
+# File-level: module docstring states what it covers
+"""Integration tests for Plan 02 pipeline branching logic (Phase 999.12).
+
+Covers:
+- Fast path detection: metadata-only vs body change vs no change
+...
+"""
+
+# Class grouping (used when multiple related scenarios):
+class TestFirstIndex:
+    """First index (no fingerprints) treats all files as new."""
+
+    @patch("dotmd.ingestion.source.discover_files")
+    def test_first_index_ingests_all_files(self, mock_discover, ...):
+        ...
+
+# Module-level functions (no class) for standalone tests:
+def test_no_change_skips_encode_batch(minimal_settings, tmp_path):
+    ...
 ```
 
-**Visualization:**
-- `visualize_graph.py` — Ad-hoc script to inspect knowledge graph structure
+**Section separators** used within long test files to group related tests:
+```python
+# ── Fast path detection ──────────────────────────────────────────────────────
+```
 
-## Mock/Stub Patterns
+**Setup pattern:**
+- Fixtures provide temp dirs, stores, settings
+- Helper functions (prefixed with `_`) build test data inline: `_write_md(...)`, `_make_file_info(...)`, `_make_chunk(...)`
+- `tmp_path` (pytest built-in) used universally for filesystem isolation; `tmp_dir` is a legacy alias defined in root conftest
 
-**No mocking framework currently used** (no pytest-mock, unittest.mock imports found)
+**Teardown:** No explicit teardown — temp fixtures clean themselves up via pytest's `tmp_path` scoping.
 
-**Recommended approach when adding tests:**
+## Autouse Fixtures (Global — `backend/tests/conftest.py`)
 
-**Protocol-based mocking:**
-Use Protocols to create test doubles. Example pattern for `VectorStoreProtocol`:
+Three `autouse=True` fixtures apply to every test by default:
+
+**`_dotmd_test_env`** — sets minimal env vars via `monkeypatch.setenv`:
+- `DOTMD_EMBEDDING_URL=http://test-tei:8088` (non-routable stub)
+- `DOTMD_EXTRACT_DEPTH=structural` (prevents NER model load)
+- `DOTMD_GRAPH_BACKEND=ladybugdb` (embedded graph, no container)
+- `DOTMD_FALKORDB_URL=redis://127.0.0.1:1` (unreachable fallback)
+
+**`_mock_semantic_engine`** — patches `SemanticSearchEngine.encode_batch` to return zero-vectors (dimension 8) and `get_tei_model_id` to return `"stub-model"`. Opt out with:
+```python
+@pytest.mark.real_semantic_encode_batch
+def test_my_test(...):
+    ...
+```
+
+**`_mock_schema_version_check`** — patches `IndexingPipeline._check_schema_version` to no-op. Prevents schema wipe when tests construct a pipeline against a pre-populated fixture DB. Opt out with:
+```python
+@pytest.mark.real_schema_check
+def test_schema_version_wipe_clears_all_state(...):
+    ...
+```
+
+## Mocking
+
+**Framework:** `unittest.mock` (`MagicMock`, `patch`, `monkeypatch`)
+
+**Patch via decorator** for module-level functions:
+```python
+@patch("dotmd.ingestion.source.discover_files")
+@patch("dotmd.ingestion.pipeline.read_file")
+@patch("dotmd.ingestion.chunker.chunk_file")
+def test_first_index_ingests_all_files(self, mock_chunk_file, mock_read_file, mock_discover, ...):
+    mock_discover.return_value = [file_a, file_b]
+    mock_chunk_file.side_effect = [[chunk_a], [chunk_b]]
+```
+
+**Patch via `monkeypatch.setattr`** for instance methods (preferred in fixture-heavy tests):
+```python
+monkeypatch.setattr(pipeline._semantic_engine, "_encode_via_tei", record_tei_boundary)
+```
+
+**Direct attribute injection** on pipeline internals:
+```python
+pipeline._semantic_engine = mock_engine
+mock_engine.encode_batch = mock_encode
+mock_engine.get_tei_model_id = MagicMock(return_value="test-model")
+```
+
+**Stub classes** (hand-written fakes, not MagicMock) for complex collaborators:
+```python
+class _TelegramSourceClientFixture:
+    """Minimal stub matching the real TelegramSourceClient interface."""
+    def describe_source(self) -> dict: ...
+    def export_source_changes(self, cursor, limit, ...) -> dict: ...
+    def search_messages(self, query, limit, ...) -> dict: ...
+```
 
 ```python
-from dotmd.storage.base import VectorStoreProtocol
-from dotmd.core.models import Chunk
-
-class MockVectorStore:
-    """Test double for VectorStoreProtocol."""
-
-    def __init__(self, return_hits: list[tuple[str, float]] | None = None):
-        self.return_hits = return_hits or []
-        self.calls: list[tuple[list[float], int]] = []
-
-    def add_chunks(self, chunks: list[Chunk], embeddings: list[list[float]]) -> None:
-        self.stored_chunks = chunks
-        self.stored_embeddings = embeddings
-
-    def search(self, query_embedding: list[float], top_k: int = 10) -> list[tuple[str, float]]:
-        self.calls.append((query_embedding, top_k))
-        return self.return_hits[:top_k]
-
-    def delete_all(self) -> None:
-        self.stored_chunks = []
-
-    def count(self) -> int:
-        return len(self.stored_chunks)
+class StubFederatedProvider:
+    """Minimal stub federated provider for testing fan-out."""
+    def __init__(self, candidates, sleep_seconds, raises): ...
+    def search_native(self, query, limit) -> list[SearchCandidate]: ...
 ```
 
-Similarly for `SearchEngineProtocol`, `ExtractorProtocol`, etc.
+**What to mock:**
+- External HTTP calls (TEI embedding server) — always mocked in unit/integration tests
+- `discover_files` / `read_file` / `chunk_file` when testing pipeline orchestration logic
+- `encode_batch` — replaced by zero-vector stub globally via autouse fixture
+- FalkorDB — avoided entirely by forcing `ladybugdb` backend via `_dotmd_test_env`
+- Settings — constructed either as real `Settings(...)` with temp dirs or as `MagicMock()` with explicit attributes
 
-## Testing Architecture Implications
+**What NOT to mock:**
+- SQLite / sqlite-vec storage — real in-memory or temp-file databases used directly
+- LadybugDB (embedded graph) — real embedded instance against `tmp_path`
+- Chunker logic — real chunker runs in most integration tests
+- Pydantic model construction and validation — always real
 
-**Dependency Injection enables testing:**
-- `DotMDService` accepts `Settings` parameter; can pass test settings with temp directories
-- `IndexingPipeline` accepts `Settings`; can be instantiated with mock stores
-- Storage backends injected; can pass test doubles
+## Fixtures and Factories
 
-**Example test structure:**
-
+**Root conftest shared fixtures:**
 ```python
-import tempfile
-from pathlib import Path
-from dotmd.core.config import Settings
-from dotmd.api.service import DotMDService
+@pytest.fixture
+def metadata_store(tmp_path: Path):
+    """SQLiteMetadataStore with M2M table for the default strategy."""
+    from dotmd.storage.metadata import SQLiteMetadataStore
+    store = SQLiteMetadataStore(db_path=tmp_path / "metadata.db", table_name="chunks_heading_512_50")
+    store.ensure_m2m_table("heading_512_50")
+    return store
 
-def test_search_with_mock_store():
-    """Test search without hitting real vector store."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        settings = Settings(index_dir=Path(tmpdir))
-        service = DotMDService(settings=settings)
-        # ... arrange, act, assert
+@pytest.fixture
+def vector_store(tmp_path: Path):
+    """SQLiteVecVectorStore backed by a temp file DB."""
+    ...
+
+@pytest.fixture
+def graph_store(tmp_path: Path):
+    """LadybugDBGraphStore backed by a temp directory."""
+    ...
 ```
 
-## Integration Testing Opportunities
+**Local fixtures defined per-file** for test-specific settings:
+```python
+@pytest.fixture
+def minimal_settings(tmp_path):
+    """Minimal settings for pipeline construction without live TEI."""
+    from dotmd.core.config import Settings
+    return Settings(data_dir=..., index_dir=..., embedding_url="http://localhost:18088", ...)
+```
 
-**Areas suitable for integration testing:**
-- Full indexing pipeline: file discovery → chunking → vector embedding → graph population
-- Search fusion: multiple engines → RRF → reranking
-- End-to-end CLI workflows: `dotmd index` → `dotmd search`
-- Storage layer: metadata persistence to SQLite, vector search across backends
+**Factory helpers** (module-level `_`-prefixed functions, not fixtures):
+```python
+def _write_md(path: Path, title: str, tags: list, body: str) -> None: ...
+def _make_file_info(path: str, title: str = "Test") -> FileInfo: ...
+def _make_chunk(chunk_id: str, file_path: str) -> Chunk: ...
+def _make_pipeline_with_mock_encode(settings) -> tuple[IndexingPipeline, list]: ...
+def _dummy_embeddings(n: int) -> list[list[float]]: ...
+```
 
-**Not yet implemented** but architecture supports it via:
-- Sample markdown files in `backend/data/` directory
-- Settings configured for test paths
-- CLI commands fully functional
+**Fixture location:**
+- `backend/tests/conftest.py` — global (metadata_store, vector_store, graph_store, tmp_dir, sqlite_conn)
+- `backend/tests/search/conftest.py` — federated search fixtures (StubFederatedProvider, bundles)
+- `backend/tests/e2e/conftest.py` — MCP transport fixtures
+- `backend/tests/ingestion/application_source_fixtures.py` — shared data builders (not a conftest; imported explicitly)
+- `backend/tests/fixtures/__init__.py` — placeholder (currently empty)
+
+## Markers
+
+Custom markers declared in `pyproject.toml`:
+
+| Marker | Meaning |
+|--------|---------|
+| `smoke` | Requires a running dotMD stack |
+| `e2e` | Against live MCP HTTP server inside container |
+| `real_semantic_encode_batch` | Opt out of `_mock_semantic_engine` autouse |
+| `real_schema_check` | Opt out of `_mock_schema_version_check` autouse |
+| `asyncio` | Marks async test (usually automatic with `asyncio_mode = "auto"`) |
+
+**Applying markers:**
+```python
+@pytest.mark.real_semantic_encode_batch
+def test_embed_chunks_sends_context_prefixed_text(minimal_settings, monkeypatch): ...
+
+@pytest.mark.real_schema_check
+def test_schema_version_wipe_clears_all_state(minimal_settings, tmp_path): ...
+
+pytestmark = pytest.mark.e2e  # module-level, applies to all tests in file
+```
 
 ## Coverage
 
-**Status:** No coverage requirements enforced.
+**Requirements:** No enforced minimum — no `--cov` flag in `addopts`.
 
-**Recommendation:** When tests added, target:
-- Core logic: `search/`, `ingestion/`, `extraction/` (>80% coverage)
-- Storage backends: Each `VectorStoreProtocol` implementation (>75%)
-- CLI: Happy-path commands (>70%)
-- Error handling: Exception paths in `ingestion/reader.py`, `storage/` modules
+**View Coverage:**
+```bash
+cd backend
+python -m pytest --cov=src/dotmd --cov-report=term-missing
+```
 
 ## Test Types
 
-**Unit Tests (when added):**
-- Scope: Single function or class method in isolation
-- Approach: Mock all dependencies; use test doubles for protocols
-- Examples:
-  - `test_extract_best_snippet()` — text windowing logic with various query patterns
-  - `test_chunk_file()` — chunking with different token lengths
-  - `test_entity_deduplication()` — NER duplicate handling
+**Unit tests** (majority):
+- Scope: single function or class method in isolation
+- Location: `backend/tests/` root and subdirs
+- Use real SQLite/LadybugDB; mock only TEI and external HTTP
 
-**Integration Tests (when added):**
-- Scope: Multiple components working together
-- Approach: Use real storage (in-memory SQLite, temp LanceDB) but mock external services (TEI embeddings)
-- Examples:
-  - Test full indexing of sample markdown files
-  - Test search across all three engines
-  - Test query expansion + search pipeline
+**Integration tests:**
+- Scope: full pipeline end-to-end with real storage backends and mocked embeddings
+- Key files: `test_pipeline_metadata.py`, `test_incremental_pipeline.py`, `test_migration_v16.py`
+- Construct `IndexingPipeline` against temp dirs; exercise `pipeline.index(data_dir)` calls
 
-**E2E Tests:**
-- Not implemented
-- Would require Docker composition or local service startup
-- Could test CLI commands against running API server
+**E2E / smoke tests:**
+- Location: `backend/tests/e2e/` — marked `@pytest.mark.e2e`
+- Require live dotMD stack inside container; not run in default `pytest` invocation
+- Parametrized over `http` and `stdio` transports
+- Pin the MCP tool surface with `EXPECTED_TOOLS` frozenset and fail on drift
 
-## Logging in Tests
+**Benchmark/devtools tests:**
+- Location: `backend/tests/devtools/`
+- Not part of regular CI; run manually for latency and quality benchmarking
 
-Tests should suppress or capture logger output:
+## Common Patterns
 
+**Call-count assertion (encode_batch call tracking):**
 ```python
-import logging
+call_log = []
+def mock_encode(texts):
+    call_log.append(list(texts))
+    return [dummy_vec[:] for _ in texts]
 
-def test_with_logging(caplog):
-    """caplog is pytest fixture for capturing logs."""
-    with caplog.at_level(logging.INFO):
-        service.search("query")
+pipeline._semantic_engine.encode_batch = mock_encode
+pipeline.index(data_dir)
 
-    assert "query" in caplog.text or len(caplog.records) > 0
+assert len(call_log) == 1, f"Metadata-only change must trigger exactly 1 encode_batch call, got {len(call_log)}: {call_log}"
+assert len(call_log[0]) == 1
 ```
 
-Alternatively, configure logger to be silent:
+**Assertion messages:** All non-trivial `assert` statements include a descriptive f-string message explaining what invariant was violated and what was actually observed.
 
+**DB state inspection** (integration tests access pipeline internals directly):
 ```python
-logging.getLogger("dotmd").setLevel(logging.CRITICAL)
+chunk_count = pipeline._conn.execute(
+    f"SELECT COUNT(*) FROM chunks_{pipeline._strategy}"
+).fetchone()[0]
 ```
 
-## Performance/Stress Testing
-
-**Evaluation suite in `backend/eval/`** provides benchmarking:
-- Runs searches against HotpotQA dataset (thousands of queries)
-- Tracks metrics: MRR (Mean Reciprocal Rank), NDCG (Normalized Discounted Cumulative Gain)
-- Identifies bottlenecks in search quality and speed
-
-**Not load-testing yet** but architecture supports it:
-- Vector store backends (LanceDB, SQLite-vec) can handle large indexes
-- Graph store (LadybugDB) scales to thousands of nodes/edges
-- BM25 index can be built incrementally
-
-## Test Data and Fixtures
-
-**Sample data location:** `backend/data/` directory contains markdown files for testing
-
-**Fixture patterns (when tests added):**
-
+**Error testing:**
 ```python
-import pytest
-from pathlib import Path
-from dotmd.core.models import Chunk, FileInfo
-
-@pytest.fixture
-def sample_chunk() -> Chunk:
-    """A test chunk."""
-    return Chunk(
-        chunk_id="test-001",
-        file_path=Path("test.md"),
-        heading_hierarchy=["Introduction", "Background"],
-        level=2,
-        text="Sample chunk text for testing.",
-        chunk_index=0,
-        char_offset=0,
-    )
-
-@pytest.fixture
-def sample_file_info() -> FileInfo:
-    """Metadata about a test markdown file."""
-    return FileInfo(
-        path=Path("test.md"),
-        title="Test Document",
-        last_modified=datetime.now(timezone.utc),
-        size_bytes=1024,
-    )
+with pytest.raises(ValueError, match="ref must be formatted as"):
+    SearchCandidate(ref="bad-ref", ...)
 ```
 
-Factory patterns for generating test data:
-
+**Async testing:**
 ```python
-def make_chunks(count: int, text_prefix: str = "Chunk") -> list[Chunk]:
-    """Factory for creating N test chunks."""
-    return [
-        Chunk(
-            chunk_id=f"chunk-{i}",
-            file_path=Path(f"file-{i}.md"),
-            text=f"{text_prefix} {i}",
-            chunk_index=i,
-            char_offset=i * 100,
-        )
-        for i in range(count)
-    ]
+# asyncio_mode = "auto" means no decorator needed:
+async def test_federated_fan_out_timeout(bundles):
+    result = await service.search_async(query="test", ...)
+    assert result.source_status[0].status == "error"
 ```
 
-## What to Mock, What NOT to Mock
+**Surface contract pinning** (e2e tests):
+```python
+EXPECTED_TOOLS: frozenset[str] = frozenset({"search", "read", "drill", "feedback"})
 
-**MOCK (test doubles):**
-- External services: TEI embedding servers, HuggingFace model hub (use local models instead)
-- Storage backends in unit tests: Replace with protocol-compatible test doubles
-- HTTP calls: Use `httpx` mock or responses library
-- File system (in isolation): Use `tempfile` or `pathlib`
-
-**DO NOT MOCK:**
-- Core domain logic: `chunk_file()`, `fuse_results()`, `extract_title()`
-- Pydantic model instantiation: Test with real model instances
-- Actual storage backends in integration tests: Use real in-memory or temp instances
-- CLI argument parsing: Test with Click's test runner
-
-## Recommended Testing Strategy
-
-**Phase 1 (Foundation):**
-1. Add pytest to `pyproject.toml` under `[project.optional-dependencies]`
-2. Create `tests/` directory with `conftest.py`
-3. Write unit tests for pure functions: `test_extract_best_snippet()`, `test_truncate()`, `_extract_title()`
-4. Write unit tests for models: ensure Pydantic validation works correctly
-
-**Phase 2 (Integration):**
-1. Test storage backends with real in-memory SQLite and temp LanceDB
-2. Test search engines with mock stores
-3. Test indexing pipeline end-to-end with sample data
-4. Test RRF fusion logic with synthetic ranked lists
-
-**Phase 3 (E2E):**
-1. CLI command tests using Click's `CliRunner`
-2. FastAPI endpoint tests using `TestClient`
-3. Full workflow tests: index → search → verify results
+def test_tool_list_matches_pinned(self, mcp_call):
+    data = mcp_call("tools/list")
+    actual = frozenset(t["name"] for t in data["result"]["tools"])
+    assert actual == EXPECTED_TOOLS, f"Tool surface drift: {actual ^ EXPECTED_TOOLS}"
+```
 
 ---
 
-*Testing analysis: 2026-03-23*
+*Testing analysis: 2026-05-10*

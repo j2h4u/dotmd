@@ -1,208 +1,174 @@
 # Codebase Concerns
 
-**Analysis Date:** 2026-03-23
+**Analysis Date:** 2026-05-10
 
 ## Tech Debt
 
-**Broad exception handling without specificity:**
-- Issue: Multiple storage and extraction modules use bare `except Exception:` blocks that swallow errors indiscriminately, masking real problems
-- Files: `backend/src/dotmd/storage/vector.py` (lines 63, 91, 105), `backend/src/dotmd/storage/sqlite_vec.py` (lines 154, 166, 185, 194), `backend/src/dotmd/storage/graph.py` (lines 92, 243, 248, 269, 292, 310, 324, 337)
-- Impact: Silent failures during schema initialization, vector operations, and graph queries make debugging difficult. Failed index operations may leave data in an inconsistent state without warning
-- Fix approach: Replace bare `except Exception` with specific exception types (e.g., `sqlite3.OperationalError`, `lb.QueryError`). Log at WARNING level with full traceback. Allow critical errors (disk full, permission denied) to propagate
+**Dead `LanceDBVectorStore` backend:**
+- Issue: `LanceDB` was replaced by `sqlite-vec` but the full implementation remains in `storage/vector.py` (129 lines). `delete_vectors_by_chunk_ids` and `lookup_embeddings_by_text_hash` are no-op stubs that silently return `0`/`{}`. The backend can still be activated via `DOTMD_VECTOR_BACKEND=lancedb` in config, and `lancedb` has an optional extras entry in `pyproject.toml`. If someone accidentally sets the env var, incremental deletes and embedding reuse are silently broken.
+- Files: `backend/src/dotmd/storage/vector.py`, `backend/src/dotmd/core/config.py:93`, `backend/src/dotmd/ingestion/pipeline.py:240-249`
+- Impact: Silent data correctness failure if backend is ever switched. Dead code inflates maintenance surface.
+- Fix approach: Delete `storage/vector.py`, remove `vector_backend` config option and the `lancedb` optional extra, hard-code `sqlite-vec` in `pipeline.py`. The `lancedb` path has not been tested since Phase 12.
 
-**Hardcoded score thresholds and weights scattered across config:**
-- Issue: Reranker score threshold (-8.0), semantic score floor (0.4), reranker length penalty (0.8–1.0 factor), and RRF weights (k=60, graph_rrf_weight=1.5) are defined in multiple places without clear rationale
-- Files: `backend/src/dotmd/core/config.py`, `backend/src/dotmd/api/service.py` (lines 213–225), `backend/src/dotmd/search/reranker.py` (line 123), `backend/src/dotmd/search/fusion.py` (lines 127, 194)
-- Impact: Parameter tuning requires changes across multiple files. No easy way to run A/B tests or experiment with different configurations. Constants lack documentation of why they were chosen
-- Fix approach: Consolidate all scoring parameters into `Settings` class with docstrings explaining each threshold. Make them overridable via environment variables
+**Protocol-breaking `hasattr` duck-typing on `VectorStoreProtocol`:**
+- Issue: Five call sites in `pipeline.py` use `hasattr()` guards for methods that are part of the protocol contract (`delete_by_chunk_ids`, `set_model_name`, `set_distance_metric`, `_tables_ensured`). This breaks the protocol abstraction and forces callers to have implementation knowledge.
+- Files: `backend/src/dotmd/ingestion/pipeline.py:1058`, `1336`, `2005`, `2008`, `2415`, `3152`
+- Impact: Adding a new backend requires knowing which `hasattr` guards to satisfy; protocol violations are invisible to the type checker; `# type: ignore[attr-defined]` follows every call.
+- Fix approach: Promote `delete_by_chunk_ids`, `set_model_name`, and `set_distance_metric` into `VectorStoreProtocol` in `storage/base.py`. Add no-op default implementations for the LadybugDB graph store.
 
-**Vector store type annotation mismatch in pipeline accessor:**
-- Issue: `IndexingPipeline.vector_store` property returns type-hinted `LanceDBVectorStore` but the actual store is a `VectorStoreProtocol` that can be either LanceDB or SQLiteVec
-- Files: `backend/src/dotmd/ingestion/pipeline.py` (line 276–278)
-- Impact: Type checkers will complain; callers cannot determine which backend is active at runtime; makes testing with different backends difficult
-- Fix approach: Change return type to `VectorStoreProtocol`. Add a runtime property `backend_type()` method to inspect which implementation is active
+**`GraphStoreProtocol` missing `delete_frontmatter_edges`:**
+- Issue: `pipeline.py:3152` uses `hasattr(self._graph_store, "delete_frontmatter_edges")` before calling it. The method exists on `FalkorDBGraphStore` but is not in `GraphStoreProtocol`. Same `# type: ignore[attr-defined]` pattern.
+- Files: `backend/src/dotmd/ingestion/pipeline.py:3152`, `backend/src/dotmd/storage/base.py`
+- Impact: FalkorDB-specific graph cleanup is silently skipped when using LadybugDB backend. Protocol is incomplete.
+- Fix approach: Add `delete_frontmatter_edges(file_path: str) -> None` to `GraphStoreProtocol` and add a no-op implementation in `LadybugDBGraphStore`.
+
+**Private attribute access across module boundary:**
+- Issue: `pipeline.py:2050` accesses `self._ner_extractor._extraction_cache` directly — a private attribute on `NERExtractor`. If `NERExtractor` refactors its internals, this line silently breaks.
+- Files: `backend/src/dotmd/ingestion/pipeline.py:2050`, `2063`, `backend/src/dotmd/extraction/ner.py`
+- Impact: Fragile coupling; type checker cannot catch this.
+- Fix approach: Add a `prune_orphans(live_texts)` public method to `NERExtractor` that delegates to its cache.
+
+**`_ConnProxy` test-spy wrapper baked into production code:**
+- Issue: `storage/metadata.py` defines `_ConnProxy`, a Python-level wrapper around `sqlite3.Connection` whose only stated purpose is to allow test spies to reassign `.execute`. It adds a property getter with an `_execute_override` dict-lookup on every `conn.execute()` call in production.
+- Files: `backend/src/dotmd/storage/metadata.py:42-76`
+- Impact: Unnecessary runtime overhead on every metadata operation. Test concerns leak into production code.
+- Fix approach: Remove `_ConnProxy`; refactor the spy test in `test_metadata_m2m.py` to use `unittest.mock.patch` or a protocol-level mock instead.
+
+**`pipeline.py` is 3,777 lines — a God Object:**
+- Issue: `IndexingPipeline` handles schema creation, two-phase chunking, embedding, FTS5, graph population, metadata, vector store coordination, orphan cleanup, vacuum scheduling, and application-source ingestion. The class has grown through 35 phases of iterative development.
+- Files: `backend/src/dotmd/ingestion/pipeline.py`
+- Impact: High cognitive load for every change; testing requires mocking a huge surface; single bugs can cascade across many subsystems.
+- Fix approach: Incrementally extract: `_EmbeddingCoordinator` (embedding cache + TEI), `_GraphCoordinator` (frontmatter + NER graph population), `ApplicationSourceIngestor` (the Telegram ingestion path). No need to do all at once.
+
+**`migrate_fingerprints_to_blake3.py` one-time script left in tree:**
+- Issue: `ingestion/migrate_fingerprints_to_blake3.py` is a one-time migration script for a Phase-era schema change. It is not called by any production code path.
+- Files: `backend/src/dotmd/ingestion/migrate_fingerprints_to_blake3.py`
+- Impact: Dead code, confusing for future readers.
+- Fix approach: Delete the file; the migration it performs is already complete on all instances.
+
+**`modal` listed as core dependency but never imported:**
+- Issue: `modal>=0.73` is in `[project.dependencies]` in `pyproject.toml` (not optional extras). Grep across all `.py` source files finds zero `import modal` or `from modal` statements. Modal is a ~60MB cloud compute SDK installed in every environment unnecessarily.
+- Files: `backend/pyproject.toml`
+- Impact: Inflates container image, installs a cloud SDK with network credentials support in a container that doesn't need it.
+- Fix approach: Remove from `[project.dependencies]`. If modal was used for a dev experiment, move to `[project.optional-dependencies]` dev.
+
+**`pandas` listed as core dependency, used only through LadybugDB `.get_as_df()`:**
+- Issue: `pandas>=2.0` is in `[project.dependencies]`. The only usage is via `result.get_as_df()` in `storage/graph.py` — a LadybugDB-internal call that returns a DataFrame, which `graph.py` then iterates row by row. `pandas` is not used directly in dotMD source code.
+- Files: `backend/src/dotmd/storage/graph.py`, `backend/pyproject.toml`
+- Impact: Unnecessary ~35MB dependency. LadybugDB (real_ladybug) likely pulls it transitively anyway, so this may be harmless, but the explicit pin creates a false impression that dotMD directly uses pandas.
+- Fix approach: Remove from `pyproject.toml`; if real_ladybug requires it, it will pull it transitively.
+
+**`descriptor_key` hardcoded as `"filesystem-mnt"` in fusion:**
+- Issue: `search/fusion.py:373` hardcodes `descriptor_key="filesystem-mnt"` for all local chunks. This is a source-registry identifier that should come from the source descriptor, not be baked into the search path.
+- Files: `backend/src/dotmd/search/fusion.py:373`
+- Impact: Adding a second local filesystem source would assign wrong descriptor keys to search results.
+- Fix approach: Pass descriptor key through `ChunkProvenance` or as a parameter to `build_candidates`.
 
 ## Known Bugs
 
-**Graph store connection leaks in read-only mode:**
-- Symptoms: When `read_only=True`, `LadybugDBGraphStore._connection()` opens temporary connections but may not clean up if exceptions occur mid-query
-- Files: `backend/src/dotmd/storage/graph.py` (lines 74–85)
-- Trigger: Call graph store methods in read-only mode, then check resource usage (open file handles, database locks)
-- Workaround: Ensure all graph queries complete without exception. Consider explicit connection pooling
+**`is_low_signal_telegram_text` has redundant dead condition:**
+- Issue: The function at `telegram_provider.py:400-412` checks `not any(ch.isalnum() for ch in stripped)` on line 407, returns `True` if that holds, then line 409-411 unconditionally re-evaluates the same condition in the `return` expression. The second clause `any(unicodedata.category(ch).startswith("S") for ch in stripped)` (detecting symbol-only text) is thus unreachable for any string that made it past line 407 — because if `stripped` has no alnum chars, we already returned `True`; if it has alnum chars, the first part of the `or` is `False`.
+- Files: `backend/src/dotmd/ingestion/telegram_provider.py:409-412`
+- Impact: Symbol-only text that contains at least one alnum character (e.g. `"3 ♠♠♠"`) is incorrectly classified as NOT low-signal.
+- Fix approach: Replace lines 409-411 with just `return any(unicodedata.category(ch).startswith("S") for ch in stripped)`.
 
-**Word position index in snippet extraction can fail silently:**
-- Symptoms: Snippet extraction in `_extract_best_snippet()` builds a character position index but uses `text.index()` which raises `ValueError` if a word appears later in the text with different context
-- Files: `backend/src/dotmd/search/fusion.py` (line 41)
-- Trigger: Text with repeated words or overlapping sequences where `text.index()` finds a different position than expected
-- Workaround: None currently; may result in incorrect snippets without error
-
-**Bare schema initialization errors swallowed silently:**
-- Symptoms: If a Cypher statement fails during graph schema init, it is logged at DEBUG level and ignored, potentially leaving the graph in a partially-initialized state
-- Files: `backend/src/dotmd/storage/graph.py` (lines 87–94)
-- Trigger: Malformed SQL, schema conflicts, or disk issues during first graph initialization
-- Workaround: Manually inspect `~/.dotmd/graphdb` and delete if corrupted; re-index
-
-## Security Considerations
-
-**No input validation on chunk text or user queries:**
-- Risk: Chunk text from markdown files is stored and queried without sanitization. Malicious markdown (e.g., with embedded SQL or Cypher injection attempts) could be reflected in snippets or cause injection attacks
-- Files: `backend/src/dotmd/ingestion/chunker.py`, `backend/src/dotmd/search/fusion.py`, `backend/src/dotmd/api/service.py`
-- Current mitigation: LanceDB, SQLiteVec, and LadybugDB use parameterized queries/bindings, so SQL/Cypher injection is unlikely. Snippets are plain text truncation, not evaluated
-- Recommendations: Add unit tests for edge cases (null bytes, very long queries, special characters). Document security assumptions. Consider adding query length limits
-
-**HTTP embedding server has no authentication:**
-- Risk: If `DOTMD_EMBEDDING_URL` points to a TEI endpoint, there is no API key or TLS verification. An attacker could intercept or redirect embeddings
-- Files: `backend/src/dotmd/search/semantic.py` (lines 74–98)
-- Current mitigation: The HTTP call uses httpx with `timeout=120s` but no cert verification or auth headers
-- Recommendations: Add `verify_ssl` option to Settings. Support `Authorization` header for bearer tokens. Document that TEI should run on a trusted network or behind a reverse proxy with auth
-
-**Acronym dictionary loaded from disk without validation:**
-- Risk: If `~/.dotmd/acronyms.json` is corrupted or tampered with, JSON parsing could fail and suppress the error silently
-- Files: `backend/src/dotmd/api/service.py` (lines 257–275)
-- Current mitigation: Wrapped in try/except that logs warning and returns None; query expansion gracefully handles None
-- Recommendations: Validate acronym dict structure (must be `dict[str, list[str]]`). Add file integrity check (CRC or signature)
+**`UnixSocketTelegramSourceClient._request` accumulates entire response in memory:**
+- Issue: The loop at `telegram_provider.py:159-163` calls `sock.recv(1024 * 1024)` (1 MB per call) and appends to `data` until `data.endswith(b"\n")`. For a large export batch, the entire JSON response is buffered before parsing.
+- Files: `backend/src/dotmd/ingestion/telegram_provider.py:153-176`
+- Impact: Memory spike proportional to batch size; a single large export response (many messages) allocates the full payload multiple times (buffer + JSON parse + Python dicts). Under 30-second timeout; large batches may time out.
+- Fix approach: Use `sock.makefile()` and `readline()` for line-framed JSON protocol; avoids both the 1 MB chunk granularity and the manual `endswith` detection.
 
 ## Performance Bottlenecks
 
-**Sequential snippet extraction with O(n²) window scanning:**
-- Problem: For each window position, the code scans all query tokens and checks if they appear in the window substring. With long queries and long chunks, this is slow
-- Files: `backend/src/dotmd/search/fusion.py` (lines 22–73)
-- Cause: `for i, start in enumerate(word_starts): for t in query_tokens: if t in window` is nested loop with substring search
-- Improvement path: Use a Aho-Corasick automaton or regex to find all query term positions in advance. Then slide a window and count term hits in O(1) with a counter
+**Synchronous TEI HTTP calls block the trickle thread:**
+- Issue: `semantic.py` makes synchronous `httpx.post()` calls (no `async`) with a 600-second timeout. These run inside `asyncio.to_thread()` in `trickle.py`, which is correct, but each batch blocks one thread-pool worker for the entire TEI round-trip. During initial backlog (many files), only one file is processed at a time — this is by design (D-LOCAL-SEQUENTIAL) — but TEI latency directly multiplies into total indexing time.
+- Files: `backend/src/dotmd/search/semantic.py:154`, `backend/src/dotmd/ingestion/trickle.py:386`
+- Impact: Indexing throughput is bounded by TEI latency × sequential file processing. Not a bug, but no async TEI path exists.
+- Fix approach: No change needed for correctness; if throughput becomes an issue, consider a mini-batch path that groups N files before calling TEI in a single request.
 
-**Reranker model loads on every first query:**
-- Problem: `Reranker._load_model()` is called in `DotMDService.search()` (line 201) but only caches on first call. After model is loaded, every rerank operation must deserialize cross-encoder and run prediction
-- Files: `backend/src/dotmd/api/service.py` (line 201), `backend/src/dotmd/search/reranker.py` (lines 56–63, 112)
-- Cause: Model is loaded lazily, which is good for startup, but `warmup()` doesn't pre-load the reranker
-- Improvement path: In `warmup()`, call `self._reranker._load_model()` (already done at line 79). Also consider batching rerank calls to amortize model loading
+**`prune_extraction_cache` loads all chunk texts into memory:**
+- Issue: `pipeline.py:2054-2058` iterates every strategy, runs `SELECT text FROM chunks_{strategy}`, and loads all text into a Python list before calling `prune_orphans`. With tens of thousands of chunks, this is a full table scan with all text content in memory.
+- Files: `backend/src/dotmd/ingestion/pipeline.py:2054-2058`
+- Impact: Memory spike on every deferred maintenance cycle (post-deletion). Only relevant at scale (thousands of files), but the pattern does not scale.
+- Fix approach: Prune by `blake3(text)` rather than raw text — store text hashes in the extraction cache and compare hashes with a SQL `NOT IN` subquery.
 
-**NER extraction processes all chunks serially:**
-- Problem: `NERExtractor.extract()` iterates through chunks one-by-one, calling GLiNER predict for each. GLiNER can batch multiple texts efficiently
-- Files: `backend/src/dotmd/extraction/ner.py` (lines 85–90)
-- Cause: Each chunk is processed independently with `model.predict_entities(chunk.text, ...)` instead of batching
-- Improvement path: Batch chunks into groups (e.g., 8–16 per batch) and call GLiNER with a batch API if available. Fall back to serial processing if no batch API exists
-
-**Graph neighbor queries scan all relationship tables:**
-- Problem: `LadybugDBGraphStore.get_neighbors()` runs a single MATCH with variable-length paths, which scans all relationship tables. For large graphs, this can be slow
-- Files: `backend/src/dotmd/storage/graph.py` (lines 204–231)
-- Cause: Cypher query `MATCH (a:Label {id})-[r* 1..N]-(b)` without indices or early termination
-- Improvement path: Add database indices on node IDs. Use LIMIT in Cypher to stop early after finding N neighbors. Consider precomputing k-hop neighborhoods on index time
+**`_extract_best_snippet` is O(N×M) on large documents:**
+- Issue: `fusion.py:40-80` slides a window across every word start, scoring each position against all query tokens. For a 10,000-word document with a 20-token query, this is 200,000 membership checks per search result.
+- Files: `backend/src/dotmd/search/fusion.py:40-80`
+- Impact: Snippet extraction adds measurable latency for large documents in the search hot path. Called once per result per search.
+- Fix approach: Build a pre-indexed `{token: [positions]}` map, compute window scores in a single O(N) sweep.
 
 ## Fragile Areas
 
-**Graph schema depends on exact relationship table naming and ordering:**
-- Files: `backend/src/dotmd/storage/graph.py` (lines 20–47)
-- Why fragile: The `_REL_TABLE_MAP` dict is a hardcoded lookup. If relationship types are added or removed, the map must be updated manually. `_find_node_label()` iterates through a fixed list of labels, so new node types are not discoverable
-- Safe modification: Add a method to dynamically register node and relationship types. Use LadybugDB's schema introspection API if available to discover actual tables instead of hardcoding
-- Test coverage: No tests for graph schema migrations or adding new node/relationship types
+**SQLite connection `check_same_thread=False` with multi-threaded access:**
+- Issue: `pipeline.py:205-208` opens the unified SQLite connection with `check_same_thread=False` and `isolation_level=None` (autocommit). The trickle indexer runs indexing in `asyncio.to_thread()` and search queries come from FastAPI's thread pool. Multiple threads share one connection.
+- Files: `backend/src/dotmd/ingestion/pipeline.py:205-208`, `backend/src/dotmd/ingestion/trickle.py:386`
+- Impact: SQLite WAL mode allows concurrent reads, and write serialization through the single connection avoids most races, but simultaneous write transactions from two threads could deadlock or corrupt if the `BEGIN`/`COMMIT` pattern is broken by an exception at the wrong moment. Currently mitigated by the `fcntl` lock and single-worker executor, but the invariant is implicit.
+- Safe modification: Never add a second thread that writes to `self._conn` without reviewing all existing transaction boundaries. All callers of `BEGIN`/`COMMIT` must be audited before adding concurrency.
 
-**Chunk ID determinism depends on file path string representation:**
-- Files: `backend/src/dotmd/ingestion/chunker.py` (lines 19–22)
-- Why fragile: Chunk IDs are MD5 hashes of `f"{file_path}:{chunk_index}"`. If file paths are normalized differently on Windows vs. POSIX (e.g., `\` vs. `/`), the same logical file produces different chunk IDs, breaking index consistency
-- Safe modification: Normalize file paths to POSIX format (`/`) before hashing. Add a test that verifies chunk IDs are identical across platforms
-- Test coverage: No cross-platform tests for chunk ID stability
+**`source_runtime_factory.build()` hardcodes two namespaces:**
+- Issue: `source_lifecycle.py:279-313` has explicit `if namespace == "filesystem"` / `if namespace == "telegram"` branches. Adding a new source type requires modifying this method rather than registering a factory.
+- Files: `backend/src/dotmd/ingestion/source_lifecycle.py:279-313`
+- Impact: Every new source is a modification to a central factory. The source registry (`SourceRegistry`) exists but the factory doesn't use it for dispatch.
+- Safe modification: Any new source type currently requires forking this method; test coverage for the build path is in `test_source_lifecycle.py`.
 
-**Reranker score blending uses hardcoded weights:**
-- Files: `backend/src/dotmd/api/service.py` (lines 207–225)
-- Why fragile: The blend factor (0.4 fusion score, 0.6 reranker score) and min-max normalization have no configuration or rationale. If reranker scores are out-of-range, normalization breaks
-- Safe modification: Add `reranker_blend_weight` to Settings. Handle edge cases: if all scores are identical, skip normalization. Document why these weights were chosen (e.g., via ablation study)
-- Test coverage: No unit tests for edge cases (all results tied, extreme score distributions)
-
-**Snippet extraction assumes query tokens are valid regex:**
-- Files: `backend/src/dotmd/search/fusion.py` (line 27)
-- Why fragile: `re.findall(r"\w+", query.lower())` works for most queries but fails if user enters special regex chars (e.g., `[query]` or `(test)`). The code doesn't sanitize or quote the regex pattern
-- Safe modification: Use `re.escape()` or implement a simple tokenizer instead of regex. Add tests for edge case queries
-- Test coverage: No tests for special characters in queries
-
-## Scaling Limits
-
-**SQLiteVec batch insert deletes all vectors on re-index:**
-- Current capacity: Works fine up to ~100k chunks; at 1M chunks, full vector table drop + recreate takes seconds
-- Limit: Linear time to rebuild entire vector table scales poorly. If index is called frequently (e.g., incremental indexing), constant full rebuilds are expensive
-- Scaling path: Implement incremental append instead of delete-all. Add a `update_chunks()` method that upserts by chunk_id instead of clearing the table. Support partial re-indexing
-
-**LanceDB vs SQLiteVec memory usage:**
-- Current capacity: LanceDB loads entire index into memory during ANN search; SQLiteVec streams from disk. At 500k chunks (384-dim), LanceDB uses ~600MB RAM
-- Limit: On memory-constrained systems (e.g., RPi, low-cost hosting), LanceDB may exhaust RAM. SQLiteVec is better but slower
-- Scaling path: Add a memory budget parameter. Spill to disk if needed. Or use a different vector DB (e.g., Qdrant, Weaviate) that supports indexing strategies beyond brute-force
-
-**Graph database doesn't support concurrent writes:**
-- Current capacity: Single MCP server or API server works fine. Multiple processes attempting to index or mutate graph concurrently will lock
-- Limit: LadybugDB (like Kuzu) uses table-level locking, so even reads can block writes. No support for distributed graphs
-- Scaling path: For multi-server deployments, use a separate graph service (e.g., Neo4j, Weaviate) or add write queuing + deduplication at the application layer
-
-## Dependencies at Risk
-
-**GLiNER zero-shot NER with no fallback:**
-- Risk: If `urchade/gliner_multi-v2.1` model becomes unavailable or the HuggingFace hub goes down, NER extraction fails entirely. No graceful degradation
-- Impact: Index operation fails if NER is enabled and model can't download
-- Migration plan: Make NER optional; fall back to structural extraction only if GLiNER fails. Cache the model locally in `~/.dotmd/` with a checksum to avoid repeated downloads
-
-**LadybugDB forked from Kuzu with custom patches:**
-- Risk: `real_ladybug` is a custom fork. If upstream Kuzu receives critical security updates, they won't be backported to LadybugDB unless maintainers actively sync
-- Impact: Potential SQL injection vulnerabilities or performance regressions if Kuzu patches aren't merged
-- Migration plan: Monitor LadybugDB GitHub for upstream syncs. Consider switching to official Kuzu if LadybugDB maintenance stalls. Add security scanning to CI
-
-**sentence-transformers embedding model pinned to specific version:**
-- Risk: Default model `BAAI/bge-small-en-v1.5` is fetched from HuggingFace hub. If it's removed or changed, existing indices become incompatible
-- Impact: Re-indexing with a different model produces different embeddings, invalidating the vector store
-- Migration plan: Cache embeddings model locally during index. Add a schema version field to track which model was used. Support model migrations (e.g., re-embedding old vectors with new model)
-
-**PyTorch version constraints due to hardware:**
-- Risk: PyTorch >=2.5 requires AVX2 CPU support. Some old/embedded hardware doesn't have AVX2, causing SIGILL at runtime
-- Impact: dotMD crashes on non-AVX2 hardware (e.g., older Xeons, ARM servers without NEON)
-- Migration plan: Test on a range of hardware. Provide fallback pure-Python implementations or use ONNX Runtime which has better hardware support. Document minimum CPU features in README
-
-## Missing Critical Features
-
-**No incremental indexing:**
-- Problem: Every call to `index()` deletes and rebuilds all stores. If you add 10 new markdown files to a large vault, the entire index is rebuilt from scratch
-- Blocks: Fast re-indexing workflows (e.g., Obsidian vault with daily sync). Continuous indexing setups
-
-**No index versioning or migration support:**
-- Problem: If the schema changes (e.g., new embedding model, new extraction type), there's no automated way to migrate old indices. Users must delete and rebuild
-- Blocks: Zero-downtime schema upgrades. A/B testing different configurations
-
-**No distributed or cloud-hosted vector store option:**
-- Problem: All backends are local files. No support for Pinecone, Weaviate, or other managed services
-- Blocks: Cloud-native deployments. Multi-region or high-availability setups
-
-**No audit or change tracking:**
-- Problem: If a chunk is modified or deleted, there's no history. No way to know when the index was last updated or by whom
-- Blocks: Compliance/audit use cases. Debugging index staleness issues
+**`_model_to_table_suffix` strips version numbers from model names:**
+- Issue: `pipeline.py:137-156` strips version suffixes (e.g., `-v2.1`, `-0.6B`) from model names when deriving table suffixes. Comment says: "Version stripping kept for now (removal deferred to migration phase when tables are renamed)." Switching between `model-v1` and `model-v2` maps to the same table suffix and silently reuses the old table.
+- Files: `backend/src/dotmd/ingestion/pipeline.py:137-156`
+- Impact: Model version changes that use the same base name (e.g., `bge-small-en-v1.5` → `bge-small-en-v2.0`) share a table and do not trigger a dimension change unless vector dimensionality differs. Embedding quality drift is silent.
+- Fix approach: Remove version-stripping from `_model_to_table_suffix`. Requires a migration that renames existing tables in production index.db.
 
 ## Test Coverage Gaps
 
-**No integration tests for mixed search modes:**
-- What's not tested: Hybrid search with all three engines (semantic, BM25, graph) returning results; RRF fusion with varying result set sizes; cross-encoder reranking edge cases
-- Files: `backend/src/dotmd/search/fusion.py`, `backend/src/dotmd/api/service.py`
-- Risk: Bug in result ordering or score blending goes undetected until production
+**Federated search async/concurrency invariants are unwritten stubs:**
+- What's not tested: 11 tests in `tests/search/test_federated.py:428-510` are `@pytest.mark.skip(reason="Deferred to Task 3 - service integration")` and contain only `pass`. These cover D-LOCAL-SEQUENTIAL (local engines don't run concurrently), D-LOOP-SAFE (sync search raises in event loop), D-LOCAL-SERIALIZED (single worker thread), lifecycle init failure surfacing as SourceStatus, and federated timeout isolation.
+- Files: `backend/tests/search/test_federated.py:428-510`
+- Risk: Regressions in the async/concurrency model (single executor, event-loop safety) would not be caught. These invariants were established in Phases 33-35 but have no behavioral tests.
 - Priority: High
 
-**No tests for graph schema migrations or corrupted databases:**
-- What's not tested: Upgrading from old to new graph schema; recovering from a partially-initialized graph; adding new node or relationship types
-- Files: `backend/src/dotmd/storage/graph.py`
-- Risk: Silent failures when graph DB is corrupted; no clear error messages for schema incompatibility
-- Priority: High
-
-**No tests for very large chunks or pathological markdown:**
-- What's not tested: Chunks exceeding max_tokens; markdown with deeply nested headings; chunks with special characters, unicode, or RTL text
-- Files: `backend/src/dotmd/ingestion/chunker.py`, `backend/src/dotmd/search/fusion.py`
-- Risk: Chunker or snippet extraction may fail or produce invalid results on edge-case inputs
+**`is_low_signal_telegram_text` logic is not tested for the dead branch:**
+- What's not tested: The symbol-detection branch (`unicodedata.category`) in `telegram_provider.py:411`. No existing test checks mixed alnum+symbol text like `"3 ♠♠♠"`.
+- Files: `backend/tests/ingestion/test_telegram_provider.py`
+- Risk: The bug (see Known Bugs above) exists silently.
 - Priority: Medium
 
-**No performance/benchmark tests:**
-- What's not tested: Indexing latency as a function of file count and chunk count; search latency under different query complexities; memory usage with various backends
-- Files: All
-- Risk: Performance regressions go undetected; scaling properties are unknown
-- Priority: Medium
+**`LanceDB` backend code paths have zero test coverage:**
+- What's not tested: `storage/vector.py` methods (`delete_vectors_by_chunk_ids`, `lookup_embeddings_by_text_hash` stubs). No test exercises `vector_backend=lancedb`.
+- Files: `backend/src/dotmd/storage/vector.py`
+- Risk: Low (backend is default-off) but the silent no-op stubs mean any accidental activation corrupts incremental indexes without error.
+- Priority: Low (resolve by deleting the backend entirely)
 
-**No tests for HTTP embedding server fallback:**
-- What's not tested: TEI server timeout, HTTP 5xx errors, malformed responses; fallback to local embeddings
-- Files: `backend/src/dotmd/search/semantic.py`
-- Risk: If embedding server is slow or down, the whole index operation times out without graceful fallback
-- Priority: Medium
+**`_ConnProxy` spy behavior is not tested directly:**
+- What's not tested: The `_execute_override` mechanism in `_ConnProxy` — only tested indirectly through `test_metadata_m2m.py`. The proxy's `__getattr__`/`__setattr__` paths under error conditions are untested.
+- Files: `backend/src/dotmd/storage/metadata.py:42-76`
+- Risk: Proxy breakage would silently degrade test accuracy rather than fail explicitly.
+- Priority: Low (resolve by removing `_ConnProxy`)
+
+## Dependencies at Risk
+
+**`torch<2.5` hard upper bound:**
+- Risk: The `<2.5` pin exists because the production server's Xeon E3 V2 CPU lacks AVX2, and PyTorch 2.5+ requires AVX2. This is documented in memory (`hardware_cpu_limits.md`). The pin will block `sentence-transformers`, `gliner`, and other torch-dependent packages from receiving upstream fixes.
+- Impact: Security and bug fix updates to the torch ecosystem are blocked.
+- Migration plan: This is a hardware constraint. Resolution requires either: (a) CPU upgrade, (b) migrating NER/reranker to ONNX Runtime (no AVX2 requirement), or (c) containerizing the torch workload on a separate host.
+
+**`real_ladybug` is an unlisted/private package:**
+- Risk: `real_ladybug>=0.1` in `pyproject.toml` is the embedded LadybugDB graph backend. It has no PyPI entry and appears to be an internal build or private fork. `import real_ladybug as lb` with `type: ignore[import-untyped]` signals no stubs. Version pinning is only a lower bound.
+- Impact: No upstream security disclosures, no changelog, no reliable update mechanism.
+- Migration plan: Ensure the package source is tracked; add an explicit version pin (not just `>=0.1`). Production uses FalkorDB so the immediate risk is low (LadybugDB is dev-only default).
+
+**`mcp[cli]>=1.0` broad version range:**
+- Risk: The MCP SDK is at an early major version (1.x). Breaking protocol changes in minor releases are likely. The `>=1.0` pin with no upper bound accepts any future 1.x or 2.x release.
+- Impact: Container image rebuild could pick up a breaking MCP version that changes SSE/streamable-http framing.
+- Migration plan: Add an upper bound `mcp[cli]>=1.0,<2.0` and pin the tested minor version in the lockfile.
+
+## Scaling Limits
+
+**Search log table grows unbounded:**
+- `pipeline.py:279-296` creates a `search_log` table with `AUTOINCREMENT` and a separate index. There is no trim or rotation logic in the visible codebase. Every search appends one row forever.
+- Current capacity: Disk-bounded. At ~1 KB per row and 100 searches/day, this is ~35 MB/year — negligible currently.
+- Limit: No hard limit, but on a 238 GB SSD shared with everything else, unbounded growth in `/dotmd-index/index.db` is a long-term concern.
+- Scaling path: Add a trim statement (e.g., `DELETE FROM search_log WHERE id < (SELECT MAX(id) - 10000 FROM search_log)`) after each insert, or a scheduled vacuum of the log table.
 
 ---
 
-*Concerns audit: 2026-03-23*
+*Concerns audit: 2026-05-10*

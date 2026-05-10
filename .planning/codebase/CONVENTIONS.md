@@ -1,191 +1,154 @@
 # Coding Conventions
 
-**Analysis Date:** 2026-03-23
+**Analysis Date:** 2026-05-10
 
 ## Naming Patterns
 
 **Files:**
-- Lowercase with underscores: `semantic.py`, `metadata.py`, `ner.py`
-- Protocol definitions use `_protocol` suffix or no suffix (e.g., `base.py` contains protocols)
-- Module grouping: `storage/base.py`, `search/base.py`, `extraction/base.py` hold protocol definitions
-- Package-level exports in `__init__.py` (minimal re-exports for public API)
+- `snake_case.py` throughout: `pipeline.py`, `sqlite_vec.py`, `source_lifecycle.py`
+- Test files prefixed with `test_`: `test_pipeline_metadata.py`, `test_incremental_pipeline.py`
+- Protocol modules named for their abstraction: `source_provider.py`, `base.py`
+- Non-test helper modules in test dirs use plain names: `application_source_fixtures.py`, `conftest.py`
 
-**Functions:**
-- Lowercase with underscores: `discover_files()`, `read_file()`, `chunk_file()`
-- Private/internal functions prefixed with single underscore: `_extract_title()`, `_get_model()`, `_load_model()`
-- Public methods no prefix: `index()`, `search()`, `extract()`
-- Boolean returns named with verb phrases: `is_file()`, `exists()` (stdlib patterns)
+**Classes:**
+- `PascalCase` for all classes: `IndexingPipeline`, `SQLiteMetadataStore`, `SemanticSearchEngine`
+- Protocol classes suffixed with `Protocol`: `VectorStoreProtocol`, `GraphStoreProtocol`, `MetadataStoreProtocol`, `ApplicationSourceProviderProtocol`, `FederatedSearchProviderProtocol`
+- Exception classes suffixed with `Error`: `DotMDError`, `IndexNotFoundError`, `IndexingLockError`, `StorageError`
+- `StrEnum` subclasses named for the domain concept they enumerate: `SearchMode`, `DocKind`, `TrickleStatus`, `SourceCapability`
+- Internal helper dataclasses prefixed with `_`: `_ExtractionBundle`
+
+**Functions and methods:**
+- `snake_case` everywhere: `encode_batch`, `add_chunks`, `delete_vectors_by_chunk_ids`
+- Private methods prefixed with `_`: `_embed_chunks`, `_check_schema_version`, `_check_weights_changed`, `_validate_refs`
+- Class methods decorated with `@classmethod` and named descriptively: `from_descriptor`, `normalized_capabilities`
+- Module-level constants in `UPPER_SNAKE_CASE`: `SCHEMA_VERSION`, `ACTIVE_FILTER_OVERFETCH_FACTOR`, `TELEGRAM_REF_PREFIX`, `_DEFAULT_MODEL` (private constants prefixed with `_`)
 
 **Variables:**
-- Lowercase with underscores: `chunk_id`, `vector_store`, `embedding_url`, `query_tokens`
-- Type-hinted collections use plural: `results: list[Chunk]`, `embeddings: list[list[float]]`
-- Abbreviations for common objects: `conn` (connection), `ctx` (context), `r` (result in loops)
-- Class instance variables private with underscore: `self._model`, `self._settings`, `self._vector_store`
+- `snake_case` throughout
+- Private instance attributes prefixed with `_`: `self._vector_store`, `self._model_name`, `self._embedding_url`
+- Loop variables and temporaries: descriptive short names (`chunk`, `embedding`, `file_path`)
 
-**Types:**
-- Pydantic models use PascalCase: `FileInfo`, `Chunk`, `SearchResult`, `IndexStats`, `Entity`, `Relation`
-- Protocol classes PascalCase with `Protocol` suffix: `VectorStoreProtocol`, `SearchEngineProtocol`, `ExtractorProtocol`
-- Literal types lowercase: `Literal["structural", "ner"]`, `Literal["semantic", "bm25", "graph", "hybrid"]`
+**Pydantic models:**
+- All field names in `snake_case`
+- Validators using `@field_validator` and `@model_validator` are named with leading `_` to signal private: `_validate_refs`, `_validate_field_type`
+- `ConfigDict(extra="forbid")` is the default for domain models; `frozen=True` added for result types (`SearchCandidate`, `SourceStatus`, `SearchResponse`)
 
 ## Code Style
 
-**Formatting:**
-- No explicit linter configured (pyproject.toml has no linting tools listed)
-- Style follows PEP 8 implicitly
-- Line length not enforced but generally short (most lines <100 characters)
-- Docstrings use double quotes: `"""Triple-quoted docstrings"""`
+**Formatting (ruff format):**
+- Line length: 100 characters
+- Quote style: double quotes (`"`)
+- Indent style: 4 spaces
+- Line endings: LF
+- Config: `backend/pyproject.toml` `[tool.ruff.format]`
 
-**Linting:**
-- No linting configuration detected in `pyproject.toml`
-- Uses `from __future__ import annotations` at file start for forward compatibility
+**Linting (ruff lint):**
+- Rule sets active: `E`, `W`, `F`, `I`, `B`, `C4`, `SIM`, `UP`, `RUF`, `N`
+- Notable ignores:
+  - `E501` — line-too-long (formatter handles it; occasional long lines in docstrings accepted)
+  - `B008` — default arg with function call (FastAPI/Click patterns)
+  - `N802`, `N803`, `N806` — naming rules relaxed for MCP tool functions and Pydantic fields
+  - `SIM108` — ternary not always mandated
+  - `RUF002`, `RUF003` — ambiguous unicode allowed (Russian comments are intentional)
+- Per-file ignores: `tests/**/*.py` exempt from `S101` (asserts fine in tests) and `B017`
+- Config: `backend/pyproject.toml` `[tool.ruff.lint]`
+
+**Type checking (pyright standard mode):**
+- `typeCheckingMode = "standard"` — not strict
+- `reportMissingTypeStubs = false` — stubs absent for several ML/DB libs; acceptable
+- `# type: ignore[...]` used narrowly and always with a specific error code at the callsite
+- Common suppression sites: untyped third-party imports (`sqlite_vec`, `yaml`, `real_ladybug`, `gliner`, `sentence_transformers`), Protocol method-assign workarounds
 
 ## Import Organization
 
-**Order:**
-1. `from __future__ import annotations` (always first)
-2. Standard library (`logging`, `json`, `sqlite3`, `pathlib`, `datetime`, `re`)
-3. Third-party packages (`pydantic`, `click`, `sentence_transformers`, `fastapi`, `pyyaml`)
-4. Local imports (`from dotmd.core.models import ...`)
-5. TYPE_CHECKING conditional imports (for type hints only):
-   ```python
-   from typing import TYPE_CHECKING
-   if TYPE_CHECKING:
-       from gliner import GLiNER
-   ```
+**Order (ruff `I` rules enforce this):**
+1. `from __future__ import annotations` — always first line in every module
+2. Standard library imports (grouped alphabetically)
+3. Third-party imports
+4. Local `dotmd.*` imports
 
-**Path Aliases:**
-- No aliases configured; uses absolute imports: `from dotmd.core.models import ...`
-- Package root is `src/dotmd/` (importable as `dotmd`)
+**Style:**
+- Absolute imports only: `from dotmd.core.models import Chunk` not relative
+- `TYPE_CHECKING` guard used for heavy imports needed only at type-check time (e.g., `SentenceTransformer` in `semantic.py`)
+- Aliased imports with leading `_` to signal internal use: `import dotmd.ingestion.chunker as _chunker_module`, `from dataclasses import dataclass as _dataclass`
+
+**Path aliases:** None — no `__init__.py` re-exports at package level; callers import from the concrete submodule.
 
 ## Error Handling
 
+**Exception hierarchy** (`backend/src/dotmd/core/exceptions.py`):
+- All custom exceptions derive from `DotMDError(Exception)`
+- Domain-specific subclasses: `IndexError`, `IndexNotFoundError`, `ChunkingError`, `StorageError`, `SearchError`, `ExtractionError`, `ConfigError`, `IndexingLockError`
+- Use the narrowest applicable subclass when raising; catch `DotMDError` at boundaries
+
 **Patterns:**
-- Custom exception hierarchy defined in `dotmd.core.exceptions`:
-  - Base: `DotMDError(Exception)`
-  - Specific: `IndexError`, `IndexNotFoundError`, `ChunkingError`, `StorageError`, `SearchError`, `ExtractionError`, `ConfigError`
-- Exceptions are specific but not heavily used in current code
-- OSError caught at ingestion layer with warning log:
-  ```python
-  except OSError:
-      logger.warning("Skipping unreadable file: %s", md_path, exc_info=True)
-  ```
-- Early validation: `discover_files()` raises `FileNotFoundError` and `NotADirectoryError` for invalid input
-- HTTP errors explicitly raised: `response.raise_for_status()` in TEI embedding code
-- No try-except in core logic; errors propagate to caller or CLI
+- Raise on unrecoverable state with an informative message; no silent swallowing
+- Federated search uses soft-skip: errors surface in `SourceStatus` (`.status = "error"`, `.reason = str(exc)`) and do not abort the whole search
+- `contextlib.suppress` / `with contextlib.suppress(...)` used for expected benign failures (e.g., missing optional tables)
+- Storage operations do not catch broadly; they let SQLite/FalkorDB exceptions propagate to the pipeline caller
 
 ## Logging
 
-**Framework:** Python standard `logging` module
+**Framework:** `logging` (stdlib), module-level logger created once per module.
 
-**Setup:** Centralized in `utils/logging.py`:
+**Pattern:**
 ```python
-def setup_logging(verbose: bool = False) -> logging.Logger:
-    logger = logging.getLogger("dotmd")
-    level = logging.DEBUG if verbose else logging.INFO
-    handler = logging.StreamHandler(sys.stderr)
-    formatter = logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
+import logging
+logger = logging.getLogger(__name__)
 ```
 
-**Patterns:**
-- Module-level loggers: `logger = logging.getLogger(__name__)`
-- Info level for major operations: `logger.info("Discovered %d files", count)`
-- Debug level for details: `logger.debug("Expanded query: %r -> %r", old, new)`
-- Warning level for recoverable issues: `logger.warning("Skipping unreadable file: %s", path, exc_info=True)`
-- Exception info logged: `exc_info=True` passed to include stack traces
-- Log messages use printf-style formatting: `logger.info("Value: %s", value)` not f-strings
-- All log calls are at module level (not in methods of classes with state)
+**Log levels:**
+- `logger.debug(...)` — per-file or per-chunk progress details, timing, cache hit/miss
+- `logger.info(...)` — pipeline phase starts/ends, file counts, significant state changes
+- `logger.warning(...)` — recoverable issues (missing optional field, fallback triggered)
+- `logger.error(...)` — hard failures before raising or before marking a source as errored
+
+**Format:** Plain strings with f-strings; counts and identifiers interpolated directly. No structured/JSON logging in-process.
 
 ## Comments
 
-**When to Comment:**
-- Module docstrings: Every file has a `"""..."""` docstring explaining purpose
-- Function/method docstrings: All public methods documented with NumPy-style sections (Parameters, Returns, Raises)
-- Complex algorithms: `_extract_best_snippet()` has comments explaining windowing logic
-- Inline comments for non-obvious code: e.g., "Word-aware truncation at the end"
-- **NOT** commented: obvious code, self-explanatory variable names
+**When to comment:**
+- Module docstrings on every file explaining purpose and design choices
+- Class docstrings on all public classes (Parameters/Returns sections in NumPy style for complex signatures)
+- Inline comments for non-obvious invariants, schema decisions, and regression notes (e.g., `# CONCERN-01 regression`)
+- Section separators using dashed lines (`# ---------------------------------------------------------------------------`) to group logical sections within long files
+- Russian comments appear in server-facing config and scripts; English is the default for code
 
-**JSDoc/TSDoc:**
-- Not applicable (Python project)
-- Uses NumPy-style docstrings with sections:
-  ```python
-  def search(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
-      """Search and return ``(chunk_id, score)`` pairs.
-
-      Parameters
-      ----------
-      query:
-          The natural-language search query.
-      top_k:
-          Maximum number of results to return.
-
-      Returns
-      -------
-      list[tuple[str, float]]
-          A list of ``(chunk_id, score)`` pairs ordered by descending relevance.
-      """
-  ```
+**Docstrings:**
+- NumPy-style Parameters / Returns sections in Protocol method docstrings
+- Public API methods (Protocols, service facade) have full docstrings
+- Internal `_`-prefixed helpers often have a single-sentence docstring or none
+- No docstrings on `__init__` — constructor arguments are documented on the class
 
 ## Function Design
 
-**Size:** Functions are short and focused:
-- Utility functions: 10-40 lines (e.g., `_extract_title()`, `_truncate()`)
-- Search methods: 30-80 lines with clear subsections (e.g., `DotMDService.search()`)
-- Pipeline orchestration: 40-120 lines with numbered steps in docstring
+**Size:** No strict line limit, but complex multi-phase operations (pipeline index stages) are broken into private `_`-prefixed methods called from one orchestrator method.
 
 **Parameters:**
-- Named parameters preferred over positional; most functions use keyword args
-- Defaults for common values: `top_k: int = 10`, `threshold: float = 0.5`
-- Type hints required (enforced by `from __future__ import annotations`)
-- Protocols used for abstraction: `vector_store: VectorStoreProtocol`
+- Keyword-only parameters (`*`) used wherever callers could confuse positional order: `add_chunks(..., *, overwrite: bool = True, text_hashes: ... | None = None)`
+- Boolean flags use keyword-only syntax
+- Settings/config injected via `Settings` object at construction time, not threaded through function signatures
 
-**Return Values:**
-- Single return type or `None`: `list[SearchResult]`, `IndexStats | None`
-- Tuples for pairs: `list[tuple[str, float]]` for (chunk_id, score) pairs
-- Domain models (Pydantic) for complex data: returns `SearchResult` not dict
-- Early returns for guards:
-  ```python
-  if not directory.exists():
-      raise FileNotFoundError(...)
-  ```
+**Return values:**
+- `None` for write operations; explicit return types on all public methods
+- `list[T]` for collections; empty list rather than `None` when nothing found
+- `T | None` for single-item lookups (`get_chunk`, `get_stats`)
+- Named tuples and dataclasses over bare tuples where fields have meaning (search returns `(chunk_id, float)` tuples as an internal contract but surfaces `SearchCandidate` models publicly)
 
 ## Module Design
 
-**Exports:**
-- Public classes/functions at module level; no `__all__` defined
-- Protocols imported into `storage/base.py`, `search/base.py`, `extraction/base.py` for discoverability
-- Private modules (eval, visualize_graph) not part of public API
-- Service facade `DotMDService` is the only public entry point for integration
+**Exports:** No barrel `__init__.py` re-exports. Callers import from concrete submodules:
+```python
+from dotmd.storage.base import VectorStoreProtocol
+from dotmd.core.models import Chunk, SearchCandidate
+```
 
-**Barrel Files:**
-- Minimal use; `__init__.py` files mostly empty or contain just imports of protocols
-- Example: `storage/__init__.py` may import `VectorStoreProtocol` for convenience
+**Protocols over ABCs:** All extension points defined as `typing.Protocol` with `@runtime_checkable`. No `abc.ABC` base classes used.
 
-## Architecture Principles
+**Pydantic models are the public contract:** All cross-layer data uses Pydantic v2 models. Raw dicts/tuples are internal to storage implementations and converted before crossing layer boundaries.
 
-**Dependency Injection:**
-- Settings object passed to pipeline and service
-- Storage backends created by pipeline, passed to search engines
-- Extractors created by pipeline, not in search layer
-- No global singletons; stateless functions preferred
-
-**Protocol-Based Abstraction:**
-- All storage implementations satisfy `VectorStoreProtocol`, `GraphStoreProtocol`, `MetadataStoreProtocol`
-- All search engines satisfy `SearchEngineProtocol`
-- All extractors satisfy `ExtractorProtocol`
-- Enables swapping backends without API changes
-
-**Lazy Loading:**
-- Models (SentenceTransformer, GLiNER, cross-encoder) loaded on first use via `_load_model()` methods
-- BM25 index loaded when first search occurs, cached in instance
-- Warmup method available: `DotMDService.warmup()` for eager loading
-
-**No Per-Request Reloading:**
-- Indexes (BM25, vector, graph) loaded once at startup and reused
-- Critical performance principle: calling `load_index()` inside search methods would cause disk I/O per query
+**`TypedDict` for ad-hoc dicts:** Service layer uses `TypedDict` (`ReadPayload`, `DrillPayload`) for structured dict return values that aren't worth a full Pydantic model.
 
 ---
 
-*Convention analysis: 2026-03-23*
+*Convention analysis: 2026-05-10*
