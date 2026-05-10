@@ -46,6 +46,7 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
   lifecycle/config/auth/cursor, federated search, filesystem unification,
   Telegram unification, and connector compatibility.
   - ✓ Phase 35: FilesystemMarkdownSourceAdapter._from_file_info renamed to public `document_for_file_info`; behavioral tests prove public lifecycle boundary — Validated in Phase 35
+  - ✓ Phase 36: Telegram unified sync and federated search — TG-01 capabilities in registry, TG-02 auto-polling task via _local_executor (300s default, env-configurable), TG-03 rebound_units counter + CLI output, TG-04 ref consistency invariant pinned by regression test — Validated in Phase 36
 
 ### Out of Scope
 
@@ -256,4 +257,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-07 after Phase 28 completion*
+*Last updated: 2026-05-10 after Phase 36 completion*
