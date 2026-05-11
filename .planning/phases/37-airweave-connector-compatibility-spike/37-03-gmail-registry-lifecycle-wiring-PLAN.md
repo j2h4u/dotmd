@@ -4,10 +4,13 @@ title: Gmail source descriptor, lifecycle config, and registry wiring
 wave: 2
 depends_on:
   - 37-01
+  - 37-02
 files_modified:
   - backend/src/dotmd/ingestion/source_registry.py
   - backend/src/dotmd/ingestion/source_lifecycle.py
   - backend/src/dotmd/core/models.py
+  - backend/src/dotmd/core/config.py
+  - backend/src/dotmd/api/service.py
 autonomous: true
 requirements:
   - AIR-01
@@ -17,19 +20,24 @@ must_haves:
     Gmail registers as a SourceDescriptor with FEDERATED_SEARCH and READ_UNIT_WINDOW
     capabilities through the same registry/lifecycle path as filesystem and Telegram.
     SourceRuntimeFactory.build("gmail") constructs a GmailApplicationSourceProvider
-    when DOTMD_GMAIL_CLIENT_ID env var is set. No direct GmailSource() instantiation
-    outside source_lifecycle.py.
+    when DOTMD_GMAIL_CLIENT_ID env var is set. Credentials come from env vars loaded
+    by the container (matching ~/.secrets/dotmd-gmail.env convention via env_file in
+    docker-compose). search_result_limit validated 1-500. Invalid credentials at
+    registration produce CREDENTIALS_UNAVAILABLE status, not a hard crash.
+    No direct GmailSource() instantiation outside source_lifecycle.py.
   truths:
     - gmail_source_descriptor() exists in source_registry.py and returns a valid SourceDescriptor
     - SourceDescriptor.namespace == "gmail"
-    - SourceDescriptor capabilities include FEDERATED_SEARCH and READ_UNIT_WINDOW
+    - SourceDescriptor capabilities include FEDERATED_SEARCH and READ_UNIT_WINDOW only (not LOCAL_SYNC)
     - GmailSourceConfig exists in source_lifecycle.py with client_id, client_secret, search_result_limit fields
+    - search_result_limit validated 1 <= value <= 500, default 20
     - SourceRuntimeFactory.build("gmail") returns SourceRuntimeBundle with provider set
     - SourceRuntimeFactory.build("gmail") raises SourceLifecycleConfigError when config missing
     - build_if_configured("gmail") returns None when DOTMD_GMAIL_CLIENT_ID not set
     - build_if_configured("gmail") returns bundle when GmailSourceConfig is present in config store
     - No direct GmailSource() call outside source_lifecycle.py
     - AIR-03: gmail uses same SourceRegistry/SourceRuntimeFactory path as filesystem and telegram
+    - Credential loading: env vars from DOTMD_GMAIL_* (loaded from ~/.secrets/dotmd-gmail.env via docker env_file)
 ---
 
 # Plan 37-03: Gmail source descriptor, lifecycle config, and registry wiring
@@ -44,6 +52,21 @@ when `DOTMD_GMAIL_CLIENT_ID` env var is set.
 
 This plan satisfies AIR-03: Gmail uses the same registry/lifecycle contracts as
 filesystem and Telegram — not a separate Airweave-only integration lane.
+
+**Dependency note:** This plan depends on both 37-01 (shims) and 37-02 (GmailBridge,
+GmailApplicationSourceProvider). The test skip markers from 37-02 are removed here.
+
+**Credential loading clarification (D-05):** The `~/.secrets/dotmd-gmail.env` file
+is loaded by the container via `env_file:` in `docker-compose.yml` (the standard
+server convention for all secrets). Inside the container, the env vars
+`DOTMD_GMAIL_CLIENT_ID`, `DOTMD_GMAIL_CLIENT_SECRET`, and `DOTMD_GMAIL_REFRESH_TOKEN`
+are available to the process. The `Settings` class reads them via pydantic-settings
+field aliases. No code change to `start.sh` or the container entrypoint is needed —
+the `env_file:` in compose is the loading mechanism. The refresh token is stored in
+`access.delegated_to` (a credential ref string, semantically "the OAuth token
+material delegated through the credential provider to this source"). The field name
+is a slight semantic mismatch but consistent with how Telegram stores socket path
+credentials — document this in a comment.
 
 ## Tasks
 
@@ -65,7 +88,7 @@ The descriptor must have:
 - `config_schema = SourceConfigSchema(name="GmailSourceConfig", fields=[`
   - `SourceSchemaField(name="client_id", field_type="str", required=True, description="Google OAuth client ID")`
   - `SourceSchemaField(name="client_secret", field_type="str", required=True, description="Google OAuth client secret")`
-  - `SourceSchemaField(name="search_result_limit", field_type="int", required=False, description="Max results per search query (default 10)")`
+  - `SourceSchemaField(name="search_result_limit", field_type="int", required=False, description="Max results per search query (1-500, default 20)")`
   `])`
 - `auth_schema = SourceAuthSchema(auth_kind="oauth_refresh", methods=["oauth_browser", "oauth_token"])`
 - `cursor_schema = SourceCursorSchema(cursor_kind="none", description="Federated-only — no local cursor for spike")`
@@ -75,6 +98,12 @@ The descriptor must have:
 Also register it in `default_source_registry()`:
 ```python
 registry.register(gmail_source_descriptor())
+```
+
+Add a test assertion comment in the function docstring:
+```
+# AIR-03 compliance: registered via the same SourceRegistry path as
+# filesystem_source_descriptor() and telegram_source_descriptor()
 ```
 </action>
 
@@ -91,7 +120,7 @@ registry.register(gmail_source_descriptor())
 ### Task 2: Add GmailSourceConfig and build branch to source_lifecycle.py
 
 <read_first>
-- backend/src/dotmd/ingestion/source_lifecycle.py — TelegramSourceConfig, SourceRuntimeFactory.build(), build_if_configured(), full file
+- backend/src/dotmd/ingestion/source_lifecycle.py — TelegramSourceConfig, SourceRuntimeFactory.build(), build_if_configured(), DefaultSourceCredentialProvider, full file
 - backend/src/dotmd/ingestion/gmail_provider.py — GmailApplicationSourceProvider constructor
 - backend/src/dotmd/vendor/airweave/shims.py — GmailOAuthTokenProvider constructor
 - backend/src/dotmd/core/config.py — Settings fields, env var naming pattern
@@ -103,12 +132,22 @@ In `source_lifecycle.py`, make the following changes:
 **1. Add `GmailSourceConfig` Pydantic model** (after `TelegramSourceConfig`):
 ```python
 class GmailSourceConfig(BaseModel):
-    """Gmail OAuth runtime config."""
+    """Gmail OAuth runtime config.
+
+    search_result_limit is validated to stay within Gmail API bounds (1-500).
+    Default 20 is conservative — avoids metadata-fetch round-trip costs on
+    large result sets while remaining useful for most queries.
+    """
     model_config = ConfigDict(extra="forbid", strict=True)
-    
+
     client_id: str
     client_secret: str
-    search_result_limit: int = 10
+    search_result_limit: int = Field(
+        default=20,
+        ge=1,
+        le=500,
+        description="Max results per Gmail search query. Gmail API hard cap is 500.",
+    )
 ```
 
 **2. Update `SourceConfig` type union**:
@@ -137,6 +176,10 @@ if namespace == "gmail":
         credentials={
             "client_id": config.client_id,
             "client_secret": config.client_secret,
+            # access.delegated_to holds the refresh_token string.
+            # Semantically: the OAuth token material "delegated" through the
+            # credential provider to this source. Consistent with how
+            # Telegram stores socket path credentials in credential_ref.
             "refresh_token": access.delegated_to or "",
         }
     )
@@ -154,26 +197,48 @@ if namespace == "gmail":
     )
 ```
 
-Note: `access.delegated_to` holds the refresh_token value. The credential
-provider resolves this from `SourceCredentialRef.credential_ref`. For the spike,
-the refresh token comes from `DOTMD_GMAIL_REFRESH_TOKEN` env var wired in
-Settings (see Task 3).
-
-**5. Add `elif namespace == "gmail":` branch in `build_if_configured()`**:
+**5. Update `DefaultSourceCredentialProvider.get_access()`** to handle `auth_kind="oauth_refresh"`:
 ```python
-if namespace == "gmail":
-    config = record.config
+if descriptor.auth_schema.auth_kind == "oauth_refresh":
+    if not credential_ref.credential_ref:
+        raise SourceLifecycleConfigError(
+            f"{descriptor.namespace}.credential_ref (refresh_token) is required"
+        )
+    return SourceAccess(kind="delegated", delegated_to=credential_ref.credential_ref)
+```
+
+**6. Add `elif namespace == "gmail":` branch in `build_if_configured()`**:
+```python
+elif namespace == "gmail":
+    config = record.config if record else None
     if not isinstance(config, GmailSourceConfig):
         return None
-    # client_id and client_secret are required fields — if we have a GmailSourceConfig, they are set
-return self.build(namespace)
+    return self.build(namespace)
 ```
+
+**7. Graceful degradation for missing credentials:**
+In `_build_federated_bundles()` in `service.py` (or in the lifecycle factory),
+if `build_if_configured("gmail")` raises `SourceLifecycleConfigError` (e.g.,
+refresh token missing but client_id/secret are set), catch the error and log a
+warning rather than crashing the service startup:
+```python
+# Graceful degradation: invalid/missing credentials → log warning, skip source
+try:
+    bundle = self._lifecycle_factory.build_if_configured(namespace)
+except SourceLifecycleConfigError as e:
+    logger.warning("Gmail source config error (skipping): %s", e)
+    bundle = None
+```
+This ensures the service starts normally even if Gmail credentials are partially configured.
 </action>
 
 <acceptance_criteria>
 - `from dotmd.ingestion.source_lifecycle import GmailSourceConfig` imports cleanly
 - `GmailSourceConfig(client_id="cid", client_secret="csec")` constructs without error
-- `GmailSourceConfig(client_id="cid", client_secret="csec").search_result_limit == 10`
+- `GmailSourceConfig(client_id="cid", client_secret="csec").search_result_limit == 20`
+- `GmailSourceConfig(client_id="c", client_secret="s", search_result_limit=500)` validates (at boundary)
+- `GmailSourceConfig(client_id="c", client_secret="s", search_result_limit=501)` raises ValidationError
+- `GmailSourceConfig(client_id="c", client_secret="s", search_result_limit=0)` raises ValidationError
 - `SourceRuntimeFactory.build("gmail")` with a properly configured store returns a `SourceRuntimeBundle` with `provider` set
 - `SourceRuntimeFactory.build("gmail")` with no gmail config in store raises `SourceLifecycleConfigError`
 - `build_if_configured("gmail")` returns `None` when no gmail config in store
@@ -193,16 +258,30 @@ In `backend/src/dotmd/core/config.py`, add Gmail env vars to `Settings`:
 gmail_client_id: str | None = Field(None, alias="DOTMD_GMAIL_CLIENT_ID")
 gmail_client_secret: str | None = Field(None, alias="DOTMD_GMAIL_CLIENT_SECRET")
 gmail_refresh_token: str | None = Field(None, alias="DOTMD_GMAIL_REFRESH_TOKEN")
-gmail_search_result_limit: int = Field(10, alias="DOTMD_GMAIL_SEARCH_RESULT_LIMIT")
+gmail_search_result_limit: int = Field(
+    default=20,
+    alias="DOTMD_GMAIL_SEARCH_RESULT_LIMIT",
+    ge=1,
+    le=500,
+)
 ```
 
+Note on credential loading: `~/.secrets/dotmd-gmail.env` is loaded into the
+container via `env_file:` in `docker-compose.yml` (the server's standard secrets
+convention). No code change to `start.sh` is needed — the env vars are available
+to the process via the OS environment when the container starts.
+
 In `backend/src/dotmd/api/service.py`, in `DotMDService.__init__()` where the
-`InMemorySourceConfigStore` is populated (search for where TelegramSourceConfig
-is added to the config store), add a parallel block for Gmail:
+`InMemorySourceConfigStore` is populated (find the block where TelegramSourceConfig
+is added), add a parallel block for Gmail:
 
 ```python
-if self._settings.gmail_client_id and self._settings.gmail_client_secret and self._settings.gmail_refresh_token:
-    from dotmd.ingestion.source_lifecycle import GmailSourceConfig, SourceConfigRecord, SourceCredentialRef
+if (self._settings.gmail_client_id
+        and self._settings.gmail_client_secret
+        and self._settings.gmail_refresh_token):
+    from dotmd.ingestion.source_lifecycle import (
+        GmailSourceConfig, SourceConfigRecord, SourceCredentialRef
+    )
     gmail_config_record = SourceConfigRecord(
         namespace="gmail",
         config=GmailSourceConfig(
@@ -217,26 +296,12 @@ if self._settings.gmail_client_id and self._settings.gmail_client_secret and sel
     )
     config_store.set_config(gmail_config_record)
 ```
-
-Also update `DefaultSourceCredentialProvider.get_access()` to handle `auth_kind="oauth_refresh"`:
-In `source_lifecycle.py`, add a branch:
-```python
-if descriptor.auth_schema.auth_kind == "oauth_refresh":
-    if not credential_ref.credential_ref:
-        raise SourceLifecycleConfigError(
-            f"{descriptor.namespace}.credential_ref (refresh_token) is required"
-        )
-    return SourceAccess(kind="delegated", delegated_to=credential_ref.credential_ref)
-```
-
-This means `access.delegated_to` holds the refresh token string, which the
-`GmailOAuthTokenProvider` receives as the `refresh_token` credential.
 </action>
 
 <acceptance_criteria>
 - Settings class has `gmail_client_id`, `gmail_client_secret`, `gmail_refresh_token`, `gmail_search_result_limit` fields
 - With `DOTMD_GMAIL_CLIENT_ID=x DOTMD_GMAIL_CLIENT_SECRET=y DOTMD_GMAIL_REFRESH_TOKEN=z` env set, `DotMDService._build_federated_bundles()` adds a gmail bundle to `self._lifecycle_bundles`
-- Without Gmail env vars set, no gmail bundle is built (no error)
+- Without Gmail env vars set, no gmail bundle is built (no error, no crash)
 - Existing Telegram and filesystem sources remain unaffected
 - `cd backend && python -m pytest tests/ -x -q` passes (all existing tests still green)
 </acceptance_criteria>
@@ -251,7 +316,7 @@ This means `access.delegated_to` holds the refresh token string, which the
 
 <action>
 Remove `@pytest.mark.skip` decorators from `test_gmail_descriptor` and
-`test_lifecycle_build_missing_config_raises` tests.
+`test_lifecycle_build_missing_config_raises` tests in `test_gmail_bridge.py`.
 
 Implement `test_gmail_descriptor`:
 ```python
@@ -263,6 +328,12 @@ def test_gmail_descriptor():
     assert SourceCapability.FEDERATED_SEARCH in d.capabilities
     assert SourceCapability.READ_UNIT_WINDOW in d.capabilities
     assert SourceCapability.LOCAL_SYNC not in d.capabilities
+    # AIR-03: same descriptor structure as filesystem and telegram
+    from dotmd.ingestion.source_registry import default_source_registry
+    r = default_source_registry()
+    assert r.get("gmail") is not None
+    assert r.get("filesystem") is not None
+    assert r.get("telegram") is not None
 ```
 
 Implement `test_lifecycle_build_missing_config_raises`:
@@ -272,10 +343,9 @@ def test_lifecycle_build_missing_config_raises():
         SourceRuntimeFactory, InMemorySourceConfigStore,
         DefaultSourceCredentialProvider, SourceLifecycleConfigError
     )
-    from dotmd.core.source_registry import SourceRegistry
     from dotmd.ingestion.source_registry import default_source_registry
     from unittest.mock import MagicMock
-    
+
     factory = SourceRuntimeFactory(
         registry=default_source_registry(),
         config_store=InMemorySourceConfigStore(),  # empty — no gmail config
@@ -292,7 +362,7 @@ def test_build_if_configured_returns_none_without_gmail_config():
     )
     from dotmd.ingestion.source_registry import default_source_registry
     from unittest.mock import MagicMock
-    
+
     factory = SourceRuntimeFactory(
         registry=default_source_registry(),
         config_store=InMemorySourceConfigStore(),
@@ -301,6 +371,19 @@ def test_build_if_configured_returns_none_without_gmail_config():
     )
     result = factory.build_if_configured("gmail")
     assert result is None
+
+def test_gmail_source_config_limit_validation():
+    from dotmd.ingestion.source_lifecycle import GmailSourceConfig
+    from pydantic import ValidationError
+    # Valid boundary values
+    GmailSourceConfig(client_id="c", client_secret="s", search_result_limit=1)
+    GmailSourceConfig(client_id="c", client_secret="s", search_result_limit=500)
+    GmailSourceConfig(client_id="c", client_secret="s")  # default 20
+    # Invalid values
+    with pytest.raises(ValidationError):
+        GmailSourceConfig(client_id="c", client_secret="s", search_result_limit=0)
+    with pytest.raises(ValidationError):
+        GmailSourceConfig(client_id="c", client_secret="s", search_result_limit=501)
 ```
 </action>
 
@@ -308,6 +391,7 @@ def test_build_if_configured_returns_none_without_gmail_config():
 - `cd backend && python -m pytest tests/test_gmail_bridge.py -v` exits 0 with all tests passing
 - No skip markers on test_gmail_descriptor or test_lifecycle_build_missing_config_raises
 - test_build_if_configured_returns_none_without_gmail_config passes
+- test_gmail_source_config_limit_validation passes (boundary values 1 and 500 are valid, 0 and 501 raise)
 </acceptance_criteria>
 
 ## Verification
@@ -321,5 +405,9 @@ from dotmd.ingestion.source_registry import default_source_registry
 r = default_source_registry()
 print('gmail descriptor:', r.get('gmail').namespace)
 print('capabilities:', [c.value for c in r.get('gmail').capabilities])
+assert r.get('filesystem') is not None
+assert r.get('telegram') is not None
+assert r.get('gmail') is not None
+print('AIR-03 registry check: OK')
 "
 ```

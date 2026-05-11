@@ -12,6 +12,10 @@ files_modified:
   - backend/src/dotmd/vendor/airweave/source_gmail.py
   - backend/src/dotmd/vendor/airweave/gmail_config.py
   - backend/src/dotmd/vendor/airweave/decorators.py
+  - backend/src/dotmd/vendor/airweave/shims.py
+  - backend/src/dotmd/vendor/airweave/VENDOR_VERSION
+  - backend/src/dotmd/vendor/airweave/VENDOR_NOTES.md
+  - backend/tests/test_vendor_airweave_import.py
 autonomous: true
 requirements:
   - AIR-01
@@ -21,14 +25,18 @@ must_haves:
     Airweave source/entity classes importable inside dotMD without pip-installing
     the full airweave package. DI shim types (logger, http client, auth provider)
     satisfy GmailSource.__init__ structurally. No Temporal, Vespa, or
-    organization-layer imports survive in the vendored tree.
+    organization-layer imports survive in the vendored tree. Token provider uses
+    margin-based cache expiry (expires_in - 300) with threading.Lock to prevent
+    concurrent refresh races.
   truths:
-    - backend/src/dotmd/vendor/airweave/ directory exists with 8 files
+    - backend/src/dotmd/vendor/airweave/ directory exists with all required files
     - "from dotmd.vendor.airweave.source_gmail import GmailSource" imports cleanly
     - GmailSource(auth=shim_auth, logger=shim_logger, http_client=shim_http) constructs without error
     - No import of airweave.domains, airweave.core, or airweave.schemas survives in vendored tree
     - SparseEmbedding replaced with Any in entities_base.py
     - "@source" decorator in decorators.py is a no-op stub that sets ClassVar attributes only
+    - GmailOAuthTokenProvider uses threading.Lock and margin-based expiry (expires_in - 300)
+    - VENDOR_VERSION file exists with source Airweave commit SHA or branch reference
 ---
 
 # Plan 37-01: Vendor Airweave platform slice and DI shims
@@ -37,8 +45,8 @@ must_haves:
 
 Copy 6 Airweave platform files into `backend/src/dotmd/vendor/airweave/`,
 rewrite their cross-module imports to be self-contained, stub out the `@source`
-decorator and external DI types, and verify the vendored slice imports cleanly
-inside the dotMD package.
+decorator and external DI types, and implement the DI shim classes. The token
+provider uses margin-based cache expiry with thread-safety.
 
 ## Context
 
@@ -126,6 +134,28 @@ Then copy and adapt 6 files into `backend/src/dotmd/vendor/airweave/`:
       return decorator
   ```
 - Do NOT import from airweave.schemas or airweave.core in the stub
+
+Also create `VENDOR_VERSION` with the source commit reference:
+```
+Source: https://github.com/airweave-ai/airweave
+Branch/commit: main (vendored 2026-05-11)
+Files vendored:
+  - backend/airweave/platform/entities/_base.py
+  - backend/airweave/platform/entities/gmail.py
+  - backend/airweave/platform/sources/_base.py
+  - backend/airweave/platform/sources/gmail.py
+  - backend/airweave/platform/configs/config.py (GmailConfig only)
+  - backend/airweave/platform/decorators.py
+Modifications: imports rewritten to dotmd.vendor.airweave.*, heavy DI deps shimmed
+```
+
+And `VENDOR_NOTES.md` documenting per-file modification delta:
+- entities_base.py: SparseEmbedding stub, removed airweave.domains imports
+- entities_gmail.py: import path rewrites only
+- source_base.py: ContextualLogger/AirweaveHttpClient/SourceAuthProvider replaced with stubs
+- source_gmail.py: import rewrites, @source decorator applied after stub available
+- gmail_config.py: extracted GmailConfig only, SourceConfig base replaced with pydantic.BaseModel
+- decorators.py: replaced with no-op stub preserving ClassVar attribute setting
 </action>
 
 <acceptance_criteria>
@@ -135,9 +165,11 @@ Then copy and adapt 6 files into `backend/src/dotmd/vendor/airweave/`:
 - `python -c "from dotmd.vendor.airweave.gmail_config import GmailConfig"` exits 0
 - `grep -r "airweave.domains\|airweave.core\|airweave.schemas" backend/src/dotmd/vendor/` returns no matches
 - `python -c "import temporalio"` is NOT required (airweave not installed)
+- `test -f backend/src/dotmd/vendor/airweave/VENDOR_VERSION` exits 0
+- `test -f backend/src/dotmd/vendor/airweave/VENDOR_NOTES.md` exits 0
 </acceptance_criteria>
 
-### Task 2: Create DI shim classes
+### Task 2: Create DI shim classes with thread-safe token caching
 
 <read_first>
 - backend/src/dotmd/vendor/airweave/source_base.py (just created)
@@ -157,12 +189,63 @@ No rate limiter. Constructor takes `httpx.AsyncClient`.
 
 **GmailOAuthTokenProvider**: provides OAuth tokens for Gmail API.
 Fields: `provider_kind = "oauth"` (string), `supports_refresh = True`.
-Method `get_token() -> str`: reads refresh_token from an injected credential dict
-(`{"client_id": ..., "client_secret": ..., "refresh_token": ...}`),
-calls `https://oauth2.googleapis.com/token` with `grant_type=refresh_token`,
-returns the `access_token` from the response. Use `httpx` synchronously (this
-is called from sync contexts in the bridge). Cache the token with 5-minute
-expiry to avoid a token request per search call.
+
+The token cache MUST use margin-based expiry and thread-safe refresh:
+
+```python
+import threading
+import time
+
+class GmailOAuthTokenProvider:
+    provider_kind: str = "oauth"
+    supports_refresh: bool = True
+
+    def __init__(self, credentials: dict[str, str]) -> None:
+        # credentials = {"client_id": ..., "client_secret": ..., "refresh_token": ...}
+        self._credentials = credentials
+        self._cached_token: str | None = None
+        self._token_expires_at: float = 0.0  # epoch seconds
+        self._refresh_lock = threading.Lock()  # prevents concurrent refresh races
+
+    def get_token(self) -> str:
+        now = time.time()
+        # Fast path: token still valid (check before acquiring lock)
+        if self._cached_token and now < self._token_expires_at:
+            return self._cached_token
+
+        # Slow path: refresh needed — serialize under lock
+        with self._refresh_lock:
+            # Re-check after acquiring lock (another thread may have refreshed)
+            if self._cached_token and time.time() < self._token_expires_at:
+                return self._cached_token
+
+            import httpx
+            response = httpx.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "client_id": self._credentials["client_id"],
+                    "client_secret": self._credentials["client_secret"],
+                    "refresh_token": self._credentials["refresh_token"],
+                    "grant_type": "refresh_token",
+                },
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            token_data = response.json()
+            self._cached_token = token_data["access_token"]
+            # Use actual expires_in from response with 300s safety margin
+            expires_in = token_data.get("expires_in", 3600)
+            self._token_expires_at = time.time() + max(expires_in - 300, 0)
+            return self._cached_token
+```
+
+Key behaviors:
+- Lock is held only during the actual refresh call, not during normal reads
+- Double-check inside lock prevents thundering herd (multiple threads refreshing simultaneously)
+- `expires_in - 300` margin means refresh triggers 5 min before actual expiry (Google tokens
+  typically have 3600s lifetime, so cache lasts ~55 min, not hard-coded 5 min)
+- Token response may include a new refresh token — if `refresh_token` is present in response,
+  update `self._credentials["refresh_token"]` to support token rotation
 
 Do NOT make this class inherit from any Airweave class.
 </action>
@@ -171,7 +254,9 @@ Do NOT make this class inherit from any Airweave class.
 - `from dotmd.vendor.airweave.shims import GmailLoggerShim, GmailHttpClientShim, GmailOAuthTokenProvider` imports cleanly
 - `GmailLoggerShim(logger=logging.getLogger("test")).debug("hi")` runs without error
 - `GmailOAuthTokenProvider(credentials={"client_id": "x", "client_secret": "y", "refresh_token": "z"})` constructs without error (no network call at construction time)
+- `GmailOAuthTokenProvider` has `_refresh_lock: threading.Lock` attribute
 - shims.py contains no imports from `airweave.*`
+- Token cache uses `expires_in - 300` margin, not hard-coded 300 seconds
 </acceptance_criteria>
 
 ### Task 3: Verify GmailSource construction with shims
@@ -188,6 +273,7 @@ Write a minimal smoke test in `backend/tests/test_vendor_airweave_import.py`:
 """Smoke tests: vendored Airweave slice imports cleanly and shims satisfy GmailSource constructor."""
 
 import logging
+import threading
 import pytest
 import httpx
 
@@ -211,6 +297,72 @@ def test_shim_construction():
     auth_shim = GmailOAuthTokenProvider(credentials=creds)
     assert auth_shim.supports_refresh is True
     assert auth_shim.provider_kind == "oauth"
+    # Verify thread-safe refresh lock exists
+    assert isinstance(auth_shim._refresh_lock, threading.Lock)
+    # Verify no network call at construction time
+    assert auth_shim._cached_token is None
+
+def test_token_provider_uses_expires_in_margin():
+    """Token cache expiry must be margin-based (expires_in - 300), not hard-coded."""
+    import time
+    from unittest.mock import patch, MagicMock
+    from dotmd.vendor.airweave.shims import GmailOAuthTokenProvider
+
+    creds = {"client_id": "cid", "client_secret": "csec", "refresh_token": "rtoken"}
+    provider = GmailOAuthTokenProvider(credentials=creds)
+
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"access_token": "fake-token", "expires_in": 3600}
+    mock_response.raise_for_status.return_value = None
+
+    with patch("httpx.post", return_value=mock_response):
+        token = provider.get_token()
+        assert token == "fake-token"
+        # Cache should last ~3300 seconds (3600 - 300), not 5 minutes (300)
+        expected_min_expiry = time.time() + 3000  # allow some test slack
+        assert provider._token_expires_at > expected_min_expiry
+
+def test_token_provider_concurrent_refresh_serialized():
+    """Concurrent get_token() calls must not issue multiple refresh requests."""
+    import time
+    from unittest.mock import patch, MagicMock
+    from dotmd.vendor.airweave.shims import GmailOAuthTokenProvider
+
+    creds = {"client_id": "cid", "client_secret": "csec", "refresh_token": "rtoken"}
+    provider = GmailOAuthTokenProvider(credentials=creds)
+
+    call_count = 0
+    original_post = None
+
+    def mock_post(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        time.sleep(0.05)  # simulate latency
+        m = MagicMock()
+        m.json.return_value = {"access_token": f"token-{call_count}", "expires_in": 3600}
+        m.raise_for_status.return_value = None
+        return m
+
+    tokens = []
+    errors = []
+
+    def get_token():
+        try:
+            tokens.append(provider.get_token())
+        except Exception as e:
+            errors.append(e)
+
+    with patch("httpx.post", side_effect=mock_post):
+        threads = [threading.Thread(target=get_token) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+    assert not errors
+    assert len(tokens) == 5
+    # Only ONE refresh call should have been made (double-check inside lock)
+    assert call_count == 1, f"Expected 1 refresh call, got {call_count}"
 
 def test_no_airweave_package_required():
     import sys
@@ -220,12 +372,22 @@ def test_no_airweave_package_required():
                     mod_name.startswith("airweave.core") or
                     mod_name.startswith("temporalio")), \
             f"Unexpected heavy airweave module loaded: {mod_name}"
+
+def test_vendor_version_file_exists():
+    import os
+    from pathlib import Path
+    vendor_version = Path("src/dotmd/vendor/airweave/VENDOR_VERSION")
+    assert vendor_version.exists(), "VENDOR_VERSION must exist for source traceability"
+    content = vendor_version.read_text()
+    assert "airweave" in content.lower(), "VENDOR_VERSION must reference airweave source"
 ```
 </action>
 
 <acceptance_criteria>
 - `cd backend && python -m pytest tests/test_vendor_airweave_import.py -v` exits 0
-- All 4 test functions pass
+- All 6 test functions pass (including concurrent refresh serialization test)
+- test_token_provider_uses_expires_in_margin confirms margin-based expiry
+- test_token_provider_concurrent_refresh_serialized confirms only 1 refresh under concurrent load
 - No import of temporalio, celery, redis, sqlalchemy triggered by the import chain
 </acceptance_criteria>
 
@@ -235,4 +397,5 @@ def test_no_airweave_package_required():
 cd /home/j2h4u/repos/j2h4u/dotmd/backend
 python -m pytest tests/test_vendor_airweave_import.py -v
 grep -r "airweave.domains\|airweave.core\|airweave.schemas\|temporalio" src/dotmd/vendor/
+test -f src/dotmd/vendor/airweave/VENDOR_VERSION && echo "VENDOR_VERSION OK"
 ```

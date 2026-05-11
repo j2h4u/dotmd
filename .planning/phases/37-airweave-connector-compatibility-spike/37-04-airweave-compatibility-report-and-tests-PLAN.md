@@ -8,22 +8,30 @@ depends_on:
 files_modified:
   - docs/airweave-compatibility.md
   - backend/tests/test_gmail_bridge.py
+  - AGENTS.md
 autonomous: true
 requirements:
   - AIR-02
   - AIR-03
 must_haves:
   goal: >
-    docs/airweave-compatibility.md exists and answers all three AIR-02 categories:
-    reusable directly, requires shims, should be avoided. Full test suite is green.
+    docs/airweave-compatibility.md exists and answers all three AIR-02 categories
+    based on the ACTUAL implemented code from Plans 37-01 through 37-03 (not
+    pre-written prose). Report includes extensibility assessment table, honest
+    accounting of GmailSource.search() absence, and SourceAsset deferred mapping.
+    AGENTS.md updated with key architectural decisions. Full test suite is green.
     No Airweave-only integration lane exists separate from filesystem/Telegram paths.
   truths:
     - docs/airweave-compatibility.md exists and is non-empty
-    - Report covers "Reusable directly" section
-    - Report covers "Requires shims" section (SourceAuthProvider, ContextualLogger, AirweaveHttpClient, @source decorator, GmailMessageDeletionEntity)
-    - Report covers "Should be avoided" section (AirweaveSystemMetadata, Vespa, Temporal, FileService, AccessControl, AirweaveHttpClient rate limiter, supports_access_control)
+    - Report was written AFTER inspecting actual implementation files (not pre-written)
+    - Report covers "Reusable directly" section with specific class/file references from vendor/
+    - Report covers "Requires shims" section citing actual shim implementations in shims.py
+    - Report covers "Should be avoided" section (AirweaveSystemMetadata, Vespa, Temporal, etc.)
     - Report documents that GmailSource.search() is not implemented and bridge uses direct API
     - Report documents SourceAsset deferred mapping for GmailAttachmentEntity
+    - Report includes extensibility assessment table (generic vs connector-specific per component)
+    - Report explicitly states Airweave's runtime/indexing stack is avoided and direct Gmail API is dotMD's concern
+    - AGENTS.md updated with vendoring decision, token handling strategy, and generic bridge pattern
     - cd backend && python -m pytest tests/ -x -q exits 0
 ---
 
@@ -32,239 +40,248 @@ must_haves:
 ## Objective
 
 Produce the `docs/airweave-compatibility.md` structured analysis (AIR-02
-deliverable), then run the full test suite to verify the complete Phase 37
-implementation is green. This plan is the evidence that the spike answered its
-research question.
+deliverable) based on the ACTUAL implemented code, run the full test suite,
+and update AGENTS.md with architectural decisions. The report must be written
+by inspecting the real implementation — not pre-written prose.
+
+## Context
+
+**Report must be evidence-based, not aspirational.** The executor must read the
+actual files in `backend/src/dotmd/vendor/airweave/`, `backend/src/dotmd/ingestion/gmail_provider.py`,
+and `backend/src/dotmd/ingestion/source_registry.py` before writing any section.
+Template placeholders (`[TBD: filled after implementation]`) should be used for
+any finding that requires running the code or observing runtime behavior, then
+filled in during this task after inspecting the real implementation.
 
 ## Tasks
 
-### Task 1: Write docs/airweave-compatibility.md
+### Task 1: Write docs/airweave-compatibility.md (evidence-based)
 
 <read_first>
-- .planning/phases/37-airweave-connector-compatibility-spike/37-CONTEXT.md — D-12 lists exact questions the report must answer
-- .planning/phases/37-airweave-connector-compatibility-spike/37-RESEARCH.md — research findings to draw from
+- backend/src/dotmd/vendor/airweave/ — ALL files (inspect actual vendored content)
+- backend/src/dotmd/vendor/airweave/VENDOR_VERSION — what was actually vendored
+- backend/src/dotmd/vendor/airweave/VENDOR_NOTES.md — per-file modification delta
+- backend/src/dotmd/ingestion/gmail_provider.py — BaseConnectorBridge, GmailBridge (actual implementation)
+- backend/src/dotmd/ingestion/source_registry.py — gmail_source_descriptor (actual registration)
+- backend/src/dotmd/ingestion/source_lifecycle.py — GmailSourceConfig, build branch (actual lifecycle)
+- backend/src/dotmd/vendor/airweave/shims.py — actual shim implementations
+- .planning/phases/37-airweave-connector-compatibility-spike/37-CONTEXT.md — D-12 questions to answer
+- /home/j2h4u/repos/airweave-ai/airweave/backend/airweave/platform/sources/gmail.py — verify search() absence
 - /home/j2h4u/repos/airweave-ai/airweave/backend/airweave/platform/sources/_base.py — BaseSource contract
-- /home/j2h4u/repos/airweave-ai/airweave/backend/airweave/platform/entities/_base.py — BaseEntity, AirweaveSystemMetadata
-- /home/j2h4u/repos/airweave-ai/airweave/backend/airweave/platform/sources/gmail.py — GmailSource, search() absence
-- backend/src/dotmd/ingestion/gmail_provider.py — the bridge implementation
-- backend/src/dotmd/vendor/airweave/ — vendored slice structure
 </read_first>
 
 <action>
-Create `docs/airweave-compatibility.md` with the following structure:
+After reading all implementation files, write `docs/airweave-compatibility.md`
+with the following structure. Every claim must cite specific files, class names,
+or line-level observations from the actual code — no aspirational statements.
+
+Use this template structure, filling each section from the real code:
 
 ```markdown
 # Airweave Connector Compatibility Analysis
 
 **Phase:** 37 — Airweave connector compatibility spike
-**Date:** 2026-05-11
+**Date:** [actual date]
 **Pilot connector:** Gmail (GmailSource from airweave/platform/sources/gmail.py)
-**Conclusion:** dotMD can wrap Airweave-style connectors as federated search
-providers without adopting Airweave's indexing, chunking, Vespa, Temporal,
-billing, or organization stack. Three lightweight shims are required.
+**Implementation:** backend/src/dotmd/vendor/airweave/ + backend/src/dotmd/ingestion/gmail_provider.py
+**Conclusion:** [one sentence summary of what was learned — fill from actual findings]
 
 ---
 
 ## 1. Reusable Directly
 
-These Airweave platform pieces are used as-is in the vendored subtree
-(`backend/src/dotmd/vendor/airweave/`):
+[For each item: cite the actual class name, source file in the Airweave repo,
+and the corresponding file in backend/src/dotmd/vendor/airweave/ where it was placed.
+Include any modifications made (from VENDOR_NOTES.md). Do not list something as
+"reusable" if it required more than import-rewrite modifications.]
 
-### Source and Entity Definitions
-- **`BaseSource`** — abstract base with `create()`, `generate_entities()`,
-  constructor DI pattern. The constructor signature (`auth`, `logger`, `http_client`)
-  is clean enough to satisfy with shims.
-- **`GmailSource`** class body — `generate_entities()`, cursor handling, Gmail API
-  helpers. Vendored without modification beyond import rewrites.
-- **`GmailThreadEntity`**, **`GmailMessageEntity`**, **`GmailAttachmentEntity`** —
-  entity schemas with typed fields. Used as reference for field mapping to
-  `SearchCandidate`. Not instantiated directly by the bridge (raw API responses
-  used instead, for simplicity).
-- **`GmailMessageDeletionEntity`** — documented as future shim target (see §3).
-
-### Entity Field Conventions
-- **`AirweaveField`** pattern — field metadata (`is_entity_id`, `is_name`) useful
-  for generic bridge field mapping. Retained in vendored tree.
-- **`Breadcrumb`** model — `entity_id`, `name`, `entity_type`. Maps cleanly to
-  `provider_metadata.breadcrumbs` in `SearchCandidate`.
-- **`entity_id`** / **`textual_representation`** pattern — the two fields common
-  across all `BaseEntity` subclasses. Generic bridge uses these for `ref` and `snippet`.
-
-### Cursor Pattern
-- **`SyncCursor.data: dict[str, object]`** — simple dict-based cursor state.
-  dotMD's own cursor store already uses the same dict pattern. No shim needed.
-
-### `@source` Decorator
-- The decorator only sets `ClassVar` attributes (no global registry side-effects,
-  no import-time DI wiring). Replaced with a no-op stub in the vendored tree;
-  the class attributes are equivalent.
+Items to evaluate (fill from actual files):
+- BaseSource class and constructor DI pattern
+- GmailSource class body (generate_entities, cursor handling)
+- GmailThreadEntity, GmailMessageEntity, GmailAttachmentEntity schemas
+- AirweaveField pattern and Breadcrumb model
+- SyncCursor dict-based cursor state
+- @source decorator (as no-op stub)
 
 ---
 
 ## 2. Requires Shims
 
-These Airweave DI types are used by `GmailSource.__init__()` and must be
-satisfied by shim implementations. All are Protocol-typed (structural subtyping)
-or duck-typed — no inheritance from Airweave classes required.
+[For each shim: cite the actual shim class name in shims.py, what Airweave
+expects (from source_base.py), and how the shim satisfies it structurally.
+Include the token caching strategy actually implemented.]
 
-### `SourceAuthProvider` / `TokenProviderProtocol`
-- **What Airweave expects:** `@runtime_checkable Protocol` with `provider_kind: str`,
-  `supports_refresh: bool`, `get_token() -> str` (async).
-- **dotMD shim:** `GmailOAuthTokenProvider` — holds `client_id`, `client_secret`,
-  `refresh_token`; calls `https://oauth2.googleapis.com/token` to exchange the
-  refresh token for an access token; caches with 5-minute expiry.
-- **Credential boundary:** Refresh token enters through `SourceCredentialRef` /
-  `CredentialProviderProtocol` — not read directly from env/files inside the provider.
-
-### `ContextualLogger`
-- **What Airweave expects:** Object with `debug()`, `info()`, `warning()`, `error()`
-  methods accepting `(str, *args, **kwargs)`.
-- **dotMD shim:** `GmailLoggerShim` — thin wrapper around Python stdlib `logging.Logger`.
-  One line of code.
-
-### `AirweaveHttpClient`
-- **What Airweave expects:** Object with `.get(url, headers=None, params=None)` and
-  `.post(url, ...)` returning `httpx.Response`.
-- **dotMD shim:** `GmailHttpClientShim` — wraps `httpx.AsyncClient` (or `httpx.Client`
-  for sync usage). No rate limiter injected (single-user spike).
-- **Note:** The bridge bypasses `GmailSource` for search (see §4 for rationale) and
-  calls the Gmail API directly via `httpx.Client`. The shim is needed only for
-  `GmailSource.__init__()` if `generate_entities()` is ever called.
-
-### `GmailMessageDeletionEntity` → dotMD binding deactivation
-- **Airweave approach:** emits a `GmailMessageDeletionEntity` when Gmail History API
-  reports a deleted message. The Airweave destination pipeline handles deletion.
-- **dotMD shim required:** dotMD uses `resource_bindings.active = 0` for deletion.
-  A future shim must detect deletion entities from `generate_entities()` and call
-  `metadata_store.deactivate_binding(ref)` instead of indexing the entity.
-- **Status:** Deferred — not needed for the federated-only spike (no local indexing).
-  Document as required shim for any future local Gmail sync phase.
+Items to cover:
+- SourceAuthProvider / GmailOAuthTokenProvider (cite actual implementation: threading.Lock, expires_in-300)
+- ContextualLogger / GmailLoggerShim
+- AirweaveHttpClient / GmailHttpClientShim
+- GmailMessageDeletionEntity → dotMD binding deactivation (future shim, deferred)
 
 ---
 
 ## 3. Should Be Avoided
 
-These Airweave pieces are incompatible with dotMD's architecture or single-user model:
+[For each item: explain why it conflicts with dotMD's architecture.
+Verify that the vendored tree does NOT contain these (grep to confirm).]
 
-### `AirweaveSystemMetadata`
-- Fields `embedding`, `chunk_index`, `sync_id`, `dense_embedding`, `sparse_embedding`
-  conflict with dotMD's own `text_hash`, `chunk_id`, and sqlite-vec storage.
-- **Verdict:** Never use. dotMD has its own equivalents and they are not compatible.
-
-### Vespa / Temporal / `FileService`
-- Airweave's indexing pipeline routes entities through Vespa (vector store) and
-  Temporal (workflow orchestration). `FileService` abstracts file storage in that
-  pipeline.
-- **Verdict:** None of these are imported or referenced in the vendored slice.
-  They live in `airweave.domains.*` which is not vendored.
-
-### `AccessControl` / `supports_access_control`
-- Multi-tenant ACL model with principals, groups, and `is_public` flags.
-- **Verdict:** dotMD is single-user. `AccessControl` is stripped from the vendored
-  `entities_base.py`. `supports_access_control=True` descriptors are not registered.
-
-### `AirweaveHttpClient` rate limiter
-- The production `AirweaveHttpClient` injects a `SourceRateLimiter` keyed by `org_id`
-  and `source_short_name` — multi-tenant rate limiting backed by Redis.
-- **Verdict:** The dotMD shim skips the rate limiter. Single-user; standard Gmail
-  API quotas (250 quota units/user/second) apply without Redis coordination.
-
-### `AirweaveSystemMetadata` `chunk_index` / `original_entity_id`
-- Used by Airweave's chunker to track chunk position within an entity.
-- **Verdict:** dotMD's chunker uses `chunk_id` (content-addressed) + `order_key`.
-  These fields are not needed and would conflict.
+Items to cover:
+- AirweaveSystemMetadata (embedding, chunk_index, sync_id — conflicts with dotMD's own)
+- Vespa / Temporal / FileService (in airweave.domains, not vendored)
+- AccessControl / supports_access_control (multi-tenant, dotMD is single-user)
+- AirweaveHttpClient rate limiter (Redis-backed multi-tenant, not needed)
 
 ---
 
 ## 4. Key Finding: GmailSource.search() Is Not Implemented
 
-**Critical spike finding:** `BaseSource` declares `search()` as an abstract
-`AsyncGenerator[BaseEntity, None]` method. `GmailSource` does **not** override it.
+[Verify this by actually reading the file. Cite the exact location of the abstract
+stub in BaseSource and confirm GmailSource does not override it. State what this
+means for connectors without search() vs connectors with search().]
 
-**Consequence:** The `AirweaveConnectorBridge.search_native()` cannot delegate to
-`GmailSource.search()`. The bridge calls the Gmail API search endpoint directly:
-`GET /gmail/v1/users/me/messages?q=<query>&maxResults=<limit>`.
-
-**Implication for generic bridge design:** The CONTEXT.md D-03 goal (generic bridge
-across all `BaseSource` subclasses via `GmailSource.search()`) needs qualification.
-The bridge is generic in entity-field mapping (`BaseEntity` → `SearchCandidate`),
-but the search invocation path must be source-specific if the connector does not
-implement `search()`. Connectors that implement `search()` (those with
-`federated_search=True` in the `@source` decorator) can use a generic call path.
-Gmail does not have `federated_search=True` in its decorator.
-
-**For future connectors:** Before wrapping a new Airweave connector, check:
-1. Does it implement `search()`? (`grep "async def search" platform/sources/<name>.py`)
-2. Is `federated_search=True` in its `@source` decorator?
-
-If yes → generic `bridge.source.search(query, limit)` works.
-If no → implement source-specific direct API search (as done for Gmail).
+Specifically document:
+- Where search() is defined in BaseSource (file + method signature)
+- Confirm GmailSource does NOT override it (grep result)
+- What this means for the generic bridge: direct API search is the fallback
+- How to check a new connector: `grep "async def search" platform/sources/<name>.py`
+- The @source decorator's federated_search=True flag as the indicator
 
 ---
 
-## 5. SourceAsset Deferred (GmailAttachmentEntity)
+## 5. Generic Bridge: BaseConnectorBridge ABC (D-03)
 
-`GmailAttachmentEntity` maps conceptually to a `SourceAsset` shape (file-like artifact
-attached to a document). dotMD does not have a `SourceAsset` model yet.
+[Cite the actual BaseConnectorBridge class from gmail_provider.py.
+Describe the three abstract methods and what they guarantee.
+Explicitly state that D-03 is satisfied: the bridge IS generic — Gmail is
+one implementation. The "bridge" in the sense of D-03 is the ABC + protocol,
+not the Gmail-specific API calls.]
 
-**Future mapping:**
-- `GmailAttachmentEntity.attachment_id` → `SourceAsset.asset_ref`
-- `GmailAttachmentEntity.filename` → `SourceAsset.display_name`
-- `GmailAttachmentEntity.mime_type` → `SourceAsset.media_type`
-- `GmailAttachmentEntity.size` → `SourceAsset.size_bytes`
-- `GmailAttachmentEntity.data` (base64) → stored via `FileService` equivalent
-
-**Status:** Deferred per D-11. No `SourceAsset` model added to `models.py` in this phase.
-When `SourceAsset` is introduced, the Gmail bridge can emit attachment assets from
-`generate_entities()` with no bridge-layer changes — only a new entity type handler.
-
----
-
-## 6. Generic Bridge Extensibility Assessment
-
-**Adding a second Airweave connector (e.g., Notion, GitHub):**
-
-Estimated effort per new connector:
-1. Vendor 2 files: `platform/sources/<name>.py` + `platform/entities/<name>.py`
-2. Rewrite imports (automated: `sed -i 's/airweave\.platform/dotmd.vendor.airweave/g'`)
-3. Check if connector implements `search()` (5 minutes inspection)
-4. If yes: implement generic bridge call (10 lines)
-   If no: implement direct API search (50-100 lines, connector-specific)
-5. Add `SourceDescriptor` (follows Gmail pattern, ~30 lines)
-6. Add `SourceConfig` + lifecycle branch (follows Gmail pattern, ~20 lines)
-7. Add env var activation gate (~5 lines)
-
-**Verdict:** The architecture is extensible. A second connector is a configuration
-+ descriptor exercise for connectors that implement `search()`. Connectors without
-`search()` require source-specific API integration (the unavoidable work).
+Also explicitly state:
+- "Airweave's runtime/indexing stack (Vespa, Temporal, Celery, Redis) is NOT
+  used. Direct Gmail API search is a dotMD provider concern, implemented in
+  GmailBridge.search_native(). This is not Airweave compatibility — it is
+  dotMD's own Gmail integration using Airweave's entity schemas as a reference."
+- This is the honest characterization per OpenCode's suggestion.
 
 ---
 
-## 7. Anti-Legacy Gate Compliance (AIR-03)
+## 6. SourceAsset Deferred (GmailAttachmentEntity)
 
-Gmail uses the same registry/lifecycle contracts as filesystem and Telegram:
-- Registered via `SourceDescriptor` in `source_registry.py`
-- Constructed via `SourceRuntimeFactory.build("gmail")` in `source_lifecycle.py`
-- Activated via env var in `DotMDService` (same pattern as Telegram socket path)
-- Federated search fan-out via `_build_federated_bundles()` (no Gmail-specific code)
-- `SearchCandidate` shape identical to Telegram federated candidates
+[Fill the mapping table from actual GmailAttachmentEntity fields in entities_gmail.py:]
 
-No separate Airweave-only integration lane was created.
+| GmailAttachmentEntity field | Future SourceAsset field | Notes |
+|----------------------------|--------------------------|-------|
+| attachment_id              | asset_ref                | unique per message |
+| filename                   | display_name             |       |
+| mime_type                  | media_type               |       |
+| size                       | size_bytes               |       |
+| data (base64)              | [via FileService equiv]  | deferred |
+
+Status: Deferred per D-11. No SourceAsset model added to models.py in this phase.
+
+---
+
+## 7. Generic Bridge Extensibility Assessment
+
+[Fill this table from the actual gmail_provider.py implementation:]
+
+| Component | Generic/Specific | Reuse for 2nd connector | Notes |
+|-----------|-----------------|------------------------|-------|
+| BaseConnectorBridge ABC | Generic | Yes — implement the ABC | 3 abstract methods |
+| to_search_candidate() | Generic | Yes — override with connector mapping | maps entity_fields → SearchCandidate |
+| GmailBridge.search_native() | Gmail-specific | No — implement per connector | direct Gmail API calls |
+| GmailBridge.read_unit_window() | Gmail-specific | No — implement per connector | Gmail message fetch + MIME decode |
+| MIME decode helpers | Gmail-specific | Partial — other email connectors | multipart/base64url logic |
+| SourceDescriptor registration | Generic pattern | Yes — copy descriptor structure | ~30 lines per connector |
+| GmailSourceConfig / lifecycle | Generic pattern | Yes — copy config structure | ~20 lines per connector |
+| DI shims (logger, http, auth) | Generic | Yes — reuse shims | GmailLoggerShim reusable; GmailOAuthTokenProvider Gmail-specific |
+
+Estimated effort for a second connector (e.g., Notion, GitHub):
+- If connector implements search(): ~80 lines (descriptor + config + thin bridge subclass)
+- If connector lacks search(): ~180 lines (above + direct API search implementation)
+
+---
+
+## 8. AIR-03 Compliance
+
+[Verify from actual source_registry.py and source_lifecycle.py that Gmail
+uses the same code path as filesystem and telegram. Cite specific function
+names and the structure of build() branches.]
+
+Checklist (fill from actual code):
+- [ ] gmail_source_descriptor() in source_registry.py alongside filesystem_ and telegram_
+- [ ] SourceRuntimeFactory.build("gmail") branch in source_lifecycle.py
+- [ ] DotMDService._build_federated_bundles() picks up Gmail via build_if_configured()
+- [ ] No Gmail-specific code in the fan-out loop
+- [ ] grep confirms no direct `from airweave` imports outside vendor/
 ```
+
+After reading all files, replace all template brackets with actual content.
+Do not publish template placeholders in the final document — every section
+must be filled with real observations from the code.
 </action>
 
 <acceptance_criteria>
 - `test -f docs/airweave-compatibility.md` exits 0
-- `wc -l docs/airweave-compatibility.md` shows > 50 lines
-- Report contains "Reusable directly" section
-- Report contains "Requires shims" section
+- `wc -l docs/airweave-compatibility.md` shows > 80 lines
+- Report contains "Reusable directly" section with specific class names
+- Report contains "Requires shims" section citing GmailOAuthTokenProvider with threading.Lock and expires_in-300
 - Report contains "Should be avoided" section
-- Report contains the GmailSource.search() finding
-- Report contains SourceAsset deferred mapping
-- Report contains generic bridge extensibility assessment
+- Report contains GmailSource.search() finding with file/line citation
+- Report contains BaseConnectorBridge ABC section (D-03 compliance)
+- Report contains SourceAsset deferred mapping table
+- Report contains extensibility assessment table with generic/specific classification
+- Report explicitly states Airweave runtime/indexing stack is avoided and direct Gmail API is dotMD's concern
+- No unreplaced template placeholders ([TBD: ...]) remain in the final document
 </acceptance_criteria>
 
-### Task 2: Full test suite verification
+### Task 2: Update AGENTS.md with architectural decisions
+
+<read_first>
+- AGENTS.md — current project AGENTS.md
+- backend/src/dotmd/vendor/airweave/VENDOR_NOTES.md (just created)
+- backend/src/dotmd/ingestion/gmail_provider.py — BaseConnectorBridge location
+</read_first>
+
+<action>
+Update the project `AGENTS.md` (at repo root, not ~/AGENTS.md) to add a section
+documenting the Phase 37 architectural decisions. Add under the "What Changed From
+Upstream" section or create a new "Architecture Decisions" subsection:
+
+```markdown
+## Phase 37: Airweave Connector Compatibility
+
+**Decision: vendored Airweave platform slice**
+Airweave package not pip-installed (pulls in temporalio, redis, celery, sqlalchemy).
+Only 6 platform files vendored into `backend/src/dotmd/vendor/airweave/`.
+See `VENDOR_VERSION` for source tracking.
+
+**Decision: direct Gmail API search (not GmailSource.search())**
+GmailSource.search() is not implemented in Airweave. Gmail bridge calls
+Gmail API directly. Future connectors: check for search() before wrapping.
+
+**Decision: BaseConnectorBridge ABC (D-03 generic bridge)**
+`backend/src/dotmd/ingestion/gmail_provider.py` — abstract methods:
+search_native(), read_unit_window(), to_search_candidate().
+GmailBridge is the first implementation.
+
+**Decision: OAuth token caching with threading.Lock**
+GmailOAuthTokenProvider uses margin-based expiry (expires_in - 300) and
+threading.Lock to serialize concurrent refresh calls. Located in shims.py.
+
+**Decision: Gmail as federated-only (no local indexing)**
+Gmail participates via _merge_with_federated_quota (quota-based slots).
+source_native_score=None is safe — federated candidates bypass RRF.
+```
+</action>
+
+<acceptance_criteria>
+- AGENTS.md contains a Phase 37 section with the vendoring decision
+- AGENTS.md mentions BaseConnectorBridge location
+- AGENTS.md mentions threading.Lock token caching decision
+- Existing AGENTS.md content is preserved (no deletions)
+</acceptance_criteria>
+
+### Task 3: Full test suite verification
 
 <read_first>
 - backend/tests/test_gmail_bridge.py — all tests from Plans 37-02 and 37-03
@@ -278,11 +295,14 @@ Common failure modes to check:
 1. Import chain pulling in an Airweave module that is not vendored
 2. `SourceConfig` type union in `source_lifecycle.py` not updated to include `GmailSourceConfig`
 3. `default_source_registry()` missing the `gmail_source_descriptor()` registration
-4. `GmailOAuthTokenProvider.get_token()` not cached — if tests call it, it may attempt network I/O
-   (ensure tests mock the token provider's `get_token()` method)
-5. `SearchCandidate` validation error if `snippet` is missing (Gmail API sometimes returns
+4. `GmailOAuthTokenProvider.get_token()` called in tests without mocking the httpx.post call
+5. `SearchCandidate` validation error if `snippet` is missing (Gmail API may return
    empty snippet for draft messages — ensure `snippet = response.get("snippet") or ""`
    so empty string is used, not None)
+6. `BaseConnectorBridge` not importable from `gmail_provider` (missing ABC import or
+   wrong module structure)
+7. `SourceAuthError` / `SourceTemporaryUnavailable` not importable — if they were
+   defined locally in gmail_provider.py, tests that import them must import from there
 
 After fixing any failures, confirm the full suite passes.
 </action>
@@ -293,7 +313,7 @@ After fixing any failures, confirm the full suite passes.
 - No regressions in existing tests (filesystem, Telegram, search pipeline tests)
 </acceptance_criteria>
 
-### Task 3: Verify AIR-03 — no Airweave-only lane
+### Task 4: Verify AIR-03 — no Airweave-only lane
 
 <read_first>
 - backend/src/dotmd/ingestion/source_registry.py — all descriptors
@@ -340,8 +360,9 @@ Perform a structural check that Gmail follows the same code path as Telegram:
 cd /home/j2h4u/repos/j2h4u/dotmd/backend
 python -m pytest tests/ -x -q
 
-# Compatibility report exists
+# Compatibility report exists and is filled
 test -f /home/j2h4u/repos/j2h4u/dotmd/docs/airweave-compatibility.md && echo "OK"
+grep -c "TBD:" /home/j2h4u/repos/j2h4u/dotmd/docs/airweave-compatibility.md || echo "No TBD placeholders: OK"
 
 # No direct airweave imports outside vendor
 grep -r "^from airweave\|^import airweave" src/dotmd/ --include="*.py" && echo "FAIL" || echo "OK"
@@ -355,11 +376,20 @@ assert r.get('telegram') is not None
 assert r.get('gmail') is not None
 print('All three descriptors registered: OK')
 "
+
+# BaseConnectorBridge is abstract, GmailBridge implements it
+python -c "
+import inspect
+from dotmd.ingestion.gmail_provider import BaseConnectorBridge, GmailBridge
+assert inspect.isabstract(BaseConnectorBridge)
+assert issubclass(GmailBridge, BaseConnectorBridge)
+print('BaseConnectorBridge ABC contract: OK')
+"
 ```
 
 ## Phase Completion
 
 When this plan passes verification, Phase 37 deliverables are complete:
-- AIR-01: `GmailApplicationSourceProvider` bridges Airweave-style connector to dotMD contracts
-- AIR-02: `docs/airweave-compatibility.md` documents reusable/shim/avoid analysis
+- AIR-01: `BaseConnectorBridge(ABC)` + `GmailBridge` bridges Airweave-style connector to dotMD contracts
+- AIR-02: `docs/airweave-compatibility.md` documents reusable/shim/avoid analysis (evidence-based)
 - AIR-03: Gmail uses same registry/lifecycle/search contracts as filesystem and Telegram
