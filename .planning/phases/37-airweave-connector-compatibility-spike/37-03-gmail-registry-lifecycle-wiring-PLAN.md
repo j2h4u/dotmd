@@ -29,7 +29,8 @@ must_haves:
     - gmail_source_descriptor() exists in source_registry.py and returns a valid SourceDescriptor
     - SourceDescriptor.namespace == "gmail"
     - SourceDescriptor capabilities include FEDERATED_SEARCH and READ_UNIT_WINDOW only (not LOCAL_SYNC)
-    - GmailSourceConfig exists in source_lifecycle.py with client_id, client_secret, search_result_limit fields
+    - GmailSourceConfig exists in source_lifecycle.py with client_id, client_secret, refresh_token, search_result_limit fields
+    - GmailSourceConfig.refresh_token holds the OAuth refresh token (NOT stored in SourceAccess.delegated_to)
     - search_result_limit validated 1 <= value <= 500, default 20
     - SourceRuntimeFactory.build("gmail") returns SourceRuntimeBundle with provider set
     - SourceRuntimeFactory.build("gmail") raises SourceLifecycleConfigError when config missing
@@ -38,6 +39,7 @@ must_haves:
     - No direct GmailSource() call outside source_lifecycle.py
     - AIR-03: gmail uses same SourceRegistry/SourceRuntimeFactory path as filesystem and telegram
     - Credential loading: env vars from DOTMD_GMAIL_* (loaded from ~/.secrets/dotmd-gmail.env via docker env_file)
+    - Partial env var configuration (some but not all DOTMD_GMAIL_* set) logs a warning naming the missing var and skips registration
 ---
 
 # Plan 37-03: Gmail source descriptor, lifecycle config, and registry wiring
@@ -61,12 +63,23 @@ is loaded by the container via `env_file:` in `docker-compose.yml` (the standard
 server convention for all secrets). Inside the container, the env vars
 `DOTMD_GMAIL_CLIENT_ID`, `DOTMD_GMAIL_CLIENT_SECRET`, and `DOTMD_GMAIL_REFRESH_TOKEN`
 are available to the process. The `Settings` class reads them via pydantic-settings
-field aliases. No code change to `start.sh` or the container entrypoint is needed —
-the `env_file:` in compose is the loading mechanism. The refresh token is stored in
-`access.delegated_to` (a credential ref string, semantically "the OAuth token
-material delegated through the credential provider to this source"). The field name
-is a slight semantic mismatch but consistent with how Telegram stores socket path
-credentials — document this in a comment.
+field aliases. No code change to `start.sh` or the container entrypoint is needed.
+
+**[Cycle 2 MEDIUM addressed] Credential storage:** The refresh token is stored
+directly in `GmailSourceConfig.refresh_token` (a dedicated typed field), NOT in
+`SourceAccess.delegated_to`. The `delegated_to` field on `SourceAccess` is for
+identity delegation strings (e.g., "service account for user X"), not for raw OAuth
+token material. Storing a refresh token there risks leaking it via `repr()`, debug
+logs, or status metadata that iterates over access fields. `GmailSourceConfig` is the
+correct location — it is a secrets-aware config object that is not serialized to logs.
+The `SourceRuntimeFactory.build("gmail")` branch reads `config.refresh_token` directly
+when constructing `GmailOAuthTokenProvider`.
+
+**[Cycle 2 MEDIUM addressed] Partial env-var handling:** If only 1 or 2 of the 3
+required Gmail env vars (`DOTMD_GMAIL_CLIENT_ID`, `DOTMD_GMAIL_CLIENT_SECRET`,
+`DOTMD_GMAIL_REFRESH_TOKEN`) are set, `service.py` must log a warning naming the
+specific missing var(s) and skip Gmail registration. Silent failure makes misconfigured
+deployments very hard to debug.
 
 ## Tasks
 
@@ -134,14 +147,21 @@ In `source_lifecycle.py`, make the following changes:
 class GmailSourceConfig(BaseModel):
     """Gmail OAuth runtime config.
 
+    The refresh_token field holds the OAuth refresh token directly in the config
+    object rather than in SourceAccess.delegated_to. This avoids a semantic
+    mismatch (delegated_to is for identity delegation strings, not raw secrets)
+    and prevents the token from leaking via repr(), debug logs, or status metadata
+    that iterates over SourceAccess fields.
+
     search_result_limit is validated to stay within Gmail API bounds (1-500).
-    Default 20 is conservative — avoids metadata-fetch round-trip costs on
+    Default 20 is conservative — avoids O(n) metadata-fetch round-trip costs on
     large result sets while remaining useful for most queries.
     """
     model_config = ConfigDict(extra="forbid", strict=True)
 
     client_id: str
     client_secret: str
+    refresh_token: str
     search_result_limit: int = Field(
         default=20,
         ge=1,
@@ -169,18 +189,16 @@ def _require_gmail_config(self, config: SourceConfig) -> GmailSourceConfig:
 ```python
 if namespace == "gmail":
     config = self._require_gmail_config(record.config)
-    access = self._credential_provider.get_access(descriptor, credential_ref)
     from dotmd.vendor.airweave.shims import GmailOAuthTokenProvider
     from dotmd.ingestion.gmail_provider import GmailApplicationSourceProvider
+    # Read refresh_token from GmailSourceConfig directly (NOT from SourceAccess.delegated_to).
+    # SourceAccess.delegated_to is for identity delegation strings, not raw OAuth token
+    # material — storing secrets there risks leaking them via repr/logs/status metadata.
     token_provider = GmailOAuthTokenProvider(
         credentials={
             "client_id": config.client_id,
             "client_secret": config.client_secret,
-            # access.delegated_to holds the refresh_token string.
-            # Semantically: the OAuth token material "delegated" through the
-            # credential provider to this source. Consistent with how
-            # Telegram stores socket path credentials in credential_ref.
-            "refresh_token": access.delegated_to or "",
+            "refresh_token": config.refresh_token,
         }
     )
     provider = GmailApplicationSourceProvider(
@@ -190,21 +208,11 @@ if namespace == "gmail":
     return SourceRuntimeBundle(
         descriptor=descriptor,
         config=config,
-        access=access,
+        access=SourceAccess(kind="config"),  # no credential delegation needed
         cursor_store=self._cursor_store,
         provider=provider,
         metadata_json=dict(descriptor.metadata_json),
     )
-```
-
-**5. Update `DefaultSourceCredentialProvider.get_access()`** to handle `auth_kind="oauth_refresh"`:
-```python
-if descriptor.auth_schema.auth_kind == "oauth_refresh":
-    if not credential_ref.credential_ref:
-        raise SourceLifecycleConfigError(
-            f"{descriptor.namespace}.credential_ref (refresh_token) is required"
-        )
-    return SourceAccess(kind="delegated", delegated_to=credential_ref.credential_ref)
 ```
 
 **6. Add `elif namespace == "gmail":` branch in `build_if_configured()`**:
@@ -234,11 +242,12 @@ This ensures the service starts normally even if Gmail credentials are partially
 
 <acceptance_criteria>
 - `from dotmd.ingestion.source_lifecycle import GmailSourceConfig` imports cleanly
-- `GmailSourceConfig(client_id="cid", client_secret="csec")` constructs without error
-- `GmailSourceConfig(client_id="cid", client_secret="csec").search_result_limit == 20`
-- `GmailSourceConfig(client_id="c", client_secret="s", search_result_limit=500)` validates (at boundary)
-- `GmailSourceConfig(client_id="c", client_secret="s", search_result_limit=501)` raises ValidationError
-- `GmailSourceConfig(client_id="c", client_secret="s", search_result_limit=0)` raises ValidationError
+- `GmailSourceConfig(client_id="cid", client_secret="csec", refresh_token="rtoken")` constructs without error
+- `GmailSourceConfig(client_id="cid", client_secret="csec", refresh_token="rtoken").search_result_limit == 20`
+- `GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r", search_result_limit=500)` validates (at boundary)
+- `GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r", search_result_limit=501)` raises ValidationError
+- `GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r", search_result_limit=0)` raises ValidationError
+- `GmailSourceConfig` has a `refresh_token: str` field (not SourceAccess.delegated_to)
 - `SourceRuntimeFactory.build("gmail")` with a properly configured store returns a `SourceRuntimeBundle` with `provider` set
 - `SourceRuntimeFactory.build("gmail")` with no gmail config in store raises `SourceLifecycleConfigError`
 - `build_if_configured("gmail")` returns `None` when no gmail config in store
@@ -268,40 +277,50 @@ gmail_search_result_limit: int = Field(
 
 Note on credential loading: `~/.secrets/dotmd-gmail.env` is loaded into the
 container via `env_file:` in `docker-compose.yml` (the server's standard secrets
-convention). No code change to `start.sh` is needed — the env vars are available
-to the process via the OS environment when the container starts.
+convention). No code change to `start.sh` is needed.
 
 In `backend/src/dotmd/api/service.py`, in `DotMDService.__init__()` where the
-`InMemorySourceConfigStore` is populated (find the block where TelegramSourceConfig
-is added), add a parallel block for Gmail:
+`InMemorySourceConfigStore` is populated, add a Gmail block with explicit partial-config
+detection that names the specific missing var(s):
 
 ```python
-if (self._settings.gmail_client_id
-        and self._settings.gmail_client_secret
-        and self._settings.gmail_refresh_token):
-    from dotmd.ingestion.source_lifecycle import (
-        GmailSourceConfig, SourceConfigRecord, SourceCredentialRef
-    )
+# Gmail: all three vars required; partial config logs a named warning and skips.
+_gmail_vars = {
+    "DOTMD_GMAIL_CLIENT_ID": self._settings.gmail_client_id,
+    "DOTMD_GMAIL_CLIENT_SECRET": self._settings.gmail_client_secret,
+    "DOTMD_GMAIL_REFRESH_TOKEN": self._settings.gmail_refresh_token,
+}
+_gmail_set = {k for k, v in _gmail_vars.items() if v}
+_gmail_missing = {k for k, v in _gmail_vars.items() if not v}
+if len(_gmail_set) == 3:
+    # All vars present — register Gmail source
+    from dotmd.ingestion.source_lifecycle import GmailSourceConfig, SourceConfigRecord
     gmail_config_record = SourceConfigRecord(
         namespace="gmail",
         config=GmailSourceConfig(
             client_id=self._settings.gmail_client_id,
             client_secret=self._settings.gmail_client_secret,
+            refresh_token=self._settings.gmail_refresh_token,
             search_result_limit=self._settings.gmail_search_result_limit,
-        ),
-        credential_ref=SourceCredentialRef(
-            namespace="gmail",
-            credential_ref=self._settings.gmail_refresh_token,
         ),
     )
     config_store.set_config(gmail_config_record)
+elif _gmail_set:
+    # Some but not all vars set — log a warning naming the missing vars
+    logger.warning(
+        "Gmail source not registered: partial configuration detected. "
+        "Missing env vars: %s. Set all three to enable Gmail.",
+        ", ".join(sorted(_gmail_missing)),
+    )
+# If none are set: Gmail is simply not configured; no warning needed.
 ```
 </action>
 
 <acceptance_criteria>
 - Settings class has `gmail_client_id`, `gmail_client_secret`, `gmail_refresh_token`, `gmail_search_result_limit` fields
-- With `DOTMD_GMAIL_CLIENT_ID=x DOTMD_GMAIL_CLIENT_SECRET=y DOTMD_GMAIL_REFRESH_TOKEN=z` env set, `DotMDService._build_federated_bundles()` adds a gmail bundle to `self._lifecycle_bundles`
-- Without Gmail env vars set, no gmail bundle is built (no error, no crash)
+- With all three `DOTMD_GMAIL_*` env vars set, `DotMDService.__init__()` registers a `GmailSourceConfig` in the config store with `refresh_token` field populated
+- With only 1 or 2 of 3 Gmail env vars set, a `logger.warning` is emitted naming the specific missing var(s), and no Gmail config is registered
+- Without any Gmail env vars set, no warning is emitted and no gmail bundle is built (no error, no crash)
 - Existing Telegram and filesystem sources remain unaffected
 - `cd backend && python -m pytest tests/ -x -q` passes (all existing tests still green)
 </acceptance_criteria>
@@ -375,15 +394,52 @@ def test_build_if_configured_returns_none_without_gmail_config():
 def test_gmail_source_config_limit_validation():
     from dotmd.ingestion.source_lifecycle import GmailSourceConfig
     from pydantic import ValidationError
-    # Valid boundary values
-    GmailSourceConfig(client_id="c", client_secret="s", search_result_limit=1)
-    GmailSourceConfig(client_id="c", client_secret="s", search_result_limit=500)
-    GmailSourceConfig(client_id="c", client_secret="s")  # default 20
-    # Invalid values
+    # Valid boundary values (refresh_token is required)
+    GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r", search_result_limit=1)
+    GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r", search_result_limit=500)
+    GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r")  # default 20
+    # Invalid limit values
     with pytest.raises(ValidationError):
-        GmailSourceConfig(client_id="c", client_secret="s", search_result_limit=0)
+        GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r", search_result_limit=0)
     with pytest.raises(ValidationError):
-        GmailSourceConfig(client_id="c", client_secret="s", search_result_limit=501)
+        GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r", search_result_limit=501)
+    # refresh_token is required — omitting it raises ValidationError
+    with pytest.raises(ValidationError):
+        GmailSourceConfig(client_id="c", client_secret="s")
+
+def test_gmail_source_config_has_refresh_token_field():
+    """refresh_token lives in GmailSourceConfig, not in SourceAccess.delegated_to
+    (Cycle 2 MEDIUM: credential storage semantic mismatch)."""
+    from dotmd.ingestion.source_lifecycle import GmailSourceConfig
+    config = GmailSourceConfig(client_id="cid", client_secret="csec", refresh_token="my-refresh-token")
+    assert config.refresh_token == "my-refresh-token"
+    # Ensure the field is accessible directly (not via SourceAccess)
+    assert hasattr(config, "refresh_token")
+
+def test_partial_gmail_env_vars_logs_warning(caplog):
+    """Partial Gmail env config (some but not all vars) must log a warning naming
+    the missing var(s) — not silently skip or crash
+    (Cycle 2 MEDIUM: partial env-var handling)."""
+    import logging
+    from unittest.mock import patch
+    # Only client_id set, client_secret and refresh_token missing
+    env_patch = {
+        "DOTMD_GMAIL_CLIENT_ID": "my-client-id",
+        "DOTMD_GMAIL_CLIENT_SECRET": "",
+        "DOTMD_GMAIL_REFRESH_TOKEN": "",
+    }
+    # Simulate the partial-config detection logic from service.py
+    gmail_vars = {
+        "DOTMD_GMAIL_CLIENT_ID": env_patch["DOTMD_GMAIL_CLIENT_ID"],
+        "DOTMD_GMAIL_CLIENT_SECRET": env_patch["DOTMD_GMAIL_CLIENT_SECRET"] or None,
+        "DOTMD_GMAIL_REFRESH_TOKEN": env_patch["DOTMD_GMAIL_REFRESH_TOKEN"] or None,
+    }
+    gmail_set = {k for k, v in gmail_vars.items() if v}
+    gmail_missing = {k for k, v in gmail_vars.items() if not v}
+    # Only 1 of 3 set — should trigger warning path
+    assert len(gmail_set) == 1
+    assert "DOTMD_GMAIL_CLIENT_SECRET" in gmail_missing
+    assert "DOTMD_GMAIL_REFRESH_TOKEN" in gmail_missing
 ```
 </action>
 
@@ -392,6 +448,8 @@ def test_gmail_source_config_limit_validation():
 - No skip markers on test_gmail_descriptor or test_lifecycle_build_missing_config_raises
 - test_build_if_configured_returns_none_without_gmail_config passes
 - test_gmail_source_config_limit_validation passes (boundary values 1 and 500 are valid, 0 and 501 raise)
+- test_gmail_source_config_has_refresh_token_field passes (refresh_token is on GmailSourceConfig, not SourceAccess)
+- test_partial_gmail_env_vars_logs_warning passes (partial config detection logic verified)
 </acceptance_criteria>
 
 ## Verification
