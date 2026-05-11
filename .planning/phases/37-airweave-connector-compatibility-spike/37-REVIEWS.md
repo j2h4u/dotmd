@@ -1,7 +1,8 @@
 ---
 phase: 37
 reviewers: [codex, opencode]
-reviewed_at: 2026-05-11T16:15:00Z
+reviewed_at: 2026-05-11T17:00:00Z
+cycles: 4
 plans_reviewed:
   - 37-01-vendor-airweave-platform-slice-PLAN.md
   - 37-02-gmail-bridge-federated-search-PLAN.md
@@ -917,3 +918,315 @@ Both reviewers assessed the Cycle 2 HIGH fixes and converged on the same three n
 **Cycle 3 Overall: MEDIUM-HIGH**
 
 Three new HIGH concerns (N1: `export_changes` signature, N2: `SourceAccess.kind` OAuth, N3: `SourceConfig` union) remain unresolved. All three are small mechanical fixes — no architectural redesign required. Fix these three items and the plans are ready for execution.
+
+---
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CYCLE 4  (2026-05-11 — plans updated to address Cycle 3 HIGHs:
+               N1: export_changes 4-param Protocol signature added (37-02);
+               N2: SourceRuntimeFactory.build("gmail") bypasses get_access(),
+                   constructs SourceAccess(kind="none") directly (37-03);
+               N3: SourceConfig union updated to include GmailSourceConfig (37-03);
+               Tests added for all three: test_gmail_provider_export_changes_accepts_all_protocol_params,
+               test_build_gmail_bypasses_credential_provider, test_source_config_union_includes_gmail)
+     ═══════════════════════════════════════════════════════════════ -->
+
+## Cycle 4 — 2026-05-11T17:00:00Z
+
+*Plans were updated after Cycle 3 to address the three HIGHs: N1
+(`export_changes` exact 4-param Protocol signature now specified in 37-02 with
+a dedicated test); N2 (`SourceRuntimeFactory.build("gmail")` now explicitly
+bypasses `DefaultSourceCredentialProvider.get_access()` and constructs
+`SourceAccess(kind="none")` directly, with monkeypatched negative test in 37-03);
+N3 (`SourceConfig` union explicitly updated to include `GmailSourceConfig`, with
+`typing.get_args()` test in 37-03). This cycle reviews the updated plans.*
+
+---
+
+### Cycle 4 · Codex Review
+
+## Summary
+
+The Cycle 4 plans substantially address the three Cycle 3 HIGHs. N1, N2, and N3 are
+resolved as written at the plan level, with explicit acceptance tests. The overall
+architecture also stays aligned with AIR-03 by routing Gmail through the shared source
+registry/lifecycle/federated provider path instead of creating a separate Airweave lane.
+Remaining risks are mostly implementation precision: making sure Gmail search/read outputs
+actually map to dotMD's `SourceUnit`/read contracts, preventing OAuth refresh hangs, and
+keeping vendored Airweave code isolated from heavy platform dependencies.
+
+## Strengths
+
+- The three prior HIGHs now have concrete code-level acceptance criteria and tests.
+- Gmail is intentionally federated-only, which fits the finding that Airweave's `GmailSource.search()` is absent.
+- `SourceRuntimeFactory.build("gmail")` correctly avoids forcing OAuth refresh tokens through `SourceAccess.delegated_to`.
+- Registry/lifecycle wiring keeps Gmail in the same architecture as filesystem and Telegram, satisfying AIR-03.
+- The compatibility report is evidence-based and explicitly separates reusable, shimmed, and avoided Airweave pieces.
+- Timeout handling is planned for Gmail API calls, with clear auth and temporary-unavailable error boundaries.
+
+## Concerns
+
+- **MEDIUM: AIR-01 SourceDocument/SourceUnit proof is still a little under-specified.**
+  The plans clearly cover `SearchCandidate` and `read_unit_window`, but AIR-01 says the spike
+  adapts Airweave connector-style output into `SourceDocument`, `SourceUnit`, optional
+  `SourceAsset`, and `SearchCandidate` contracts. Since `export_changes()` is intentionally
+  unsupported, the plan should explicitly state where `SourceDocument` and `SourceUnit` mapping
+  is proven for Gmail, or explain why federated-only read windows are the accepted `SourceUnit` proof.
+
+- **MEDIUM: OAuth token refresh lacks an explicit timeout in Plan 37-01.**
+  Cycle 3 marked this LOW, but it can block all Gmail search/read flows if the refresh endpoint
+  hangs. Add `timeout=httpx.Timeout(..., connect=...)` or a module-level token timeout constant.
+
+- **MEDIUM: Vendored Airweave isolation depends on import tests being broad enough.**
+  Grepping for `airweave.domains/core/schemas` helps, but import-time failures can also come
+  from other transitive platform dependencies. The import test should instantiate or minimally
+  exercise `GmailSource`, Gmail entities, and config objects, not only import one module.
+
+- **LOW: 401/403 handling may be too broad.**
+  Clearing token cache on 401 is right. For 403, Gmail may mean insufficient scope, disabled
+  API, quota policy, or forbidden mailbox access. Treating all 403s as `SourceAuthError` is
+  acceptable for a spike, but the report should document this simplification.
+
+- **LOW: O(n) message fetch is acceptable but should be quota-aware.**
+  With `search_result_limit <= 500`, worst-case API fanout is still high. For the spike this
+  is fine, but keep default 20 and avoid encouraging large limits.
+
+- **LOW: Secret handling needs explicit guardrails.**
+  `GmailSourceConfig.refresh_token` in config is acceptable for env-based local deployment,
+  but tests/docs should avoid printing model dumps, reprs, or warning messages that include
+  the refresh token.
+
+## Suggestions
+
+- Add an explicit test proving Gmail native result → dotMD read/search contracts: `GmailBridge.to_search_candidate()` produces a stable Gmail ref, and `read_unit_window()` resolves that ref into the expected unit/window shape.
+- In `docs/airweave-compatibility.md`, add a short AIR-01 mapping table: `Gmail message → SourceDocument?`, `Gmail message/body → SourceUnit/read window`, `Gmail attachment → deferred SourceAsset`, `Gmail search hit → SearchCandidate`.
+- Add timeout to `GmailOAuthTokenProvider.get_token()` now; it is small and removes a real operational footgun.
+- Add tests that partial Gmail env configuration logs only missing variable names, never present values.
+- Make the `SourceAuthError` / `SourceTemporaryUnavailable` import decision deterministic. Prefer importing from `dotmd.core.exceptions`; only define locally if the exceptions truly do not exist.
+
+## Risk Assessment
+
+**Overall risk: MEDIUM-LOW.**
+The architecture is coherent and the prior HIGHs are resolved in the written plans. The remaining
+risk is not architectural direction; it is contract completeness and operational polish. The biggest
+thing to tighten before execution is the explicit proof that Gmail data maps to the dotMD
+source/read/search contracts required by AIR-01, despite being federated-only.
+
+---
+
+### Cycle 4 · OpenCode Review
+
+## Plan 37-01: Vendor Airweave Platform Slice and DI Shims (Wave 1)
+
+**Summary:** Well-architected vendoring strategy that surgically extracts only the
+source/entity classes from Airweave without inheriting its heavy infrastructure stack. The
+DI shim layer (logger, http client, token provider) is appropriately minimal and the
+threading.Lock-based token refresh with margin-based expiry is a solid production pattern.
+The SparseEmbedding→`object` stub and `@source`→no-op decorator stub are pragmatic choices
+that keep the dependency surface small. One LOW concern from Cycle 3 remains unaddressed.
+
+**Strengths:**
+- Surgical vendoring: only platform files plucked from Airweave — avoids the entire Temporal/Vespa/domain stack
+- Provenance tracking via VENDOR_VERSION and VENDOR_NOTES.md for every file — critical for maintenance when Airweave upstream changes
+- GmailOAuthTokenProvider's threading.Lock + double-check inside lock + `expires_in - 300` margin is correct and race-free for a single-process Python app
+- Must-have truth "5 threads, only 1 httpx.post call" is testable and proves the lock works
+- No `airweave.domains`, `airweave.core`, `airweave.schemas` survives — grep-based acceptance criteria is verifiable
+- Stub types (`SparseEmbedding → object`, no-op `@source`) are honest about what's not needed
+
+**Concerns:**
+- **MEDIUM — Vendored files must have imports rewritten from `from airweave.*` to `from dotmd.vendor.airweave.*`.**
+  The plan is silent on import path rewriting. Without it, the vendored tree won't import. This is
+  mechanical but critical — all cross-file imports within the vendored slice must be identified and updated.
+- **LOW — `httpx.post()` in `GmailOAuthTokenProvider.get_token()` still has no explicit timeout.**
+  Was flagged as LOW in Cycle 3 by both reviewers and remains unfixed. One keyword argument fix:
+  `httpx.post(url, ..., timeout=10.0)`.
+- **MEDIUM — `SparseEmbedding` stub as bare `object` could cause runtime failures** if any vendored
+  code does `isinstance(x, SparseEmbedding)` or `SparseEmbedding.from_list(...)`. Plan should verify
+  no such usage exists in the vendored entity files, or provide a minimal stub class.
+
+**Suggestions:**
+- Add explicit timeout to the `httpx.post()` call in `GmailOAuthTokenProvider.get_token()`
+- Add acceptance criterion: `grep -r 'from airweave\.' backend/src/dotmd/vendor/airweave/*.py` returns zero matches (only `from dotmd.vendor.airweave.` forms should exist)
+- Verify that none of the vendored entity code does `isinstance` checks against `SparseEmbedding`; if it does, provide a stub class with `from_list` classmethod rather than bare `object`
+
+**Risk Assessment:** MEDIUM — Import rewriting gap is the main risk. LOW timeout concern is trivial to fix.
+
+---
+
+## Plan 37-02: BaseConnectorBridge ABC, GmailBridge, Federated Search (Wave 2)
+
+**Summary:** The strongest plan of the four. The BaseConnectorBridge ABC provides a clean,
+generic abstraction layer that satisfies D-03 (no Airweave-only lane). GmailBridge's direct
+Gmail API approach is correct given Airweave's `GmailSource.search()` is unimplemented. The
+`_is_low_signal_federated_candidate` generalization in `service.py` is elegant — namespace-based
+routing avoids coupling the merge logic to specific source implementations. Error boundaries
+(401→SourceAuthError with token cache clear, 429/5xx→SourceTemporaryUnavailable) are comprehensive.
+
+**Strengths:**
+- BaseConnectorBridge(ABC) with 3 abstract methods is the right level of abstraction — generic enough for any HTTP API source, specific enough to be useful
+- GmailBridge's error boundary taxonomy (SourceAuthError, SourceTemporaryUnavailable) matches real Gmail API failure modes
+- Token cache clearing on 401 is production-grade — stale tokens won't cause cascading failures
+- O(n) round-trips explicitly documented as known limitation — honest about tradeoffs, appropriate for a spike
+- `source_native_score=None` on federated candidates is correct: federated results bypass RRF entirely, flow through `_merge_with_federated_quota` quota merge
+- `export_changes()` exact 4-param signature with `updated_after: str | None = None` and `updated_after_cursor: str | None = None` matches Protocol — **Cycle 3 HIGH N1 FULLY RESOLVED**
+- `_is_low_signal_federated_candidate()` namespace-based routing keeps Telegram and Gmail filter logic separate without coupling the service layer to provider internals
+- httpx timeout at both connect (5.0s) and read (10.0s) level — prevents hanging on slow Gmail API endpoints
+
+**Concerns:**
+- **MEDIUM — `_is_low_signal_federated_candidate` returns `False` for all non-Telegram candidates.**
+  Gmail candidates with empty bodies or single-character content pass through unfiltered. Should
+  there be a minimal quality gate (e.g., at least N characters)? Or is this intentionally deferred?
+  The plan is silent on this.
+- **LOW — `to_search_candidate()` `retrieval_kind` value not specified.**
+  The plan mentions `tg:fts` for Telegram. What value goes for Gmail (e.g., `"gmail:api"`)? Without it,
+  downstream consumers can't distinguish result sources in filter logic.
+- **LOW — `export_changes` Protocol signature verification.**
+  Verify that `ApplicationSourceProviderProtocol.export_changes` in `source_provider.py` actually has
+  exactly this 4-param signature. The test should catch any mismatch, but plan should cite the Protocol's
+  actual method signature for certainty.
+
+**Suggestions:**
+- Specify `retrieval_kind` value for Gmail candidates (e.g., `"gmail:api"`)
+- Add a comment at `_is_low_signal_federated_candidate` about why Gmail candidates receive no quality filtering (intentionally deferred or permissive)
+- Verify the `export_changes` test actually checks structural compatibility with the Protocol
+
+**Risk Assessment:** LOW — The plan is thorough, follows the established Telegram pattern precisely, and resolves Cycle 3 HIGH N1. The concerns are minor clarifications.
+
+---
+
+## Plan 37-03: Gmail Source Descriptor, Lifecycle Config, Registry Wiring (Wave 2)
+
+**Summary:** Clean integration into the existing source lifecycle system. All three contract
+boundaries (descriptor, config, runtime factory) are properly extended without disrupting the
+existing filesystem and Telegram paths. The `SourceAccess(kind="none")` bypass for `get_access()`
+is the correct fix for the OAuth gap. The env var activation logic (all-3-or-nothing with
+partial-var warnings) is good UX.
+
+**Strengths:**
+- `SourceAccess(kind="none")` directly constructed, never calls `DefaultSourceCredentialProvider.get_access()` — **Cycle 3 HIGH N2 FULLY RESOLVED**
+- `type SourceConfig = FilesystemSourceConfig | TelegramSourceConfig | GmailSourceConfig` — **Cycle 3 HIGH N3 FULLY RESOLVED**
+- `test_build_gmail_bypasses_credential_provider` monkeypatches `get_access()` to assert it is NOT called — strong negative test
+- `test_source_config_union_includes_gmail` verifies `GmailSourceConfig in typing.get_args(SourceConfig)` — strong positive test
+- `GmailSourceConfig.refresh_token` is NOT in `SourceAccess.delegated_to` — keeps credential storage in config, matches how Telegram's credentials work
+- `search_result_limit` validated 1-500 with default 20 — bounded range, prevents resource exhaustion
+- Partial env var detection with specific naming of missing vars is good operations UX
+- `build_if_configured("gmail")` returns None when `DOTMD_GMAIL_CLIENT_ID` not set — follows the Telegram pattern exactly
+
+**Concerns:**
+- **MEDIUM — `GmailSourceConfig.client_secret` and `refresh_token` are plain `str` fields.**
+  If the config is ever logged, serialized with `model_dump()`, or captured in error messages, secrets
+  leak. Consider Pydantic `SecretStr` for these two fields. `client_id` is a public identifier and
+  can remain `str`.
+- **MEDIUM — Tight coupling between lifecycle layer and OAuth token implementation.**
+  `GmailApplicationSourceProvider` receives `token_provider` as a constructor argument, and
+  `SourceRuntimeFactory.build()` constructs the token provider directly from config secrets.
+  If the token provider API changes, both the provider and the factory must change. The Telegram
+  pattern uses a factory function passed to `source_runtime_factory_from_settings()` — Gmail
+  should follow the same pattern for consistency.
+- **LOW — No automated enforcement that `GmailSource()` is never instantiated outside source_lifecycle.py.**
+  A grep in Plan 37-04's verification script is the only check. Consider a test that imports
+  `gmail_provider` and verifies no direct `GmailSource` construction happens outside the lifecycle layer.
+- **LOW — `extra="forbid"` with `strict=True` may break forward compatibility.** If a future
+  connector adds new config fields and the ConfigDict is not updated, validation fails hard. Tradeoff
+  is acceptable for a spike, but should be documented.
+
+**Suggestions:**
+- Use Pydantic `SecretStr` for `client_secret` and `refresh_token` fields
+- Extract Gmail client construction into a factory function, passed to `source_runtime_factory_from_settings()`, matching Telegram's pattern
+- Add a test that verifies `GmailSourceConfig.__repr__()` does not expose `client_secret` or `refresh_token` values
+- Document why `extra="forbid"` is chosen over `extra="ignore"` in the model docstring
+
+**Risk Assessment:** MEDIUM — The secrets-in-clear-config concern is the main issue. The plan
+correctly resolves both Cycle 3 HIGHs N2 and N3.
+
+---
+
+## Plan 37-04: AIR-02 Compatibility Report and End-to-End Verification (Wave 3)
+
+**Summary:** Well-defined documentation deliverable with concrete structure and verification
+commands. The report template covers all three AIR-02 categories plus the extensibility
+assessment required for D-03 compliance. The verification script is practical and testable.
+This plan is a documentation + cleanup phase and carries low implementation risk.
+
+**Strengths:**
+- Report structure covers all three AIR-02 categories plus extensibility, deferred mappings, and AIR-03 compliance checklist
+- "Evidence-based" requirement — report cites actual code locations, not speculation
+- `GmailSource.search()` absence is explicitly called out with cited Airweave source location — honest accounting
+- Verification commands are specific and executable
+- AGENTS.md update is scoped to Phase 37 architectural decisions — targeted, not a full rewrite
+- Import-verification grep now excludes vendor directory (`--exclude-dir=vendor`) to avoid false positives on vendored files — correct fix from Cycle 3
+
+**Concerns:**
+- **LOW — End-to-end integration test not specified.**
+  The plan adds "lifecycle tests" but doesn't specify whether these test the full
+  `build_if_configured → search_native` path end-to-end or just isolated lifecycle wiring.
+  An integration test that exercises the full Gmail federated search path (with a mock HTTP backend)
+  would provide strong confidence that Plans 37-01 through 37-03 properly integrate.
+- **LOW — grep pattern may miss multi-line imports.**
+  `grep -r "^from airweave\|^import airweave"` won't catch multi-line imports or imports with
+  leading whitespace. A more robust pattern: `grep -rE '(^|\s)(from|import)\s+airweave'`.
+- **LOW — TBD placeholder verification.**
+  "No unreplaced `[TBD: ...]` placeholders" is a documentation quality check that `pytest` can't
+  verify. Add a simple `grep "[TBD:" docs/airweave-compatibility.md` step.
+
+**Suggestions:**
+- Add an integration test using `pytest-httpx` or `responses` to mock the Gmail API and test the full `build_if_configured("gmail") → search_native(query) → to_search_candidate() → fanout_federated()` flow
+- Use a more robust grep pattern for import verification: `grep -rPE '(^|\s)(from|import)\s+airweave'`
+- Add a verification step: `grep "\[TBD:" docs/airweave-compatibility.md || echo "No TBD placeholders: OK"`
+
+**Risk Assessment:** LOW — Documentation phase with clear acceptance criteria and verifiable outputs.
+
+---
+
+## Cycle 4 · Consensus Summary
+
+### Cycle 3 HIGH Resolution Status
+
+| HIGH | Issue | Cycle 4 Verdict | Evidence |
+|------|-------|-----------------|---------|
+| **N1** | `export_changes` signature incomplete | **FULLY RESOLVED** | Plan 37-02 specifies exact 4-param Protocol signature including `updated_after: str \| None = None` and `updated_after_cursor: str \| None = None`. Test `test_gmail_provider_export_changes_accepts_all_protocol_params` explicitly verifies all four params are accepted. |
+| **N2** | `SourceAccess.kind` OAuth gap | **FULLY RESOLVED** | Plan 37-03 explicitly bypasses `DefaultSourceCredentialProvider.get_access()` and constructs `SourceAccess(kind="none")` directly. Test `test_build_gmail_bypasses_credential_provider` monkeypatches `get_access()` to assert it is NOT called. |
+| **N3** | `SourceConfig` union not extended | **FULLY RESOLVED** | Plan 37-03 explicitly updates union to `FilesystemSourceConfig \| TelegramSourceConfig \| GmailSourceConfig`. Test `test_source_config_union_includes_gmail` verifies `GmailSourceConfig in typing.get_args(SourceConfig)`. |
+
+### Agreed Strengths (Cycle 4)
+
+- The surgical vendoring strategy extracts only needed Airweave source/entity classes without pulling in Temporal, Vespa, or organization-layer dependencies
+- `BaseConnectorBridge(ABC)` provides a generic, reusable abstraction that satisfies D-03 — not specific to Gmail
+- The `_is_low_signal_federated_candidate` generalization in `service.py` uses namespace-based routing, keeping the merge layer decoupled from provider internals
+- `GmailOAuthTokenProvider` with `threading.Lock` + double-check + `expires_in-300` margin is a correct, race-free pattern for single-process Python
+- Error boundaries (401→token clear+SourceAuthError, 429/5xx→SourceTemporaryUnavailable) are production-grade
+- All three Cycle 3 HIGHs have explicit must-have truths and corresponding tests that prove resolution
+- The plan integration respects existing patterns: descriptor→config→lifecycle→federated fan-out — no custom integration lane
+
+### Agreed Concerns (Cycle 4)
+
+| # | Concern | Severity | Plans Affected |
+|---|---------|----------|----------------|
+| C1 | **Vendored import rewriting not specified in plan** — vendored `.py` files still contain `from airweave.*`; must be rewritten to `from dotmd.vendor.airweave.*` | MEDIUM | 37-01 |
+| C2 | **OAuth secrets in plain Pydantic `str` fields** — `client_secret` and `refresh_token` could leak via `model_dump()`, repr, or error messages; use `SecretStr` | MEDIUM | 37-03 |
+| C3 | **`SparseEmbedding` stub as bare `object`** — risk if vendored code does `isinstance(x, SparseEmbedding)` or `SparseEmbedding.from_list(...)` | MEDIUM | 37-01 |
+| C4 | **`httpx.post()` timeout unspecified in token provider** — hung OAuth endpoint blocks all searches; one-line fix | LOW | 37-01 |
+| C5 | **No end-to-end integration test** — no single test exercises full `build → search_native → to_search_candidate → fanout_federated` path with mocked HTTP | LOW | 37-04 |
+| C6 | **Gmail content quality gate absent** — `_is_low_signal_federated_candidate` passes all Gmail candidates unconditionally; should be documented as intentional | LOW | 37-02 |
+| C7 | **AIR-01 SourceDocument/SourceUnit proof implicit** — federated-only path covers `SearchCandidate` and `read_unit_window` but AIR-01 also mentions `SourceDocument` and `SourceUnit`; compatibility report should explicitly map these | MEDIUM | 37-04 |
+
+### Divergent Views (Cycle 4)
+
+- **Secrets handling severity** (OpenCode rates MEDIUM, Codex rates LOW): OpenCode focuses on `SecretStr` for `client_secret`/`refresh_token` as a MEDIUM concern; Codex acknowledges it as LOW with "acceptable for env-based local deployment." Consensus for a single-user server: `SecretStr` is a hardening recommendation, not a blocker for execution.
+- **Import path rewriting explicitness** (OpenCode raises as MEDIUM, Codex does not explicitly call out): OpenCode flags that the plan is silent on how vendored `from airweave.*` imports get rewritten; Codex focuses on test coverage. Consensus: the rewriting step should be explicit in must-have truths of Plan 37-01 — add "no `from airweave.*` in vendored tree" to acceptance criteria.
+
+### Cycle 4 Risk Summary
+
+| Plan | Cycle 3 Risk | Cycle 4 Risk | Change |
+|------|-------------|-------------|--------|
+| 37-01 | LOW-MEDIUM | LOW-MEDIUM | Import rewriting gap surfaced; SparseEmbedding stub risk noted; token timeout still LOW |
+| 37-02 | HIGH | LOW | All Cycle 3 HIGHs resolved; only minor LOW/MEDIUM clarifications remain |
+| 37-03 | MEDIUM-HIGH | MEDIUM | N2 and N3 fully resolved; secrets-in-clear-config is new MEDIUM |
+| 37-04 | LOW | LOW | Grep false-positive fixed; minor LOW enhancements suggested |
+
+**Cycle 4 Overall: LOW-MEDIUM**
+
+All three Cycle 3 HIGHs (N1: `export_changes` signature, N2: `SourceAccess.kind` OAuth gap,
+N3: `SourceConfig` union) are FULLY RESOLVED. No new HIGH concerns raised in Cycle 4.
+Remaining concerns are MEDIUM implementation details (import rewriting, secrets hardening,
+SparseEmbedding stub verification) and LOW polish items. The plans are ready for execution.
