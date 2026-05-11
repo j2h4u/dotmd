@@ -359,13 +359,21 @@ class GmailApplicationSourceProvider:
             "Use search_native() or read_unit_window() instead."
         )
 
-    def export_changes(
+    def export_changes(  # noqa: PLR0913
         self,
         cursor: str | None,
         limit: int,
         updated_after: str | None = None,
         updated_after_cursor: str | None = None,
     ) -> ApplicationSourceChangeBatch:
+        """Not supported — Gmail is federated-only, no cursor-based sync.
+
+        Signature matches ApplicationSourceProviderProtocol exactly, including
+        the two optional parameters updated_after and updated_after_cursor.
+        Python structural subtyping (Protocol) requires all parameter names and
+        defaults to match — omitting these two params causes a runtime and
+        type-checker mismatch (Cycle 3 HIGH N1).
+        """
         raise NotImplementedError(
             "Gmail is a federated-only source; export_changes is not supported. "
             "Gmail does not participate in cursor-based incremental sync."
@@ -386,6 +394,7 @@ class GmailApplicationSourceProvider:
 - `GmailApplicationSourceProvider` has all four methods: `describe_source`, `export_changes`, `search_native`, `read_unit_window`
 - `GmailApplicationSourceProvider().describe_source()` raises `NotImplementedError` with "federated-only source" in message
 - `GmailApplicationSourceProvider().export_changes(None, 10)` raises `NotImplementedError` with "federated-only source" in message
+- `GmailApplicationSourceProvider().export_changes(None, 10, updated_after=None, updated_after_cursor=None)` also raises `NotImplementedError` (all four params accepted — exact Protocol signature match, Cycle 3 HIGH N1)
 - `GMAIL_API_TIMEOUT_SECONDS` is defined at module level as `10.0`
 - `GmailBridge.__init__` constructs `httpx.Client` with `timeout=httpx.Timeout(GMAIL_API_TIMEOUT_SECONDS, connect=5.0)`
 - A comment in `search_native` documents O(n) round-trips as a known limitation
@@ -540,6 +549,15 @@ test_gmail_provider_export_changes_raises_not_implemented:
   - Assert raises NotImplementedError
   - Assert "federated-only source" in str(exc)
 
+test_gmail_provider_export_changes_accepts_all_protocol_params:
+  """export_changes signature must exactly match ApplicationSourceProviderProtocol —
+  all four parameters including updated_after and updated_after_cursor must be accepted
+  without TypeError (Cycle 3 HIGH N1: structural subtyping requires exact param match)."""
+  - Instantiate GmailApplicationSourceProvider with mock token provider
+  - Call provider.export_changes(None, 10, updated_after="2026-01-01", updated_after_cursor="cursor-abc")
+  - Assert raises NotImplementedError (not TypeError — signature matches, method not supported)
+  - Assert "federated-only source" in str(exc)
+
 test_gmail_bridge_uses_explicit_timeout:
   """GmailBridge httpx.Client must be constructed with GMAIL_API_TIMEOUT_SECONDS timeout
   (Cycle 2 HIGH: no search-level timeout)."""
@@ -595,6 +613,7 @@ All tests use `unittest.mock`; no real network calls.
 - test_base_connector_bridge_is_abstract passes
 - test_gmail_provider_describe_source_raises_not_implemented passes
 - test_gmail_provider_export_changes_raises_not_implemented passes
+- test_gmail_provider_export_changes_accepts_all_protocol_params passes (Cycle 3 HIGH N1 — exact Protocol signature)
 - test_gmail_bridge_uses_explicit_timeout passes
 - test_search_native_timeout_raises_source_temporarily_unavailable passes
 - test_low_signal_filter_passes_gmail_candidates passes
@@ -636,6 +655,15 @@ try:
 except NotImplementedError as e:
     assert 'federated-only source' in str(e), f'Wrong message: {e}'
     print('export_changes NotImplementedError: OK')
+try:
+    # Cycle 3 HIGH N1: all four Protocol params must be accepted without TypeError
+    p.export_changes(None, 10, updated_after='2026-01-01', updated_after_cursor='cur')
+    assert False, 'should have raised'
+except NotImplementedError as e:
+    print('export_changes Protocol signature match (N1): OK')
+except TypeError as e:
+    print(f'FAIL — export_changes signature does not match Protocol: {e}')
+    raise
 "
 
 # Timeout constant defined

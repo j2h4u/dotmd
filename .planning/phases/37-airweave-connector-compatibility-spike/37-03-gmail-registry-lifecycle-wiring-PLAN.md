@@ -32,6 +32,10 @@ must_haves:
     - GmailSourceConfig exists in source_lifecycle.py with client_id, client_secret, refresh_token, search_result_limit fields
     - GmailSourceConfig.refresh_token holds the OAuth refresh token (NOT stored in SourceAccess.delegated_to)
     - search_result_limit validated 1 <= value <= 500, default 20
+    - SourceConfig union type in source_lifecycle.py is updated to include GmailSourceConfig (Cycle 3 HIGH N3)
+    - type SourceConfig = FilesystemSourceConfig | TelegramSourceConfig | GmailSourceConfig
+    - SourceRuntimeFactory.build("gmail") bypasses DefaultSourceCredentialProvider.get_access() for auth (Cycle 3 HIGH N2)
+    - SourceRuntimeFactory.build("gmail") constructs SourceAccess(kind="none") directly, does NOT call get_access() with auth_kind="oauth_refresh"
     - SourceRuntimeFactory.build("gmail") returns SourceRuntimeBundle with provider set
     - SourceRuntimeFactory.build("gmail") raises SourceLifecycleConfigError when config missing
     - build_if_configured("gmail") returns None when DOTMD_GMAIL_CLIENT_ID not set
@@ -80,6 +84,31 @@ required Gmail env vars (`DOTMD_GMAIL_CLIENT_ID`, `DOTMD_GMAIL_CLIENT_SECRET`,
 `DOTMD_GMAIL_REFRESH_TOKEN`) are set, `service.py` must log a warning naming the
 specific missing var(s) and skip Gmail registration. Silent failure makes misconfigured
 deployments very hard to debug.
+
+**[Cycle 3 HIGH N2 — `SourceAccess.kind` OAuth gap]:** The current
+`DefaultSourceCredentialProvider.get_access()` only handles `auth_kind == "none"` and
+`auth_kind == "delegated"`. Gmail's descriptor registers with `auth_kind="oauth_refresh"`,
+which would cause `get_access()` to raise `SourceLifecycleConfigError("auth_kind unsupported")`.
+
+Resolution: The `build("gmail")` branch in `SourceRuntimeFactory` must **NOT** call
+`self._credential_provider.get_access(descriptor, credential_ref)`. Instead, it reads
+`config.refresh_token` directly from `GmailSourceConfig` and constructs
+`SourceAccess(kind="none")` directly — credentials are already embedded in the config
+object. This bypasses `DefaultSourceCredentialProvider` for Gmail entirely, which is
+correct because Gmail's OAuth token material is managed by `GmailOAuthTokenProvider`,
+not by the generic credential provider chain.
+
+Note: `SourceAccess.kind` is kept as `Literal["none", "delegated"]` — no new variant is
+added. The `kind="none"` value is correct here since there is no credential delegation;
+the credentials come from the config object directly.
+
+**[Cycle 3 HIGH N3 — `SourceConfig` union not extended]:** The current type alias
+`type SourceConfig = FilesystemSourceConfig | TelegramSourceConfig` in `source_lifecycle.py`
+must be updated to `type SourceConfig = FilesystemSourceConfig | TelegramSourceConfig | GmailSourceConfig`.
+Without this, `SourceRuntimeFactory._require_config()` and Pydantic validation will reject
+`GmailSourceConfig` instances. This is a one-line fix but must be explicit in the
+implementation — the executor must update the union before adding `GmailSourceConfig` to
+any config store.
 
 ## Tasks
 
@@ -170,10 +199,13 @@ class GmailSourceConfig(BaseModel):
     )
 ```
 
-**2. Update `SourceConfig` type union**:
+**2. Update `SourceConfig` type union** (Cycle 3 HIGH N3 — one-line fix, MUST be done
+before any code attempts to store GmailSourceConfig in the config store):
 ```python
 type SourceConfig = FilesystemSourceConfig | TelegramSourceConfig | GmailSourceConfig
 ```
+Without this change, `SourceRuntimeBundle.config: SourceConfig` type annotation and
+Pydantic validation reject GmailSourceConfig instances, causing a runtime error.
 
 **3. Add private helper `_require_gmail_config`** (pattern mirrors `_require_telegram_config`):
 ```python
@@ -191,6 +223,12 @@ if namespace == "gmail":
     config = self._require_gmail_config(record.config)
     from dotmd.vendor.airweave.shims import GmailOAuthTokenProvider
     from dotmd.ingestion.gmail_provider import GmailApplicationSourceProvider
+    # Cycle 3 HIGH N2: Do NOT call self._credential_provider.get_access() here.
+    # DefaultSourceCredentialProvider.get_access() only handles auth_kind "none" and
+    # "delegated" — it raises SourceLifecycleConfigError for auth_kind "oauth_refresh".
+    # Gmail's OAuth token material comes from GmailSourceConfig.refresh_token directly;
+    # there is no credential delegation chain. Use SourceAccess(kind="none") directly.
+    access = SourceAccess(kind="none")
     # Read refresh_token from GmailSourceConfig directly (NOT from SourceAccess.delegated_to).
     # SourceAccess.delegated_to is for identity delegation strings, not raw OAuth token
     # material — storing secrets there risks leaking them via repr/logs/status metadata.
@@ -208,7 +246,7 @@ if namespace == "gmail":
     return SourceRuntimeBundle(
         descriptor=descriptor,
         config=config,
-        access=SourceAccess(kind="config"),  # no credential delegation needed
+        access=access,
         cursor_store=self._cursor_store,
         provider=provider,
         metadata_json=dict(descriptor.metadata_json),
@@ -248,7 +286,9 @@ This ensures the service starts normally even if Gmail credentials are partially
 - `GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r", search_result_limit=501)` raises ValidationError
 - `GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r", search_result_limit=0)` raises ValidationError
 - `GmailSourceConfig` has a `refresh_token: str` field (not SourceAccess.delegated_to)
-- `SourceRuntimeFactory.build("gmail")` with a properly configured store returns a `SourceRuntimeBundle` with `provider` set
+- `type SourceConfig = FilesystemSourceConfig | TelegramSourceConfig | GmailSourceConfig` (Cycle 3 HIGH N3 — union updated)
+- `SourceRuntimeFactory.build("gmail")` does NOT call `self._credential_provider.get_access()` (Cycle 3 HIGH N2 — bypasses auth_kind="oauth_refresh" path that raises)
+- `SourceRuntimeFactory.build("gmail")` returns a `SourceRuntimeBundle` with `access.kind == "none"` and `provider` set
 - `SourceRuntimeFactory.build("gmail")` with no gmail config in store raises `SourceLifecycleConfigError`
 - `build_if_configured("gmail")` returns `None` when no gmail config in store
 - `bundle.supports_federated_search` is `True` when provider has `search_native` method
@@ -416,6 +456,63 @@ def test_gmail_source_config_has_refresh_token_field():
     # Ensure the field is accessible directly (not via SourceAccess)
     assert hasattr(config, "refresh_token")
 
+def test_source_config_union_includes_gmail():
+    """SourceConfig union must include GmailSourceConfig (Cycle 3 HIGH N3).
+    Without this, SourceRuntimeBundle.config: SourceConfig and Pydantic validation
+    reject GmailSourceConfig instances, causing a runtime error."""
+    from dotmd.ingestion.source_lifecycle import GmailSourceConfig, SourceConfig
+    import typing
+    # SourceConfig is a type alias — verify GmailSourceConfig is in the union args
+    args = typing.get_args(SourceConfig)
+    assert GmailSourceConfig in args, (
+        f"GmailSourceConfig not in SourceConfig union: {args}"
+    )
+
+def test_build_gmail_bypasses_credential_provider(monkeypatch):
+    """SourceRuntimeFactory.build('gmail') must NOT call get_access() on the
+    credential provider (Cycle 3 HIGH N2 — get_access() raises for auth_kind='oauth_refresh').
+    Instead it constructs SourceAccess(kind='none') directly."""
+    from dotmd.ingestion.source_lifecycle import (
+        SourceRuntimeFactory, InMemorySourceConfigStore,
+        DefaultSourceCredentialProvider, GmailSourceConfig, SourceConfigRecord,
+    )
+    from dotmd.ingestion.source_registry import default_source_registry
+    from unittest.mock import MagicMock, patch
+
+    config_store = InMemorySourceConfigStore([
+        SourceConfigRecord(
+            namespace="gmail",
+            config=GmailSourceConfig(
+                client_id="cid", client_secret="csec", refresh_token="rtoken"
+            ),
+        )
+    ])
+
+    credential_provider = DefaultSourceCredentialProvider()
+    # Monkeypatch get_access to raise if called — it must NOT be called for gmail
+    original_get_access = credential_provider.get_access
+    get_access_called = []
+    def spy_get_access(descriptor, credential_ref):
+        get_access_called.append(True)
+        return original_get_access(descriptor, credential_ref)
+    monkeypatch.setattr(credential_provider, "get_access", spy_get_access)
+
+    with patch("dotmd.vendor.airweave.shims.GmailOAuthTokenProvider") as mock_tp, \
+         patch("dotmd.ingestion.gmail_provider.GmailApplicationSourceProvider") as mock_prov:
+        mock_tp.return_value = MagicMock()
+        mock_prov.return_value = MagicMock(search_native=lambda q, l: [])
+        factory = SourceRuntimeFactory(
+            registry=default_source_registry(),
+            config_store=config_store,
+            credential_provider=credential_provider,
+            cursor_store=MagicMock(),
+        )
+        bundle = factory.build("gmail")
+
+    assert not get_access_called, "get_access() must NOT be called for gmail build"
+    assert bundle.access.kind == "none"
+    assert bundle.provider is not None
+
 def test_partial_gmail_env_vars_logs_warning(caplog):
     """Partial Gmail env config (some but not all vars) must log a warning naming
     the missing var(s) — not silently skip or crash
@@ -450,6 +547,8 @@ def test_partial_gmail_env_vars_logs_warning(caplog):
 - test_gmail_source_config_limit_validation passes (boundary values 1 and 500 are valid, 0 and 501 raise)
 - test_gmail_source_config_has_refresh_token_field passes (refresh_token is on GmailSourceConfig, not SourceAccess)
 - test_partial_gmail_env_vars_logs_warning passes (partial config detection logic verified)
+- test_source_config_union_includes_gmail passes (Cycle 3 HIGH N3 — GmailSourceConfig in SourceConfig union)
+- test_build_gmail_bypasses_credential_provider passes (Cycle 3 HIGH N2 — get_access() not called, access.kind="none")
 </acceptance_criteria>
 
 ## Verification
@@ -467,5 +566,46 @@ assert r.get('filesystem') is not None
 assert r.get('telegram') is not None
 assert r.get('gmail') is not None
 print('AIR-03 registry check: OK')
+"
+
+# Cycle 3 HIGH N3: GmailSourceConfig in SourceConfig union
+python -c "
+import typing
+from dotmd.ingestion.source_lifecycle import GmailSourceConfig, SourceConfig
+args = typing.get_args(SourceConfig)
+assert GmailSourceConfig in args, f'GmailSourceConfig not in SourceConfig union: {args}'
+print('SourceConfig union includes GmailSourceConfig (N3): OK')
+"
+
+# Cycle 3 HIGH N2: build('gmail') does not call get_access(), uses SourceAccess(kind='none')
+python -c "
+from dotmd.ingestion.source_lifecycle import (
+    SourceRuntimeFactory, InMemorySourceConfigStore,
+    DefaultSourceCredentialProvider, GmailSourceConfig, SourceConfigRecord,
+    SourceLifecycleConfigError,
+)
+from dotmd.ingestion.source_registry import default_source_registry
+from unittest.mock import MagicMock, patch
+
+config_store = InMemorySourceConfigStore([
+    SourceConfigRecord(
+        namespace='gmail',
+        config=GmailSourceConfig(client_id='cid', client_secret='csec', refresh_token='rtoken'),
+    )
+])
+with patch('dotmd.vendor.airweave.shims.GmailOAuthTokenProvider') as mock_tp, \
+     patch('dotmd.ingestion.gmail_provider.GmailApplicationSourceProvider') as mock_prov:
+    mock_tp.return_value = MagicMock()
+    mock_prov.return_value = MagicMock(search_native=lambda q, l: [])
+    factory = SourceRuntimeFactory(
+        registry=default_source_registry(),
+        config_store=config_store,
+        credential_provider=DefaultSourceCredentialProvider(),
+        cursor_store=MagicMock(),
+    )
+    bundle = factory.build('gmail')
+assert bundle.access.kind == 'none', f'Expected kind=none, got {bundle.access.kind}'
+assert bundle.provider is not None
+print('build(\"gmail\") bypasses get_access(), access.kind=none (N2): OK')
 "
 ```
