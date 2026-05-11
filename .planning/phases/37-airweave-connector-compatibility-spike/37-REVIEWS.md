@@ -1,7 +1,7 @@
 ---
 phase: 37
 reviewers: [codex, opencode]
-reviewed_at: 2026-05-11T10:16:26Z
+reviewed_at: 2026-05-11T15:45:00Z
 plans_reviewed:
   - 37-01-vendor-airweave-platform-slice-PLAN.md
   - 37-02-gmail-bridge-federated-search-PLAN.md
@@ -11,7 +11,14 @@ plans_reviewed:
 
 # Cross-AI Plan Review — Phase 37
 
-## Codex Review
+<!-- ═══════════════════════════════════════════════════════════════
+     CYCLE 1  (2026-05-11T10:16:26Z — plans before threading.Lock /
+               BaseConnectorBridge ABC were added)
+     ═══════════════════════════════════════════════════════════════ -->
+
+## Cycle 1 — 2026-05-11T10:16:26Z
+
+### Cycle 1 · Codex Review
 
 ## Summary
 
@@ -59,7 +66,7 @@ The phase is scoped as a spike, and the plans mostly avoid the dangerous failure
 
 ---
 
-## OpenCode Review
+### Cycle 1 · OpenCode Review
 
 # Phase 37 Plan Review — Airweave Connector Compatibility Spike
 
@@ -113,27 +120,18 @@ The direct Gmail API approach is pragmatic given `GmailSource.search()` is a stu
 #### Concerns
 
 - **HIGH — `source_native_score = None` breaks RRF fusion assumptions.** RRF (Reciprocal Rank Fusion) computes `score = 1 / (k + rank)` per result across engines. If `source_native_score` is `None`, the fusion layer must either: (a) treat it as unbounded (which biases fusion toward/away from Gmail results unpredictably), or (b) derive a rank-based fallback. The plan acknowledges this with a comment but doesn't check whether the existing RRF implementation handles `None` scores. Audit `backend/src/dotmd/search/fusion.py` before accepting this plan. If it doesn't handle `None`, the bridge should compute a positional decay score or the fusion layer needs a patch.
-- **HIGH — No MIME decoding edge case handling specified.** The plan says "decodes base64url-encoded MIME body parts" but doesn't address:
-  - **Multipart messages** (multipart/alternative, multipart/mixed): which part is the "body"? If the email has both `text/plain` and `text/html`, does the bridge prefer plain text or HTML-stripped?
-  - **No text/plain part** (HTML-only emails): HTML decoding and tag stripping needed.
-  - **Charset handling**: Content-Type charset may not be UTF-8. The bridge must decode using the declared charset, not assume.
-  - **base64 vs base64url**: Gmail API returns both variants depending on the endpoint. The decoder must handle both.
-  - **Large bodies**: The plan loads full body into memory for `read_unit_window`. What's the size guardrail? A 100MB attachment shouldn't crash the MCP server.
-- **MEDIUM — D-03 "generic bridge" has no design in this plan.** The plan is titled "AirweaveConnectorBridge and Gmail federated search," and D-03 says "Bridge must be generic across all BaseSource subclasses, not Gmail-specific." Yet the plan only describes Gmail-specific API calls. Where does the generic bridge abstraction live? What's the abstract interface? How would a second connector (say, Slack or Notion) plug into the same bridge without rewriting it? The bridge class should be abstract with `search_native(query, limit) -> list[SearchCandidate]` and `read_unit_window(ref) -> SourceUnitWindow` as its protocol, with `GmailBridge` as one implementation. This abstraction is missing.
-- **MEDIUM — No error handling for Gmail API failures.** `GET /messages?q=...` can return 401 (expired token), 429 (rate limit), 500 (transient server error), or return empty results (valid but confusing). The bridge should:
-  - Return `[]` on empty results (correct, not an error).
-  - Raise `SourceAuthError` on 401 → triggers credential refresh upstream.
-  - Raise `SourceTemporaryUnavailable` on 429/5xx → fusion can degrade gracefully.
-  - Log transient errors with throttling to avoid log spam.
-- **LOW — `SearchCandidate` doesn't reference `SourceDocument` or `SourceUnit`.** The success criteria say "maps into `SourceDocument`, `SourceUnit`, optional `SourceAsset`, and `SearchCandidate`." The plan only shows `SearchCandidate` mapping. For a federated-search-only source, `SourceDocument` and `SourceUnit` may be virtual (constructed at query time from `SearchCandidate` metadata), but this should be explicitly stated in the design.
+- **HIGH — No MIME decoding edge case handling specified.** The plan says "decodes base64url-encoded MIME body parts" but doesn't address: **Multipart messages** (multipart/alternative, multipart/mixed): which part is the "body"? **No text/plain part** (HTML-only emails): HTML decoding and tag stripping needed. **Charset handling**: Content-Type charset may not be UTF-8. **base64 vs base64url**: Gmail API returns both variants depending on the endpoint. **Large bodies**: The plan loads full body into memory for `read_unit_window`. What's the size guardrail?
+- **MEDIUM — D-03 "generic bridge" has no design in this plan.** The plan is titled "AirweaveConnectorBridge and Gmail federated search," and D-03 says "Bridge must be generic across all BaseSource subclasses, not Gmail-specific." Yet the plan only describes Gmail-specific API calls. Where does the generic bridge abstraction live? What's the abstract interface?
+- **MEDIUM — No error handling for Gmail API failures.** `GET /messages?q=...` can return 401 (expired token), 429 (rate limit), 500 (transient server error), or return empty results.
+- **LOW — `SearchCandidate` doesn't reference `SourceDocument` or `SourceUnit`.** For a federated-search-only source, `SourceDocument` and `SourceUnit` may be virtual (constructed at query time), but this should be explicitly stated.
 
 #### Suggestions
 
-1. **Audit `fusion.py` RRF implementation for `None` score handling** before accepting the plan. If it doesn't handle `None`, either add a positional decay score (`1.0 / (rank + 1)`) in the bridge or patch the fusion layer.
-2. **Specify MIME body decoding logic in a decision record** covering: part selection order, charset handling, HTML fallback, size limits (e.g., 1MB cap on body, truncate with `...` suffix).
-3. **Define `BaseConnectorBridge` abstract class** with `search_native(query, limit) -> list[SearchCandidate]` and `read_unit_window(ref) -> SourceUnitWindow` as its protocol. `GmailBridge` implements it. This satisfies D-03.
+1. **Audit `fusion.py` RRF implementation for `None` score handling** before accepting the plan.
+2. **Specify MIME body decoding logic** covering: part selection order, charset handling, HTML fallback, size limits.
+3. **Define `BaseConnectorBridge` abstract class** with `search_native`, `read_unit_window`, and `to_search_candidate` as its protocol.
 4. **Add error classification and retry strategy** for Gmail API HTTP responses.
-5. **Clarify `SourceDocument`/`SourceUnit` mapping** for federated-search-only sources — are they virtual/on-the-fly, or is a no-op stub acceptable?
+5. **Clarify `SourceDocument`/`SourceUnit` mapping** for federated-search-only sources.
 
 ---
 
@@ -146,23 +144,23 @@ Cleanly follows the filesystem/Telegram pattern for registry registration and li
 #### Strengths
 
 - **Correct capability set: FEDERATED_SEARCH + READ_UNIT_WINDOW, no LOCAL_SYNC.** Accurately reflects that Gmail is a read-only query source with no indexing/trickle involvement.
-- **Credential provider boundary is respected.** OAuth tokens don't leak into the registry or search layer — they stay behind the `CredentialProviderProtocol` abstraction.
-- **Env var activation is low-friction.** `DOTMD_GMAIL_*` vars follow the existing convention (similar to `DOTMD_TELEGRAM_*`).
+- **Credential provider boundary is respected.** OAuth tokens don't leak into the registry or search layer.
+- **Env var activation is low-friction.** `DOTMD_GMAIL_*` vars follow the existing convention.
 
 #### Concerns
 
-- **MEDIUM — Credential storage location mismatch.** User decision D-05 says credentials live in `~/.secrets/dotmd-gmail.env`, but the plan wires env vars directly. These are not the same thing — the plan should specify how the `.env` file is loaded (via `source_lifecycle.py`? via `start.sh`? via `SourceRuntimeFactory._load_secrets()`?). If the container doesn't have `~/.secrets/` bind-mounted, the credentials will be missing.
-- **MEDIUM — No credential validation at registration time.** If `DOTMD_GMAIL_*` vars are set but the refresh token is expired or invalid, the descriptor should still register (degraded mode) but log a warning. Currently, the plan doesn't specify what happens on invalid credentials — does `build("gmail")` fail loudly, or does it succeed with a broken provider?
-- **LOW — Plan depends only on 37-01, but references test removal from 37-02.** If 37-03 runs before 37-02, the skip markers don't exist yet. The dependency graph should show `Depends on: 37-01, 37-02` or the test skip-marker removal should move to Plan 37-04.
-- **LOW — Search result limit env var.** `DOTMD_GMAIL_SEARCH_RESULT_LIMIT` is a hard cap on `maxResults`. Gmail API has its own cap (500). The plan should specify a sane default (e.g., 20) and validate it stays within the API bound (1–500).
+- **MEDIUM — Credential storage location mismatch.** User decision D-05 says credentials live in `~/.secrets/dotmd-gmail.env`, but the plan wires env vars directly. The plan should specify how the `.env` file is loaded.
+- **MEDIUM — No credential validation at registration time.** If `DOTMD_GMAIL_*` vars are set but the refresh token is expired or invalid, the descriptor should still register (degraded mode) but log a warning.
+- **LOW — Plan depends only on 37-01, but references test removal from 37-02.** The dependency graph should show `Depends on: 37-01, 37-02`.
+- **LOW — Search result limit env var.** `DOTMD_GMAIL_SEARCH_RESULT_LIMIT` should validate it stays within API bound (1–500).
 
 #### Suggestions
 
-1. Specify how `~/.secrets/dotmd-gmail.env` is loaded into env vars (or update D-05 if the decision changed). If the file approach is preferred, implement `SourceRuntimeFactory._load_dotenv(path)` or similar.
+1. Specify how `~/.secrets/dotmd-gmail.env` is loaded into env vars.
 2. Add graceful degradation: if credentials are invalid, register the descriptor but mark it as `status=SourceLifecycleStatus.CREDENTIALS_UNAVAILABLE`.
 3. Set `DOTMD_GMAIL_SEARCH_RESULT_LIMIT` default to 20, validate 1 ≤ value ≤ 500.
 4. Fix dependency declaration to include 37-02, or move test skip-marker removal to 37-04.
-5. Add a `health_check()` method (or reuse the lifecycle's existing check pattern) that validates the Gmail OAuth token with a lightweight API call (e.g., `GET /profile` with `fields=emailAddress`).
+5. Add a `health_check()` method that validates the Gmail OAuth token with a lightweight API call.
 
 ---
 
@@ -175,114 +173,394 @@ Good quality gate — the report structure is comprehensive and the verification
 #### Strengths
 
 - **Report structure answers all three AIR-02 categories.** Reusable, shim, avoid — clear triage.
-- **Verification checks are automatable.** The grep for `^from airweave|^import airweave` and the three-descriptor count are CI-checkable.
+- **Verification checks are automatable.**
 - **Attribution of `GmailSource.search()` being unimplemented.** The key research finding is correctly surfaced as a report section.
 
 #### Concerns
 
-- **MEDIUM — "Pre-written in the plan" is a smell.** If the report content is predetermined before the spike executes, it may miss actual findings. The report should be a template with placeholders, filled in after Plans 37-01 through 37-03 complete. At minimum, the report must cite specific file paths, class names, and tested behaviors from the implemented code.
-- **MEDIUM — GmailAttachmentEntity deferred but not detailed.** D-11 says "SourceAsset is deferred" and AIR-02 should document the mapping. The report template mentions it, but doesn't specify what the mapping would look like — e.g., which `GmailAttachmentEntity` fields map to `SourceAsset` fields, and what blockers exist.
-- **LOW — No mention of updating AGENTS.md.** Phase completions should update the project's AGENTS.md with architecture decisions (why we vendored, why direct API calls, token handling strategy).
-- **LOW — "Generic bridge extensibility assessment" is vague.** The report section should assess: if we added a Slack connector tomorrow, what % of the bridge code is reusable vs. connector-specific?
+- **MEDIUM — "Pre-written in the plan" is a smell.** If the report content is predetermined before the spike executes, it may miss actual findings.
+- **MEDIUM — GmailAttachmentEntity deferred but not detailed.** The report template mentions it, but doesn't specify what the mapping would look like.
+- **LOW — No mention of updating AGENTS.md.**
+- **LOW — "Generic bridge extensibility assessment" is vague.**
 
 #### Suggestions
 
 1. Write the report as a template with `[TBD: filled after 37-01–37-03]` markers, not pre-written prose.
-2. Include a concrete `SourceAsset` mapping table even if deferred — "this is what it would look like."
-3. Add an "Extensibility Assessment" table: for each bridge component, classify as `generic` or `connector-specific` with % estimates.
-4. Include an AGENTS.md update task in the plan (or a follow-up note to update it post-merge).
+2. Include a concrete `SourceAsset` mapping table even if deferred.
+3. Add an "Extensibility Assessment" table: for each bridge component, classify as `generic` or `connector-specific`.
+4. Include an AGENTS.md update task in the plan.
 
 ---
 
-### Cross-Cutting Concerns
+### Cycle 1 · Cross-Cutting Concerns
 
 #### 1. `source_native_score = None` and RRF Fusion (CRITICAL)
 
-This is the highest-risk item across all plans. The RRF formula is `score = ∑ 1/(k + rank_i)` summed across participating engines. If Gmail results have `source_native_score = None` and the fusion layer either skips them or assigns an arbitrary value, the fused ranking will be wrong. Audit `backend/src/dotmd/search/fusion.py` immediately.
-
-**Recommendation:** Write a quick integration test that feeds a `SearchResult` with `score=None` into the fusion layer and verify it doesn't crash, exclude, or misrank the result.
+Both reviewers independently flagged this as the top risk. Gmail API returns no relevance score; setting `source_native_score = None` may crash or silently corrupt the fusion layer. `backend/src/dotmd/search/fusion.py` must be audited. If the fusion layer does not handle `None`, either add `source_native_score = 1.0 / (rank + 1)` positional decay in the bridge, or patch the fusion layer.
 
 #### 2. Generic Bridge Abstraction (D-03) Not Designed (HIGH)
 
-User decision D-03 states: "Bridge must be generic across all BaseSource subclasses, not Gmail-specific." None of the plans define a generic bridge abstraction. The plans collectively describe a Gmail-specific integration. For the phase to satisfy AIR-01 and AIR-03, there must be a generic bridge class that Gmail instantiates, not a Gmail-specific class pretending to be generic.
-
-**Recommendation:** Add a task to Plan 37-02: define `BaseConnectorBridge(ABC)` with:
-- `search_native(query: str, limit: int) -> list[SearchCandidate]`
-- `read_unit_window(ref: str) -> SourceUnitWindow`
-- `to_search_candidate(entity: BaseEntity, rank: int) -> SearchCandidate`
-
-GmailBridge implements this. The abstraction satisfies D-03 with minimal overhead.
+Both reviewers flagged that D-03 ("bridge must be generic across all BaseSource subclasses") has no design artifact in any plan. A `BaseConnectorBridge(ABC)` abstract class defining `search_native`, `read_unit_window`, and `to_search_candidate` must be added to Plan 37-02, with `GmailBridge` as its first implementation.
 
 #### 3. OAuth Token Lifecycle (MEDIUM)
 
-Token refresh is mentioned across plans but never designed as a coherent lifecycle:
-- Plan 37-01: caches for 5 minutes (too short)
-- Plan 37-01: no refresh race condition guard
-- Plan 37-03: no credential validation at registration
-- No plan for refresh token rotation (Google may issue new refresh tokens on refresh)
+Token refresh is mentioned across plans but never designed as a coherent lifecycle: 5-minute hard TTL is too short, no `threading.Lock` guard, no handling for refresh token rotation. Consolidate token handling into a `TokenCache` class in shims layer with thread-safe refresh serialization and margin-based expiry (`expires_in - 300`).
 
-**Recommendation:** Consolidate token handling into a single `TokenCache` class in the DI shims layer with thread-safe refresh serialization and margin-based expiry (`expires_in - 300`).
+### Cycle 1 · Risk Summary
 
-#### 4. MIME Body Decoding (MEDIUM)
+| Plan | Risk |
+|------|------|
+| 37-01 | **MEDIUM** — Token caching design needs revision |
+| 37-02 | **HIGH** — `source_native_score=None` RRF risk unmitigated; generic bridge missing |
+| 37-03 | **MEDIUM** — Credential source mismatch; graceful degradation unspecified |
+| 37-04 | **LOW** — Pre-written report risk |
 
-Plan 37-02 underspecifies MIME decoding. Must address:
-- Part selection: prefer `text/plain` > stripped `text/html` > any text part
-- Charset handling: decode per part's `Content-Type` charset, fallback to UTF-8
-- Size limits: cap body at configurable limit (e.g., 1MB), truncate with marker
-- Encoding variants: Gmail returns both standard base64 and URL-safe base64url
-
-#### 5. Error Boundary Design (MEDIUM)
-
-No plan specifies error boundaries between the bridge and the caller (search service). Each HTTP error type needs a defined handling path: empty results (return `[]`), 401 (token expired → raise `SourceAuthError`), 429/5xx (rate limited/transient → raise `SourceTemporaryUnavailable`).
-
-#### 6. Scope Creep Risk (LOW)
-
-The plans are well-scoped to the spike goal. The only scope concern is whether the "generic bridge" requirement (D-03) pulls the spike into designing infrastructure it wasn't meant to. The spike should *demonstrate* that a generic bridge is feasible, not *build* a production-ready generic bridge.
-
-### Risk Assessment
-
-| Plan | Risk | Justification |
-|------|------|---------------|
-| 37-01 | **MEDIUM** | Token caching design needs revision. Otherwise well-scoped. |
-| 37-02 | **HIGH** | `source_native_score = None` RRF risk unmitigated. MIME edge cases unaddressed. Generic bridge abstraction missing despite D-03 requirement. |
-| 37-03 | **MEDIUM** | Credential source mismatch. Graceful degradation unspecified. |
-| 37-04 | **LOW** | Pre-written report risk is real but easily corrected. |
-
-**Overall Phase Risk: MEDIUM-HIGH**
-
-Two blockers must be resolved before execution:
-1. **BLOCKER:** Audit RRF fusion for `None` score handling — fix or add bridge fallback.
-2. **BLOCKER:** Design and insert the generic `BaseConnectorBridge` abstraction into Plan 37-02 to satisfy D-03.
+**Cycle 1 Overall: MEDIUM-HIGH**
 
 ---
 
-## Consensus Summary
+<!-- ═══════════════════════════════════════════════════════════════
+     CYCLE 2  (2026-05-11T15:45:00Z — plans updated to address Cycle 1:
+               threading.Lock + expires_in-300 added to 37-01;
+               BaseConnectorBridge ABC + source_native_score=None
+               safety doc added to 37-02; MIME edge cases added;
+               error boundaries added; 37-03/04 fleshed out)
+     ═══════════════════════════════════════════════════════════════ -->
 
-Both reviewers converged on the same three primary risk areas with strong agreement.
+## Cycle 2 — 2026-05-11T15:45:00Z
 
-### Agreed Strengths
+*Plans were updated after Cycle 1 to address the three HIGHs: threading.Lock +
+margin-based expiry added (37-01), BaseConnectorBridge(ABC) added with
+source_native_score=None safety test (37-02), MIME decode edge cases and error
+boundaries fully specified (37-02). This cycle reviews the updated plans.*
 
-- **Correct isolation of Airweave runtime.** Both reviewers praised the vendoring strategy — no Temporal, Vespa, Celery, Redis, or heavy transitive deps survive in the vendored tree.
-- **Correct federated-only scope.** Gmail as a query-time federated provider (no trickle, no embedding, no FTS5 ingestion) is the right call for a spike.
-- **Existing lifecycle contracts reused correctly.** Source registry, `SourceDescriptor`, `SourceRuntimeFactory`, credential provider boundary — all followed. AIR-03 is well-served.
-- **Metadata whitelist discipline.** `GMAIL_PROVIDER_METADATA_KEYS` whitelist prevents raw API payload leakage into search results.
-- **SourceAsset deferred cleanly.** Both reviewers agreed that deferring `GmailAttachmentEntity` → `SourceAsset` is the right call for a spike.
+---
 
-### Agreed Concerns
+### Cycle 2 · Codex Review
 
-1. **HIGH — `source_native_score = None` in RRF fusion.** Both reviewers independently flagged this as the top risk. Gmail API returns no relevance score; setting `source_native_score = None` may crash or silently corrupt the fusion layer. `backend/src/dotmd/search/fusion.py` must be audited before plan acceptance. If the fusion layer does not handle `None`, either add `source_native_score = 1.0 / (rank + 1)` positional decay in the bridge, or patch the fusion layer.
+## Summary
 
-2. **HIGH — Generic bridge abstraction absent (D-03 unsatisfied).** Both reviewers flagged that D-03 ("bridge must be generic across all BaseSource subclasses") has no design artifact in any plan. The plans describe a Gmail-specific integration, not a generic bridge. A `BaseConnectorBridge(ABC)` abstract class (or Protocol) defining `search_native`, `read_unit_window`, and `to_search_candidate` must be added to Plan 37-02, with `GmailBridge` as its first implementation.
+Overall the phase is directionally sound: it keeps Gmail in the federated-provider lane, avoids local indexing, preserves the existing source registry/lifecycle boundary, and explicitly avoids Airweave's heavier runtime stack. The biggest weakness is that the plans claim "generic BaseSource compatibility," but the concrete Gmail path bypasses `GmailSource.search()` and calls Gmail directly. That is reasonable for the spike, but the plans need sharper acceptance criteria proving the reusable part is the bridge/entity/config pattern, not actual Airweave search reuse.
 
-3. **MEDIUM — OAuth token caching design is fragile.** Both reviewers identified: (a) 5-minute hard TTL is too short — should use `expires_in - 300` margin from the token response, and (b) no `threading.Lock` guard against concurrent refresh races. For a single-user server this is low severity in practice, but structurally wrong.
+## PLAN 37-01 Review
 
-4. **MEDIUM — MIME body decoding is underspecified.** Both reviewers flagged that Plan 37-02's `_decode_gmail_body` helper has no documented handling for HTML-only emails, charset detection, multipart/mixed nesting, or body size limits.
+### Strengths
 
-5. **MEDIUM — Error boundaries between bridge and search service unspecified.** Neither plan defines what exception types the bridge raises for 401, 429, or 5xx responses, or how the fusion/search layer should degrade when Gmail is unavailable.
+- Vendoring is scoped to the platform slice and explicitly rejects Temporal, Vespa, billing, and organization-layer imports.
+- Import smoke tests and forbidden-import checks are good guardrails.
+- Token refresh serialization with expiry margin and `threading.Lock` is the right risk to test early.
+- `VENDOR_VERSION` and `VENDOR_NOTES.md` are important for future diffing against upstream.
 
-### Divergent Views
+### Concerns
 
-- **Vendor version anchoring:** OpenCode raised this as a MEDIUM concern (missing commit SHA in vendored files); Codex did not mention it. Recommend adding a `VENDOR_VERSION` file — low cost, high future value.
-- **Pre-written report in 37-04:** OpenCode flagged this as a MEDIUM risk ("aspirational rather than evidence-based"). Codex did not flag it explicitly. The concern is valid: the report should be a template filled after implementation, not predetermined prose.
-- **Dependency graph fix for 37-03:** OpenCode noted that 37-03 references test skip-marker removal from 37-02 but only declares dependency on 37-01 — a minor dependency graph inconsistency. Codex did not raise this.
-- **`access.delegated_to` semantic mismatch:** Codex raised that storing a refresh token in `delegated_to` is semantically misleading. OpenCode addressed the credential storage gap from a different angle (D-05 `.env` file not wired). Both are valid; the credential flow design has two distinct gaps.
+- **HIGH:** This plan vendors `GmailSource`, but later plans do not actually use `GmailSource.search()` because it is absent. The plan should avoid implying that vendoring proves connector behavior end to end.
+- **MEDIUM:** License/provenance handling is underspecified. Vendoring should preserve Airweave license headers or include explicit attribution.
+- **MEDIUM:** Structural DI compatibility is weaker than runtime compatibility. A constructor smoke test is not enough if Airweave internals expect logger/http/client methods during listing or entity hydration.
+- **LOW:** "Copy 6 files" conflicts with the longer modified-file list. That mismatch can cause review noise.
+
+### Suggestions
+
+- Add a test that instantiates `GmailSource.create(...)` or equivalent construction path with shims, even if search is not used.
+- Add a vendored license/provenance checklist to acceptance.
+- Add a forbidden-import test that scans the vendored package AST/import graph, not only raw grep strings.
+
+### Risk Assessment
+
+**MEDIUM.** The vendoring boundary is manageable, but there is reputational risk in calling this connector compatibility if the vendored connector is only partially exercised.
+
+---
+
+## PLAN 37-02 Review
+
+### Strengths
+
+- Correctly accepts the research finding that Gmail search must use the Gmail API directly.
+- Keeps the provider behind a generic `BaseConnectorBridge`.
+- MIME decoding coverage is appropriately broad for email: multipart, HTML-only, charset, malformed base64, and size cap.
+- Error boundaries for 401 and retryable provider failures match federated soft-failure expectations.
+
+### Concerns
+
+- **HIGH:** `ApplicationSourceProviderProtocol` currently includes `describe_source`, `export_changes`, and `read_unit_window`, while federated search is a separate protocol shape. `GmailApplicationSourceProvider` must either implement `export_changes` as unsupported/empty or the protocol/runtime assumptions will be leaky.
+- **HIGH:** The existing quota merge uses a Telegram-specific low-signal filter on all federated candidates in `service.py`. Gmail snippets may be incorrectly filtered. This phase should generalize or scope that filter before adding Gmail.
+- **MEDIUM:** Gmail latency can exceed the current federated timeout if search does list + N message fetches. The plan needs explicit httpx timeouts, max fetch count, and partial-result behavior.
+- **MEDIUM:** "batch metadata fetch" is vague. Gmail's batch behavior is not the same as a simple bulk endpoint; implementation should not assume a convenient batch API unless verified.
+- **MEDIUM:** Query handling is underspecified. Gmail `q` syntax is powerful; raw user queries may behave unexpectedly or expose broad mailbox searches.
+- **LOW:** Provider metadata whitelist is good, but sender/subject can still contain sensitive data. That is acceptable for search output, but logs/tests should avoid leaking it.
+
+### Suggestions
+
+- Add tests proving Gmail candidates survive `_merge_with_federated_quota`.
+- Add per-request timeout and partial-result tests: one slow message fetch should not fail the whole Gmail provider.
+- Make `BaseConnectorBridge` generic enough to carry source namespace, descriptor key, and capability metadata, not just conversion methods.
+- Add a clear `export_changes` behavior for Gmail federated-only mode.
+
+### Risk Assessment
+
+**HIGH.** This is the behavior-critical plan. The direct Gmail API path is practical, but timeout, protocol conformance, and Telegram-specific merge behavior can easily break the federated-search goal.
+
+---
+
+## PLAN 37-03 Review
+
+### Strengths
+
+- Correctly routes Gmail through descriptor, lifecycle, config, and runtime factory instead of creating an Airweave-only lane.
+- `build_if_configured("gmail")` being optional matches the production model.
+- `search_result_limit` validation is useful and bounded.
+- "No direct `GmailSource()` instantiation outside lifecycle" is a good architectural guardrail.
+
+### Concerns
+
+- **HIGH:** `SourceConfig` is currently a closed union in `source_lifecycle.py`. The plan mentions adding `GmailSourceConfig`, but must explicitly update the union and config validation paths.
+- **HIGH:** Putting the refresh token into `SourceAccess.delegated_to` is a semantic mismatch with security risk. It may show up in reprs, errors, debug logs, or status metadata.
+- **MEDIUM:** "Invalid credentials at registration produce `CREDENTIALS_UNAVAILABLE` status" needs a concrete status model. Current `SourceStatus.status` is only `ok | skipped | error`; if this is lifecycle status, name the exact field/model.
+- **MEDIUM:** `service.py` populating `InMemorySourceConfigStore` only when all three env vars are present is fine, but partial config should produce an observable skipped/error reason, not silently disable Gmail.
+- **LOW:** Docker `env_file` is declared out of code scope, but the phase should still verify expected env var names match `Settings`.
+
+### Suggestions
+
+- Prefer a credential ref such as `credential_ref="gmail:default"` and let the credential provider return token material without storing secrets in `SourceAccess.delegated_to`.
+- Add tests for no config, partial config, invalid refresh token, and successful config.
+- Add a grep/test guard that only `source_lifecycle.py` constructs the Gmail provider/bridge.
+
+### Risk Assessment
+
+**MEDIUM-HIGH.** The architecture is aligned, but credential handling and closed-union config wiring are easy places to create either a runtime crash or a secret leak.
+
+---
+
+## PLAN 37-04 Review
+
+### Strengths
+
+- The compatibility report requirements are concrete and tied to actual implemented code.
+- The AIR-03 checklist is the right closeout artifact for this phase.
+- Full suite plus targeted grep checks are appropriate for a spike that changes lifecycle and service wiring.
+- Updating `AGENTS.md` with vendoring and bridge rules will prevent future drift.
+
+### Concerns
+
+- **MEDIUM:** Full test suite green may be too broad if there are known unrelated failures. If the suite is currently clean, keep it. If not, record exact known failures before starting.
+- **MEDIUM:** The report can become post-hoc justification unless it includes evidence from tests and code paths.
+- **LOW:** `AGENTS.md` should stay operational and concise; detailed compatibility analysis belongs in `docs/airweave-compatibility.md`.
+
+### Suggestions
+
+- Include a short evidence table in the report: claim, code path, test.
+- Add verification for `read(ref)` on a Gmail ref, not only provider registration.
+- Add a negative check that Gmail does not create local chunks, FTS rows, embeddings, graph nodes, or trickle registrations.
+
+### Risk Assessment
+
+**LOW-MEDIUM.** Documentation and verification are well scoped, but should explicitly prove "federated only" at storage boundaries.
+
+---
+
+## Cycle 2 · Codex Cross-Plan Concerns
+
+- **HIGH:** The phase goal says "wrap any Airweave `BaseSource` connector," but the actual implementation is closer to "vendor Airweave entity/config/source shapes and build a dotMD bridge around provider APIs." That is acceptable if the report states it plainly.
+- **HIGH:** The Telegram-specific federated merge filter must be fixed before Gmail is added, or Gmail results can be silently dropped.
+- **MEDIUM:** There is no live OAuth/bootstrap plan. Even if token creation is manual, the phase should define the command or script used once to obtain the refresh token.
+- **MEDIUM:** The plans need a "no local indexing side effects" assertion: no writes to chunk, FTS, vector, graph, or trickle state during Gmail search/read.
+- **MEDIUM:** Rate limiting and Gmail quota behavior need backoff/soft-skip tests, especially for 429.
+- **LOW:** Naming should avoid overclaiming. `BaseConnectorBridge` may be better than `AirweaveConnectorBridge` if the bridge is deliberately dotMD-owned.
+
+**Cycle 2 Codex Overall: MEDIUM-HIGH.** The architecture direction is strong and consistent with the existing source lifecycle/federated-search model, but Plan 37-02 and 37-03 contain the real integration risk: Gmail live-search latency, secret handling, protocol conformance, and existing Telegram-specific merge behavior.
+
+---
+
+### Cycle 2 · OpenCode Review
+
+# Phase 37: Airweave Connector Compatibility Spike — Plan Review
+
+## Overall Assessment
+
+Phase 37 is well-scoped with clear boundaries: prove the pattern, use Gmail as the test subject, don't over-integrate. The four plans form a coherent dependency chain (vendor → bridge → wire → verify), and the research finding that `GmailSource.search()` is a stub shapes the architecture correctly. The biggest gaps are around MIME edge case maturity, non-happy-path lifecycle handling, and a few missing handoff points between plans that could surface during execution.
+
+---
+
+## PLAN 37-01: Vendor Airweave Platform Slice and DI Shims
+
+### Summary
+Solid foundation plan. The vendoring strategy is disciplined — copy only the 6 necessary files, rewrite imports to be self-contained, and stub the decorator rather than pulling in the meta-programming framework. The token provider design with margin-based expiry and double-checked locking is production-correct.
+
+### Strengths
+- **Minimal vendoring footprint.** Copying only `sources/`, `entities/`, and `configs/` — explicitly excluding `domains/`, `core/`, `schemas/`, and the Temporal/Vespa stack. This makes the vendored tree auditable.
+- **DI shim pattern is clean.** `GmailLoggerShim`, `GmailHttpClientShim`, `GmailOAuthTokenProvider` satisfy `GmailSource.__init__` structurally without inheriting Airweave's runtime wiring framework.
+- **Token provider race protection.** `threading.Lock` + margin-based expiry (`expires_in - 300`) + double-check inside lock is excellent. The concurrent refresh serialization test (5 threads, only 1 `httpx.post`) proves correctness.
+- **Source traceability.** `VENDOR_VERSION` + `VENDOR_NOTES.md` will matter when upstream Airweave eventually updates.
+- **`@source` decorator as no-op.** Sets `ClassVar` attributes and returns the class unchanged. Correct.
+
+### Concerns
+- **MEDIUM — `@source` decorator may need to preserve more than `ClassVar` attrs.** If any vendored source uses decorator-managed metadata at class-load time (e.g., entity type registration), a pure no-op will miss it. A comment noting this limitation is fine for the spike, but it should be explicit.
+- **MEDIUM — No mention of how vendored source/entity Pydantic models interact with dotMD's Pydantic v2.** Airweave's `BaseEntity` likely uses Pydantic v1 or a different version. Cross-Pydantic-version model inheritance is fragile. Plan should confirm both projects use Pydantic v2, or document the shim approach for model compatibility.
+- **LOW — `VENDOR_VERSION` going stale.** `VENDOR_NOTES.md` should record the commit hash/date of the source files.
+
+### Suggestions
+- Add a comment in `@source` stub noting which Airweave decorator behaviors are intentionally not implemented.
+- Verify Pydantic version compatibility between Airweave entities and dotMD models in `VENDOR_NOTES.md`.
+- Record the Airweave commit hash in `VENDOR_VERSION` alongside the version tag.
+
+---
+
+## PLAN 37-02: BaseConnectorBridge ABC, GmailBridge, and Federated Search
+
+### Summary
+The heart of the phase. `BaseConnectorBridge(ABC)` is the right abstraction — generic enough for D-03, concrete enough that Gmail doesn't need special-casing. Direct Gmail API calls via `httpx.Client` (not wrapping `GmailSource.search()`) is the correct call. MIME decoding is handled with reasonable pragmatism but is the riskiest subsystem.
+
+### Strengths
+- **Generic bridge contract.** 3 abstract methods (`search_native`, `read_unit_window`, `to_search_candidate`) map cleanly to the federated search interface.
+- **Error boundary taxonomy.** `SourceAuthError` for 401, `SourceTemporaryUnavailable` for 429/5xx.
+- **`source_native_score=None` is handled correctly.** Federated candidates bypass RRF score fusion and flow through `_merge_with_federated_quota` (Phase 36). Architecturally sound.
+- **`provider_metadata` whitelist is minimal.**
+- **MIME decoding acknowledges complexity.** Prefers text/plain over stripped text/html, handles multipart/alternative recursion, charset detection, base64url decoding.
+
+### Concerns
+- **HIGH — Batch metadata fetch is O(n) individual requests.** For `limit=100`, that's 101 HTTP round-trips before the user sees anything. Gmail's `batch` endpoint (`POST /batch`) can bundle multiple requests. Plan should document this as a known limitation with a follow-up optimization task.
+- **HIGH — No Gmail API quota/pagination awareness.** Gmail free tier has 250 quota units/user/second. `users.messages.list` costs 5 units, `users.messages.get` costs 5 units. For 100 messages, that's ~505 quota units — exceeds the per-second limit without retry/backoff. Plan mentions 429 handling but not quota unit awareness.
+- **MEDIUM — MIME edge case: 1MB cap is arbitrary and undocumented behavior.** Truncating at 1MB silently loses content — the search result should flag truncated content so the user knows they're seeing a partial result.
+- **MEDIUM — `to_search_candidate()` field mapping is underspecified.** What Gmail field becomes `SearchCandidate.title`? `SearchCandidate.snippet`? `SearchCandidate.timestamp`? These drive the search display.
+- **MEDIUM — No integration test path for the Gmail API.** All smoke tests mock `httpx`. A single integration test (run manually, not in CI) that hits the real Gmail API with a known search query verifies the bridge actually works end-to-end.
+- **LOW — Malformed base64 handling should specify base64url vs base64.** Gmail's raw MIME uses base64url encoding. Error handling paragraph should specify which encoding errors are caught.
+- **LOW — HTML tag stripping is lossy for structured content.** Table-based emails, nested lists, and code blocks lose formatting. Acceptable for a spike, but worth noting in the compatibility report.
+
+### Suggestions
+- Add `POST /batch` as a follow-up optimization task.
+- Add Gmail quota unit budget awareness in the comment above batch metadata fetch logic.
+- In `to_search_candidate()`, include a `truncated: bool` field on SearchCandidate (or in provider_metadata) when MIME body exceeds the cap.
+- Enumerate the SearchCandidate field mapping table in Plan 37-02's must-haves.
+- Consider a single manual integration test script (`scripts/test_gmail_integration.py`) for the developer to run once with real credentials.
+
+---
+
+## PLAN 37-03: Gmail Source Descriptor, Lifecycle Config, and Registry Wiring
+
+### Summary
+Clean registry integration following Phase 36's patterns. Gmail enters through the same `SourceRegistry` → `SourceRuntimeFactory` → `SourceRuntimeBundle` path as filesystem and Telegram (satisfying AIR-03). The credential loading story is thin but correct for the spike.
+
+### Strengths
+- **Same registry path as existing sources.** `gmail_source_descriptor()` registers with `namespace="gmail"`, `capabilities=[FEDERATED_SEARCH, READ_UNIT_WINDOW]`, same shape as Telegram's descriptor.
+- **Graceful credential absence.** `build_if_configured("gmail")` returns `None` when `DOTMD_GMAIL_CLIENT_ID` is unset.
+- **Invalid credentials → `CREDENTIALS_UNAVAILABLE`.** Registration doesn't hard-crash.
+- **`search_result_limit` validation.** `Field(ge=1, le=500)` catches configuration errors at startup.
+- **No direct `GmailSource()` outside lifecycle.**
+
+### Concerns
+- **MEDIUM — `access.delegated_to` holding `refresh_token` is a semantic mismatch.** `AccessCredential.delegated_to` usually holds a user identity string. Using it for a raw OAuth refresh token means any code that iterates over `delegated_to` values will leak secrets. A dedicated `GmailAccessCredential` subclass or a `refresh_token` field on the config object would be safer.
+- **MEDIUM — `InMemorySourceConfigStore` population condition.** What happens when only 2 of 3 Gmail env vars are set? The plan should specify: partial env sets log a warning with the specific missing var name and don't register.
+- **MEDIUM — Start-up token validation.** Does `build("gmail")`'s "get access" mean a live HTTP call to Google's token endpoint? If so, container startup blocks on external network I/O. Plan should clarify whether token acquisition is eager or lazy.
+- **LOW — `env_file: ~/.secrets/dotmd-gmail.env` in docker-compose.** Path `~/.secrets/` resolves to root's home (`/root/.secrets/`) inside the container, not the host. Need absolute host path or explicit env injection.
+- **LOW — No mention of how `DOTMD_GMAIL_REFRESH_TOKEN` gets into the env in the first place.** D-05 says "initial OAuth flow run once to obtain refresh token." Is there a CLI command or a manual `curl`? Plans don't address token bootstrapping.
+
+### Suggestions
+- Create a `GmailSourceConfig.refresh_token` field instead of abusing `AccessCredential.delegated_to`.
+- Add partial-env-var detection: if some Gmail vars are set but not all, log a warning listing which are missing and skip registration.
+- Clarify whether startup-time token validation is synchronous (blocking) or lazy (deferred to first search).
+- Add a small `dotmd gmail auth` CLI command or a `scripts/gmail_oauth_flow.py` script for token bootstrapping.
+
+---
+
+## PLAN 37-04: AIR-02 Compatibility Report and E2E Verification
+
+### Summary
+The capstone plan. The report is generated from actual implemented code rather than pre-written prose — that's the right way to ensure honesty. The verification checklist is thorough and cleanup checks enforce the boundaries set by Plans 37-01 through 37-03.
+
+### Strengths
+- **Report from code, not before code.** "Based on ACTUAL implemented code (not pre-written prose)" — avoids the common trap of writing optimistic architecture docs that reality never matches.
+- **Three-axis compatibility taxonomy.** "Reusable directly," "Requires shims," "Should be avoided" — matches AIR-02 exactly.
+- **Cleanup verification.** `grep -r "^from airweave|^import airweave"` ensures no Airweave module-level imports leaked through.
+- **No skipped tests.**
+- **AGENTS.md update.** Preserves vendoring decision, token handling pattern, and generic bridge pattern as institutional knowledge.
+
+### Concerns
+- **MEDIUM — Compatibility report structure underspecified.** "Extensibility assessment table" and "AIR-03 compliance checklist" are mentioned but not detailed. Without a template, the report risks being a narrative document rather than a structured assessment.
+- **MEDIUM — No integration/end-to-end test exercising the full path.** A single manual end-to-end test (search for "receipt" → get Gmail results mixed with filesystem/Telegram results → read one Gmail message body) proves the integration works.
+- **LOW — `grep` check may miss re-exported imports.** If a vendored file does `from airweave.x import Y as _Y` and re-exports it, the regex won't catch it.
+- **LOW — Report doesn't mention what happens when Airweave upstream changes.**
+
+### Suggestions
+- Provide a template/skeleton for `docs/airweave-compatibility.md` with required sections and expected formats.
+- Add one manual E2E verification step to the checklist in Plan 37-04.
+- Include the Airweave upstream commit hash and report generation date in `docs/airweave-compatibility.md`.
+
+---
+
+## Cycle 2 · OpenCode Cross-Cutting Concerns
+
+| # | Concern | Severity | Affected Plans |
+|---|---------|----------|---------------|
+| 1 | **No search timeout for live Gmail calls.** When Gmail API is slow or unreachable, `search()` blocks — potentially impacting the entire search pipeline if synchronous. | **HIGH** | 37-02, 37-03 |
+| 2 | **No retry strategy for OAuth token refresh failure.** If Google's token endpoint returns 5xx, does the bridge retry with backoff or fail immediately? | **MEDIUM** | 37-01, 37-02 |
+| 3 | **Telemetry/logging not addressed.** When Gmail search fails, what shows up in the container logs? No plan mentions structured logging or trace context for federated providers. | MEDIUM | 37-02, 37-03 |
+| 4 | **`httpx.Client` lifecycle.** Is the client created once per `GmailBridge` instance and reused across `search_native()` calls, or created per call? Connection pooling matters for production. | LOW | 37-01, 37-02 |
+| 5 | **Concurrent search handling.** If two search requests arrive simultaneously, do they share the same `GmailBridge` instance? Is the token provider's `threading.Lock` sufficient or does search need its own serialization? | LOW | 37-01, 37-02 |
+
+**Cycle 2 OpenCode Overall: MEDIUM**
+
+The architecture is sound and the DI shim + ABC pattern is the right abstraction level for a spike. Plans 37-01 through 37-04 form a logical dependency chain. The boundary is well-enforced: no embedding, no FTS5, no graph, no trickle for Gmail — pure federated search.
+
+The HIGH concerns are all operational rather than architectural: Gmail batch API underuse (O(n) round-trips), quota unit budgeting, and search timeout. None of these block the spike — they're documentation items for the compatibility report.
+
+**Verdict:** Approve with the noted edge cases addressed during implementation.
+
+---
+
+## Cycle 2 · Consensus Summary
+
+Both reviewers assessed the updated plans (which address the Cycle 1 HIGH concerns) and converged on remaining issues.
+
+### What Changed Since Cycle 1 (HIGHs Addressed in Plans)
+
+The three Cycle 1 HIGHs were addressed in the updated plans:
+1. **`source_native_score=None` RRF risk** → Plan 37-02 now documents the federated bypass path (`_merge_with_federated_quota`) and includes a fusion-correctness test. **Partially resolved** — documented and tested in plan, but Codex raised a NEW HIGH that the Telegram-specific filter in `_merge_with_federated_quota` may still drop Gmail candidates.
+2. **Generic bridge abstraction absent (D-03)** → Plan 37-02 now has `BaseConnectorBridge(ABC)` with 3 abstract methods and `GmailBridge` as the implementation. **Resolved.**
+3. **OAuth token caching fragile** → Plan 37-01 now specifies `threading.Lock` + `expires_in - 300` margin + double-check-inside-lock + concurrent refresh serialization test. **Resolved.**
+
+### Agreed Strengths (Cycle 2)
+
+- **Token provider design is now production-correct.** `threading.Lock` + margin-based expiry + double-check inside lock + serialization test.
+- **`BaseConnectorBridge(ABC)` satisfies D-03.** Generic 3-method contract, `GmailBridge` as first implementation.
+- **MIME decoding is now comprehensively specified.** Multipart, HTML-only, charset, malformed base64, 1MB cap all addressed.
+- **Error boundaries are defined.** 401 → `SourceAuthError`, 429/5xx → `SourceTemporaryUnavailable`.
+- **AIR-03 pattern is symmetric.** Gmail uses the same registry/lifecycle/service path as filesystem and Telegram.
+
+### Agreed Concerns (Cycle 2)
+
+1. **HIGH — Telegram-specific filter in `_merge_with_federated_quota` may drop Gmail candidates silently** (Codex). The quota merge may have Telegram-specific logic; Gmail snippets could be incorrectly filtered. Verify and generalize before accepting Plan 37-02.
+
+2. **HIGH — `ApplicationSourceProviderProtocol` conformance gap for `GmailApplicationSourceProvider`** (Codex). If the protocol requires `export_changes` or `describe_source` methods not planned for Gmail, the thin wrapper will fail at runtime. Explicit implementation with no-op stubs needed.
+
+3. **HIGH — O(n) metadata fetch round-trips** (OpenCode). For `limit=100`, 101 individual HTTP calls before any results. Plan should document this explicitly as a known limitation with a follow-up task.
+
+4. **HIGH — No search-level timeout** (OpenCode). A slow or unreachable Gmail API blocks the synchronous search pipeline. Explicit httpx timeout needed.
+
+5. **MEDIUM — `access.delegated_to` stores raw refresh_token** (both reviewers). Semantic mismatch may cause secret leak in logs/reprs. Prefer `GmailSourceConfig.refresh_token` field.
+
+6. **MEDIUM — Partial env-var handling** (OpenCode). If only 2 of 3 Gmail env vars are set, the current plan silently disables Gmail with no observable reason. Log which specific var is missing.
+
+7. **MEDIUM — `to_search_candidate()` field mapping underspecified** (OpenCode). Which Gmail field maps to `SearchCandidate.title`, `.snippet`, `.timestamp`? Affects search result display.
+
+8. **MEDIUM — Token bootstrapping unaddressed** (OpenCode). No plan for the initial OAuth flow to obtain the refresh token. A `dotmd gmail auth` CLI or `scripts/gmail_oauth_flow.py` is needed.
+
+### Divergent Views (Cycle 2)
+
+- **License/provenance of vendored files** (Codex raised, OpenCode did not). Vendoring should preserve Airweave license headers or include explicit attribution.
+- **Scope characterization** (Codex raised). The phase claims "wrap any Airweave BaseSource connector" but the implementation is closer to "vendor Airweave entity schemas and build a dotMD bridge around provider APIs." The compatibility report should state this honestly.
+- **`@source` decorator gap** (OpenCode raised). A pure no-op may miss entity-type registration if other connectors depend on decorator-managed metadata at class-load time.
+- **Pydantic version compatibility** (OpenCode raised). Airweave may use Pydantic v1; cross-version model inheritance is fragile and should be verified in `VENDOR_NOTES.md`.
+
+### Cycle 2 Risk Summary
+
+| Plan | Cycle 1 Risk | Cycle 2 Risk | Change |
+|------|-------------|-------------|--------|
+| 37-01 | MEDIUM | MEDIUM | No change — token/vendor risks now lower, license gap raised |
+| 37-02 | HIGH | HIGH | Telegram filter + protocol conformance + O(n) + timeout are new HIGHs |
+| 37-03 | MEDIUM | MEDIUM-HIGH | `delegated_to` secret leak risk sharpened |
+| 37-04 | LOW | LOW-MEDIUM | Report structure risk remains |
+
+**Cycle 2 Overall: MEDIUM-HIGH**
+
+Four new HIGH concerns remain unresolved (Telegram filter gap, `ApplicationSourceProviderProtocol`
+conformance, O(n) metadata fetch, search timeout). These are all in Plan 37-02 and should be
+addressed before execution begins on that wave.
