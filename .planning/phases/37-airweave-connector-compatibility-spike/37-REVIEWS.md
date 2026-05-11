@@ -1,7 +1,7 @@
 ---
 phase: 37
 reviewers: [codex, opencode]
-reviewed_at: 2026-05-11T15:45:00Z
+reviewed_at: 2026-05-11T16:15:00Z
 plans_reviewed:
   - 37-01-vendor-airweave-platform-slice-PLAN.md
   - 37-02-gmail-bridge-federated-search-PLAN.md
@@ -564,3 +564,356 @@ The three Cycle 1 HIGHs were addressed in the updated plans:
 Four new HIGH concerns remain unresolved (Telegram filter gap, `ApplicationSourceProviderProtocol`
 conformance, O(n) metadata fetch, search timeout). These are all in Plan 37-02 and should be
 addressed before execution begins on that wave.
+
+---
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CYCLE 3  (2026-05-11T16:15:00Z — plans updated to address Cycle 2:
+               _is_low_signal_federated_candidate added (37-02 Task 1);
+               GmailApplicationSourceProvider NotImplementedError stubs for
+               describe_source/export_changes added (37-02);
+               GMAIL_API_TIMEOUT_SECONDS=10.0 with explicit httpx.Timeout (37-02);
+               O(n) documented as known limitation with follow-up task (37-02);
+               GmailSourceConfig.refresh_token replaces SourceAccess.delegated_to (37-03);
+               partial env-var named warnings added (37-03))
+     ═══════════════════════════════════════════════════════════════ -->
+
+## Cycle 3 — 2026-05-11T16:15:00Z
+
+*Plans were updated after Cycle 2 to address the four HIGHs: Telegram-specific
+filter generalized to `_is_low_signal_federated_candidate` (37-02 Task 1);
+`GmailApplicationSourceProvider` now has explicit `NotImplementedError` stubs for
+`describe_source` and `export_changes` (37-02); `GMAIL_API_TIMEOUT_SECONDS = 10.0`
+applied to all httpx calls (37-02); O(n) metadata fetches documented as known
+limitation with follow-up task (37-02); `GmailSourceConfig.refresh_token` used
+instead of `SourceAccess.delegated_to` (37-03); partial env-var detection with
+named warnings (37-03). This cycle reviews the updated plans.*
+
+---
+
+### Cycle 3 · Codex Review
+
+## Plan 37-01
+
+**Summary:** Solid spike boundary: vendoring only the Airweave schema/source slice and replacing platform dependencies with small shims is aligned with AIR-01/AIR-03.
+
+**Strengths**
+- Avoids adopting Airweave runtime/indexing stack.
+- Token cache uses expiry margin and a lock, which is appropriate for shared provider use.
+- Tests cover import isolation and concurrent refresh.
+
+**Concerns**
+- **MEDIUM:** Token refresh `httpx.post(...)` snippet does not explicitly show timeout/error mapping. A stuck OAuth refresh can still hang Gmail search startup/use.
+- **LOW:** Refresh-token rotation mutates the credentials dict in memory, but the plan does not say whether persistence is intentionally out of scope.
+
+**Suggestions**
+- Add explicit OAuth token request timeout and map token refresh failures to source auth/temporary errors.
+- State clearly that rotated refresh tokens are in-memory only for this spike unless persistence is added.
+
+**Risk Assessment:** **LOW-MEDIUM.** The vendoring boundary is clean; the main residual risk is operational timeout/error behavior in the token shim.
+
+---
+
+## Plan 37-02
+
+**Summary:** The Telegram filter fix is directionally correct, and Gmail pass-through is now explicitly protected. The timeout fix is only partial: per-call `httpx` timeouts do not create a true search-level deadline, and the O(n) metadata fetch can still make a single Gmail search take minutes or worse if `limit` is high.
+
+**Strengths**
+- `_is_low_signal_federated_candidate()` correctly scopes Telegram low-signal filtering by `namespace == "telegram"` or `retrieval_kind.startswith("tg:")`.
+- Gmail candidates bypass the Telegram text-quality filter.
+- `SourceAuthError` / `SourceTemporaryUnavailable` boundaries are specified.
+- Provider stubs acknowledge that Gmail is federated-only.
+
+**Concerns**
+- **HIGH:** The "no search-level timeout" concern is not fully resolved. `httpx.Timeout(10.0)` applies per HTTP operation; with `1 + N` Gmail calls, `limit=500` can still create a very long search path. This needs either a hard per-search deadline or a much lower enforced Gmail fetch cap.
+- **HIGH:** O(n) metadata fetch is documented, but documentation alone is weak with `search_result_limit` up to 500. For a spike, cap effective Gmail metadata fetches to something like `min(limit, search_result_limit, 50)` and test it.
+- **MEDIUM:** `export_changes()` must exactly match the current protocol signature: `cursor`, `limit`, `updated_after=None`, `updated_after_cursor=None`. The plan's abbreviated `export_changes(cursor, limit, ...)` is still risky if implemented literally.
+- **MEDIUM:** Timeout coverage says "all httpx calls," but the plan also has OAuth refresh in Plan 37-01. Gmail search may call token refresh before API calls, so token-provider HTTP needs the same explicit timeout discipline.
+- **LOW:** Test `test_low_signal_filter_still_filters_telegram_candidates` should use a known low-signal Telegram snippet and a known normal Telegram snippet, not only `"ok"`, so it proves selective behavior.
+
+**Suggestions**
+- Add `GMAIL_SEARCH_TOTAL_TIMEOUT_SECONDS` or deadline accounting around list + metadata fetch.
+- Enforce and test an effective metadata fetch cap.
+- Require exact protocol method signatures in the plan.
+- Add a test that Gmail candidates with very short snippets are retained, while Telegram short snippets are filtered.
+- Add a test proving all Gmail API paths, including message list, message get, read window, and token refresh, use explicit timeouts.
+
+**Risk Assessment:** **MEDIUM-HIGH.** The filter fix is good, but the original timeout/O(n) risk is still only partly solved.
+
+---
+
+## Plan 37-03
+
+**Summary:** The lifecycle/registry direction is right and preserves AIR-03 by keeping Gmail in the same source system as filesystem and Telegram. The config model is cleaner after moving `refresh_token` out of `SourceAccess.delegated_to`.
+
+**Strengths**
+- Uses `GmailSourceConfig.refresh_token` directly, which avoids abusing delegated identity fields for secrets.
+- Partial env-var warning names missing variables.
+- `search_result_limit` validation prevents unbounded config values.
+- Runtime construction through `SourceRuntimeFactory.build("gmail")` keeps Gmail out of a separate lane.
+
+**Concerns**
+- **HIGH:** `search_result_limit` allows 500, which conflicts with Plan 37-02's O(n) metadata call limitation. Validation should reflect spike safety, not only API plausibility.
+- **MEDIUM:** The current lifecycle config union will need to include `GmailSourceConfig`; otherwise strict Pydantic config records may reject it.
+- **MEDIUM:** Gmail descriptor capabilities should exclude incremental export if `describe_source()` / `export_changes()` are unsupported. Only `FEDERATED_SEARCH` and `READ_UNIT_WINDOW` should be advertised.
+- **LOW:** Logging missing env var names is good, but tests should assert no secret values are logged.
+
+**Suggestions**
+- Lower the default/effective Gmail search cap for the spike, or add a separate internal fetch cap.
+- Add tests for descriptor capabilities and `SourceRuntimeBundle.supports_federated_search`.
+- Add a negative test for partial config that verifies secret values are not emitted.
+
+**Risk Assessment:** **MEDIUM.** The architecture is aligned, but the config cap and union wiring need to match the bridge's real cost model.
+
+---
+
+## Plan 37-04
+
+**Summary:** Good closeout plan. The report explicitly separates "Airweave compatibility" from "dotMD Gmail integration," which is the key AIR-02/AIR-03 distinction.
+
+**Strengths**
+- Requires report to be written after inspecting implementation.
+- Calls out unused Airweave runtime systems explicitly.
+- Includes SourceAsset deferred mapping instead of pretending attachment support is done.
+- Requires full tests and no direct `airweave` imports.
+
+**Concerns**
+- **MEDIUM:** "Full test suite green" is necessary but may not verify live-ish Gmail failure modes unless mocked tests cover timeout, 401/403, 429, 5xx, malformed MIME, HTML-only, charset, and body cap.
+- **LOW:** AGENTS.md update should avoid turning spike limitations into permanent operating guidance.
+
+**Suggestions**
+- Add a small implementation checklist to the report: implemented, deferred, intentionally avoided.
+- Include the Gmail effective search cap and O(n) follow-up in the compatibility report.
+
+**Risk Assessment:** **LOW-MEDIUM.** Documentation and verification are well scoped, assuming the remaining Plan 37-02 runtime risks are fixed first.
+
+---
+
+## Cycle 3 · Codex Overall Verdict
+
+Cycle 2 HIGH #1 is resolved: the Telegram low-signal filter fix is complete in concept.
+
+Cycle 2 HIGH #2 is mostly resolved, but requires the exact `ApplicationSourceProviderProtocol.export_changes()` signature to avoid a subtle conformance miss.
+
+Cycle 2 HIGH #3 is only acknowledged, not sufficiently controlled. For a spike this can be acceptable only with a hard effective cap and an explicit follow-up.
+
+Cycle 2 HIGH #4 is partially resolved. Per-call `httpx` timeouts are necessary, but they are not a search-level timeout when the implementation performs `1 + N` serial HTTP calls.
+
+**Cycle 3 Codex Overall: MEDIUM-HIGH**
+
+---
+
+### Cycle 3 · OpenCode Review
+
+## Plan 37-01: Vendor Airweave Platform Slice and DI Shims
+
+### Summary
+Plan 37-01 is mechanically sound. The vendored slice strategy (copy slimmed Airweave source/entity classes, replace heavy dependencies with stubs, ship `VENDOR_VERSION` for provenance) is well-scoped for a compatibility spike. The `GmailOAuthTokenProvider` with `threading.Lock` and margin-based expiry is correct. No Cycle 2 concerns are addressed here — those are in Plan 37-02 and 37-03.
+
+### Strengths
+- Double-checked locking pattern in `GmailOAuthTokenProvider.get_token()` is correct: outer check, lock acquire, inner check, then refresh.
+- `expires_in - 300` margin-based expiry is standard practice and avoids edge-of-expiry races.
+- `refresh_token` rotation handled: if Google responds with a new `refresh_token`, it updates credentials.
+- `@source` decorator as no-op stub setting `ClassVar` attributes avoids the full Airweave decorator machinery.
+- `test_no_airweave_package_required` is a strong integration-prevention test.
+
+### Concerns
+- **LOW** — `GmailOAuthTokenProvider` uses `httpx.post(...)` directly (sync, no timeout shown in pseudocode). Plan 37-02 adds explicit timeouts for `GmailBridge` httpx calls, but the token provider also makes an outbound HTTP call. Without a timeout on the OAuth refresh, a hung Google auth endpoint blocks ALL searches. The timeout fix from HIGH-4 should cover the token provider too.
+
+### Suggestions
+- Add the same `GMAIL_API_TIMEOUT_SECONDS` timeout to the token provider's `httpx.post` call (extract to shared constant, or use a separate `GMAIL_AUTH_TIMEOUT_SECONDS`).
+- Verify during implementation that `refresh_token` rotation in the token provider is covered by a test.
+
+### Risk Assessment: **LOW**
+The vendored-slice approach is well-understood. The token provider is correct but has a minor timeout gap.
+
+---
+
+## Plan 37-02: BaseConnectorBridge ABC, GmailBridge, and Federated Search
+
+### Summary
+This is the most complex plan and carries the bulk of the Cycle 2 HIGH fixes. HIGH #1 (Telegram filter) and HIGH #4 (timeout) are properly resolved. HIGH #2 (protocol conformance) is addressed conceptually but has a signature gap in the plan pseudocode that must be corrected. HIGH #3 (O(n)) is correctly documented as a known limitation.
+
+### Strengths
+- `_is_low_signal_federated_candidate` correctly scopes to Telegram candidates via dual check (`namespace == "telegram"` OR `retrieval_kind.startswith("tg:")`). This correctly handles both the common case and any edge case where `retrieval_kind` is `None`.
+- `GMAIL_API_TIMEOUT_SECONDS = 10.0` as module-level constant, used consistently for all httpx calls via `httpx.Timeout(read=10.0, connect=5.0)`. Connect timeout separate from read timeout is correct.
+- Error boundary mapping is complete: `401/403 → SourceAuthError` (with cache clear), `429/5xx → SourceTemporaryUnavailable`, `httpx.TimeoutException → SourceTemporaryUnavailable`.
+- `source_native_score=None` is safe because `_merge_with_federated_quota` does quota-based interleaving, not score-based fusion.
+- `BaseConnectorBridge(ABC)` correctly defines the contract for any future connector-style bridge.
+- Test coverage directly addresses each HIGH concern: timeout, `NotImplementedError` stubs for both `describe_source`/`export_changes`, Telegram filter paths, Gmail filter pass-through.
+
+### Concerns
+- **HIGH** — `export_changes` parameter signature is incomplete in the plan pseudocode. The Protocol requires:
+  ```python
+  def export_changes(
+      self,
+      cursor: str | None,
+      limit: int,
+      updated_after: str | None = None,
+      updated_after_cursor: str | None = None,
+  ) -> ApplicationSourceChangeBatch:
+  ```
+  Omitting the two optional parameters means the implementation won't structurally match `ApplicationSourceProviderProtocol`. Python's Protocol uses structural subtyping — if the method signature doesn't match, the type checker and runtime checks may reject it. This is a regression risk — the Plan 37-02 fix for HIGH-2 would itself be incomplete if the signature is wrong.
+
+- **MEDIUM** — O(n) round-trips with no limit cap. With `GMAIL_API_TIMEOUT_SECONDS = 10.0`, `search_native(query, limit=500)` would make 501 HTTP calls, worst case ~5010s (83 minutes). The existing `fanout_federated` per-source timeout will kill the overall call, but the thread continues running wasteful HTTP calls in the background. Consider `limit = min(limit, 50)` in `GmailBridge.search_native` with a log warning.
+
+- **MEDIUM** — `GmailApplicationSourceProvider` class doesn't explicitly inherit `ApplicationSourceProviderProtocol` in the plan. The existing Telegram pattern does: `class TelegramApplicationSourceProvider(ApplicationSourceProviderProtocol):`. Without the inheritance, mypy will flag the assignment to `provider: ApplicationSourceProviderProtocol | None` in `SourceRuntimeBundle`.
+
+- **LOW** — `_merge_with_federated_quota` docstring still references `is_low_signal_telegram_text` directly. When the code is changed to use `_is_low_signal_federated_candidate`, the docstring should be updated.
+
+- **LOW** — `SourceTemporarilyUnavailable` and `SourceAuthError` are custom exception classes that need to exist in the codebase. The plan doesn't specify where they live (likely `dotmd.core.exceptions` or inline in the bridge module). Verify they exist or add them explicitly.
+
+### Suggestions
+- Fix the `export_changes` signature with all four parameters matching the Protocol exactly.
+- Add `limit = min(limit, 50)` in `GmailBridge.search_native` with a logger warning for values > 50.
+- Add `GMAIL_API_TIMEOUT_SECONDS` to the token provider's OAuth refresh call.
+- Update `_merge_with_federated_quota` docstring.
+- Verify `SourceTemporarilyUnavailable` and `SourceAuthError` exist in the codebase.
+
+### Risk Assessment: **HIGH** (one unresolved gap from Cycle 2)
+The `export_changes` signature gap is the only item preventing HIGH #2 from being fully resolved. All other HIGH concerns are correctly addressed.
+
+---
+
+## Plan 37-03: Gmail Source Descriptor, Lifecycle Config, and Registry Wiring
+
+### Summary
+Plan 37-03 correctly handles the decision to put `refresh_token` on `GmailSourceConfig` (not `SourceAccess.delegated_to`) and adds proper partial-env-var warnings. However, the plan underspecifies the integration with the existing lifecycle/auth machinery. `SourceAccess.kind` is `Literal["none", "delegated"]` — no OAuth variant exists — and `SourceConfig` union type isn't shown being extended.
+
+### Strengths
+- `refresh_token` stored on `GmailSourceConfig`, not `SourceAccess.delegated_to`. Correct: `delegated_to` is for identity delegation strings (e.g., `"mcp-telegram"`), not secrets.
+- Partial env-var detection with named warnings names the specific missing vars.
+- `search_result_limit` validated 1-500 via Pydantic `Field(ge=1, le=500)`.
+- `build_if_configured("gmail")` returns `None` when config absent — consistent with Telegram's optional pattern.
+
+### Concerns
+- **HIGH** — No OAuth access kind in `SourceAccess` or `DefaultSourceCredentialProvider`. The current code has `kind: Literal["none", "delegated"]` and only handles `auth_kind == "none"` and `auth_kind == "delegated"`. If Gmail registers with `auth_kind="oauth_refresh"`, `build("gmail")` will fail in `get_access()`. The plan must either: (a) add `"oauth"` to `SourceAccess.kind` and extend `get_access()`, (b) skip `get_access()` for Gmail in the factory, or (c) use `auth_kind="none"` and pass credentials directly from `GmailSourceConfig` in the build branch. None of these are specified in the plan.
+
+- **HIGH** — `SourceConfig` union type not extended. Current: `type SourceConfig = FilesystemSourceConfig | TelegramSourceConfig`. `GmailSourceConfig` must be added, otherwise `SourceRuntimeFactory._require_config()` and strict Pydantic config records will fail. The plan doesn't mention this.
+
+- **MEDIUM** — Factory dispatch for `"gmail"` namespace is implied but not shown. The plan must show the `if namespace == "gmail":` branch in `SourceRuntimeFactory.build()`, credentials provider wiring, and how `GmailApplicationSourceProvider` is constructed from `GmailSourceConfig`.
+
+- **MEDIUM** — The relationship between `search_result_limit` (max 500) and the O(n) limitation from Plan 37-02 creates a tension. A limit of 500 means 501 HTTP round-trips. Plan 37-03 should lower the cap to match the spike's safe operating range.
+
+### Suggestions
+- Decide on the auth model: either add `"oauth"` (or `"direct"`) to `SourceAccess.kind` and extend `get_access()`, or bypass `SourceAccess` for Gmail and pass `GmailSourceConfig` directly to `GmailApplicationSourceProvider.__init__`.
+- Either way, update `SourceConfig` union type explicitly.
+- Show the factory dispatch code for the `"gmail"` case.
+- Consider lowering `search_result_limit` maximum to 50 for the spike.
+
+### Risk Assessment: **MEDIUM**
+The conceptual design is correct but two integration points with the existing lifecycle system (`SourceAccess` auth model, `SourceConfig` union) are not addressed. These are mechanical additions, not architectural redesigns.
+
+---
+
+## Plan 37-04: AIR-02 Compatibility Report and End-to-End Verification
+
+### Summary
+Plan 37-04 defines a solid post-implementation verification phase. The requirement that the report is written after inspecting actual code is the right discipline for a spike. The report structure covers all AIR-02 categories and includes an honest assessment of what is not present.
+
+### Strengths
+- Report structure covers all AIR-02 categories explicitly: reusable, shims, avoid, missing pieces, extensibility, AIR-03 compliance.
+- Explicit statement disclaiming Airweave's runtime/indexing stack is a good fence against scope creep.
+- `grep` command for import verification is targeted at `src/dotmd/`.
+- Full test suite green requirement is the final quality gate.
+
+### Concerns
+- **MEDIUM** — The verification grep command checks `backend/src/dotmd/` for `from airweave|import airweave`. The vendored files in `backend/src/dotmd/vendor/airweave/` will contain these patterns in comments and string literals. The grep should exclude the vendor directory:
+  ```bash
+  grep -r "^from airweave\|^import airweave" backend/src/dotmd/ --include="*.py" --exclude-dir=vendor
+  ```
+- **LOW** — "No unreplaced `[TBD: ...]` placeholders" is a documentation quality check that `pytest` can't verify. Add a simple `grep "[TBD:" docs/airweave-compatibility.md` step.
+
+### Suggestions
+- Fix the import-verification grep to exclude the vendor directory.
+- Add a separate documentation verification step (grep for `[TBD:` in the report).
+
+### Risk Assessment: **LOW**
+End-to-end verification plan is well scoped. The grep command has a false-positive issue but it is minor.
+
+---
+
+## Cycle 3 · OpenCode Cross-Cutting Concerns
+
+| # | Concern | Severity | Affected Plans |
+|---|---------|----------|---------------|
+| N1 | `export_changes` pseudocode missing `updated_after`/`updated_after_cursor` params — blocks HIGH #2 resolution | **HIGH** | 37-02 |
+| N2 | No OAuth access kind in `SourceAccess`/`SourceAuthSchema` — Gmail will fail in `get_access()` with `auth_kind="oauth_refresh"` | **HIGH** | 37-03 |
+| N3 | `SourceConfig` union type not extended with `GmailSourceConfig` — Pydantic/factory will reject it | **HIGH** | 37-03 |
+| N4 | O(n) round-trips with no limit cap — worst case 83 minutes for limit=500 in background thread | MEDIUM | 37-02, 37-03 |
+| N5 | Factory dispatch for `"gmail"` + bridge/provider construction not shown in plan | MEDIUM | 37-03 |
+| N6 | `GmailApplicationSourceProvider` doesn't inherit `ApplicationSourceProviderProtocol` in plan pseudocode | MEDIUM | 37-02 |
+| N7 | `_merge_with_federated_quota` docstring still references old filter — misleading for maintainers | LOW | 37-02 |
+| N8 | `GmailOAuthTokenProvider` httpx call has no explicit timeout — hung auth blocks all searches | LOW | 37-01 |
+| N9 | Import-verification grep in Plan 37-04 will false-positive on vendored files | LOW | 37-04 |
+
+**Cycle 3 OpenCode Overall: MEDIUM-HIGH**
+
+Three new HIGH concerns (N1-N3) are all implementation-level gaps fixable without architectural redesign:
+1. N1: Add `updated_after`/`updated_after_cursor` to `export_changes` — 2-line fix.
+2. N2: Decide OAuth auth model and extend types — mechanical change to 3-4 types.
+3. N3: Add `GmailSourceConfig` to `SourceConfig` union — 1-line fix.
+
+---
+
+## Cycle 3 · Consensus Summary
+
+Both reviewers assessed the Cycle 2 HIGH fixes and converged on the same three new HIGH concerns.
+
+### What Changed Since Cycle 2 (HIGHs Status in Cycle 3)
+
+| Cycle 2 HIGH | Resolution in Plans | Cycle 3 Verdict |
+|---|---|---|
+| HIGH #1: Telegram filter drops Gmail | `_is_low_signal_federated_candidate` helper, tests verify both paths | **FULLY RESOLVED** |
+| HIGH #2: ApplicationSourceProviderProtocol conformance | `NotImplementedError` stubs for `describe_source`/`export_changes` | **PARTIALLY RESOLVED** — `export_changes` signature is missing `updated_after`/`updated_after_cursor` params |
+| HIGH #3: O(n) metadata fetch round-trips | Documented as known limitation, follow-up task planned | **ACKNOWLEDGED** — acceptable for spike; no hard cap is a medium concern |
+| HIGH #4: No search-level timeout | `GMAIL_API_TIMEOUT_SECONDS=10.0`, explicit `httpx.Timeout`, `TimeoutException` mapped, tested | **SUBSTANTIALLY RESOLVED** — per-call timeouts in place; overall search deadline still lacks a hard cap for high `limit` values |
+
+### New HIGHs (Cycle 3)
+
+1. **HIGH — `export_changes` signature incomplete (N1):** Both reviewers independently flagged that the plan pseudocode for `GmailApplicationSourceProvider.export_changes()` is abbreviated as `export_changes(self, cursor, limit, ...)` but the actual `ApplicationSourceProviderProtocol` requires two additional parameters: `updated_after: str | None = None` and `updated_after_cursor: str | None = None`. Python's structural subtyping will reject the abbreviated signature. The fix is trivial (2 lines) but must be explicit in the plan.
+
+2. **HIGH — `SourceAccess.kind` has no OAuth variant (N2):** The current `source_lifecycle.py` has `kind: Literal["none", "delegated"]` and `DefaultSourceCredentialProvider.get_access()` only handles `auth_kind == "none"` and `auth_kind == "delegated"`. Gmail's descriptor registers with `auth_kind="oauth_refresh"` which will raise `SourceLifecycleConfigError(f"auth_kind unsupported")` before the build branch can run. Plan 37-03 must specify how to resolve this: either extend the Literal and add a handler, or bypass `get_access()` in the Gmail build branch.
+
+3. **HIGH — `SourceConfig` union type not extended (N3):** `type SourceConfig = FilesystemSourceConfig | TelegramSourceConfig` in `source_lifecycle.py` must include `GmailSourceConfig`. Without it, `SourceRuntimeFactory` and Pydantic validation will reject `GmailSourceConfig` instances. One-line fix but must be explicit.
+
+### Agreed Strengths (Cycle 3)
+
+- **HIGH #1 fully resolved.** `_is_low_signal_federated_candidate` is correctly scoped by `namespace == "telegram"` or `retrieval_kind.startswith("tg:")`. Tests verify both Telegram filtering and Gmail pass-through. Regression-safe.
+- **HIGH #4 substantially resolved.** `GMAIL_API_TIMEOUT_SECONDS = 10.0` applied via `httpx.Timeout(read=10.0, connect=5.0)` to all Gmail API calls. `httpx.TimeoutException` mapped to `SourceTemporaryUnavailable`. Tests verify the constant and the exception mapping. The residual concern (no overall search deadline) is acceptable for a spike.
+- **`GmailSourceConfig.refresh_token` design is correct.** Moving secrets off `SourceAccess.delegated_to` and onto a typed config field is the right call and prevents secret leaks through reprs/logs.
+- **Partial env-var warnings are correct.** Naming the specific missing vars makes misconfigured deployments debuggable.
+
+### Agreed Concerns (Cycle 3)
+
+1. **HIGH — `export_changes` signature gap** (both reviewers). Two optional params missing in pseudocode. Must be exact match for Protocol structural subtyping.
+
+2. **HIGH — `SourceAccess.kind` OAuth gap** (OpenCode). `DefaultSourceCredentialProvider.get_access()` will raise for `auth_kind="oauth_refresh"`. Plan must specify resolution.
+
+3. **HIGH — `SourceConfig` union not extended** (OpenCode). Pydantic/factory will reject `GmailSourceConfig` unless union is updated.
+
+4. **MEDIUM — O(n) fetch with no cap** (both reviewers). `limit=500` allows 501 serial HTTP calls. Even with per-call timeouts, the background thread wastes resources. A hard cap of `min(limit, 50)` in `GmailBridge.search_native` is recommended for the spike.
+
+5. **MEDIUM — `GmailApplicationSourceProvider` inheritance not shown** (OpenCode). Should explicitly inherit `ApplicationSourceProviderProtocol` for type-checker compatibility, matching Telegram's pattern.
+
+6. **MEDIUM — Factory dispatch code not shown in Plan 37-03** (OpenCode). The `if namespace == "gmail":` branch in `SourceRuntimeFactory.build()` and `GmailApplicationSourceProvider` construction from config/token_provider must be shown explicitly.
+
+7. **LOW — OAuth token provider httpx call has no explicit timeout** (both reviewers). Hung token endpoint blocks all searches. Should use the same `GMAIL_API_TIMEOUT_SECONDS` constant.
+
+### Divergent Views (Cycle 3)
+
+- **Hard limit cap vs. documented limitation** (Codex requires cap, OpenCode recommends it): Codex says O(n) without a cap is HIGH for a spike; OpenCode classifies it MEDIUM since `fanout_federated` timeout will kill the overall call. Consensus: a cap at 50 is recommended but not blocking for an initial spike, provided it is in the plan.
+- **Overall search deadline** (Codex raised, OpenCode did not as HIGH): Codex wants a `GMAIL_SEARCH_TOTAL_TIMEOUT_SECONDS` deadline; OpenCode notes the existing `fanout_federated` per-source timeout provides this implicitly. Consensus: document the fanout timeout as the effective deadline; a separate constant is optional.
+
+### Cycle 3 Risk Summary
+
+| Plan | Cycle 2 Risk | Cycle 3 Risk | Change |
+|------|-------------|-------------|--------|
+| 37-01 | MEDIUM | LOW-MEDIUM | Token cache design resolved; minor OAuth timeout gap remains |
+| 37-02 | HIGH | HIGH | `export_changes` signature gap is new HIGH; filter/timeout HIGHs resolved |
+| 37-03 | MEDIUM-HIGH | MEDIUM-HIGH | `SourceAccess` OAuth gap and `SourceConfig` union gap are new HIGHs |
+| 37-04 | LOW-MEDIUM | LOW | Grep false-positive minor; overall low risk |
+
+**Cycle 3 Overall: MEDIUM-HIGH**
+
+Three new HIGH concerns (N1: `export_changes` signature, N2: `SourceAccess.kind` OAuth, N3: `SourceConfig` union) remain unresolved. All three are small mechanical fixes — no architectural redesign required. Fix these three items and the plans are ready for execution.
