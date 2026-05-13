@@ -80,7 +80,7 @@ class TelegramSourceClientProtocol(Protocol):
         limit: int,
         dialog_id: int | None = None,
     ) -> dict:
-        """Search Telegram messages via daemon FTS. Returns {hits: [...]}"""
+        """Search Telegram messages via daemon FTS. Returns {messages: [...], total: int, ...}"""
         ...
 
 
@@ -140,7 +140,7 @@ class UnixSocketTelegramSourceClient:
         limit: int,
         dialog_id: int | None = None,
     ) -> dict:
-        """Search Telegram messages via daemon FTS. Returns {hits: [...]}"""
+        """Search Telegram messages via daemon FTS. Returns {messages: [...], total: int, ...}"""
         payload: dict = {
             "method": "search_messages",
             "query": query,
@@ -232,7 +232,7 @@ class TelegramApplicationSourceProvider(ApplicationSourceProviderProtocol):
         provider capability at runtime.
         """
         payload = self._client.search_messages(query=query, limit=limit)
-        hits = payload.get("hits", [])
+        hits = payload.get("messages", [])
 
         # Derive can_read from provider capability (cycle-2 MEDIUM fold-in)
         can_read_local = callable(
