@@ -30,7 +30,9 @@ from dotmd.ingestion.pipeline import IndexingPipeline
 from dotmd.ingestion.reader import parse_frontmatter, read_file
 from dotmd.ingestion.source_lifecycle import SourceRuntimeFactory
 from dotmd.ingestion.source_provider import ApplicationSourceProviderProtocol
-from dotmd.ingestion.telegram_provider import is_low_signal_telegram_text
+from dotmd.ingestion.telegram_provider import (
+    is_low_signal_telegram_text as _is_low_signal_telegram_text,
+)
 from dotmd.ingestion.trickle import TrickleIndexer
 from dotmd.search.fusion import build_candidates, fuse_results
 from dotmd.search.graph_direct import GraphDirectEngine
@@ -163,6 +165,23 @@ def format_elapsed_ms(elapsed_ms: float) -> str:
     return f"{seconds}s"
 
 
+def _is_low_signal_federated_candidate(candidate: SearchCandidate) -> bool:
+    """Return True if a federated candidate should be excluded from quota slots.
+
+    Only applies the text-quality filter to Telegram candidates, where the
+    low-signal heuristic is meaningful and proven in the trickle ingestion
+    pipeline. Non-Telegram federated candidates have different snippet
+    semantics and are passed through unconditionally.
+    """
+    is_telegram = (
+        candidate.namespace == "telegram"
+        or (candidate.retrieval_kind or "").startswith("tg:")
+    )
+    if is_telegram:
+        return _is_low_signal_telegram_text(candidate.snippet or "")
+    return False
+
+
 def _merge_with_federated_quota(
     local_candidates: list[SearchCandidate],
     fed_candidates: list[SearchCandidate],
@@ -187,13 +206,14 @@ def _merge_with_federated_quota(
     - Sparse fed results: fed_slots shrinks, local gets the freed positions.
     - Normal operation: fed_slots=fed_quota, standard split.
 
-    The is_low_signal_telegram_text pre-filter removes very short or emoji-only
-    messages that FTS scored well by keyword but carry no semantic content. The
-    filter is already proven in the trickle ingestion pipeline.
+    The _is_low_signal_federated_candidate pre-filter removes very short or
+    emoji-only Telegram messages that FTS scored well by keyword but carry no
+    semantic content. Non-Telegram sources (e.g., Gmail) are passed through
+    unconditionally because their snippet quality semantics differ.
     """
     filtered_fed = [
         c for c in fed_candidates
-        if not is_low_signal_telegram_text(c.snippet or "")
+        if not _is_low_signal_federated_candidate(c)
     ]
     fed_slots = min(fed_quota, len(filtered_fed))
     local_slots = top_k - fed_slots
