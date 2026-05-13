@@ -154,7 +154,7 @@ See: `.planning/REQUIREMENTS.md`
 | 34. Federated SearchCandidate contract | v1.6 | Not started | — |
 | 35. Filesystem unified source adapter | 2/2 | Complete    | 2026-05-10 |
 | 36. Telegram unified sync and federated search | 2/2 | Complete    | 2026-05-10 |
-| 37. Airweave connector compatibility spike | 1/4 | In Progress|  |
+| 37. Airweave connector compatibility spike | 2/4 | In Progress|  |
 
 ### Backlog 999.2: Pipeline parallelism — overlap GLiNER and TEI across files
 
@@ -1212,7 +1212,7 @@ dotMD's source contracts without adopting Airweave's indexing/runtime stack.
 **Requirements:** AIR-01, AIR-02, AIR-03
 **Depends on:** Phase 36
 **Backlog source:** 999.31
-**Plans:** 1/4 plans executed
+**Plans:** 2/4 plans executed
 
 Success criteria:
 1. One pilot connector or connector-like source maps into `SourceDocument`,
