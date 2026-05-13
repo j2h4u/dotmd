@@ -9,10 +9,14 @@ from unittest.mock import patch
 from click.testing import CliRunner
 
 from dotmd.cli import main
+from dotmd.core.models import SearchResponse
 
 
 def test_search_accepts_reranker_option(tmp_path: Path) -> None:
-    with patch("dotmd.api.service.DotMDService.search", return_value=[]) as search:
+    with patch(
+        "dotmd.api.service.DotMDService.search",
+        return_value=SearchResponse(),
+    ) as search:
         result = CliRunner().invoke(
             main,
             [

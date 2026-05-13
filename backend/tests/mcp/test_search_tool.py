@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+from dotmd.core.models import SearchCandidate, SearchResponse
 
 
 def _import_mcp():  # type: ignore[no-untyped-def]
@@ -28,7 +29,9 @@ class TestSearchRefContract:
 
     def test_registered_output_schema_has_ref_not_file_paths(self) -> None:
         schema = _tool_schema("search")["outputSchema"]
-        hit_schema = schema["$defs"]["SearchHit"]
+        candidate_ref = schema["properties"]["candidates"]["items"]["$ref"]
+        candidate_def_name = candidate_ref.removeprefix("#/$defs/")
+        hit_schema = schema["$defs"][candidate_def_name]
         properties = hit_schema["properties"]
 
         assert properties["ref"]["type"] == "string"
@@ -37,15 +40,22 @@ class TestSearchRefContract:
 
     def test_tool_call_output_has_ref(self) -> None:
         mcp = _import_mcp()
-        stub_result = SimpleNamespace(
-            chunk_id="a" * 64,
+        stub_result = SearchCandidate(
             ref="filesystem:/mnt/test.md",
+            namespace="filesystem",
+            descriptor_key="filesystem",
+            source_kind="local_filesystem",
+            retrieval_kind="local",
             heading_path="# Test",
             snippet="test snippet",
             fused_score=0.9,
+            can_read=True,
+            chunk_id="a" * 64,
         )
         service = MagicMock()
-        service.search.return_value = [stub_result]
+        service.search_async = AsyncMock(
+            return_value=SearchResponse(candidates=[stub_result])
+        )
         previous_service = mcp._service
         mcp._service = service
         try:
@@ -56,11 +66,11 @@ class TestSearchRefContract:
             mcp._service = previous_service
 
         structured = cast(dict[str, Any], structured_raw)
-        payload = cast(dict[str, Any], structured["result"][0])
+        payload = cast(dict[str, Any], structured["candidates"][0])
         assert payload["ref"] == "filesystem:/mnt/test.md"
         assert "file_paths" not in payload
         assert "file_path" not in payload
-        service.search.assert_called_once_with("test", top_k=1)
+        service.search_async.assert_awaited_once_with("test", top_k=1)
 
 
 class TestReadToolRefContract:

@@ -1,9 +1,11 @@
 """Minimal vendored Gmail source implementation from Airweave."""
+# pyright: reportAttributeAccessIssue=false, reportIncompatibleMethodOverride=false
 
 from __future__ import annotations
 
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
 from inspect import isawaitable
+from typing import Any
 
 from dotmd.vendor.airweave.decorators import source
 from dotmd.vendor.airweave.entities_base import BaseEntity
@@ -121,6 +123,7 @@ class GmailSource(BaseSource):
         if included_labels and not any(label.lower() in label_ids for label in included_labels):
             return False
         excluded_labels = getattr(self, "excluded_labels", None)
-        if excluded_labels and any(label.lower() in label_ids for label in excluded_labels):
-            return False
-        return True
+        return not (
+            excluded_labels
+            and any(label.lower() in label_ids for label in excluded_labels)
+        )

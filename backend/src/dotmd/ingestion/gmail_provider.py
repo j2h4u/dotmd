@@ -36,8 +36,11 @@ class SourceAuthError(RuntimeError):
     """Raised when Gmail returns an auth failure."""
 
 
-class SourceTemporaryUnavailable(RuntimeError):
+class SourceTemporaryUnavailableError(RuntimeError):
     """Raised when Gmail is temporarily unavailable."""
+
+
+SourceTemporaryUnavailable = SourceTemporaryUnavailableError
 
 
 class BaseConnectorBridge(ABC):
@@ -187,7 +190,7 @@ class GmailBridge(BaseConnectorBridge):
         self,
         url: str,
         *,
-        params: dict[str, object] | None,
+        params: dict[str, str | int | list[str]] | None,
         timeout_message: str,
     ) -> dict[str, Any]:
         headers = {"Authorization": f"Bearer {self._token_provider.get_token()}"}
@@ -199,15 +202,15 @@ class GmailBridge(BaseConnectorBridge):
                 timeout=httpx.Timeout(GMAIL_API_TIMEOUT_SECONDS, connect=5.0),
             )
         except httpx.TimeoutException as exc:
-            raise SourceTemporaryUnavailable(timeout_message) from exc
+            raise SourceTemporaryUnavailableError(timeout_message) from exc
 
         if response.status_code in {401, 403}:
             self._token_provider._cached_token = None
             raise SourceAuthError(f"Gmail auth failed: {response.status_code}")
         if response.status_code == 429:
-            raise SourceTemporaryUnavailable("Gmail rate limited (429)")
+            raise SourceTemporaryUnavailableError("Gmail rate limited (429)")
         if response.status_code >= 500:
-            raise SourceTemporaryUnavailable(f"Gmail server error: {response.status_code}")
+            raise SourceTemporaryUnavailableError(f"Gmail server error: {response.status_code}")
         if response.status_code >= 400:
             raise RuntimeError(f"Gmail API request failed: {response.status_code}")
         data = response.json()

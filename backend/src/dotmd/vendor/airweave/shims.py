@@ -1,4 +1,5 @@
 """DI shims for the vendored Airweave Gmail source."""
+# pyright: reportArgumentType=false, reportReturnType=false
 
 from __future__ import annotations
 

@@ -230,12 +230,11 @@ class Settings(BaseSettings):
 
     # Gmail federated search credentials. In production these are loaded from
     # ~/.secrets/dotmd-gmail.env via docker-compose env_file.
-    gmail_client_id: str | None = Field(None, alias="DOTMD_GMAIL_CLIENT_ID")
-    gmail_client_secret: str | None = Field(None, alias="DOTMD_GMAIL_CLIENT_SECRET")
-    gmail_refresh_token: str | None = Field(None, alias="DOTMD_GMAIL_REFRESH_TOKEN")
+    gmail_client_id: str | None = None
+    gmail_client_secret: str | None = None
+    gmail_refresh_token: str | None = None
     gmail_search_result_limit: int = Field(
         default=20,
-        alias="DOTMD_GMAIL_SEARCH_RESULT_LIMIT",
         ge=1,
         le=500,
     )

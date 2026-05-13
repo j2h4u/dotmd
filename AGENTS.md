@@ -32,6 +32,35 @@ The fork has been substantially reworked:
 - **FalkorDB**: production graph backend; LadybugDB kept as embedded local-dev default
 - **TEI**: external embedding server (Text Embeddings Inference), CPU-only
 
+## Phase 37: Airweave Connector Compatibility
+
+**Decision: vendored Airweave platform slice**
+Airweave is not pip-installed because the full package pulls in runtime and
+platform dependencies dotMD does not use. Only the platform slice needed for
+Gmail compatibility is vendored into `backend/src/dotmd/vendor/airweave/`.
+See `VENDOR_VERSION` and `VENDOR_NOTES.md` for source tracking and local deltas.
+
+**Decision: direct Gmail API search, not `GmailSource.search()`**
+Airweave's GmailSource does not implement `search()`. The Gmail bridge calls
+the Gmail API directly. Future connectors must check whether `search()` exists
+before assuming the source can be wrapped directly.
+
+**Decision: `BaseConnectorBridge` ABC**
+`backend/src/dotmd/ingestion/gmail_provider.py` defines the generic bridge
+contract: `search_native()`, `read_unit_window()`, and `to_search_candidate()`.
+`GmailBridge` is the first implementation.
+
+**Decision: OAuth token caching with `threading.Lock`**
+`GmailOAuthTokenProvider` uses margin-based expiry (`expires_in - 300`) and
+`threading.Lock` to serialize concurrent refresh calls. The refresh token lives
+in `GmailSourceConfig.refresh_token`, not `SourceAccess.delegated_to`.
+
+**Decision: Gmail is federated-only**
+Gmail participates through live federated search and readable message refs. It
+does not ingest into the local SQLite/FTS/vector index in Phase 37.
+`source_native_score=None` is safe because federated candidates bypass RRF and
+flow through quota-based `_merge_with_federated_quota()`.
+
 ## Tech Stack
 
 | Component | Technology |

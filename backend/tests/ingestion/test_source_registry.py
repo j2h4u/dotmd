@@ -17,7 +17,11 @@ from dotmd.core.models import (
     SourceSchemaField,
 )
 from dotmd.core.source_registry import SourceRegistry
-from dotmd.ingestion.source_registry import default_source_registry, telegram_source_descriptor
+from dotmd.ingestion.source_registry import (
+    default_source_registry,
+    gmail_source_descriptor,
+    telegram_source_descriptor,
+)
 
 
 def _descriptor(namespace: str = "demo") -> SourceDescriptor:
@@ -143,12 +147,12 @@ def test_source_registry_rejects_duplicate_namespace() -> None:
         registry.register(_descriptor("demo"))
 
 
-def test_default_registry_contains_filesystem_and_telegram() -> None:
+def test_default_registry_contains_filesystem_telegram_and_gmail() -> None:
     namespaces = {
         descriptor.namespace for descriptor in default_source_registry().list()
     }
 
-    assert namespaces == {"filesystem", "telegram"}
+    assert namespaces == {"filesystem", "telegram", "gmail"}
 
 
 def test_filesystem_descriptor_shape() -> None:
@@ -195,6 +199,29 @@ def test_telegram_descriptor_shape() -> None:
     assert SourceCapability.ACL not in descriptor.capabilities
 
 
+def test_gmail_descriptor_shape() -> None:
+    descriptor = default_source_registry().require("gmail")
+    fields = {field.name: field for field in descriptor.config_schema.fields}
+
+    assert descriptor.namespace == "gmail"
+    assert descriptor.source_kind == "email"
+    assert descriptor.display.display_name == "Gmail"
+    assert fields["client_id"].field_type == "str"
+    assert fields["client_id"].required is True
+    assert fields["client_secret"].field_type == "str"
+    assert fields["client_secret"].required is True
+    assert fields["search_result_limit"].field_type == "int"
+    assert fields["search_result_limit"].required is False
+    assert descriptor.auth_schema.auth_kind == "oauth_refresh"
+    assert descriptor.cursor_schema.cursor_kind == "none"
+    assert SourceCapability.FEDERATED_SEARCH in descriptor.capabilities
+    assert SourceCapability.READ_UNIT_WINDOW in descriptor.capabilities
+    assert SourceCapability.LOCAL_SYNC not in descriptor.capabilities
+    assert SourceCapability.INCREMENTAL_CURSOR not in descriptor.capabilities
+    assert descriptor.metadata_json["media_type"] == "message/rfc822"
+    assert descriptor.metadata_json["parser_name"] == "gmail-message"
+
+
 def test_source_descriptor_converts_to_application_source_description() -> None:
     description = ApplicationSourceDescription.from_descriptor(
         telegram_source_descriptor()
@@ -210,3 +237,18 @@ def test_source_descriptor_converts_to_application_source_description() -> None:
         "federated_search",
     ]
     assert description.metadata_json == {"transport": "mcp-telegram-daemon"}
+
+
+def test_gmail_source_descriptor_converts_to_application_source_description() -> None:
+    description = ApplicationSourceDescription.from_descriptor(
+        gmail_source_descriptor()
+    )
+
+    assert description.namespace == "gmail"
+    assert description.source_kind == "email"
+    assert description.display_name == "Gmail"
+    assert description.capabilities == [
+        "federated_search",
+        "read_unit_window",
+    ]
+    assert description.metadata_json["parser_name"] == "gmail-message"

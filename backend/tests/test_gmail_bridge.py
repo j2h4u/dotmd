@@ -146,9 +146,15 @@ def test_search_native_api_errors(
     expected_error: type[Exception],
 ) -> None:
     provider = GmailApplicationSourceProvider(mock_token_provider)
-    with patch.object(provider._bridge._client, "get", return_value=_json_response({}, status_code)):
-        with pytest.raises(expected_error):
-            provider.search_native("query", limit=5)
+    with (
+        patch.object(
+            provider._bridge._client,
+            "get",
+            return_value=_json_response({}, status_code),
+        ),
+        pytest.raises(expected_error),
+    ):
+        provider.search_native("query", limit=5)
 
 
 def test_provider_metadata_whitelist(
@@ -282,7 +288,7 @@ def test_gmail_source_config_limit_validation() -> None:
     with pytest.raises(ValidationError):
         GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r", search_result_limit=501)
     with pytest.raises(ValidationError):
-        GmailSourceConfig(client_id="c", client_secret="s")
+        GmailSourceConfig(client_id="c", client_secret="s")  # pyright: ignore[reportCallIssue]
 
 
 def test_gmail_source_config_has_refresh_token_field() -> None:
@@ -347,7 +353,7 @@ def test_build_gmail_bypasses_credential_provider(monkeypatch: pytest.MonkeyPatc
     assert bundle.supports_federated_search is True
 
 
-def test_partial_gmail_env_vars_logs_warning(tmp_path: object, caplog: pytest.LogCaptureFixture) -> None:
+def test_partial_gmail_env_vars_logs_warning(tmp_path: object) -> None:
     from dotmd.core.config import Settings
     from dotmd.ingestion.source_lifecycle import source_runtime_factory_from_settings
 
@@ -357,16 +363,18 @@ def test_partial_gmail_env_vars_logs_warning(tmp_path: object, caplog: pytest.Lo
         gmail_client_secret=None,
         gmail_refresh_token=None,
     )
-    with caplog.at_level("WARNING"):
+    with patch("dotmd.ingestion.source_lifecycle.logger.warning") as warning:
         factory = source_runtime_factory_from_settings(settings, MagicMock())
     assert factory._config_store.get_config("gmail") is None
-    assert "DOTMD_GMAIL_CLIENT_SECRET" in caplog.text
-    assert "DOTMD_GMAIL_REFRESH_TOKEN" in caplog.text
+    warning.assert_called_once()
+    warning_text = " ".join(str(arg) for arg in warning.call_args.args)
+    assert "DOTMD_GMAIL_CLIENT_SECRET" in warning_text
+    assert "DOTMD_GMAIL_REFRESH_TOKEN" in warning_text
 
 
 def test_base_connector_bridge_is_abstract(mock_token_provider: MagicMock) -> None:
     with pytest.raises(TypeError):
-        BaseConnectorBridge()
+        BaseConnectorBridge()  # pyright: ignore[reportAbstractUsage]
     assert issubclass(GmailBridge, BaseConnectorBridge)
     assert isinstance(GmailBridge(mock_token_provider), BaseConnectorBridge)
 

@@ -25,6 +25,13 @@ from dotmd.storage.metadata import SQLiteMetadataStore
 logger = logging.getLogger(__name__)
 
 
+def _configured_string(value: object) -> str | None:
+    """Return a non-empty configured string, ignoring mock/dynamic attributes."""
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
 class SourceLifecycleConfigError(ValueError):
     """Raised when a source runtime cannot be constructed from local config."""
 
@@ -456,20 +463,26 @@ def source_runtime_factory_from_settings(
             )
         )
     gmail_vars = {
-        "DOTMD_GMAIL_CLIENT_ID": settings.gmail_client_id,
-        "DOTMD_GMAIL_CLIENT_SECRET": settings.gmail_client_secret,
-        "DOTMD_GMAIL_REFRESH_TOKEN": settings.gmail_refresh_token,
+        "DOTMD_GMAIL_CLIENT_ID": _configured_string(settings.gmail_client_id),
+        "DOTMD_GMAIL_CLIENT_SECRET": _configured_string(settings.gmail_client_secret),
+        "DOTMD_GMAIL_REFRESH_TOKEN": _configured_string(settings.gmail_refresh_token),
     }
     gmail_set = {key for key, value in gmail_vars.items() if value}
     gmail_missing = {key for key, value in gmail_vars.items() if not value}
     if len(gmail_set) == 3:
+        gmail_client_id = gmail_vars["DOTMD_GMAIL_CLIENT_ID"]
+        gmail_client_secret = gmail_vars["DOTMD_GMAIL_CLIENT_SECRET"]
+        gmail_refresh_token = gmail_vars["DOTMD_GMAIL_REFRESH_TOKEN"]
+        assert gmail_client_id is not None
+        assert gmail_client_secret is not None
+        assert gmail_refresh_token is not None
         records.append(
             SourceConfigRecord(
                 namespace="gmail",
                 config=GmailSourceConfig(
-                    client_id=cast(str, settings.gmail_client_id),
-                    client_secret=cast(str, settings.gmail_client_secret),
-                    refresh_token=cast(str, settings.gmail_refresh_token),
+                    client_id=gmail_client_id,
+                    client_secret=gmail_client_secret,
+                    refresh_token=gmail_refresh_token,
                     search_result_limit=settings.gmail_search_result_limit,
                 ),
                 credential_ref=SourceCredentialRef(namespace="gmail"),

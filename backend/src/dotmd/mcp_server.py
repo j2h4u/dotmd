@@ -505,10 +505,8 @@ async def _run_telegram_poller(
             )
         except Exception:
             logger.exception("telegram_sync error during ingest")
-        try:
+        with suppress(TimeoutError):
             await asyncio.wait_for(shutdown_event.wait(), timeout=interval_seconds)
-        except TimeoutError:
-            pass
 
 
 def create_app() -> Starlette:

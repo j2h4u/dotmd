@@ -1,9 +1,10 @@
 """Minimal Airweave entity base classes vendored for connector compatibility."""
+# pyright: reportArgumentType=false, reportCallIssue=false
 
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any, ClassVar
 from uuid import UUID
 
@@ -42,7 +43,7 @@ def AirweaveField(
     return Field(default, json_schema_extra=extras, **kwargs)
 
 
-class AirweaveFieldFlag(str, Enum):
+class AirweaveFieldFlag(StrEnum):
     """Vendored field flags used by AirweaveField json_schema_extra."""
 
     IS_ENTITY_ID = "is_entity_id"

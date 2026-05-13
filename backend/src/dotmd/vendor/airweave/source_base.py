@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from enum import Enum
-from typing import Any, AsyncGenerator, ClassVar, Protocol
+from collections.abc import AsyncGenerator
+from enum import StrEnum
+from typing import Any, ClassVar, Protocol
 
 import httpx
 from pydantic import BaseModel
@@ -16,7 +17,7 @@ SyncCursor = dict[str, object]
 NodeSelectionData = Any
 
 
-class AuthenticationMethod(str, Enum):
+class AuthenticationMethod(StrEnum):
     """Source authentication methods used by vendored decorators."""
 
     OAUTH_BROWSER = "oauth_browser"
@@ -25,14 +26,14 @@ class AuthenticationMethod(str, Enum):
     OAUTH_BYOC = "oauth_byoc"
 
 
-class OAuthType(str, Enum):
+class OAuthType(StrEnum):
     """OAuth token type."""
 
     WITH_REFRESH = "with_refresh"
     WITH_ROTATING_REFRESH = "with_rotating_refresh"
 
 
-class RateLimitLevel(str, Enum):
+class RateLimitLevel(StrEnum):
     """Rate-limit scope stub."""
 
     ORG = "org"
@@ -77,7 +78,7 @@ class AirweaveHttpClient:
         url: str,
         *,
         headers: dict[str, str] | None = None,
-        params: dict[str, object] | None = None,
+        params: dict[str, str | int | list[str]] | None = None,
     ) -> httpx.Response:
         """Issue a GET request."""
         return await self._client.get(url, headers=headers, params=params)

@@ -142,10 +142,11 @@ class TestMergeBackBeyondPoolSize:
         )
 
 
-        # Patch build_candidates to capture fused list before it's truncated
-        import dotmd.search.fusion as fusion_module
+        # Patch the service module's imported build_candidates symbol to
+        # capture the fused list before it's truncated.
+        import dotmd.api.service as service_module
 
-        original_build = fusion_module.build_candidates
+        original_build = service_module.build_candidates
 
         captured_fused = []
 
@@ -153,7 +154,7 @@ class TestMergeBackBeyondPoolSize:
             captured_fused.extend(fused)
             return original_build(fused, **kwargs)
 
-        with patch.object(fusion_module, "build_candidates", side_effect=capture_build):
+        with patch.object(service_module, "build_candidates", side_effect=capture_build):
             service.search("test query", top_k=30, mode="hybrid", rerank=True)
 
         # The fused list passed to build_search_results should contain more
@@ -261,10 +262,10 @@ class TestKeywordSurvivalThroughReranking:
         service._reranker_factory = MagicMock()
         service._reranker_factory.get.return_value = reranker
 
-        # Capture fused list
-        import dotmd.search.fusion as fusion_module
+        # Capture the fused list through the service module's imported symbol.
+        import dotmd.api.service as service_module
 
-        original_build = fusion_module.build_candidates
+        original_build = service_module.build_candidates
         captured_fused = []
 
         def capture_build(fused, **kwargs):
@@ -279,7 +280,7 @@ class TestKeywordSurvivalThroughReranking:
             return_value=[mock_chunk]
         )
 
-        with patch.object(fusion_module, "build_candidates", side_effect=capture_build):
+        with patch.object(service_module, "build_candidates", side_effect=capture_build):
             service.search("test query", top_k=10, mode="hybrid", rerank=True)
 
         fused_ids = {cid for cid, _ in captured_fused}
@@ -490,7 +491,7 @@ class TestSearchResultContracts:
             captured_fused.extend(fused)
             return []
 
-        with patch.object(svc_module, "build_search_results", side_effect=capture_build):
+        with patch.object(svc_module, "build_candidates", side_effect=capture_build):
             service.search("test query", top_k=10, mode="hybrid", rerank=True)
 
         fused_scores = dict(captured_fused)

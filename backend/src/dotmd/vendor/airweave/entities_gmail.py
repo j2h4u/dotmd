@@ -1,4 +1,5 @@
 """Gmail entity schemas vendored from Airweave."""
+# pyright: reportCallIssue=false
 
 from __future__ import annotations
 
