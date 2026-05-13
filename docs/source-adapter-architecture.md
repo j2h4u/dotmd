@@ -342,7 +342,7 @@ mcp-telegram daemon socket. The daemon method `search_messages` returns:
 
 ```json
 {
-  "hits": [
+  "messages": [
     {
       "dialog_id": 12345,
       "dialog_name": "Project Chat",

@@ -241,7 +241,7 @@ Response:
 {
   "ok": true,
   "data": {
-    "hits": [
+    "messages": [
       {
         "dialog_id": 12345,
         "dialog_name": "Project Chat",
@@ -265,11 +265,11 @@ Telegram FTS search results map to `SearchCandidate`:
 - **descriptor_key:** `"telegram"` (identifies the source descriptor)
 - **source_kind:** `"chat"`
 - **retrieval_kind:** `"tg:fts"`
-- **title:** `dialog_name` from the hit
-- **snippet:** `text` from the hit (message preview)
+- **title:** `dialog_name` from the message
+- **snippet:** `text` from the message preview
 - **can_read:** `True` if the provider supports `read_unit_window`
 - **can_materialize:** `False` (Phase 34 invariant)
-- **source_native_score:** `score` from the hit (FTS score)
+- **source_native_score:** `score` from the message FTS result
 - **source_native_rank:** Zero-based rank (0, 1, 2, ... for a 5-hit response)
 - **provider_metadata:** Whitelist only `{dialog_id, message_id, sender, sent_at, dialog_name}`. Credentials, phone numbers, auth tokens, session paths, api_id, api_hash MUST NOT appear.
 
