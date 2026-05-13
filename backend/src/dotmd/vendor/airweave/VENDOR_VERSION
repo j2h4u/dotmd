@@ -1,0 +1,10 @@
+Source: https://github.com/airweave-ai/airweave
+Branch/commit: main (vendored 2026-05-11)
+Files vendored:
+  - backend/airweave/platform/entities/_base.py
+  - backend/airweave/platform/entities/gmail.py
+  - backend/airweave/platform/sources/_base.py
+  - backend/airweave/platform/sources/gmail.py
+  - backend/airweave/platform/configs/config.py (GmailConfig only)
+  - backend/airweave/platform/decorators.py
+Modifications: imports rewritten to dotmd.vendor.airweave.*, heavy DI deps shimmed
