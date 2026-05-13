@@ -6,6 +6,7 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
 from enum import StrEnum
+from inspect import isawaitable
 from typing import Any, ClassVar, Protocol
 
 import httpx
@@ -62,7 +63,7 @@ class SourceAuthProvider(Protocol):
     provider_kind: str
     supports_refresh: bool
 
-    async def get_token(self) -> str:
+    def get_token(self) -> str:
         """Return a valid access token."""
         ...
 
@@ -144,7 +145,10 @@ class BaseSource(ABC):
 
     async def get_access_token(self) -> str:
         """Get a valid access token via the auth provider."""
-        return await self._auth.get_token()
+        token = self._auth.get_token()
+        if isawaitable(token):
+            return await token
+        return token
 
     @classmethod
     @abstractmethod
