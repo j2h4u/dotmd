@@ -4,7 +4,7 @@ import warnings
 from pathlib import Path
 from typing import Literal, cast
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, TomlConfigSettingsSource
 
 from dotmd.core.models import ExtractDepth
@@ -66,6 +66,7 @@ class Settings(BaseSettings):
     model_config = {
         "env_prefix": "DOTMD_",
         "toml_file": str(Path.home() / ".dotmd" / "config.toml"),
+        "populate_by_name": True,
     }
 
     # Paths
@@ -226,6 +227,18 @@ class Settings(BaseSettings):
     # UNIX socket for the existing mcp-telegram daemon JSON API.
     # DOTMD_TELEGRAM_DAEMON_SOCKET is the only Phase 29 live transport.
     telegram_daemon_socket: Path | None = None
+
+    # Gmail federated search credentials. In production these are loaded from
+    # ~/.secrets/dotmd-gmail.env via docker-compose env_file.
+    gmail_client_id: str | None = Field(None, alias="DOTMD_GMAIL_CLIENT_ID")
+    gmail_client_secret: str | None = Field(None, alias="DOTMD_GMAIL_CLIENT_SECRET")
+    gmail_refresh_token: str | None = Field(None, alias="DOTMD_GMAIL_REFRESH_TOKEN")
+    gmail_search_result_limit: int = Field(
+        default=20,
+        alias="DOTMD_GMAIL_SEARCH_RESULT_LIMIT",
+        ge=1,
+        le=500,
+    )
 
     # Background Telegram sync polling interval (Phase 36).
     # DOTMD_TELEGRAM_SYNC_INTERVAL_SECONDS overrides the default.

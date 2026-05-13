@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
@@ -20,6 +21,8 @@ from dotmd.ingestion.telegram_provider import (
     UnixSocketTelegramSourceClient,
 )
 from dotmd.storage.metadata import SQLiteMetadataStore
+
+logger = logging.getLogger(__name__)
 
 
 class SourceLifecycleConfigError(ValueError):
@@ -43,7 +46,33 @@ class TelegramSourceConfig(BaseModel):
     socket_path: Path | None = None
 
 
-type SourceConfig = FilesystemSourceConfig | TelegramSourceConfig
+class GmailSourceConfig(BaseModel):
+    """Gmail OAuth runtime config.
+
+    The refresh_token field holds the OAuth refresh token directly in the config
+    object rather than in SourceAccess.delegated_to. This avoids a semantic
+    mismatch because delegated_to is for identity delegation strings, not raw
+    secrets.
+
+    search_result_limit is validated to stay within Gmail API bounds (1-500).
+    Default 20 is conservative because Gmail metadata fetch currently performs
+    O(n) round-trips.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    client_id: str
+    client_secret: str
+    refresh_token: str
+    search_result_limit: int = Field(
+        default=20,
+        ge=1,
+        le=500,
+        description="Max results per Gmail search query. Gmail API hard cap is 500.",
+    )
+
+
+SourceConfig = FilesystemSourceConfig | TelegramSourceConfig | GmailSourceConfig
 
 
 class SourceCredentialRef(BaseModel):
@@ -310,6 +339,35 @@ class SourceRuntimeFactory:
                 metadata_json=dict(descriptor.metadata_json),
             )
 
+        if namespace == "gmail":
+            config = self._require_gmail_config(record.config)
+            from dotmd.ingestion.gmail_provider import GmailApplicationSourceProvider
+            from dotmd.vendor.airweave.shims import GmailOAuthTokenProvider
+
+            # Cycle 3 HIGH N2: Gmail bypasses DefaultSourceCredentialProvider.get_access().
+            # That provider only handles auth_kind "none" and "delegated"; Gmail uses
+            # auth_kind="oauth_refresh" and keeps OAuth material in GmailSourceConfig.
+            access = SourceAccess(kind="none")
+            token_provider = GmailOAuthTokenProvider(
+                credentials={
+                    "client_id": config.client_id,
+                    "client_secret": config.client_secret,
+                    "refresh_token": config.refresh_token,
+                }
+            )
+            provider = GmailApplicationSourceProvider(
+                token_provider=token_provider,
+                search_result_limit=config.search_result_limit,
+            )
+            return SourceRuntimeBundle(
+                descriptor=descriptor,
+                config=config,
+                access=access,
+                cursor_store=self._cursor_store,
+                provider=provider,
+                metadata_json=dict(descriptor.metadata_json),
+            )
+
         raise SourceLifecycleConfigError(f"{namespace} runtime is not supported")
 
     def build_if_configured(self, namespace: str) -> SourceRuntimeBundle | None:
@@ -322,6 +380,10 @@ class SourceRuntimeFactory:
             if not isinstance(config, TelegramSourceConfig):
                 return None
             if config.socket_path is None:
+                return None
+        elif namespace == "gmail":
+            config = record.config
+            if not isinstance(config, GmailSourceConfig):
                 return None
         return self.build(namespace)
 
@@ -357,6 +419,13 @@ class SourceRuntimeFactory:
             raise SourceLifecycleConfigError("telegram.socket_path is required")
         return cast(TelegramSourceConfig, config)
 
+    def _require_gmail_config(self, config: SourceConfig) -> GmailSourceConfig:
+        if not isinstance(config, GmailSourceConfig):
+            raise SourceLifecycleConfigError(
+                f"gmail config must be GmailSourceConfig, got {type(config).__name__}"
+            )
+        return config
+
 
 def source_runtime_factory_from_settings(
     settings: Settings,
@@ -385,6 +454,32 @@ def source_runtime_factory_from_settings(
                     credential_ref="mcp-telegram",
                 ),
             )
+        )
+    gmail_vars = {
+        "DOTMD_GMAIL_CLIENT_ID": settings.gmail_client_id,
+        "DOTMD_GMAIL_CLIENT_SECRET": settings.gmail_client_secret,
+        "DOTMD_GMAIL_REFRESH_TOKEN": settings.gmail_refresh_token,
+    }
+    gmail_set = {key for key, value in gmail_vars.items() if value}
+    gmail_missing = {key for key, value in gmail_vars.items() if not value}
+    if len(gmail_set) == 3:
+        records.append(
+            SourceConfigRecord(
+                namespace="gmail",
+                config=GmailSourceConfig(
+                    client_id=cast(str, settings.gmail_client_id),
+                    client_secret=cast(str, settings.gmail_client_secret),
+                    refresh_token=cast(str, settings.gmail_refresh_token),
+                    search_result_limit=settings.gmail_search_result_limit,
+                ),
+                credential_ref=SourceCredentialRef(namespace="gmail"),
+            )
+        )
+    elif gmail_set:
+        logger.warning(
+            "Gmail source not registered: partial configuration detected. "
+            "Missing env vars: %s. Set all three to enable Gmail.",
+            ", ".join(sorted(gmail_missing)),
         )
 
     return SourceRuntimeFactory(

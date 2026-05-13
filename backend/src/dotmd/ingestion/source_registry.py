@@ -103,10 +103,67 @@ def telegram_source_descriptor() -> SourceDescriptor:
     )
 
 
+def gmail_source_descriptor() -> SourceDescriptor:
+    """Return the declarative descriptor for Gmail federated search.
+
+    AIR-03 compliance: registered via the same SourceRegistry path as
+    filesystem_source_descriptor() and telegram_source_descriptor().
+    """
+    return SourceDescriptor(
+        namespace="gmail",
+        source_kind="email",
+        display=SourceDisplayMetadata(
+            display_name="Gmail",
+            description="Gmail inbox and sent messages via Google OAuth.",
+            labels=["application", "email"],
+            docs_slug="gmail",
+        ),
+        config_schema=SourceConfigSchema(
+            name="GmailSourceConfig",
+            fields=[
+                SourceSchemaField(
+                    name="client_id",
+                    field_type="str",
+                    required=True,
+                    description="Google OAuth client ID",
+                ),
+                SourceSchemaField(
+                    name="client_secret",
+                    field_type="str",
+                    required=True,
+                    description="Google OAuth client secret",
+                ),
+                SourceSchemaField(
+                    name="search_result_limit",
+                    field_type="int",
+                    required=False,
+                    description="Max results per search query (1-500, default 20)",
+                ),
+            ],
+        ),
+        auth_schema=SourceAuthSchema(
+            auth_kind="oauth_refresh",
+            methods=["oauth_browser", "oauth_token"],
+        ),
+        cursor_schema=SourceCursorSchema(
+            cursor_kind="none",
+            description="Federated-only - no local cursor for spike",
+        ),
+        capabilities=[
+            SourceCapability.FEDERATED_SEARCH,
+            SourceCapability.READ_UNIT_WINDOW,
+        ],
+        metadata_json={
+            "media_type": "message/rfc822",
+            "parser_name": "gmail-message",
+        },
+    )
+
+
 def default_source_registry() -> SourceRegistry:
     """Return the Phase 32 default source registry."""
     registry = SourceRegistry()
     registry.register(filesystem_source_descriptor())
     registry.register(telegram_source_descriptor())
+    registry.register(gmail_source_descriptor())
     return registry
-

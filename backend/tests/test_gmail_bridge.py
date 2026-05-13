@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import base64
+import typing
 from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from dotmd.api.service import _is_low_signal_federated_candidate
-from dotmd.core.models import SearchCandidate
+from dotmd.core.models import SearchCandidate, SourceCapability
 from dotmd.ingestion.gmail_provider import (
     GMAIL_BODY_MAX_BYTES,
     GMAIL_PROVIDER_METADATA_KEYS,
@@ -219,16 +221,147 @@ def test_decode_gmail_body_malformed_base64() -> None:
     assert _decode_gmail_body({"mimeType": "text/plain", "body": {"data": "%%%%"}}) == ""
 
 
-@pytest.mark.skip(reason="depends on 37-03")
 def test_gmail_descriptor() -> None:
-    from dotmd.ingestion.source_registry import gmail_source_descriptor
+    from dotmd.ingestion.source_registry import default_source_registry, gmail_source_descriptor
 
-    assert gmail_source_descriptor().namespace == "gmail"
+    descriptor = gmail_source_descriptor()
+    assert descriptor.namespace == "gmail"
+    assert SourceCapability.FEDERATED_SEARCH in descriptor.capabilities
+    assert SourceCapability.READ_UNIT_WINDOW in descriptor.capabilities
+    assert SourceCapability.LOCAL_SYNC not in descriptor.capabilities
+    registry = default_source_registry()
+    assert registry.get("gmail") is not None
+    assert registry.get("filesystem") is not None
+    assert registry.get("telegram") is not None
 
 
-@pytest.mark.skip(reason="depends on 37-03")
 def test_lifecycle_build_missing_config_raises() -> None:
-    raise AssertionError("implemented in 37-03")
+    from dotmd.ingestion.source_lifecycle import (
+        DefaultSourceCredentialProvider,
+        InMemorySourceConfigStore,
+        SourceLifecycleConfigError,
+        SourceRuntimeFactory,
+    )
+    from dotmd.ingestion.source_registry import default_source_registry
+
+    factory = SourceRuntimeFactory(
+        registry=default_source_registry(),
+        config_store=InMemorySourceConfigStore(),
+        credential_provider=DefaultSourceCredentialProvider(),
+        cursor_store=MagicMock(),
+    )
+    with pytest.raises(SourceLifecycleConfigError):
+        factory.build("gmail")
+
+
+def test_build_if_configured_returns_none_without_gmail_config() -> None:
+    from dotmd.ingestion.source_lifecycle import (
+        DefaultSourceCredentialProvider,
+        InMemorySourceConfigStore,
+        SourceRuntimeFactory,
+    )
+    from dotmd.ingestion.source_registry import default_source_registry
+
+    factory = SourceRuntimeFactory(
+        registry=default_source_registry(),
+        config_store=InMemorySourceConfigStore(),
+        credential_provider=DefaultSourceCredentialProvider(),
+        cursor_store=MagicMock(),
+    )
+    assert factory.build_if_configured("gmail") is None
+
+
+def test_gmail_source_config_limit_validation() -> None:
+    from dotmd.ingestion.source_lifecycle import GmailSourceConfig
+
+    GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r", search_result_limit=1)
+    GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r", search_result_limit=500)
+    assert GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r").search_result_limit == 20
+    with pytest.raises(ValidationError):
+        GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r", search_result_limit=0)
+    with pytest.raises(ValidationError):
+        GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r", search_result_limit=501)
+    with pytest.raises(ValidationError):
+        GmailSourceConfig(client_id="c", client_secret="s")
+
+
+def test_gmail_source_config_has_refresh_token_field() -> None:
+    from dotmd.ingestion.source_lifecycle import GmailSourceConfig
+
+    config = GmailSourceConfig(
+        client_id="cid",
+        client_secret="csec",
+        refresh_token="my-refresh-token",
+    )
+    assert config.refresh_token == "my-refresh-token"
+    assert hasattr(config, "refresh_token")
+
+
+def test_source_config_union_includes_gmail() -> None:
+    from dotmd.ingestion.source_lifecycle import GmailSourceConfig, SourceConfig
+
+    args = typing.get_args(SourceConfig)
+    assert GmailSourceConfig in args
+
+
+def test_build_gmail_bypasses_credential_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dotmd.ingestion.source_lifecycle import (
+        DefaultSourceCredentialProvider,
+        GmailSourceConfig,
+        InMemorySourceConfigStore,
+        SourceConfigRecord,
+        SourceRuntimeFactory,
+    )
+    from dotmd.ingestion.source_registry import default_source_registry
+
+    config_store = InMemorySourceConfigStore(
+        [
+            SourceConfigRecord(
+                namespace="gmail",
+                config=GmailSourceConfig(
+                    client_id="cid",
+                    client_secret="csec",
+                    refresh_token="rtoken",
+                ),
+            )
+        ]
+    )
+    credential_provider = DefaultSourceCredentialProvider()
+    get_access_called = []
+
+    def spy_get_access(descriptor: object, credential_ref: object) -> object:
+        get_access_called.append(True)
+        raise AssertionError("get_access must not be called for gmail")
+
+    monkeypatch.setattr(credential_provider, "get_access", spy_get_access)
+    factory = SourceRuntimeFactory(
+        registry=default_source_registry(),
+        config_store=config_store,
+        credential_provider=credential_provider,
+        cursor_store=MagicMock(),
+    )
+    bundle = factory.build("gmail")
+    assert not get_access_called
+    assert bundle.access.kind == "none"
+    assert bundle.provider is not None
+    assert bundle.supports_federated_search is True
+
+
+def test_partial_gmail_env_vars_logs_warning(tmp_path: object, caplog: pytest.LogCaptureFixture) -> None:
+    from dotmd.core.config import Settings
+    from dotmd.ingestion.source_lifecycle import source_runtime_factory_from_settings
+
+    settings = Settings(
+        embedding_url="http://localhost:18088",
+        gmail_client_id="my-client-id",
+        gmail_client_secret=None,
+        gmail_refresh_token=None,
+    )
+    with caplog.at_level("WARNING"):
+        factory = source_runtime_factory_from_settings(settings, MagicMock())
+    assert factory._config_store.get_config("gmail") is None
+    assert "DOTMD_GMAIL_CLIENT_SECRET" in caplog.text
+    assert "DOTMD_GMAIL_REFRESH_TOKEN" in caplog.text
 
 
 def test_base_connector_bridge_is_abstract(mock_token_provider: MagicMock) -> None:
