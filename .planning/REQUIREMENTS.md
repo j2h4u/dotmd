@@ -118,12 +118,12 @@ dotMD unless a later phase explicitly justifies it.
 
 ### Compatibility
 
-- [ ] **AIR-01**: dotMD can run one compatibility spike that adapts third-party
+- [x] **AIR-01**: dotMD can run one compatibility spike that adapts third-party
   Airweave connector-style output into dotMD `SourceDocument`, `SourceUnit`,
   optional `SourceAsset`, and `SearchCandidate` contracts.
-- [ ] **AIR-02**: The spike identifies which Airweave pieces are reusable
+- [x] **AIR-02**: The spike identifies which Airweave pieces are reusable
   directly, which require shims, and which should be avoided.
-- [ ] **AIR-03**: The compatibility spike does not introduce an Airweave-only
+- [x] **AIR-03**: The compatibility spike does not introduce an Airweave-only
   integration lane separate from filesystem and Telegram.
 
 ## Out Of Scope
@@ -157,6 +157,6 @@ dotMD unless a later phase explicitly justifies it.
 | TG-02 | Phase 36 | Planned |
 | TG-03 | Phase 36 | Planned |
 | TG-04 | Phase 36 | Planned |
-| AIR-01 | Phase 37 | Planned |
-| AIR-02 | Phase 37 | Planned |
-| AIR-03 | Phase 37 | Planned |
+| AIR-01 | Phase 37 | Complete |
+| AIR-02 | Phase 37 | Complete |
+| AIR-03 | Phase 37 | Complete |
