@@ -74,6 +74,16 @@ Airweave's runtime/indexing stack (Vespa, Temporal, Celery, Redis) is NOT used. 
 
 `GmailAttachmentEntity` is present in `backend/src/dotmd/vendor/airweave/entities_gmail.py:182`. dotMD does not add a `SourceAsset` model in this phase.
 
+AIR-01 mapping status:
+
+| Airweave/Gmail concept | dotMD target | Phase 37 status |
+|------------------------|--------------|-----------------|
+| Gmail message identity and metadata | `SearchCandidate` + provider metadata | Implemented by `GmailBridge.to_search_candidate()`. |
+| Gmail message body | `SourceUnitWindow` read surface | Implemented by `GmailBridge.read_unit_window()`. |
+| Gmail message as durable source document | `SourceDocument` | Deferred because Gmail is federated-only in this spike. |
+| Gmail message as source unit | `SourceUnit` | Deferred for the same reason; no local Gmail sync cursor exists. |
+| Gmail attachment | Future `SourceAsset` | Deferred per D-11; mapping below records the expected fields. |
+
 | GmailAttachmentEntity field | Future SourceAsset field | Notes |
 |----------------------------|--------------------------|-------|
 | `attachment_id` | `asset_ref` | Unique within the parent Gmail message. |
