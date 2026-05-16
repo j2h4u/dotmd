@@ -1,4 +1,4 @@
-# Airweave Connector Compatibility Analysis
+# Gmail Airweave Compatibility Spike
 
 **Phase:** 37 - Airweave connector compatibility spike
 **Date:** 2026-05-13

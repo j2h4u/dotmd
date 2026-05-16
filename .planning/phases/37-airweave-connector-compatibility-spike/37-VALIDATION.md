@@ -45,4 +45,4 @@ created: 2026-05-11
 | read_unit_window | 37-02 | 2 | AIR-01 | unit (mock httpx) | `pytest tests/test_gmail_bridge.py::test_read_unit_window` | pending |
 | gmail descriptor | 37-03 | 2 | AIR-03 | unit | `pytest tests/test_gmail_bridge.py::test_gmail_descriptor` | pending |
 | lifecycle build | 37-03 | 2 | AIR-03 | unit | `pytest tests/test_gmail_bridge.py::test_lifecycle_build_missing_config_raises` | pending |
-| AIR-02 report | 37-04 | 3 | AIR-02 | file exists | `test -f docs/airweave-compatibility.md` | pending |
+| AIR-02 report | 37-04 | 3 | AIR-02 | file exists | `test -f docs/gmail-airweave-compatibility-spike.md` | pending |

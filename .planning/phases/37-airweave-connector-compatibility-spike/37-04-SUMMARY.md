@@ -21,7 +21,7 @@ tech-stack:
   patterns: [evidence-based-compatibility-report, vendored-connector-spike]
 key-files:
   created:
-    - docs/airweave-compatibility.md
+    - docs/gmail-airweave-compatibility-spike.md
   modified:
     - AGENTS.md
     - backend/src/dotmd/ingestion/gmail_provider.py
@@ -47,7 +47,7 @@ commit: 60954a9
 
 ## Accomplishments
 
-- Added `docs/airweave-compatibility.md` from the implemented vendor slice, Gmail bridge, registry, lifecycle, and shim files.
+- Added `docs/gmail-airweave-compatibility-spike.md` from the implemented vendor slice, Gmail bridge, registry, lifecycle, and shim files.
 - Documented the split between reusable Airweave pieces, shimmed pieces, and avoided Airweave runtime components.
 - Documented that `GmailSource.search()` is not implemented and that `GmailBridge.search_native()` is dotMD-owned direct Gmail API behavior.
 - Added `AGENTS.md` Phase 37 notes covering vendoring, token caching, generic bridge boundaries, and federated-only Gmail behavior.

@@ -1,4 +1,4 @@
-# Airweave Adapter Compatibility
+# Airweave Adapter Playbook
 
 dotMD can use Airweave connectors as adapter donor code, not as an Airweave
 runtime dependency.

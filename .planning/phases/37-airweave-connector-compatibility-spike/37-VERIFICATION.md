@@ -20,13 +20,13 @@ Passed. Phase 37 proves dotMD can reuse an Airweave connector-style schema/sourc
 
 | Requirement | Status | Evidence |
 |-------------|--------|----------|
-| AIR-01 | Passed | Vendored Gmail source/entity/config slice in `backend/src/dotmd/vendor/airweave/`; `BaseConnectorBridge` and `GmailBridge` convert Gmail-native results into `SearchCandidate` and `SourceUnitWindow`. `docs/airweave-compatibility.md` explicitly records deferred `SourceDocument`, `SourceUnit`, and `SourceAsset` mapping for the federated-only spike. |
-| AIR-02 | Passed | `docs/airweave-compatibility.md` covers reusable pieces, required shims, avoided Airweave runtime components, `GmailSource.search()` absence, SourceAsset deferred mapping, and a generic bridge extensibility table. |
+| AIR-01 | Passed | Vendored Gmail source/entity/config slice in `backend/src/dotmd/vendor/airweave/`; `BaseConnectorBridge` and `GmailBridge` convert Gmail-native results into `SearchCandidate` and `SourceUnitWindow`. `docs/gmail-airweave-compatibility-spike.md` explicitly records deferred `SourceDocument`, `SourceUnit`, and `SourceAsset` mapping for the federated-only spike. |
+| AIR-02 | Passed | `docs/gmail-airweave-compatibility-spike.md` covers reusable pieces, required shims, avoided Airweave runtime components, `GmailSource.search()` absence, SourceAsset deferred mapping, and a generic bridge extensibility table. |
 | AIR-03 | Passed | Gmail is registered via `gmail_source_descriptor()`, built through `SourceRuntimeFactory.build("gmail")`, and discovered by `DotMDService._build_federated_bundles()` through the same descriptor/lifecycle path as filesystem and Telegram. |
 
 ## Must-Have Verification
 
-- `docs/airweave-compatibility.md` exists and is evidence-based.
+- `docs/gmail-airweave-compatibility-spike.md` exists and is evidence-based.
 - Report covers "Reusable Directly", "Requires Shims", and "Should Be Avoided".
 - Report documents `GmailSource.search()` absence and `GmailBridge.search_native()` direct Gmail API fallback.
 - Report documents deferred `SourceAsset` mapping for `GmailAttachmentEntity`.

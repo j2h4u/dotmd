@@ -344,7 +344,7 @@ Overall the phase is directionally sound: it keeps Gmail in the federated-provid
 
 - **MEDIUM:** Full test suite green may be too broad if there are known unrelated failures. If the suite is currently clean, keep it. If not, record exact known failures before starting.
 - **MEDIUM:** The report can become post-hoc justification unless it includes evidence from tests and code paths.
-- **LOW:** `AGENTS.md` should stay operational and concise; detailed compatibility analysis belongs in `docs/airweave-compatibility.md`.
+- **LOW:** `AGENTS.md` should stay operational and concise; detailed compatibility analysis belongs in `docs/gmail-airweave-compatibility-spike.md`.
 
 ### Suggestions
 
@@ -481,9 +481,9 @@ The capstone plan. The report is generated from actual implemented code rather t
 - **LOW — Report doesn't mention what happens when Airweave upstream changes.**
 
 ### Suggestions
-- Provide a template/skeleton for `docs/airweave-compatibility.md` with required sections and expected formats.
+- Provide a template/skeleton for `docs/gmail-airweave-compatibility-spike.md` with required sections and expected formats.
 - Add one manual E2E verification step to the checklist in Plan 37-04.
-- Include the Airweave upstream commit hash and report generation date in `docs/airweave-compatibility.md`.
+- Include the Airweave upstream commit hash and report generation date in `docs/gmail-airweave-compatibility-spike.md`.
 
 ---
 
@@ -823,7 +823,7 @@ Plan 37-04 defines a solid post-implementation verification phase. The requireme
   ```bash
   grep -r "^from airweave\|^import airweave" backend/src/dotmd/ --include="*.py" --exclude-dir=vendor
   ```
-- **LOW** — "No unreplaced `[TBD: ...]` placeholders" is a documentation quality check that `pytest` can't verify. Add a simple `grep "[TBD:" docs/airweave-compatibility.md` step.
+- **LOW** — "No unreplaced `[TBD: ...]` placeholders" is a documentation quality check that `pytest` can't verify. Add a simple `grep "[TBD:" docs/gmail-airweave-compatibility-spike.md` step.
 
 ### Suggestions
 - Fix the import-verification grep to exclude the vendor directory.
@@ -999,7 +999,7 @@ keeping vendored Airweave code isolated from heavy platform dependencies.
 ## Suggestions
 
 - Add an explicit test proving Gmail native result → dotMD read/search contracts: `GmailBridge.to_search_candidate()` produces a stable Gmail ref, and `read_unit_window()` resolves that ref into the expected unit/window shape.
-- In `docs/airweave-compatibility.md`, add a short AIR-01 mapping table: `Gmail message → SourceDocument?`, `Gmail message/body → SourceUnit/read window`, `Gmail attachment → deferred SourceAsset`, `Gmail search hit → SearchCandidate`.
+- In `docs/gmail-airweave-compatibility-spike.md`, add a short AIR-01 mapping table: `Gmail message → SourceDocument?`, `Gmail message/body → SourceUnit/read window`, `Gmail attachment → deferred SourceAsset`, `Gmail search hit → SearchCandidate`.
 - Add timeout to `GmailOAuthTokenProvider.get_token()` now; it is small and removes a real operational footgun.
 - Add tests that partial Gmail env configuration logs only missing variable names, never present values.
 - Make the `SourceAuthError` / `SourceTemporaryUnavailable` import decision deterministic. Prefer importing from `dotmd.core.exceptions`; only define locally if the exceptions truly do not exist.
@@ -1167,12 +1167,12 @@ This plan is a documentation + cleanup phase and carries low implementation risk
   leading whitespace. A more robust pattern: `grep -rE '(^|\s)(from|import)\s+airweave'`.
 - **LOW — TBD placeholder verification.**
   "No unreplaced `[TBD: ...]` placeholders" is a documentation quality check that `pytest` can't
-  verify. Add a simple `grep "[TBD:" docs/airweave-compatibility.md` step.
+  verify. Add a simple `grep "[TBD:" docs/gmail-airweave-compatibility-spike.md` step.
 
 **Suggestions:**
 - Add an integration test using `pytest-httpx` or `responses` to mock the Gmail API and test the full `build_if_configured("gmail") → search_native(query) → to_search_candidate() → fanout_federated()` flow
 - Use a more robust grep pattern for import verification: `grep -rPE '(^|\s)(from|import)\s+airweave'`
-- Add a verification step: `grep "\[TBD:" docs/airweave-compatibility.md || echo "No TBD placeholders: OK"`
+- Add a verification step: `grep "\[TBD:" docs/gmail-airweave-compatibility-spike.md || echo "No TBD placeholders: OK"`
 
 **Risk Assessment:** LOW — Documentation phase with clear acceptance criteria and verifiable outputs.
 

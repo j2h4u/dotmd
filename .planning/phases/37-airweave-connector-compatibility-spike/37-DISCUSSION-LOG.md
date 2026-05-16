@@ -96,11 +96,11 @@
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| docs/airweave-compatibility.md | Standalone markdown in docs/. Permanent reference, easily discoverable. | ✓ |
+| docs/gmail-airweave-compatibility-spike.md | Standalone markdown in docs/. Permanent reference, easily discoverable. | ✓ |
 | Phase artifact in .planning/phases/37-*/ | Part of phase directory. Good for GSD continuity. | |
 | Inline in bridge code as structured docstrings | Findings live in code. No separate doc. | |
 
-**User's choice:** `docs/airweave-compatibility.md`
+**User's choice:** `docs/gmail-airweave-compatibility-spike.md`
 
 ---
 

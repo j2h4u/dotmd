@@ -208,7 +208,7 @@ with `FEDERATED_SEARCH` capability automatically.
 | `SearchCandidate` ref validates as `"gmail:message:<id>"` | Model validation test |
 | `read_unit_window` returns `SourceUnitWindow` from message dict | Unit test with fixture |
 | Bridge `search_native()` called with shim auth returns candidates | Integration test with mock httpx |
-| `docs/airweave-compatibility.md` exists and covers all 3 AIR-02 categories | File existence check |
+| `docs/gmail-airweave-compatibility-spike.md` exists and covers all 3 AIR-02 categories | File existence check |
 | `SourceRuntimeFactory.build("gmail")` raises `SourceLifecycleConfigError` on missing config | Unit test |
 
 ### Live smoke (manual, needs real credentials)
@@ -291,7 +291,7 @@ rewriting. Alternative: keep the vendored code as-is and add the vendor path to
 
 **Wave 3 (after Wave 2):**
 - `37-04`: AIR-02 compatibility report + tests
-  - `docs/airweave-compatibility.md` — structured analysis per D-12
+  - `docs/gmail-airweave-compatibility-spike.md` — structured analysis per D-12
   - Unit tests for bridge mapping, descriptor, SearchCandidate validation
   - Manual smoke test notes (credentials required)
 
@@ -312,7 +312,7 @@ rewriting. Alternative: keep the vendored code as-is and add the vendor path to
 | `backend/src/dotmd/ingestion/source_registry.py` | Modify — add `gmail_source_descriptor()` |
 | `backend/src/dotmd/ingestion/source_lifecycle.py` | Modify — add `GmailSourceConfig`, factory branch |
 | `backend/src/dotmd/api/service.py` | Modify — activate Gmail in `_build_federated_bundles()` |
-| `docs/airweave-compatibility.md` | Create — AIR-02 deliverable |
+| `docs/gmail-airweave-compatibility-spike.md` | Create — AIR-02 deliverable |
 | `backend/tests/test_gmail_bridge.py` | Create — bridge unit tests |
 
 ## RESEARCH COMPLETE

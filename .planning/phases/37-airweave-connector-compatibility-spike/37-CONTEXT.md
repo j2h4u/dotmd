@@ -18,7 +18,7 @@ Concretely, this phase delivers:
 3. Real OAuth credentials for the personal Gmail inbox, wired through the
    `source_lifecycle` credential-provider boundary.
 4. `read_unit_window` implementation so `read(ref)` resolves Gmail message refs.
-5. `docs/airweave-compatibility.md` — structured analysis of what's reusable
+5. `docs/gmail-airweave-compatibility-spike.md` — structured analysis of what's reusable
    directly from Airweave, what requires shims, and what to avoid (AIR-02).
 
 This phase is NOT ingesting Gmail into the local SQLite/FTS5/vector index, NOT
@@ -119,7 +119,7 @@ Gmail-specific hard-coded integration (the bridge must generalize).
 ### AIR-02 Compatibility Report
 
 - **D-12:** The compatibility analysis is written to
-  `docs/airweave-compatibility.md`. It must answer:
+  `docs/gmail-airweave-compatibility-spike.md`. It must answer:
   1. **Reusable directly** — Airweave source/entity definitions, entity
      field conventions (`AirweaveField`, `is_entity_id`, `is_name`), cursor
      pattern.
@@ -255,7 +255,7 @@ Gmail-specific hard-coded integration (the bridge must generalize).
   `SearchCandidate`. New file `gmail_provider.py` mirrors this structure.
 - `api/service.py` — `_build_federated_bundles()` picks up Gmail provider
   when `DOTMD_GMAIL_*` env vars are set.
-- `docs/` — new file `airweave-compatibility.md` (AIR-02 deliverable).
+- `docs/` — new file `gmail-airweave-compatibility-spike.md` (AIR-02 deliverable).
 
 ### Anti-Patterns To Avoid
 

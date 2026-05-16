@@ -6,7 +6,7 @@ depends_on:
   - 37-02
   - 37-03
 files_modified:
-  - docs/airweave-compatibility.md
+  - docs/gmail-airweave-compatibility-spike.md
   - backend/tests/test_gmail_bridge.py
   - AGENTS.md
 autonomous: true
@@ -15,14 +15,14 @@ requirements:
   - AIR-03
 must_haves:
   goal: >
-    docs/airweave-compatibility.md exists and answers all three AIR-02 categories
+    docs/gmail-airweave-compatibility-spike.md exists and answers all three AIR-02 categories
     based on the ACTUAL implemented code from Plans 37-01 through 37-03 (not
     pre-written prose). Report includes extensibility assessment table, honest
     accounting of GmailSource.search() absence, and SourceAsset deferred mapping.
     AGENTS.md updated with key architectural decisions. Full test suite is green.
     No Airweave-only integration lane exists separate from filesystem/Telegram paths.
   truths:
-    - docs/airweave-compatibility.md exists and is non-empty
+    - docs/gmail-airweave-compatibility-spike.md exists and is non-empty
     - Report was written AFTER inspecting actual implementation files (not pre-written)
     - Report covers "Reusable directly" section with specific class/file references from vendor/
     - Report covers "Requires shims" section citing actual shim implementations in shims.py
@@ -39,7 +39,7 @@ must_haves:
 
 ## Objective
 
-Produce the `docs/airweave-compatibility.md` structured analysis (AIR-02
+Produce the `docs/gmail-airweave-compatibility-spike.md` structured analysis (AIR-02
 deliverable) based on the ACTUAL implemented code, run the full test suite,
 and update AGENTS.md with architectural decisions. The report must be written
 by inspecting the real implementation — not pre-written prose.
@@ -55,7 +55,7 @@ filled in during this task after inspecting the real implementation.
 
 ## Tasks
 
-### Task 1: Write docs/airweave-compatibility.md (evidence-based)
+### Task 1: Write docs/gmail-airweave-compatibility-spike.md (evidence-based)
 
 <read_first>
 - backend/src/dotmd/vendor/airweave/ — ALL files (inspect actual vendored content)
@@ -71,7 +71,7 @@ filled in during this task after inspecting the real implementation.
 </read_first>
 
 <action>
-After reading all implementation files, write `docs/airweave-compatibility.md`
+After reading all implementation files, write `docs/gmail-airweave-compatibility-spike.md`
 with the following structure. Every claim must cite specific files, class names,
 or line-level observations from the actual code — no aspirational statements.
 
@@ -221,8 +221,8 @@ must be filled with real observations from the code.
 </action>
 
 <acceptance_criteria>
-- `test -f docs/airweave-compatibility.md` exits 0
-- `wc -l docs/airweave-compatibility.md` shows > 80 lines
+- `test -f docs/gmail-airweave-compatibility-spike.md` exits 0
+- `wc -l docs/gmail-airweave-compatibility-spike.md` shows > 80 lines
 - Report contains "Reusable directly" section with specific class names
 - Report contains "Requires shims" section citing GmailOAuthTokenProvider with threading.Lock and expires_in-300
 - Report contains "Should be avoided" section
@@ -361,8 +361,8 @@ cd /home/j2h4u/repos/j2h4u/dotmd/backend
 python -m pytest tests/ -x -q
 
 # Compatibility report exists and is filled
-test -f /home/j2h4u/repos/j2h4u/dotmd/docs/airweave-compatibility.md && echo "OK"
-grep -c "TBD:" /home/j2h4u/repos/j2h4u/dotmd/docs/airweave-compatibility.md || echo "No TBD placeholders: OK"
+test -f /home/j2h4u/repos/j2h4u/dotmd/docs/gmail-airweave-compatibility-spike.md && echo "OK"
+grep -c "TBD:" /home/j2h4u/repos/j2h4u/dotmd/docs/gmail-airweave-compatibility-spike.md || echo "No TBD placeholders: OK"
 
 # No direct airweave imports outside vendor
 grep -r "^from airweave\|^import airweave" src/dotmd/ --include="*.py" && echo "FAIL" || echo "OK"
@@ -391,5 +391,5 @@ print('BaseConnectorBridge ABC contract: OK')
 
 When this plan passes verification, Phase 37 deliverables are complete:
 - AIR-01: `BaseConnectorBridge(ABC)` + `GmailBridge` bridges Airweave-style connector to dotMD contracts
-- AIR-02: `docs/airweave-compatibility.md` documents reusable/shim/avoid analysis (evidence-based)
+- AIR-02: `docs/gmail-airweave-compatibility-spike.md` documents reusable/shim/avoid analysis (evidence-based)
 - AIR-03: Gmail uses same registry/lifecycle/search contracts as filesystem and Telegram
