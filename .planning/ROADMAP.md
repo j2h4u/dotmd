@@ -53,16 +53,20 @@ These phase directories predate the finalized v1.4 archive but remain on disk,
 so the active roadmap keeps minimal records for GSD health checks.
 
 ### Phase 11: Embedding Model Evaluation
+
 - [x] E5-large vs Qwen3-Embedding-0.6B A/B comparison
 - [x] Multi-model vector store support
 
 ### Phase 12: Indexing Integrity Rework
+
 - [x] Unified database, split fingerprints, embedding reuse, and exclusive index lock
 
 ### Phase 13: Content-Aware Chunking & Search
+
 - [x] Speaker-turn chunking, context prefix injection, graph-direct retrieval, and FTS5 improvements
 
 ### Phase 14: Frontmatter-Driven Indexing
+
 - [x] Structured frontmatter handling across chunk text, graph, FTS5, and embeddings
 
 </details>
@@ -103,6 +107,7 @@ See: `.planning/milestones/v1.5-ROADMAP.md`
 ## v1.6 Unified Source Architecture (Phases 32-37) — SHIPPED
 
 Reference:
+
 - Upstream: `https://github.com/airweave-ai/airweave`
 - Local checkout: `/home/j2h4u/repos/airweave-ai/airweave`
 
@@ -178,6 +183,7 @@ See: `.planning/phases/38-evaluate-embedded-surrealdb-as-unified-storage-backend
 **Expected gain:** ~1.5x over current 4.53 s/chunk.
 
 **Plans:**
+
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
 ### Backlog 999.3: Automatic orphan cleanup — chunks/vec/FTS rows without live file_path (DONE 2026-04-25)
@@ -185,11 +191,13 @@ See: `.planning/phases/38-evaluate-embedded-surrealdb-as-unified-storage-backend
 **Goal:** Detect and purge orphan rows (chunks without fingerprints, chunks without vectors, chunks for deleted files) on a periodic or startup basis. Historically `_purge_file()` only ran when re-chunking, so orphans accumulated for months across hash-algorithm migrations.
 
 **Context found 2026-04-24 during Phase 15 pre-migration cleanup:**
+
 - `chunks_heading_512_50`: 237 files orphan (no fingerprints — files deleted from disk)
 - `chunks_contextual_512_50`: 4937 rows without FTS and without vec_meta (pure ghosts from buggy `_purge_file()` after the 2026-04-03 MD5→blake2b migration)
 - Total: ~5k invisible rows consuming disk/RAM, surviving across re-chunking cycles
 
 **Done:**
+
 - ✅ Criterion (c) — chunks with file_path not in discovered files — cleaned on every trickle startup (2026-04-24)
 - ✅ `purge_orphaned_files` rewritten to scan ALL `chunks_<strategy>` tables, not just the active strategy (2026-04-24)
 - ✅ Cascade covers chunks, chunks_fts, vec_meta, vec0 virtual table by rowid, chunk_fingerprints, embed_fingerprints_* across every embedding model (2026-04-24)
@@ -204,21 +212,23 @@ Resolved: `indexing_exclude` already existed; extended default list in `config.p
 
 _Below is the original backlog description, kept for history:_
 
-
 **Goal:** Stop indexing auto-generated or duplicate content that pollutes the knowledgebase.
 
 **Context found 2026-04-24 during Phase 15 migration attempt:**
+
 - `.pytest_cache/README.md` is pytest boilerplate, identical in every repo — currently indexed as many separate "documents"
 - Skill directories are cloned into multiple locations (`~/.agents/`, `~/.hermes/`, `~/repos/.../skills/`) — same content indexed N times
 - No exclusion mechanism in `discover_files()`
 
 **Scope:**
+
 - Config field `DOTMD_IGNORE_PATTERNS` (list of glob patterns, default includes `.pytest_cache/`, `node_modules/`, `.venv/`, `.git/`, `__pycache__/`)
 - Apply in `discover_files()` before yielding FileInfo
 - Purge existing chunks for files matching new ignore patterns on next startup
 - Document in CLAUDE.md/AGENTS.md that copy-reflection patterns should not be under `data_dir`
 
 **Plans:**
+
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
 ### Backlog 999.7: Remove migration_v16 dead code after soak (DONE 2026-04-30)
@@ -230,6 +240,7 @@ _Below is the original backlog description, kept for history:_
 **Trigger condition:** Phase 16 stable in production without rollback need, AND `index.db.v16-backup` removed or verified absent in the same sweep (i.e. committing to "no rollback path" simultaneously with deleting the rollback script).
 
 **Scope (one phase, one mental purge):**
+
 - [x] `backend/src/dotmd/ingestion/migration_v16.py` — full migration logic deleted.
 - [x] `backend/src/dotmd/cli.py` — `dotmd migrate` Click group removed entirely.
 - [x] Migration tests and pre-v16 schema fixtures removed.
@@ -239,6 +250,7 @@ _Below is the original backlog description, kept for history:_
 - [x] `migration_v16_lock` startup guard and `lock_constants.py` removed because no process creates that lock anymore.
 
 **Out of scope:**
+
 - The M2M schema itself, `_holder_aware_chunk_cleanup`, `chunk_file_paths_*` tables — these are now the live schema, not migration code.
 
 **Plans:** Complete.
@@ -250,6 +262,7 @@ _Below is the original backlog description, kept for history:_
 **Context 2026-04-24:** Phase 16 locked these fields on the `chunks_*` row with a fail-closed divergence policy (Decision #10). Observed divergence count on current KB = 0 (all duplicates are symlinks/mirrors with identical headings), so the scope expansion was deferred. Trigger condition: any downstream feature that needs per-holder heading.
 
 **Plans:**
+
 - [ ] TBD (promote when a consumer emerges)
 
 ### Backlog 999.9: MCP tool — graph entity inspection
@@ -259,11 +272,13 @@ _Below is the original backlog description, kept for history:_
 **Context 2026-04-25:** Hermes (Tiger's Claw) searched for "Даннинг-Крюгер" and found a relevant voicenote (score 0.904). When asked to explore further — linked entities, related conversations, speaker context — it couldn't. dotmd has 42k entities and 256k graph edges in FalkorDB, but they're used only internally for RRF ranking. Nothing surfaces through MCP. Hermes noted: "граф используется под капотом для reranking, но наружу выдаётся всё равно плоский список сниппетов."
 
 **Proposed tools:**
+
 - `get_entity(name)` → entity properties + type
 - `related_entities(name, depth=1)` → neighbours with relation types and weights
 - Possibly: `entity_mentions(name)` → chunks where entity appears
 
 **Plans:**
+
 - [ ] TBD
 
 ---
@@ -287,6 +302,7 @@ _Below is the original backlog description, kept for history:_
 **Note:** Lower priority than 999.9 and 999.10. Useful only if an agent workflow specifically iterates over the file list rather than searching. A `get_metadata(file_path)` tool (999.10) is more immediately useful.
 
 **Plans:**
+
 - [ ] TBD
 
 ---
@@ -300,6 +316,7 @@ _Below is the original backlog description, kept for history:_
 **Technique:** Dual-encoder unified embedding (arxiv 2601.11863, ECIR 2026).
 
 Instead of `embed(title + tags + chunk_text)` → store two vectors separately:
+
 ```
 e_text  = embed(chunk_text)           # computed once per chunk, frozen
 e_meta  = embed(title + tags)         # one vector per document (not per chunk)
@@ -312,6 +329,7 @@ On body change: recompute `e_text` per chunk (same as today).
 Paper reports unified embeddings match or beat prefix approach in retrieval quality. `α` is a tunable weight (needs per-corpus calibration).
 
 **Schema impact:**
+
 - `e_text` — store alongside existing vec in `vec_meta_*`
 - `e_meta` — new per-file table (one vector per file_path per model)
 - `e_fused` — replaces current vec0 content; recomputed locally on metadata change
@@ -324,6 +342,7 @@ Paper reports unified embeddings match or beat prefix approach in retrieval qual
 so `.planning/phases/` only contains active milestone phase directories.
 
 **Plans:**
+
 - [x] Completed as a backlog implementation run (3/3 plans)
 
 ---
@@ -335,6 +354,7 @@ so `.planning/phases/` only contains active milestone phase directories.
 **Context 2026-04-26:** Текущий workaround `stateless_http=True + json_response=True` был введён из-за бага в mcp 1.27.0 где SSE-доставка ответов на `tools/call` не работала. Root cause: в `streamable_http.py` `message_router` использует zero-buffer `anyio.create_memory_object_stream(0)` для доставки ответов в SSE writer — при определённых условиях response дропался без ошибки.
 
 **Почему notification важна:**
+
 - Hermes поддерживает `notifications/tools/list_changed` — реализовано в `tools/mcp_tool.py::_make_message_handler()` + `_refresh_tools()`
 - При получении уведомления Hermes немедленно перечитывает `tools/list` и обновляет реестр инструментов
 - В stateless режиме нет персистентного SSE-канала — уведомление некуда слать
@@ -344,11 +364,13 @@ so `.planning/phases/` only contains active milestone phase directories.
 FastMCP поддерживает `Context.session.send_tool_list_changed()`. В нашем случае — отправлять при старте lifespan (после warmup), чтобы уже подключённые клиенты обновили кэш.
 
 **Блокер:** mcp 1.27.0 SSE bug. Варианты разблокировки:
+
 - Дождаться фикса в mcp SDK (открыть issue upstream)
 - Зафиксировать версию SDK на 1.26.x где SSE работало
 - Самостоятельно патчить `message_router` (хрупко)
 
 **Plans:**
+
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
 ---
@@ -362,6 +384,7 @@ FastMCP поддерживает `Context.session.send_tool_list_changed()`. В 
 **Prerequisite:** voiceprint-postgres (`pgvector/pgvector:pg18`) is already running on senbonzakura but belongs to voiceprint service. Before dotmd can adopt pgvector, Postgres must be extracted into a shared service (`shared-postgres`) independent of voiceprint. Both voiceprint and dotmd then connect to the shared instance.
 
 **Migration scope:**
+
 - Extract `voiceprint-postgres` → `shared-postgres` standalone Docker service
 - Implement `PgVectorVectorStore` adapter (existing `VectorStoreProtocol` abstraction makes this clean)
 - Full index rebuild required (no vector portability from sqlite-vec)
@@ -371,6 +394,7 @@ FastMCP поддерживает `Context.session.send_tool_list_changed()`. В 
 **Trigger:** Performance issues with sqlite-vec at scale, or when N-vector component updates become a meaningful operational pain.
 
 **Plans:**
+
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
 ---
@@ -386,6 +410,7 @@ FastMCP поддерживает `Context.session.send_tool_list_changed()`. В 
 **Trigger:** Накоплено достаточно запросов в `search_log` для статистически значимого sweep (~100+ запросов).
 
 **Plans:**
+
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
 ---
@@ -401,6 +426,7 @@ FastMCP поддерживает `Context.session.send_tool_list_changed()`. В 
 **Note:** Более шумный сигнал чем кросс-энкодер (999.15). Полезен как дополнительная валидация или когда reranker недоступен.
 
 **Plans:**
+
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
 ### Backlog 999.17: Fix shared-chunk e_fused — per-file fused vector for multi-file chunks
@@ -412,6 +438,7 @@ FastMCP поддерживает `Context.session.send_tool_list_changed()`. В 
 **Plans:** 4 plans
 
 Plans:
+
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
 ---
@@ -423,6 +450,7 @@ Plans:
 **Plans:** 0 plans
 
 Plans:
+
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
 ---
@@ -434,6 +462,7 @@ Plans:
 **Plans:** 0 plans
 
 Plans:
+
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
 ---
@@ -447,52 +476,66 @@ introduce the minimal source model, then integrate Telegram read-only as the
 first real non-filesystem source and harden from real usage.
 
 **Architecture context:**
+
 - [`docs/source-adapter-architecture.md`](../docs/source-adapter-architecture.md)
   — source/document/unit/chunk vocabulary, source assets, metadata layers,
   source entity catalogs, cross-source identity resolution, parser/content
   format axis, and phased MVP proposal.
+
 - [`docs/source-adapter-architecture-panel-review.md`](../docs/source-adapter-architecture-panel-review.md)
   — expert-panel review covering product scope, retrieval/indexing, integration
   contracts, metadata, file-like assets, entity catalogs, security/privacy,
   QA, and MVP phase shape.
+
 - [`docs/architecture.md`](../docs/architecture.md)
   — top-level architecture index linking to the source-adapter context.
 
 **Context captured 2026-05-04:**
+
 - Current dotMD discovery is `.md`-only; `.txt` is not a supported parser today.
 - Markdown frontmatter is already document metadata: `title`, `kind`, `tags`,
   and `participants` influence chunking, metadata embeddings, FTS, and graph.
+
 - Source and content format are separate axes: filesystem can discover Markdown,
   PDF, HTML, DOCX, etc.; the parser/chunking strategy should depend on
   `media_type`/`parser_name`, not on the source alone.
+
 - File-like assets can come from any source: PDF from filesystem, Telegram,
   Slack, Notion, or Google Drive should share parser infrastructure while
   preserving provenance.
+
 - Sources may emit entity catalogs such as Telegram users, Google contacts, or
   Gmail addresses. These are not corpus documents by default; they should feed
   graph identity resolution, alias expansion, keyword lookup, and display
   metadata.
+
 - Cross-source identity resolution must keep `SourceEntity`, `Mention`, and
   `CanonicalEntity` separate and record confidence/evidence; string equality is
   not enough for automatic person merges.
 
 **MVP phase shape proposed by the docs:**
+
 1. Minimal Source Model Shim — canonical `namespace`, `document_ref`, `ref`,
    `media_type`, `parser_name`, current markdown/frontmatter metadata, and
    filesystem compatibility.
+
 2. Telegram Read-Only MVP — minimal export surface in `mcp-telegram`, Telegram
    adapter in dotMD, dialog-as-document, message-as-source-unit, message-window
    chunks, and read context around Telegram hits.
+
 3. Telegram Hardening From Real Usage — improve chunking, snippets/read,
    delete/edit propagation, observability, and tests based on real searches.
+
 4. Minimal Entity Catalog Layer — Telegram users/entities as `SourceEntity`,
    conservative exact-ID graph links, no fuzzy name merging by default.
+
 5. Second Source Validation — Perplexity exporter, Notion, or Google Docs after
    Telegram lessons refine the contract.
 
 **Plans:** 0 plans
 
 Plans:
+
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
 ---
@@ -504,13 +547,16 @@ and other conversational documents so dotMD can recall important commitments
 even when the user does not remember the exact words.
 
 **Context captured 2026-05-05:**
+
 - A search for prior profit-sharing agreements found useful nearby results but
   missed the Николай Сенин agreement until the exact phrase `65 на 35` was
   supplied.
+
 - The missed transcript used `выручку делить`, `доли`, and `65/35`, while the
   user asked with broader wording such as `распределение прибыли`. This showed
   that embeddings + top-K search are not enough for high-recall retrieval of
   agreements, commitments, and financial terms.
+
 - A quick PoC with `gpt-5.4-mini` over
   `/mnt/knowledgebase/voicenotes/20260319-1358-Aqny3Jxn/transcript.md`
   produced useful structured arrays for agreements, promises, decisions, open
@@ -519,20 +565,25 @@ even when the user does not remember the exact words.
   validation and normalization.
 
 **Proposed approach:**
+
 - During indexing, run a cheap candidate extractor over chunks, with overlap or
   neighbouring context, to produce arrays:
   `agreements`, `promises`, `decisions`, `open_questions`,
   `financial_terms`, and `next_steps`.
+
 - Mark low-context items with a flag such as `requires_context` when a chunk
   says "договорились" or "давай так" but the actual subject is in a neighbouring
   chunk.
+
 - For candidates, re-read a wider window (`previous + current + next`) and run
   a verifier/consolidator that confirms the item, normalizes participants,
   extracts short evidence quotes, and pins source timecodes.
+
 - Store the final structured items as a separate searchable layer linked to
   source file, chunk/window ids, participants, date, and project/topic hints.
 
 **Example target record:**
+
 ```json
 {
   "type": "financial_term",
@@ -552,18 +603,23 @@ even when the user does not remember the exact words.
 ```
 
 **Open design questions:**
+
 - Whether this belongs in the existing graph layer, a new SQLite table family,
   or both.
+
 - Whether extraction should run for every chunk by default, only for
   transcript-like `kind`s, or behind an opt-in indexing mode.
+
 - How much overlap is needed for reliable commitment extraction without making
   indexing too expensive.
+
 - Which model tier is acceptable for first-pass extraction, and whether a
   stronger verifier is needed for low-confidence or financially sensitive items.
 
 **Plans:** 0 plans
 
 Plans:
+
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
 ---
@@ -579,72 +635,94 @@ currently a single-user/single-runtime service and can tolerate a breaking
 contract change if it simplifies the next source-adapter phases.
 
 **Context captured 2026-05-06:**
+
 - Phase 25 shipped `SourceDocument`, `ChunkProvenance`, `source_documents`, and
   `chunk_source_provenance_<strategy>`, but kept `SearchResult.file_paths`, MCP
   `SearchHit.file_paths`, MCP `read(file_path, start, end)`, and
   `chunk_file_paths_<strategy>` as the compatibility-authoritative path.
+
 - That shape is still filesystem-centric. If Telegram read-only is implemented
   next without cleanup, the Telegram adapter will likely inherit path-shaped
   APIs and require another compatibility bridge.
+
 - There are no external dotMD users or third-party MCP clients to protect. The
   only current consumers are our own agents and service workflows, so an
   intentional breaking change is acceptable if it is planned and tested.
 
 **Proposed scope:**
+
 - Make `ref` / `(namespace, document_ref)` the primary identity returned from
   search results and used by read/drill-style APIs.
+
 - Replace or supersede MCP `read(file_path, start, end)` with source-aware
   `read(ref, start, end)` or an equivalent `SourceRef` input contract.
+
 - Keep filesystem path as source metadata (`source_uri` / display path) for
   filesystem documents, not as the universal public identity.
+
 - Decide whether `SearchResult.file_paths` becomes optional display metadata,
   `source_refs`, or is removed from the public MCP/API shape.
+
 - Reassess `chunk_file_paths_<strategy>`: keep it only if it remains needed as
   an internal holder table for content-addressed dedup, not as the public read
   contract.
+
 - Update `drill(file_path)` and any docs/tests that assume path-first lookup.
 - Run a live MCP smoke against the local container after the breaking contract
   change, because our own agents are the real consumer.
 
 **Migration constraint: avoid full reindex whenever possible**
+
 - Every refactor, new feature, and bugfix in dotMD should first be evaluated
   through one operational question: will this require a full reindex or not?
+
 - The phase should be planned as an API/schema-contract migration over the
   existing index wherever possible, not as a rebuild of all chunks, vectors,
   metadata embeddings, FTS rows, or graph state.
+
 - Avoid requiring `dotmd index --force`, full TEI re-embedding, full metadata
   vector recomputation, or full graph rebuild unless the plan proves there is
   no practical incremental path.
+
 - Prefer deriving source refs from already persisted Phase 25 data:
   `source_documents`, `chunk_source_provenance_<strategy>`, and existing
   filesystem document refs. Backfill only missing lightweight rows if needed.
+
 - Any unavoidable data migration must be idempotent, resumable, and scoped to
   metadata/reference rows, with a dry-run/count report before writes.
+
 - A plan that proposes full reindex must treat it as a major cost/risk item
   requiring an explicit user decision, because current full rebuild cost is
   about three days.
 
 **Out of scope:**
+
 - Telegram adapter implementation.
 - Source-unit emission for non-filesystem sources.
 - Entity catalogs, canonical identity resolution, TTL, and second-source
   validation.
+
 - Removing every internal filesystem path. Filesystem sources still need paths
   for discovery, local file reads, display, and delete detection.
 
 **Open design questions:**
+
 - Should the new public input be a plain `ref` string like
   `filesystem:/abs/path.md`, or a structured `{namespace, document_ref}` object?
+
 - Should filesystem search still expose display paths for convenience while
   making `ref` the only stable read key?
+
 - Should `drill` merge into `read(ref)` or remain a separate source-aware
   metadata tool?
+
 - How much of `chunk_file_paths_<strategy>` is still required for
   content-dedup holder semantics after the public path contract is removed?
 
 **Plans:** 0 plans
 
 Plans:
+
 - [ ] TBD (promote before Telegram/non-filesystem source work)
 
 ---
@@ -659,24 +737,31 @@ TEI embedding, NER/extraction, FTS, or graph work for chunks that were already
 processed.
 
 **Context captured 2026-05-06:**
+
 - Phase 16 already separated `chunks_*` from `chunk_file_paths_<strategy>` M2M
   holder rows, so chunks can be shared by multiple filesystem paths.
+
 - Phase 25 added `SourceDocument`, `source_documents`, and
   `chunk_source_provenance_<strategy>`, but filesystem `document_ref` is still
   derived from the resolved path.
+
 - Phase 26 made source refs the public read/search contract, which means the
   next source work can stop treating filesystem paths as the universal identity.
+
 - Current `_purge_file` is holder-aware, but if holder count drops to zero it
   physically deletes chunks/vectors/FTS/provenance immediately. That is correct
   for consistency but too eager for rename/move/reimport scenarios.
+
 - The practical invariant for future source adapters is: if dotMD already spent
   CPU on a content unit or chunk, a later resource reshuffle should reuse that
   work instead of recomputing it.
 
 **Current asset inventory:**
+
 - Existing useful pieces:
   - `SourceDocument` with `namespace`, `document_ref`, `ref`,
     `content_fingerprint`, and `metadata_fingerprint`.
+
   - `chunks_*` keyed by `chunk_id`, no direct `file_path` column.
   - `chunk_file_paths_<strategy>` as a filesystem-specific holder table.
   - `chunk_source_provenance_<strategy>` as the first source provenance layer.
@@ -685,22 +770,29 @@ processed.
 - Missing or incomplete pieces:
   - universal active/inactive resource binding rows independent of filesystem
     path shape;
+
   - retained unreferenced content/artifacts with `unreferenced_since` /
     `retained_until` instead of immediate cascade delete;
+
   - source-unit identity below document level, e.g. Telegram message id,
     edited-message version, paragraph, heading section, or speaker turn;
+
   - search/read filtering through active bindings so retained inactive content
     stays physically available but invisible to users;
+
   - GC as an explicit or deferred cleanup step that deletes retained artifacts
     only after a grace period.
 
 **Proposed scope:**
+
 - Introduce a resource binding model that generalizes
   `chunk_file_paths_<strategy>` beyond filesystem paths. A binding should tie
   `{namespace, document_ref/resource_ref, source_unit_ref?, chunk_id,
   chunk_index}` to an active/inactive state.
+
 - Preserve current filesystem behavior through an incremental migration or
   compatibility view; do not require a full reindex.
+
 - Change deletion/orphan handling from immediate physical cascade to:
   1. deactivate/remove the public resource binding immediately;
   2. make search/read ignore inactive bindings immediately;
@@ -709,8 +801,10 @@ processed.
 - Make content/chunk reuse explicit: if a new active binding points at an
   existing chunk hash, attach the binding/provenance without recomputing
   embeddings, extraction, FTS, or graph unless the derived-artifact key changed.
+
 - Treat watcher events (`created`, `modified`, `deleted`, `moved`) as wake-up
   signals for reconciliation, not as business logic for rename semantics.
+
 - Keep resource identity and content identity separate:
   - source sync fingerprint: did the external resource change?
   - document metadata fingerprint: title/tags/path/source metadata;
@@ -719,42 +813,56 @@ processed.
   - derived-artifact fingerprint: chunk/input + model/extractor/config version.
 
 **Acceptance criteria ideas:**
+
 - Atomic write `tmp -> file.md` indexes the destination without waiting for the
   hourly poll.
+
 - Rename or delete-then-readd with identical content reuses existing chunks and
   derived artifacts, while the old public ref stops working immediately.
+
 - Appending to a document reuses unchanged chunk/source-unit artifacts and
   processes only genuinely new or changed chunks.
+
 - Metadata-only changes update only metadata-derived surfaces.
 - Inactive retained content is not returned by search and cannot be read through
   stale refs.
+
 - GC removes expired unreferenced artifacts without touching chunks that have
   active bindings.
+
 - The phase includes a dry-run/count report before any migration that touches
   existing production index rows.
 
 **Out of scope:**
+
 - Telegram adapter implementation.
 - Full historical reindex of the production corpus.
 - Fuzzy identity resolution, contact/entity catalogs, or second-source
   validation.
+
 - Perfect paragraph-level diffing for every markdown shape if an MVP source-unit
   model can preserve current behavior and unlock Telegram safely.
 
 **Open design questions:**
+
 - Should the first binding table be strategy-specific, global, or a compatibility
   layer over existing `chunk_file_paths_<strategy>`?
+
 - What grace period is appropriate for retained unreferenced artifacts: fixed
   time, N poll cycles, explicit admin GC only, or configurable?
+
 - Which source-unit granularity should filesystem Markdown use first: whole
   file, heading section, paragraph, speaker turn, or parser-specific units?
+
 - Which derived artifacts can be safely retained without graph drift, and which
   graph edges need active-binding filtering?
+
 - How should status/debug commands show active vs retained vs GC-pending rows?
 
 **Plans:** 0 plans
 
 Plans:
+
 - [ ] TBD (promote before Telegram/non-filesystem source work)
 
 ---
@@ -766,20 +874,25 @@ filesystem, Telegram, future federated providers, and Airweave-compatible
 connectors are described through the same capability vocabulary.
 
 **Context captured 2026-05-08:**
+
 - Airweave's strongest reusable idea is not its search/indexing stack, but its
   source platform shape: source registry, typed config/auth/cursor metadata,
   declared capabilities, and source lifecycle wiring.
+
 - dotMD currently has a stronger document/source-unit/chunk/provenance model,
   but source capabilities are still spread across filesystem-specific code,
   Telegram provider code, MCP tool behavior, and architecture docs.
+
 - The registry should make source behavior explicit before we add more
   integrations, especially federated search sources where data may not be fully
   synced into the local index.
 
 **Proposed scope:**
+
 - Define a source descriptor/capability model with fields such as `short_name`,
   `display_name`, `source_kind`, config schema, auth schema, cursor schema, and
   capability flags:
+
   - `supports_sync`
   - `supports_federated_search`
   - `supports_read_unit_window`
@@ -790,6 +903,7 @@ connectors are described through the same capability vocabulary.
 - Keep the registry dotMD-native: the canonical payload types remain
   `SourceDocument`, `SourceUnit`, `SourceUnitWindow`, and future `SourceAsset`,
   not Airweave `BaseEntity`.
+
 - Seed the registry with existing filesystem and Telegram source descriptions.
 - Document how Airweave source metadata maps into the dotMD registry without
   making Airweave a required dependency.
@@ -798,6 +912,7 @@ connectors are described through the same capability vocabulary.
 **Recommended order:** First item in the Airweave-inspired architecture line.
 
 **Anti-legacy gate:**
+
 - This backlog line must not create a parallel "new source platform" beside
   legacy filesystem/Telegram paths. The registry work is only architectural
   groundwork; the source architecture line is not complete until filesystem and
@@ -805,6 +920,7 @@ connectors are described through the same capability vocabulary.
   capability model.
 
 **Out of scope:**
+
 - Running real Airweave connectors.
 - Rewriting filesystem or Telegram ingestion.
 - Adding new OAuth flows, UI, or external source credentials.
@@ -812,6 +928,7 @@ connectors are described through the same capability vocabulary.
 **Plans:** 0 plans
 
 Plans:
+
 - [ ] TBD (promote when starting unified source architecture work)
 
 ---
@@ -824,23 +941,30 @@ HTTP/rate-limit clients, instead of letting each adapter solve those concerns
 separately.
 
 **Context captured 2026-05-08:**
+
 - Airweave has a useful lifecycle pattern: load source connection, resolve the
   source class from registry, load credentials/config, create auth provider and
   HTTP client, instantiate source, then validate it.
+
 - dotMD should borrow that separation without inheriting Airweave's Postgres,
   Redis, organization/billing, Vespa, or Temporal assumptions.
+
 - This boundary is the practical prerequisite for using third-party connector
   code because most real SaaS adapters expect typed config, credential access,
   retry/rate-limit behavior, and cursor state.
 
 **Proposed scope:**
+
 - Define typed config/auth/cursor models for filesystem and Telegram first.
 - Add a source lifecycle service/factory that returns a ready source runtime
   from a registry entry and persisted local configuration.
+
 - Keep credentials behind a provider interface; source adapters should not read
   raw secret storage directly.
+
 - Define how cursor checkpointing is committed only after local persistence
   succeeds, preserving the Phase 28 checkpoint safety rule.
+
 - Provide fake/test lifecycle providers so source contracts can be tested
   without live SaaS credentials.
 
@@ -848,12 +972,14 @@ separately.
 **Recommended order:** Second; it makes the registry executable.
 
 **Anti-legacy gate:**
+
 - Lifecycle/config/auth/cursor work must include migration hooks for existing
   filesystem and Telegram adapter construction. Do not leave the new lifecycle
   service used only by future SaaS integrations while current adapters continue
   to instantiate through bespoke paths.
 
 **Out of scope:**
+
 - Production-grade OAuth UI.
 - Airweave auth-provider parity.
 - Multi-tenant organization/billing model.
@@ -861,6 +987,7 @@ separately.
 **Plans:** 0 plans
 
 Plans:
+
 - [ ] TBD (promote after source capability registry)
 
 ---
@@ -873,14 +1000,18 @@ API search, can return one normalized result shape and round-trip through
 `read(ref)` / `drill(ref)`.
 
 **Context captured 2026-05-08:**
+
 - Many future integrations already have native search APIs. For those sources,
   it may be wasteful or impossible to fully sync everything before search.
+
 - MCP Telegram already has its own full-text search across its local database,
   making it a good first proof for federated search without needing a SaaS API.
+
 - Airweave models this as `federated_search` capability on sources. dotMD should
   adopt the capability but keep its own result/ref/read model.
 
 **Proposed scope:**
+
 - Define a normalized `SearchCandidate` contract that can represent:
   - local semantic / FTS5 / graph results;
   - Telegram native FTS results;
@@ -889,21 +1020,26 @@ API search, can return one normalized result shape and round-trip through
 - Candidate fields should include `ref`, source identity, title/snippet,
   source-native rank/score, retrieval kind, provenance, `can_read`, and
   `can_materialize`.
+
 - Extend source connectors with optional `search(query, limit, filters)` and
   `hydrate_result(ref)`/materialization hooks.
+
 - Define fusion/reranking rules that keep source-native rank useful without
   pretending every provider score is directly comparable.
+
 - Use MCP Telegram native search as the first live federated provider proof.
 
 **Depends on:** Backlog 999.26 and preferably 999.27.
 **Recommended order:** Third; it should land before broad third-party adapter work.
 
 **Anti-legacy gate:**
+
 - Federated search must reuse the same public `ref` / `read(ref)` /
   `drill(ref)` surface as local search. Do not add a separate Telegram-native
   or Airweave-native result plane that callers have to handle differently.
 
 **Out of scope:**
+
 - Replacing dotMD's local search stack.
 - Full cross-source ACL enforcement.
 - New UI for search source selection.
@@ -911,6 +1047,7 @@ API search, can return one normalized result shape and round-trip through
 **Plans:** 0 plans
 
 Plans:
+
 - [ ] TBD (promote after registry/lifecycle, or earlier if Telegram native search becomes urgent)
 
 ---
@@ -922,23 +1059,29 @@ implementation of the same source connector contract as Telegram and future
 Airweave-compatible integrations.
 
 **Context captured 2026-05-08:**
+
 - Airweave does not appear to have a local filesystem indexer, so dotMD's
   filesystem source is not a trivial adapter port. It must preserve discovery,
   watch/trickle behavior, local file reads, retained artifacts, parser routing,
   and content-addressed reuse.
+
 - The filesystem source is the hardest compatibility test for the unified
   contract. If the contract cannot model filesystem well, it is too narrow for
   dotMD.
 
 **Proposed scope:**
+
 - Implement filesystem as a registered source with typed config and cursor-ish
   local state.
+
 - Map filesystem discovery into the same source lifecycle vocabulary used by
   app sources: resource discovery, document identity, source units, parser
   routing, active bindings, and retained artifacts.
+
 - Preserve existing public refs and existing trickle behavior.
 - Keep internal filesystem paths where they are actually needed for discovery,
   local reads, display, delete detection, and content-dedup holder semantics.
+
 - Add regression coverage proving filesystem behavior remains stable after the
   unified source refactor.
 
@@ -949,14 +1092,17 @@ in the same milestone.
 stable for third-party connectors.
 
 **Anti-legacy gate:**
+
 - This item is mandatory before broad external connector work. The filesystem
   indexer must not remain a special legacy pipeline after the unified source
   architecture exists.
+
 - Completion must include a code-path inventory showing which filesystem
   internals remain intentionally source-specific and which older adapter paths
   were removed or redirected through the unified lifecycle.
 
 **Out of scope:**
+
 - Removing all path-shaped internals.
 - Full parser rewrite for PDF/DOCX/HTML.
 - Full reindex unless an explicit later plan proves no incremental path exists.
@@ -964,6 +1110,7 @@ stable for third-party connectors.
 **Plans:** 0 plans
 
 Plans:
+
 - [ ] TBD (promote after source lifecycle boundary)
 
 ---
@@ -975,34 +1122,44 @@ contract as filesystem and future app connectors, including both local
 sync/export and source-native federated search.
 
 **Context captured 2026-05-08:**
+
 - Phase 29 made Telegram a first concrete source-unit ingestion path.
 - Phase 30 was deferred into this backlog item instead of being implemented as
   a Telegram-specific legacy branch. Its incremental sync/reuse requirements
   should be implemented only through the unified source contract path.
+
 - Phase 31 may still run as a v1.5 baseline smoke, but it does not prove
   incremental Telegram sync/reuse after this deferral.
+
 - MCP Telegram also has native full-text search over its database. That search
   should be usable as a federated source capability rather than treated as a
   separate one-off integration path.
 
 **Proposed scope:**
+
 - Register Telegram source capabilities: sync/export, read unit window,
   incremental cursor, and federated FTS search where available.
+
 - Carry forward the deferred Phase 30 behavior:
   - repeated Telegram sync processes only new or changed source units;
   - unchanged history is not rechunked/reembedded;
   - sync state is per source or per dialog/source-unit stream, not one
     whole-dialog fingerprint;
+
   - reporting exposes discovered, new, changed, rebound, skipped, hidden,
     failed, and reused counts where practical;
+
   - failure isolation and regression coverage preserve filesystem behavior.
 - Normalize MCP Telegram native search hits into `SearchCandidate` with stable
   message-shaped refs.
+
 - Decide when a federated Telegram hit should remain search-only versus be
   materialized into local `SourceDocument`/`SourceUnit` state.
+
 - Preserve Phase 29 identity decisions:
   `telegram:dialog:<dialog_id>:message:<message_id>` remains the public
   message ref shape.
+
 - Ensure `read(ref)` and `drill(ref)` do not require callers to know whether a
   result came from local dotMD search or native Telegram search.
 
@@ -1012,14 +1169,17 @@ generic federated contract.
 contract, Telegram proves hybrid sync + federated behavior.
 
 **Anti-legacy gate:**
+
 - Telegram must not remain as a one-off application provider after the unified
   source contract exists. Both the existing export/sync path and the native FTS
   search path must present the same source descriptor, stable refs, read/drill
   behavior, and lifecycle/cursor model as other sources.
+
 - Completion must prove callers cannot tell, from API shape alone, whether a
   Telegram result came from local dotMD indexing or MCP Telegram native search.
 
 **Out of scope:**
+
 - Bidirectional Telegram actions.
 - Attachment/media ingestion.
 - Long-term TTL/GC scheduler, complete edit/delete lifecycle policy, or full
@@ -1028,6 +1188,7 @@ contract, Telegram proves hybrid sync + federated behavior.
 **Plans:** 0 plans
 
 Plans:
+
 - [ ] TBD (promote after Phase 31 or as part of the next source-search milestone)
 
 ---
@@ -1039,16 +1200,20 @@ source reader/search provider without adopting Airweave's indexing, chunking,
 Vespa, Temporal, billing, or organization model.
 
 **Context captured 2026-05-08:**
+
 - The business goal is to connect to integrations such as Notion, Google Drive,
   Slack, GitHub, and similar products using existing third-party connector work
   where practical.
+
 - Airweave's connector ecosystem is valuable, but its `BaseEntity` /
   textual-representation / chunk-as-document / destination pipeline should not
   become dotMD's internal ontology.
+
 - dotMD should adapt Airweave connector outputs into `SourceDocument`,
   `SourceUnit`, `SourceAsset`, and `SearchCandidate` contracts.
 
 **Proposed scope:**
+
 - Choose one pilot connector with low ambiguity. Recommended order:
   1. Notion or GitHub for sync/export proof;
   2. Google Drive for file/asset proof;
@@ -1059,6 +1224,7 @@ Vespa, Temporal, billing, or organization model.
   - Airweave entity fields -> dotMD document/unit/source metadata.
 - Provide minimal compatibility shims for auth provider, typed config, logger,
   HTTP client, cursor, and optional file service.
+
 - Produce an integration report: which Airweave pieces are reusable directly,
   which require shims, and which should be avoided.
 
@@ -1067,12 +1233,14 @@ Vespa, Temporal, billing, or organization model.
 fit the unified contract.
 
 **Anti-legacy gate:**
+
 - Do not start the compatibility spike as a shortcut around unfinished
   filesystem/Telegram unification. The spike should validate that the unified
   contract is good enough for third-party connectors, not introduce a separate
   Airweave-only integration lane.
 
 **Out of scope:**
+
 - Importing the whole Airweave backend.
 - Replacing dotMD local retrieval, chunking, embeddings, FTS5, graph, or rerank.
 - Supporting every Airweave connector in the first pass.
@@ -1080,6 +1248,7 @@ fit the unified contract.
 **Plans:** 0 plans
 
 Plans:
+
 - [ ] TBD (promote after unified source contract is validated on local sources)
 
 ---
@@ -1089,30 +1258,34 @@ Plans:
 **Goal:** Delete unused legacy storage backends and all references to them.
 
 **Context captured 2026-06-12:**
+
 - Production uses SQLite/FTS5/sqlite-vec plus FalkorDB.
 - LanceDB existed only as a legacy optional code path and dependency extra.
 - LadybugDB existed only as a local-dev graph fallback.
 - We do not want to preserve either compatibility layer.
 
 **Proposed scope:**
+
 - Remove LanceDB and LadybugDB code, config, dependency extras, tests, docs,
   examples, comments, and lockfile references where no longer needed.
+
 - Make supported storage choices explicit in code and documentation.
 - Keep migration behavior focused on the current production storage model.
 
 **Plans:** 0 plans
 
 Plans:
+
 - [x] Removed legacy backends directly from backlog cleanup.
 
 ---
 
 ### Future ideas:
+
 - Semantic chunking (split by topic similarity, not just structure)
 - Doc-level chunks (whole-document embeddings for broad queries)
 - Query-time NER via GLiNER (complement entity catalog string matching)
 - Telegram/chat history as additional data source
-
 
 ---
 
@@ -1127,27 +1300,34 @@ through one vocabulary.
 **Plans:** 4/4 plans complete
 
 Reference:
+
 - Upstream: `https://github.com/airweave-ai/airweave`
 - Local checkout: `/home/j2h4u/repos/airweave-ai/airweave`
 
 Success criteria:
+
 1. Source descriptors include source kind, display metadata, config schema,
    auth schema, cursor schema, and capability flags.
+
 2. Filesystem and Telegram are present in the registry.
 3. Capability flags distinguish sync, federated search, read-unit windows,
    materialization, browse trees, ACLs, and incremental cursors.
+
 4. Docs map Airweave source metadata to dotMD descriptors without a runtime
    Airweave dependency.
 
 Plans:
 **Wave 1**
+
 - [x] 32-01-source-descriptor-contract-PLAN.md — Source descriptor contract
 
 **Wave 2** *(blocked on Wave 1 completion)*
+
 - [x] 32-02-filesystem-telegram-registry-seeds-PLAN.md — Filesystem and Telegram registry seeds
 - [x] 32-03-provider-description-compatibility-PLAN.md — Provider description compatibility
 
 **Wave 3** *(blocked on Wave 2 completion)*
+
 - [x] 32-04-airweave-mapping-docs-PLAN.md — Airweave mapping documentation
 
 ---
@@ -1162,20 +1342,25 @@ registry entries, typed config, credentials, cursor state, and runtime helpers.
 **Plans:** 3/3 plans complete
 
 Success criteria:
+
 1. Source runtimes are built through one lifecycle/factory boundary.
 2. Credentials are accessed through a provider interface, not direct secret
    reads inside adapters.
+
 3. Cursor commits happen only after local persistence succeeds.
 4. Filesystem and Telegram construction paths use the lifecycle boundary.
 
 Plans:
 **Wave 1**
+
 - [x] 33-01-lifecycle-runtime-bundle-PLAN.md — Lifecycle runtime bundle contract
 
 **Wave 2** *(blocked on Wave 1 completion)*
+
 - [x] 33-02-filesystem-lifecycle-migration-PLAN.md — Filesystem lifecycle migration
 
 **Wave 3** *(blocked on Wave 2 completion)*
+
 - [x] 33-03-telegram-lifecycle-and-cursor-boundary-PLAN.md — Telegram lifecycle and cursor boundary
 
 ---
@@ -1190,12 +1375,16 @@ source-native federated search, then prove it with MCP Telegram native FTS.
 **Plans:** 0/0 plans complete
 
 Success criteria:
+
 1. Local semantic/FTS5/graph hits and source-native hits share one
    `SearchCandidate` shape.
+
 2. Candidates include stable ref, source identity, title/snippet, retrieval
    kind, provenance, source score/rank, `can_read`, and `can_materialize`.
+
 3. Fusion/ranking handles provider-native scores without treating them as
    directly comparable.
+
 4. MCP Telegram native FTS can return candidates that round-trip through
    `read(ref)` and `drill(ref)`.
 
@@ -1212,10 +1401,13 @@ content-addressed reuse.
 **Plans:** 2/2 plans complete
 
 Success criteria:
+
 1. Filesystem indexing/search/read flows through the source registry and
    lifecycle where appropriate.
+
 2. Path-shaped internals remain only where needed for discovery, holder
    semantics, local reads, display, and delete detection.
+
 3. Regression coverage proves current filesystem behavior is preserved.
 
 ---
@@ -1230,12 +1422,16 @@ deferred incremental sync/reuse behavior and native federated FTS search.
 **Plans:** 2/2 plans complete
 
 Success criteria:
+
 1. Telegram declares sync/export, read-unit-window, incremental-cursor, and
    federated-search capabilities where available.
+
 2. Repeated sync skips/reuses unchanged source units without rechunking or
    reembedding unchanged history.
+
 3. Sync reporting includes discovered, new, changed, rebound, skipped, hidden,
    failed, and reused counts where practical.
+
 4. Telegram local-index and native-search results expose the same public
    `search -> ref -> drill/read` shape.
 
@@ -1251,10 +1447,13 @@ dotMD's source contracts without adopting Airweave's indexing/runtime stack.
 **Plans:** 4/4 plans complete
 
 Success criteria:
+
 1. One pilot connector or connector-like source maps into `SourceDocument`,
    `SourceUnit`, optional `SourceAsset`, and `SearchCandidate`.
+
 2. The spike reports reusable Airweave pieces, required shims, and avoided
    assumptions.
+
 3. The spike uses the same source registry/lifecycle/search contracts as
    filesystem and Telegram.
 
@@ -1268,22 +1467,39 @@ and FalkorDB storage with one embedded SurrealDB-backed storage layer.
 **Depends on:** Phase 37
 **Backlog source:** 999.33
 **Plans:** 0/5 plans complete
-
 Plans:
+**Wave 1**
+
 - [ ] 38-01-PLAN.md - Current data inventory, copied snapshot evidence, and migration map
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 38-05-PLAN.md - Early embedded atomicity, writer-safety, and package gate before schema/import
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 38-02-PLAN.md - Surreal storage schema/adapters and transform-only import proof
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 38-03-PLAN.md - Retrieval parity proof for FTS, vector, graph-direct, and hybrid/RRF
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 38-04-PLAN.md - Operations proof and final migrate/defer/reject recommendation
 
 Success criteria:
+
 1. A minimal SurrealDB prototype models documents, source units, chunks,
    embeddings, entities, relations, feedback, and cursor/checkpoint state.
+
 2. The prototype proves or rejects dotMD's required retrieval paths:
    full-text, vector, graph-direct entity retrieval, and hybrid/RRF fusion.
+
 3. The spike measures migration feasibility from current production data:
    SQLite metadata/FTS/source state, sqlite-vec embeddings, and FalkorDB graph
    data should be migrated where possible instead of recomputed on CPU.
+
 4. The result is an explicit recommendation: migrate, defer, or reject, with
    operational notes for backup/restore, locking/concurrency, and rollback.
 
