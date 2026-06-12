@@ -1,0 +1,58 @@
+# Dependabot configuration — version updates.
+# Security updates and vulnerability alerts are controlled in GitHub repo
+# settings. This file keeps routine dependency PRs grouped and predictable.
+version: 2
+updates:
+  # Backend Python dependencies — uv reads backend/pyproject.toml + backend/uv.lock.
+  - package-ecosystem: "uv"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "Asia/Almaty"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+    groups:
+      backend-python-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Modal helper dependencies.
+  - package-ecosystem: "uv"
+    directory: "/modal"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "Asia/Almaty"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    groups:
+      modal-python-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions pinned in .github/workflows/*.yml.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "Asia/Almaty"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

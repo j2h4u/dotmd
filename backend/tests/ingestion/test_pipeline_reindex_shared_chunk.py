@@ -571,7 +571,7 @@ class TestPropertyReindexHolderInvariant:
         # orthogonal to the M2M-FTS5 invariant that WR-2 governs).
         from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
 
-        def _noop_add_chunks(self_vs, chunks, embeddings, **kwargs):  # type: ignore[no-untyped-def]
+        def _noop_add_chunks(_self_vs, chunks, embeddings, **kwargs):  # type: ignore[no-untyped-def]
             pass
 
         N_OPS = 10

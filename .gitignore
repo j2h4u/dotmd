@@ -16,6 +16,7 @@ ENV/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.import_linter_cache/
 .pyright/
 .coverage
 .coverage.*
