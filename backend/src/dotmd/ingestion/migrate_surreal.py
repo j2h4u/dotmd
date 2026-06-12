@@ -128,6 +128,10 @@ def _loads_json_list(value: Any) -> list[str]:
     return [str(item) for item in loaded]
 
 
+def _composite_id(*parts: object) -> str:
+    return "\x1f".join(str(part) for part in parts)
+
+
 def load_sqlite_rows_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
     """Load current SQLite rows as transform-only data records."""
 
@@ -199,14 +203,27 @@ def load_sqlite_rows_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
         ]
 
     file_paths_by_chunk: dict[str, list[str]] = {}
+    file_bindings_by_chunk: dict[str, list[dict[str, Any]]] = {}
     for row in file_path_rows:
-        file_paths_by_chunk.setdefault(str(row["chunk_id"]), []).append(str(row["file_path"]))
+        chunk_id = str(row["chunk_id"])
+        binding = {
+            "binding_id": _composite_id(chunk_id, row["file_path"], row["chunk_index"]),
+            "chunk_id": chunk_id,
+            "file_path": str(row["file_path"]),
+            "chunk_index": int(row["chunk_index"]),
+        }
+        file_paths_by_chunk.setdefault(chunk_id, []).append(str(row["file_path"]))
+        file_bindings_by_chunk.setdefault(chunk_id, []).append(binding)
 
     provenance_by_chunk: dict[str, list[dict[str, Any]]] = {}
     for row in provenance_rows:
         chunk_id = str(row["chunk_id"])
         payload = {
-            "provenance_id": f"{chunk_id}::{row['document_ref']}",
+            "provenance_id": _composite_id(
+                chunk_id,
+                row["namespace"],
+                row["document_ref"],
+            ),
             "chunk_id": chunk_id,
             "namespace": str(row["namespace"]),
             "document_ref": str(row["document_ref"]),
@@ -230,6 +247,7 @@ def load_sqlite_rows_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
                 "level": int(row["level"]),
                 "text": str(row["text"]),
                 "file_paths": list(file_paths_by_chunk.get(chunk_id, [])),
+                "file_bindings": list(file_bindings_by_chunk.get(chunk_id, [])),
                 "document_ref": document_ref,
                 "ref": f"{namespace}:{document_ref}" if namespace and document_ref else None,
                 "source_unit_refs": first_provenance.get("source_unit_refs", []),
@@ -300,6 +318,8 @@ def load_sqlite_rows_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
     cursor_rows = [
         {
             "original_ref": str(row["ref"]),
+            "cursor_id": _composite_id(row["namespace"], row["resource_ref"]),
+            "namespace": str(row["namespace"]),
             "resource_ref": str(row["resource_ref"]),
             "document_ref": str(row["document_ref"]),
             "active": bool(row["active"]),
@@ -341,7 +361,12 @@ def load_graph_rows_for_surreal(exporter: Any) -> dict[str, Any]:
 def load_feedback_rows_for_surreal(provider: Any) -> list[dict[str, Any]]:
     """Load feedback rows through the provider surface and never raw SQL."""
 
-    rows = list(provider.list_all(limit=1000, include_closed=True))
+    limit = 1001
+    rows = list(provider.list_all(limit=limit, include_closed=True))
+    if len(rows) >= limit:
+        raise RuntimeError(
+            "feedback provider returned the page limit; exhaustive feedback export is unavailable"
+        )
     return [
         {
             "original_feedback_id": str(row["id"]),

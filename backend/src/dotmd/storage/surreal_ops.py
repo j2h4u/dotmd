@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import socket
+import sqlite3
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -477,7 +478,7 @@ def rehearse_surreal_backup_restore(
 
     shutil.copy2(source, backup_path)
     shutil.copy2(backup_path, restored_path)
-    restored_counts = expected_counts
+    restored_counts = _read_surreal_counts_manifest(source)
     restore_verified = restored_path.read_bytes() == source.read_bytes()
     counts_verified = verify_surreal_restore_counts(expected_counts, restored_counts)
     restore = SurrealRestoreReport(
@@ -487,7 +488,7 @@ def rehearse_surreal_backup_restore(
         expected_counts=expected_counts,
         verified=restore_verified and counts_verified,
         method=method,
-        smoke_passed=restore_verified,
+        smoke_passed=restore_verified and counts_verified,
         notes=list(notes),
     )
     return SurrealBackupReport(
@@ -540,7 +541,9 @@ def rehearse_current_stack_rollback(
 
     sqlite_restored = sqlite_target.read_bytes() == sqlite_source.read_bytes()
     falkor_restored = falkor_target.read_bytes() == falkor_source.read_bytes()
-    smoke = bool(smoke_queries) and sqlite_restored and falkor_restored
+    sqlite_smoke = _sqlite_restore_smoke(sqlite_target)
+    falkor_smoke = _json_restore_smoke(falkor_target)
+    smoke = bool(smoke_queries) and sqlite_restored and falkor_restored and sqlite_smoke and falkor_smoke
     return CurrentStackRollbackReport(
         sqlite_source=str(sqlite_source),
         falkor_source=str(falkor_source),
@@ -838,6 +841,36 @@ def _dominant_failure_category(
         if category in categories:
             return category
     return categories[0] if categories else SurrealDecisionCategory.NONE
+
+
+def _read_surreal_counts_manifest(source_path: Path) -> SurrealImportCounts:
+    manifest_path = source_path.with_name(f"{source_path.name}.counts.json")
+    if not manifest_path.exists():
+        return SurrealImportCounts()
+    raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        return SurrealImportCounts()
+    allowed = set(SurrealImportCounts.__dataclass_fields__)
+    return SurrealImportCounts(
+        **{key: int(value) for key, value in raw.items() if key in allowed}
+    )
+
+
+def _sqlite_restore_smoke(sqlite_path: Path) -> bool:
+    try:
+        with sqlite3.connect(sqlite_path) as conn:
+            conn.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
+    except sqlite3.Error:
+        return False
+    return True
+
+
+def _json_restore_smoke(json_path: Path) -> bool:
+    try:
+        json.loads(json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return True
 
 
 def _dedupe_preserve_order(values: list[str]) -> list[str]:

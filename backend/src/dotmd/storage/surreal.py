@@ -40,6 +40,7 @@ _SCHEMA_TABLES = {
     "sections": "graph section nodes",
     "tags": "graph tag nodes",
     "relations": "typed graph relation rows with property payloads",
+    "chunk_file_bindings": "Phase 16 chunk/file/path/index many-to-many bindings",
     "feedback": "feedback rows imported through provider surface",
     "cursors": "resource-ref keyed cursor/reference audit rows",
     "checkpoints": "source checkpoint rows",
@@ -92,6 +93,10 @@ def decode_surreal_record_id(record: RecordID | str) -> str:
     """Decode a Surreal RecordID created by :func:`encode_surreal_record_id`."""
 
     return SurrealRecordIdCodec().decode(record)
+
+
+def _composite_id(*parts: object) -> str:
+    return "\x1f".join(str(part) for part in parts)
 
 
 class SurrealConnection:
@@ -275,11 +280,13 @@ class SurrealMetadataStore:
         )
 
     def get_chunk_ids_by_file(self, file_path: str) -> list[str]:
-        chunk_ids = []
-        for row in self._connection.scan_table("chunks"):
-            if file_path in row.get("file_paths", []):
-                chunk_ids.append(str(row["chunk_id"]))
-        return chunk_ids
+        rows = [
+            row
+            for row in self._connection.scan_table("chunk_file_bindings")
+            if row.get("file_path") == file_path
+        ]
+        rows.sort(key=lambda row: int(row.get("chunk_index", 0)))
+        return [str(row["chunk_id"]) for row in rows]
 
     def delete_chunks_by_file(self, file_path: str) -> int:
         deleted = 0
@@ -289,7 +296,18 @@ class SurrealMetadataStore:
         return deleted
 
     def delete_all(self) -> None:
-        for table_name in ("chunks", "documents", "source_units", "provenance", "bindings", "fingerprints", "cursors", "checkpoints", "stats"):
+        for table_name in (
+            "chunks",
+            "chunk_file_bindings",
+            "documents",
+            "source_units",
+            "provenance",
+            "bindings",
+            "fingerprints",
+            "cursors",
+            "checkpoints",
+            "stats",
+        ):
             self._connection.delete_all_from_table(table_name)
 
     def replace_documents(self, rows: list[dict[str, Any]]) -> int:
@@ -303,7 +321,10 @@ class SurrealMetadataStore:
     def replace_source_units(self, rows: list[dict[str, Any]]) -> int:
         for row in rows:
             self._connection.upsert(
-                self._codec.encode("source_units", str(row["unit_ref"])),
+                self._codec.encode(
+                    "source_units",
+                    _composite_id(row["namespace"], row["document_ref"], row["unit_ref"]),
+                ),
                 dict(row),
             )
         return len(rows)
@@ -318,16 +339,29 @@ class SurrealMetadataStore:
 
     def replace_chunk_rows(self, rows: list[dict[str, Any]]) -> int:
         for row in rows:
+            payload = dict(row)
+            file_bindings = list(payload.pop("file_bindings", []))
             self._connection.upsert(
-                self._codec.encode("chunks", str(row["chunk_id"])),
-                dict(row),
+                self._codec.encode("chunks", str(payload["chunk_id"])),
+                payload,
             )
+            for binding in file_bindings:
+                binding_payload = dict(binding)
+                binding_id = _composite_id(
+                    binding_payload["chunk_id"],
+                    binding_payload["file_path"],
+                    binding_payload["chunk_index"],
+                )
+                self._connection.upsert(
+                    self._codec.encode("chunk_file_bindings", binding_id),
+                    binding_payload,
+                )
         return len(rows)
 
     def replace_binding_rows(self, rows: list[dict[str, Any]]) -> int:
         for row in rows:
             self._connection.upsert(
-                self._codec.encode("bindings", str(row["resource_ref"])),
+                self._codec.encode("bindings", _composite_id(row["namespace"], row["resource_ref"])),
                 dict(row),
             )
         return len(rows)
@@ -351,7 +385,7 @@ class SurrealMetadataStore:
     def replace_cursor_rows(self, rows: list[dict[str, Any]]) -> int:
         for row in rows:
             self._connection.upsert(
-                self._codec.encode("cursors", str(row["original_ref"])),
+                self._codec.encode("cursors", str(row["cursor_id"])),
                 dict(row),
             )
         return len(rows)
@@ -710,7 +744,7 @@ class SurrealGraphStore:
             target_id = str(row["target_id"])
             if relation_type == "HAS_TAG":
                 self.add_tag_node(target_id)
-            else:
+            elif not self._connection.select(self._codec.encode("entities", target_id)):
                 self.add_entity_node(target_id, "Entity", str(row["source_id"]))
             self.add_section_node(
                 chunk_id=str(row["source_id"]),

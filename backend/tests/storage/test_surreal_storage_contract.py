@@ -325,7 +325,25 @@ def test_collect_feedback_inventory_uses_provider_abstraction_and_not_raw_sql(
 
     assert inventory.total_feedback == 2
     assert inventory.status_counts["open"] == 2
-    assert provider.calls == [(1000, True)]
+    assert provider.calls == [(1001, True)]
+
+
+def test_collect_feedback_inventory_fails_closed_when_export_may_be_truncated() -> None:
+    provider = _FakeFeedbackProvider(
+        [
+            {
+                "status": "open",
+                "severity": "bug",
+            }
+            for _ in range(1001)
+        ]
+    )
+
+    inventory = collect_feedback_inventory(provider)
+
+    assert inventory.available is False
+    assert inventory.total_feedback == 0
+    assert "exhaustive feedback export" in str(inventory.unavailable_reason)
 
 
 def test_build_surreal_migration_map_marks_known_categories_and_rejects_unknown() -> None:

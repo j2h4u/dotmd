@@ -355,7 +355,12 @@ def collect_feedback_inventory(provider: Any) -> FeedbackSnapshotInventory:
     """Collect feedback counts through the provider surface, never raw SQL."""
 
     try:
-        rows = list(provider.list_all(limit=1000, include_closed=True))
+        limit = 1001
+        rows = list(provider.list_all(limit=limit, include_closed=True))
+        if len(rows) >= limit:
+            raise RuntimeError(
+                "feedback provider returned the page limit; exhaustive feedback export is unavailable"
+            )
     except Exception as exc:
         return FeedbackSnapshotInventory(
             total_feedback=0,

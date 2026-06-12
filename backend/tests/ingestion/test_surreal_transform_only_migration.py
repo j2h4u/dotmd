@@ -484,7 +484,7 @@ def test_run_surreal_import_dry_run_counts_transformable_rows_without_writing(tm
     assert report.counts.cursors == 2
     assert report.counts.checkpoints == 1
     assert "search_log" in report.unsupported_categories
-    assert feedback_provider.calls == [(1000, True)]
+    assert feedback_provider.calls == [(1001, True)]
     assert graph_exporter.inventory_calls == 1
     assert graph_exporter.row_calls == 1
     assert not (tmp_path / "dry-run.db").exists()
@@ -540,7 +540,10 @@ def test_run_surreal_import_apply_preserves_ids_vectors_feedback_and_graph_prope
             codec.encode('feedback', 'feedback:/ one {"quoted"}')
         )
         stored_checkpoint = connection.select(codec.encode("checkpoints", "filesystem"))
-        stored_cursor = connection.select(codec.encode("cursors", fixture_ids["ref"]))
+        stored_cursor = connection.select(
+            codec.encode("cursors", f"filesystem\x1f{fixture_ids['file_path']}")
+        )
+        file_bindings = connection.scan_table("chunk_file_bindings")
 
     assert stored_chunk["original_chunk_id"] == fixture_ids["chunk_id"]
     assert stored_chunk["ref"] == fixture_ids["ref"]
@@ -556,6 +559,13 @@ def test_run_surreal_import_apply_preserves_ids_vectors_feedback_and_graph_prope
     assert stored_feedback["original_feedback_id"] == 'feedback:/ one {"quoted"}'
     assert stored_checkpoint["checkpoint_cursor"] == "cursor:{one}/Привет"
     assert stored_cursor["original_ref"] == fixture_ids["ref"]
+    assert [
+        (row["chunk_id"], row["file_path"], row["chunk_index"])
+        for row in sorted(file_bindings, key=lambda item: item["chunk_index"])
+    ] == [
+        (fixture_ids["chunk_id"], fixture_ids["file_path"], 0),
+        ("chunk:plain", "/tmp/Doc Two.md", 1),
+    ]
 
 
 @pytest.mark.parametrize(
@@ -612,7 +622,25 @@ def test_load_feedback_rows_for_surreal_uses_provider_and_never_opens_feedback_s
     rows = migrate_module.load_feedback_rows_for_surreal(provider)
 
     assert len(rows) == 2
-    assert provider.calls == [(1000, True)]
+    assert provider.calls == [(1001, True)]
+
+
+def test_load_feedback_rows_for_surreal_fails_when_export_may_be_truncated() -> None:
+    from dotmd.ingestion.migrate_surreal import load_feedback_rows_for_surreal  # type: ignore[import-not-found]
+
+    class PageLimitProvider:
+        def list_all(self, limit: int = 50, include_closed: bool = False) -> list[dict[str, object]]:
+            return [
+                {
+                    "id": f"feedback-{index}",
+                    "submitted_at": index,
+                    "message": "x",
+                }
+                for index in range(limit)
+            ]
+
+    with pytest.raises(RuntimeError, match="exhaustive feedback export"):
+        load_feedback_rows_for_surreal(PageLimitProvider())
 
 
 def test_load_graph_rows_for_surreal_preserves_labels_weights_keys_and_typed_properties(

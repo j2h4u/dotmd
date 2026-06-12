@@ -183,6 +183,36 @@ class TestParityComparators:
         assert result.missing_ids == ()
         assert result.failure_category is None
 
+    def test_graph_direct_parity_respects_top_k_before_comparison(self) -> None:
+        case = _make_case(
+            name="graph-direct-top-k",
+            retrieval_kind="graph-direct",
+            top_k=1,
+        )
+
+        current_results = [
+            ("chunk-alpha", "MENTIONS", 1.0),
+        ]
+        surreal_results = [
+            {
+                "source_id": "chunk-alpha",
+                "target_id": "entity:surreal",
+                "relation_type": "MENTIONS",
+                "weight": 1.0,
+            },
+            {
+                "source_id": "chunk-low-rank-extra",
+                "target_id": "entity:surreal",
+                "relation_type": "MENTIONS",
+                "weight": 0.1,
+            },
+        ]
+
+        result = compare_graph_direct_results(case, current_results, surreal_results)
+
+        assert result.passed is True
+        assert result.candidate_ids == ("chunk-alpha",)
+
     def test_hybrid_parity_preserves_top_hit_and_engine_attribution(self) -> None:
         case = _make_case(
             name="hybrid-rrf-stable",

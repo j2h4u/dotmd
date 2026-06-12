@@ -21,10 +21,10 @@ The operations helper rehearses backup and restore only on copied/local Surreal 
 |---|---|
 | surreal CLI | unavailable in this rehearsal path; fallback required |
 | fallback | validated file-copy fallback |
-| restore verification | reconnect/count-smoke equivalent represented by restored count comparison in tests |
+| restore verification | copied-store byte check plus restored count manifest comparison |
 | partial failure | cannot produce migrate-ready status |
 
-Fallback restore is valid only when restored counts match every imported STOR-01 category. Missing surreal CLI plus unvalidated fallback maps to `CLI backup tooling` defer.
+Fallback restore is valid only when restored count-manifest evidence matches every imported STOR-01 category. Missing surreal CLI plus unvalidated fallback maps to `CLI backup tooling` defer.
 
 ## rollback to current stack
 
@@ -32,7 +32,7 @@ Rollback rehearsal targets copied originals for the current stack:
 
 - SQLite/sqlite-vec/FTS5: copied `index.db` original
 - FalkorDB: copied graph export fixture
-- smoke query: representative current-stack search/read check on the copied originals
+- smoke query: restored SQLite can be opened, restored Falkor JSON can be parsed, and representative current-stack query labels are present
 
 This proves the rollback path is not merely Surreal-to-Surreal restore. Live production volumes are not mutated.
 

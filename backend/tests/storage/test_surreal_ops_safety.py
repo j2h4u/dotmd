@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import json
+import sqlite3
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
@@ -179,6 +182,10 @@ def test_backup_restore_rehearsal_validates_fallback_counts(tmp_path: Path) -> N
         relations=1,
         feedback=1,
     )
+    source.with_name(f"{source.name}.counts.json").write_text(
+        json.dumps(asdict(expected)),
+        encoding="utf-8",
+    )
 
     backup = rehearse_surreal_backup_restore(
         source,
@@ -226,7 +233,9 @@ def test_current_stack_rollback_restores_copied_sqlite_and_falkor_originals(
     """Rollback rehearsal must prove return to current SQLite/FalkorDB originals."""
     sqlite_original = tmp_path / "index.db"
     falkor_original = tmp_path / "falkor-export.json"
-    sqlite_original.write_text("sqlite-original", encoding="utf-8")
+    with sqlite3.connect(sqlite_original) as conn:
+        conn.execute("CREATE TABLE smoke (query TEXT)")
+        conn.execute("INSERT INTO smoke (query) VALUES ('Hiveon')")
     falkor_original.write_text('{"nodes": 2, "relations": 1}', encoding="utf-8")
 
     report = rehearse_current_stack_rollback(

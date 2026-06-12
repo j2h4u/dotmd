@@ -307,16 +307,16 @@ def compare_graph_direct_results(
 ) -> RetrievalParityResult:
     """Compare bounded graph-direct related-section results."""
 
-    baseline_rows = _normalize_graph_related_sections(current_results)
+    baseline_rows = _normalize_graph_related_sections(current_results)[: case.top_k]
     if surreal_results and isinstance(surreal_results[0], Mapping):  # type: ignore[index]
         candidate_rows = _normalize_surreal_relation_rows(
             surreal_results,  # type: ignore[arg-type]
             seed_chunk_id=seed_chunk_id,
-        )
+        )[: case.top_k]
     else:
         candidate_rows = _normalize_graph_related_sections(  # type: ignore[arg-type]
             surreal_results,  # type: ignore[arg-type]
-        )
+        )[: case.top_k]
 
     baseline = [(chunk_id, weight) for chunk_id, _relation_type, weight in baseline_rows]
     candidate = [(chunk_id, weight) for chunk_id, _relation_type, weight in candidate_rows]
