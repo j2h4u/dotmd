@@ -442,6 +442,13 @@ def evaluate_surreal_scale_gate(
 ) -> dict[str, Any]:
     """Evaluate whether scale evidence is complete enough for migration gating."""
 
+    latency_p50 = None
+    latency_p95 = None
+    if query_latencies_ms:
+        latencies = [float(value) for value in query_latencies_ms]
+        latency_p50 = median(latencies)
+        latency_p95 = _percentile(latencies, 0.95)
+
     missing: list[str] = []
     if not record_counts:
         missing.append("record count")
@@ -463,11 +470,10 @@ def evaluate_surreal_scale_gate(
             "record_counts": dict(record_counts or {}),
             "hnsw_build_seconds": hnsw_build_seconds,
             "surrealkv_file_size_bytes": surrealkv_file_size_bytes,
-            "query_latency_p50_ms": None,
-            "query_latency_p95_ms": None,
+            "query_latency_p50_ms": latency_p50,
+            "query_latency_p95_ms": latency_p95,
         }
 
-    latencies = [float(value) for value in query_latencies_ms]
     return {
         "passed": True,
         "failure_category": None,
@@ -476,8 +482,8 @@ def evaluate_surreal_scale_gate(
         "record_counts": dict(record_counts),
         "hnsw_build_seconds": float(hnsw_build_seconds),
         "surrealkv_file_size_bytes": int(surrealkv_file_size_bytes),
-        "query_latency_p50_ms": median(latencies),
-        "query_latency_p95_ms": _percentile(latencies, 0.95),
+        "query_latency_p50_ms": latency_p50,
+        "query_latency_p95_ms": latency_p95,
     }
 
 
@@ -502,7 +508,12 @@ class SurrealRetrievalParityHarness:
         if case.retrieval_kind == "vector":
             return compare_vector_results(case, current, surreal)  # type: ignore[arg-type]
         if case.retrieval_kind == "graph-direct":
-            return compare_graph_direct_results(case, current, surreal)  # type: ignore[arg-type]
+            return compare_graph_direct_results(  # type: ignore[arg-type]
+                case,
+                current,
+                surreal,
+                seed_chunk_id=case.metadata.get("seed_chunk_id"),  # type: ignore[arg-type]
+            )
         if case.retrieval_kind == "hybrid":
             baseline_fused, baseline_engine_hits = self._unpack_hybrid_payload(current)
             candidate_fused, candidate_engine_hits = self._unpack_hybrid_payload(surreal)
