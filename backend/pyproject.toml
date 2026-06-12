@@ -12,7 +12,7 @@ dependencies = [
     "blake3>=1.0",
     "click>=8.0",
     "sentence-transformers>=3.0",
-    "transformers>=4.45,<5",
+    "transformers>=5.11.0,<6",
     "torch<2.5",
     "einops>=0.8",
     "sqlite-vec>=0.1.6",
