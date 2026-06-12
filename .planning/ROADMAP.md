@@ -1071,6 +1071,55 @@ Plans:
 
 ---
 
+### Backlog 999.32: Remove LanceDB and LadybugDB completely
+
+**Goal:** Delete unused legacy storage backends and all references to them.
+
+**Context captured 2026-06-12:**
+- Production uses SQLite/FTS5/sqlite-vec plus FalkorDB.
+- LanceDB remains only as a legacy optional code path and dependency extra.
+- LadybugDB remains only as a local-dev graph fallback.
+- We do not want to preserve either compatibility layer.
+
+**Proposed scope:**
+- Remove LanceDB and LadybugDB code, config, dependency extras, tests, docs,
+  examples, comments, and lockfile references where no longer needed.
+- Make supported storage choices explicit in code and documentation.
+- Keep migration behavior focused on the current production storage model.
+
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote when ready)
+
+---
+
+### Backlog 999.33: Evaluate Embedded SurrealDB as unified storage backend
+
+**Goal:** Decide whether dotMD should replace separate SQLite/sqlite-vec/FTS5
+and FalkorDB storage with one embedded SurrealDB-backed storage layer.
+
+**Context captured 2026-06-12:**
+- Current production storage is split across local SQLite index files and an
+  external FalkorDB graph service.
+- SurrealDB may cover document metadata, graph relationships, text retrieval,
+  vector search, and operational state in one embedded database.
+
+**Proposed scope:**
+- Verify embedded SurrealDB support for dotMD's required features: metadata
+  transactions, full-text search, vector search, graph/entity traversal,
+  migrations, backup/restore, and Python/runtime ergonomics.
+- Compare operational simplicity against performance, reliability, query
+  expressiveness, and migration risk.
+- Produce a recommendation: migrate, defer, or reject.
+
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote as a storage architecture spike)
+
+---
+
 ### Future ideas:
 - Semantic chunking (split by topic similarity, not just structure)
 - Doc-level chunks (whole-document embeddings for broad queries)
