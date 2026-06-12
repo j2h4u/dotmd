@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.6
-milestone_name: Unified Source Architecture
-status: milestone_complete
-last_updated: "2026-05-13T12:16:34.599Z"
-last_activity: 2026-05-13
+milestone: v1.7
+milestone_name: Storage Simplification
+status: active
+last_updated: "2026-06-12T00:00:00.000Z"
+last_activity: 2026-06-12
 progress:
-  total_phases: 6
-  completed_phases: 6
-  total_plans: 18
-  completed_plans: 18
-  percent: 100
+  total_phases: 1
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # GSD State
@@ -20,17 +20,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** v1.6 milestone complete
+**Current focus:** Phase 38 Embedded SurrealDB storage spike
 
 ## Current Milestone
 
-**v1.6 — Unified Source Architecture**
+**v1.7 — Storage Simplification**
 
-Phase: 37
-Status: Milestone complete
-Last activity: 2026-05-13
+Phase: 38
+Status: Active
+Last activity: 2026-06-12
 
-Progress: [██████████] 100% (Milestone: 6/6 phases complete)
+Progress: [░░░░░░░░░░] 0% (Milestone: 0/1 phases complete)
 
 ## Deferred Items
 

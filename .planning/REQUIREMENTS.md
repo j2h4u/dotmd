@@ -126,6 +126,21 @@ dotMD unless a later phase explicitly justifies it.
 - [x] **AIR-03**: The compatibility spike does not introduce an Airweave-only
   integration lane separate from filesystem and Telegram.
 
+### Storage
+
+- [ ] **STOR-01**: dotMD can model its current persistent data in embedded
+  SurrealDB: documents, source units, chunks, embeddings, entities, relations,
+  feedback, cursors, and checkpoints.
+- [ ] **STOR-02**: The SurrealDB prototype can execute the retrieval paths dotMD
+  depends on: full-text, vector, graph-direct entity retrieval, and hybrid/RRF
+  fusion.
+- [ ] **STOR-03**: The spike measures how much current production data can be
+  migrated from SQLite/sqlite-vec/FalkorDB without CPU-heavy rechunking,
+  reembedding, or re-extraction.
+- [ ] **STOR-04**: The spike produces a recommendation to migrate, defer, or
+  reject SurrealDB, including operational notes for backup/restore,
+  locking/concurrency, and rollback.
+
 ## Out Of Scope
 
 - Replacing dotMD's local chunking, embeddings, FTS5, graph retrieval, or
@@ -160,3 +175,7 @@ dotMD unless a later phase explicitly justifies it.
 | AIR-01 | Phase 37 | Complete |
 | AIR-02 | Phase 37 | Complete |
 | AIR-03 | Phase 37 | Complete |
+| STOR-01 | Phase 38 | Planned |
+| STOR-02 | Phase 38 | Planned |
+| STOR-03 | Phase 38 | Planned |
+| STOR-04 | Phase 38 | Planned |

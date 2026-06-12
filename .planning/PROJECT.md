@@ -24,8 +24,8 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 - ✓ API force parameter on POST /index — Validated in Phase 3: CLI & API Polish
 - ✓ Fix BM25 results missing in hybrid mode — Validated in Phase 5: BM25 Hybrid Fix
 - ✓ FalkorDB graph store adapter — Validated in Phase 4: FalkorDB Adapter + Config
-- ✓ Graph backend config (`graph_backend`, `falkordb_url`) — Validated in Phase 4
-- ✓ Pipeline integration for backend selection — Validated in Phase 4
+- ✓ FalkorDB runtime config (`falkordb_url`) — Validated in Phase 4 and simplified in Backlog 999.32
+- ✓ Pipeline integration for the current SQLite/sqlite-vec + FalkorDB storage stack — Validated in Phase 4 and simplified in Backlog 999.32
 - ✓ Docker networking for FalkorDB connectivity — Validated in Phase 6: Docker Integration + Migration
 - ✓ Full re-index with FalkorDB (229 files, 3520 entities, 20269 edges) — Validated in Phase 6
 - ✓ Production packaging — parameterized compose with bundled profiles, env-driven config, production include: pattern — Validated in Phase 7: Production Packaging
@@ -41,19 +41,18 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 
 ### Active
 
-- v1.6 Unified Source Architecture — promote the Airweave-inspired source
-  architecture backlog line: source capability registry, source
-  lifecycle/config/auth/cursor, federated search, filesystem unification,
-  Telegram unification, and connector compatibility.
-  - ✓ Phase 35: FilesystemMarkdownSourceAdapter._from_file_info renamed to public `document_for_file_info`; behavioral tests prove public lifecycle boundary — Validated in Phase 35
-  - ✓ Phase 36: Telegram unified sync and federated search — TG-01 capabilities in registry, TG-02 auto-polling task via _local_executor (300s default, env-configurable), TG-03 rebound_units counter + CLI output, TG-04 ref consistency invariant pinned by regression test — Validated in Phase 36
+- v1.7 Storage Simplification — evaluate whether embedded SurrealDB can replace
+  the current SQLite/sqlite-vec/FTS5 + FalkorDB split while preserving as much
+  existing data as possible without CPU-heavy recomputation.
+  - Phase 38: Embedded SurrealDB storage spike — active.
 
 ### Out of Scope
 
 - Concurrent TEI requests — benchmarked 2026-03-28, no gain (0.7→0.8 t/s within noise, TEI saturates all cores on single request)
 - GLiNER batch NER — benchmarked 2026-03-28, batching slower than sequential (0.72 vs 0.53-0.61 t/s) and OOM at bs=8 on 16GB
 - GPU acceleration — no GPU on current hardware, Jetson/Mac Mini is future consideration
-- LadybugDB removal — keep as alternative embedded backend
+- Reintroducing alternative storage backends for compatibility without a current
+  migration or operational need
 - Full QMD-style query expansion/reranking — different product philosophy
 - Upstream PRs — project has diverged too far (sqlite-vec, TEI, incremental indexing, schema migrations). Former upstream is historical reference only
 

@@ -1,11 +1,18 @@
 ---
 created: 2026-03-24T00:00:00Z
+completed: 2026-06-12T00:00:00Z
 title: Migrate graph store from LadybugDB to FalkorDB
 area: api
 files:
   - backend/src/dotmd/storage/graph.py
   - backend/src/dotmd/core/config.py
 ---
+
+## Completion
+
+Closed by backlog cleanup `999.32`: LadybugDB was removed entirely, FalkorDB is
+the only production graph backend, and the old backend-selection compatibility
+path no longer exists.
 
 ## Problem
 

@@ -1094,32 +1094,6 @@ Plans:
 
 ---
 
-### Backlog 999.33: Evaluate Embedded SurrealDB as unified storage backend
-
-**Goal:** Decide whether dotMD should replace separate SQLite/sqlite-vec/FTS5
-and FalkorDB storage with one embedded SurrealDB-backed storage layer.
-
-**Context captured 2026-06-12:**
-- Current production storage is split across local SQLite index files and an
-  external FalkorDB graph service.
-- SurrealDB may cover document metadata, graph relationships, text retrieval,
-  vector search, and operational state in one embedded database.
-
-**Proposed scope:**
-- Verify embedded SurrealDB support for dotMD's required features: metadata
-  transactions, full-text search, vector search, graph/entity traversal,
-  migrations, backup/restore, and Python/runtime ergonomics.
-- Compare operational simplicity against performance, reliability, query
-  expressiveness, and migration risk.
-- Produce a recommendation: migrate, defer, or reject.
-
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (promote as a storage architecture spike)
-
----
-
 ### Future ideas:
 - Semantic chunking (split by topic similarity, not just structure)
 - Doc-level chunks (whole-document embeddings for broad queries)
@@ -1273,5 +1247,27 @@ Success criteria:
 
 ---
 
+### Phase 38: Embedded SurrealDB storage spike
+
+**Goal:** Decide whether dotMD should replace separate SQLite/sqlite-vec/FTS5
+and FalkorDB storage with one embedded SurrealDB-backed storage layer.
+**Requirements:** STOR-01, STOR-02, STOR-03, STOR-04
+**Depends on:** Phase 37
+**Backlog source:** 999.33
+**Plans:** 0/0 plans complete
+
+Success criteria:
+1. A minimal SurrealDB prototype models documents, source units, chunks,
+   embeddings, entities, relations, feedback, and cursor/checkpoint state.
+2. The prototype proves or rejects dotMD's required retrieval paths:
+   full-text, vector, graph-direct entity retrieval, and hybrid/RRF fusion.
+3. The spike measures migration feasibility from current production data:
+   SQLite metadata/FTS/source state, sqlite-vec embeddings, and FalkorDB graph
+   data should be migrated where possible instead of recomputed on CPU.
+4. The result is an explicit recommendation: migrate, defer, or reject, with
+   operational notes for backup/restore, locking/concurrency, and rollback.
+
+---
+
 *Roadmap created: 2026-03-26*
-*Last updated: 2026-05-08*
+*Last updated: 2026-06-12*

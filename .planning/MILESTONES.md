@@ -1,5 +1,27 @@
 # Milestones
 
+## v1.6 Unified Source Architecture (Shipped: 2026-05-13)
+
+**Phases completed:** 6 phases complete, 18 plans complete
+
+**Key accomplishments:**
+
+- Source descriptors now describe source kind, display metadata, config/auth,
+  cursor schema, and capability flags.
+- Source lifecycle construction now flows through one registry/config/auth/cursor
+  boundary for filesystem and Telegram.
+- Local and source-native results now share a federated `SearchCandidate`
+  contract with ref-first read/drill behavior.
+- Filesystem and Telegram were unified on the source contract, including
+  Telegram sync/reuse and native federated search.
+- Airweave connector compatibility was proven through a Gmail bridge without
+  adopting Airweave's indexing/runtime stack.
+
+**Known deferred items at close:** broader third-party connector rollout and
+storage consolidation, now continued as Phase 38.
+
+---
+
 ## v1.5 Telegram Source Adapter (Shipped: 2026-05-08)
 
 **Phases completed:** 4 phases complete, 1 phase deferred, 13 plans complete
