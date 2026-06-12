@@ -169,18 +169,17 @@ def _create_inventory_fixture(db_path: Path) -> None:
         conn.close()
 
 
-def _create_wal_fixture(db_path: Path) -> None:
+def _create_wal_fixture(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
-    try:
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("CREATE TABLE wal_payload (id INTEGER PRIMARY KEY, body TEXT NOT NULL)")
-        conn.commit()
-        conn.execute("INSERT INTO wal_payload (body) VALUES (?)", ("committed",))
-        conn.commit()
-        conn.execute("INSERT INTO wal_payload (body) VALUES (?)", ("still-in-wal",))
-        conn.commit()
-    finally:
-        conn.close()
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA wal_autocheckpoint=0")
+    conn.execute("CREATE TABLE wal_payload (id INTEGER PRIMARY KEY, body TEXT NOT NULL)")
+    conn.commit()
+    conn.execute("INSERT INTO wal_payload (body) VALUES (?)", ("committed",))
+    conn.commit()
+    conn.execute("INSERT INTO wal_payload (body) VALUES (?)", ("still-in-wal",))
+    conn.commit()
+    return conn
 
 
 class _FakeGraphExporter:
@@ -251,14 +250,17 @@ def test_copy_sqlite_snapshot_copies_to_explicit_snapshot_dir_without_mutating_s
 
 def test_copy_sqlite_snapshot_handles_wal_state_without_silent_row_loss(tmp_path: Path) -> None:
     db_path = tmp_path / "wal-index.db"
-    _create_wal_fixture(db_path)
-    wal_path = Path(f"{db_path}-wal")
-    shm_path = Path(f"{db_path}-shm")
+    conn = _create_wal_fixture(db_path)
+    try:
+        wal_path = Path(f"{db_path}-wal")
+        shm_path = Path(f"{db_path}-shm")
 
-    assert wal_path.exists()
-    assert shm_path.exists()
+        assert wal_path.exists()
+        assert shm_path.exists()
 
-    snapshot = copy_sqlite_snapshot(db_path, tmp_path / "snapshot", "wal-check")
+        snapshot = copy_sqlite_snapshot(db_path, tmp_path / "snapshot", "wal-check")
+    finally:
+        conn.close()
 
     with sqlite3.connect(snapshot.snapshot_path) as conn:
         rows = conn.execute("SELECT body FROM wal_payload ORDER BY id").fetchall()
