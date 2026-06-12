@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Storage Simplification
 status: Active
-stopped_at: Completed 38-05-PLAN.md
-last_updated: "2026-06-12T14:42:14.172Z"
+stopped_at: Completed 38-02-PLAN.md
+last_updated: "2026-06-12T15:09:58.591Z"
 last_activity: 2026-06-12
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 5
-  completed_plans: 2
-  percent: 40
+  completed_plans: 3
+  percent: 60
 ---
 
 # GSD State
@@ -31,7 +31,7 @@ Phase: 38
 Status: Active
 Last activity: 2026-06-12
 
-Progress: [████░░░░░░] 40% (Phase 38: 2/5 plans complete)
+Progress: [██████░░░░] 60% (Phase 38: 3/5 plans complete)
 
 ## Deferred Items
 
@@ -96,6 +96,7 @@ Items acknowledged and deferred at milestone close:
 | 37 | 4 | - | - |
 | Phase 38 P01-current-data-inventory | 21 min | 3 tasks | 5 files |
 | Phase 38 P05 | 10 min | 3 tasks | 6 files |
+| Phase 38 P02 | 13 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -204,6 +205,9 @@ Recent decisions affecting current work:
 - [Phase 27]: [Phase 27 Plan 03]: Binding diagnostics are count-only with active, inactive, retained, and reused keys. — No include_inactive, recycle-bin search, inactive read, or inactive list surface was added.
 - [Phase 38]: [Plan 38-05]: Embedded Surreal probes use raw SurrealQL transactions via query_raw because the embedded SDK rejects client-side begin()/commit(). — The installed embedded SDK raises UnsupportedFeatureError for begin()/commit(), so the gate proves commit and rollback semantics through raw SurrealQL on a local surrealkv target instead.
 - [Phase 38]: [Plan 38-05]: Same-target embedded writer safety is guarded with a sidecar JSON lock plus TTL stale recovery and explicit force-release. — Phase 38 needs explicit single-writer evidence before schema/import work, and the local guard preserves owner metadata for stale recovery and force-release reporting without touching live production volumes.
+- [Phase 38]: Use a centralized Surreal record-ID codec so chunk IDs, refs, file paths, entity names, relation IDs, and feedback IDs remain data-only and cannot shape SurrealQL structure.
+- [Phase 38]: Block Surreal apply writes on the 38-05 embedded safety gate and refuse migrate-ready evidence when the gate is missing or failed.
+- [Phase 38]: Keep feedback import behind the supported provider/exporter abstraction instead of querying feedback.db directly.
 
 ### Pending Todos
 
@@ -290,9 +294,9 @@ safe so SurrealDB evaluation does not imply unnecessary CPU-heavy recomputation.
 ## Current Position
 
 Phase: 38 (evaluate-embedded-surrealdb-as-unified-storage-backend) — ACTIVE
-Plan: 3 of 5
+Plan: 4 of 5
 Status: Ready to execute
-Last activity: 2026-06-12 -- Completed 38-05 embedded safety gate and package verification
+Last activity: 2026-06-12 -- Completed 38-02 Surreal storage schema, transform-only import proof, and summary
 
 ## Operator Next Steps
 
@@ -300,6 +304,6 @@ Last activity: 2026-06-12 -- Completed 38-05 embedded safety gate and package ve
 
 ## Session
 
-**Last session:** 2026-06-12T14:42:00.153Z
-**Stopped at:** Completed 38-05-PLAN.md
+**Last session:** 2026-06-12T15:09:58.576Z
+**Stopped at:** Completed 38-02-PLAN.md
 **Resume file:** None
