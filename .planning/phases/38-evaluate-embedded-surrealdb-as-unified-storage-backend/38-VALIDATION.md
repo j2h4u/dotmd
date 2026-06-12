@@ -39,9 +39,10 @@ created: 2026-06-12
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
 | 38-01-01 | 01 | 1 | STOR-01 | T-38-01 | Snapshot readers must not mutate production stores | integration | `cd backend && uv run pytest tests/storage/test_surreal_storage_contract.py -x` | ❌ W0 | ⬜ pending |
-| 38-02-01 | 02 | 1 | STOR-03 | T-38-02 | Migration proof must import existing IDs/vectors/entities without TEI/GLiNER calls | integration | `cd backend && uv run pytest tests/ingestion/test_surreal_transform_only_migration.py -x` | ❌ W0 | ⬜ pending |
-| 38-03-01 | 03 | 2 | STOR-02 | T-38-03 | Retrieval parity checks must compare Surreal outputs against current dotMD behavior on the same corpus | integration/parity | `cd backend && uv run pytest tests/search/test_surreal_retrieval_parity.py -x` | ❌ W0 | ⬜ pending |
-| 38-04-01 | 04 | 2 | STOR-04 | T-38-04 | Backup, restore, rollback, and writer coordination must be rehearsed before a migrate recommendation | integration/manual-smoke | `cd backend && uv run pytest tests/storage/test_surreal_ops_safety.py -x` | ❌ W0 | ⬜ pending |
+| 38-05-01 | 05 | 2 | STOR-04 | T-38-05 | Embedded Surreal atomicity and single-writer safety must gate schema/import work | integration/manual-smoke | `cd backend && uv run pytest tests/storage/test_surreal_ops_safety.py -x` | ❌ W0 | ⬜ pending |
+| 38-02-01 | 02 | 3 | STOR-03 | T-38-02 | Migration proof must import existing IDs/vectors/entities without TEI/GLiNER calls and must consume the Plan 38-05 gate | integration | `cd backend && uv run pytest tests/ingestion/test_surreal_transform_only_migration.py -x` | ❌ W0 | ⬜ pending |
+| 38-03-01 | 03 | 4 | STOR-02 | T-38-03 | Retrieval parity checks must compare Surreal outputs against current dotMD behavior on the same corpus after gated import proof | integration/parity | `cd backend && uv run pytest tests/search/test_surreal_retrieval_parity.py -x` | ❌ W0 | ⬜ pending |
+| 38-04-01 | 04 | 5 | STOR-04 | T-38-04 | Backup, restore, rollback, and final recommendation must consume the early embedded safety gate | integration/manual-smoke | `cd backend && uv run pytest tests/storage/test_surreal_ops_safety.py -x` | ❌ W0 | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -52,7 +53,7 @@ created: 2026-06-12
 - [ ] `backend/tests/storage/test_surreal_storage_contract.py` — storage model and protocol contract coverage for STOR-01.
 - [ ] `backend/tests/ingestion/test_surreal_transform_only_migration.py` — transform-only import coverage for STOR-03.
 - [ ] `backend/tests/search/test_surreal_retrieval_parity.py` — FTS/vector/graph/hybrid parity coverage for STOR-02.
-- [ ] `backend/tests/storage/test_surreal_ops_safety.py` — backup/restore/rollback and single-writer safety coverage for STOR-04.
+- [ ] `backend/tests/storage/test_surreal_ops_safety.py` — early embedded atomicity/single-writer gate plus backup/restore/rollback coverage for STOR-04.
 
 ---
 

@@ -354,22 +354,22 @@ RELATE section:chunk_a->has_tag->tag:release_notes;
 | A3 | Surreal relation-table queries can meet acceptable latency for dotMD’s current graph-direct workload at about 28.7k entities and 353.7k edges. [ASSUMED] | Summary, Architecture Patterns | If false, the graph half of the unification case breaks and the phase should not recommend migration. |
 | A4 | Embedded SurrealKV operational safety for single-writer production use can be proven without a lock mechanism equivalent to the current `fcntl.flock` discipline. [ASSUMED] | Runtime State Inventory, Open Questions | If false, production rollout needs a new locking design or must stay on the current stack. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Can embedded Python connections support the atomicity dotMD actually needs?**
    - What we know: Embedded Python connections support query/CRUD/auth and explicit embedded URLs, but documented sessions and client-side transactions require WebSocket. [CITED:https://surrealdb.com/docs/languages/python/concepts/connecting-to-surrealdb] [CITED:https://surrealdb.com/docs/languages/python/api/core/surreal-transaction]
    - What's unclear: Whether raw multi-statement `BEGIN` / `COMMIT` via `.query()` is operationally sufficient on embedded `surrealkv://` for migration and purge-style writes. [ASSUMED]
-   - Recommendation: Make this the first technical gate in the plan and allow a WebSocket fallback only as a control experiment, not as the default path. [CITED:https://surrealdb.com/docs/reference/query-language/language-primitives/transactions]
+   - Planning resolution: Plan `38-05` is a Wave 2 blocking gate after snapshot inventory and before Surreal schema/import/parity work. It verifies package legitimacy, installs the SDK only after the package checkpoint, probes raw embedded `surrealkv://` commit/rollback behavior, and proves local writer-guard behavior on copied stores. If embedded atomicity or writer safety cannot be proven, downstream schema/import/parity plans are blocked from producing a migrate-ready result. A WebSocket/server-backed run may be recorded only as a control experiment, not as the primary embedded answer. [CITED:https://surrealdb.com/docs/reference/query-language/language-primitives/transactions]
 
 2. **How should current FTS5 weighting map into Surreal’s single-field full-text model?**
    - What we know: Surreal full-text indexes are single-field, while current dotMD FTS5 stores text/title/tags together with weighting logic. [CITED:https://surrealdb.com/docs/learn/data-models/full-text-search/search-indexes] [VERIFIED: codebase grep]
    - What's unclear: Whether denormalized `search_text`, separate indexes, or mixed app-side ranking gives the closest parity on real dotMD queries. [ASSUMED]
-   - Recommendation: Reserve a dedicated parity plan for search ranking before any schema is blessed as “the Surreal model.” [VERIFIED: codebase grep]
+   - Planning resolution: Plan `38-03` measures FTS weighting parity as a blocking retrieval gate. The schema/import plan may create candidate searchable fields, but no Surreal search model is considered acceptable until the parity harness compares title/tag/body cases against current FTS5 behavior on the same corpus. FTS top-result or visibility regressions block a migrate recommendation and must be recorded in `38-03-RETRIEVAL-PARITY.md`. [VERIFIED: codebase grep]
 
 3. **Can current sqlite-vec and graph data be imported without CPU recomputation?**
    - What we know: dotMD stores chunk IDs, text hashes, and vector blobs in SQLite, and current graph semantics are explicit File/Section/Entity/Tag nodes with relation metadata. [VERIFIED: codebase grep] [VERIFIED: live sqlite inventory] [VERIFIED: live FalkorDB inventory]
    - What's unclear: The exact Surreal import shape and whether imported vectors/relations preserve recall and latency without hidden rebuilds. [ASSUMED]
-   - Recommendation: Add transform-only import tasks plus corpus-level parity checks before any TEI or GLiNER fallback is even proposed. [VERIFIED: .planning/phases/38-evaluate-embedded-surrealdb-as-unified-storage-backend/38-CONTEXT.md]
+   - Planning resolution: Plan `38-02` depends on both the inventory/migration map and the early embedded safety gate. It must prove the import shape from existing SQLite/sqlite-vec/FalkorDB/feedback rows as transform-only data movement before any parity result or recommendation can count as migration evidence. TEI, chunking, and GLiNER/entity-extraction call sites are negative-grep gated out of the import modules; any need for CPU recomputation is recorded as a failed or deferred D-01 category, not silently folded into the migration path. [VERIFIED: .planning/phases/38-evaluate-embedded-surrealdb-as-unified-storage-backend/38-CONTEXT.md]
 
 ## Environment Availability
 
