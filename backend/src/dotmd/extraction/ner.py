@@ -224,7 +224,7 @@ class NERExtractor:
         model = self._get_model()
 
         texts = [chunk.text for chunk in chunks]
-        batch_predictions: list[list[dict[str, Any]]] = model.inference(
+        batch_predictions: list[list[dict[str, Any]]] = cast(Any, model).inference(
             texts,
             self._entity_types,
             threshold=self._threshold,
@@ -306,12 +306,13 @@ class NERExtractor:
             # ADR: Cap max sequence length to match our chunk token budget.
             # GLiNER attention is O(n^2) — shorter max_len = faster inference.
             # 512 matches our chunk_max_tokens setting.
-            if hasattr(model, "config") and hasattr(model.config, "max_len"):
-                model.config.max_len = 512
+            model_config = getattr(cast(Any, model), "config", None)
+            if model_config is not None and hasattr(model_config, "max_len"):
+                model_config.max_len = 512
             logger.info(
                 "GLiNER model loaded (threads=%d, max_len=%s).",
                 torch.get_num_threads(),
-                getattr(getattr(model, "config", None), "max_len", "?"),
+                getattr(model_config, "max_len", "?"),
             )
             self._model = model
         return cast("GLiNER", self._model)
