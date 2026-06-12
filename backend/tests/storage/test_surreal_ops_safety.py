@@ -53,6 +53,7 @@ def test_writer_guard_blocks_second_writer_and_exposes_owner_metadata(
         second.acquire()
 
     assert second.read_current_owner() == first_metadata
+    first.release()
 
     report = probe_embedded_writer_safety(target_path, stale_after_seconds=1.0)
     assert report.probe_kind == "writer"
@@ -60,8 +61,6 @@ def test_writer_guard_blocks_second_writer_and_exposes_owner_metadata(
     assert report.previous_owner_metadata is not None
     assert report.previous_owner_metadata["owner_id"] == "guard-owner-a"
     assert report.go_no_go is True
-
-    first.release()
 
 
 def test_release_stale_writer_guard_requires_ttl_expiry(tmp_path: Path) -> None:
