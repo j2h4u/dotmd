@@ -53,15 +53,15 @@ existing data, production cutover, and complete removal of legacy storage code.
 
 ### Retrieval Contract
 
-- [ ] **SURR-RET-01**: dotMD has a documented SurrealDB-native retrieval
+- [x] **SURR-RET-01**: dotMD has a documented SurrealDB-native retrieval
   contract for weighted full-text, vector, graph/entity, hybrid fusion, and
   reranker candidate inputs.
 
-- [ ] **SURR-RET-02**: The retrieval contract defines quality gates in terms of
+- [x] **SURR-RET-02**: The retrieval contract defines quality gates in terms of
   expected user-visible results and explainable differences, not exact rank
   parity with the old stack.
 
-- [ ] **SURR-RET-03**: The old stack is explicitly treated as a temporary
+- [x] **SURR-RET-03**: The old stack is explicitly treated as a temporary
   baseline/evaluator only and not as a product compatibility target.
 
 ### Evaluation
@@ -82,7 +82,7 @@ existing data, production cutover, and complete removal of legacy storage code.
   source units, chunks, embeddings, source refs, file/resource bindings,
   fingerprints, graph entities/relations, feedback, cursors, and checkpoints.
 
-- [ ] **SURR-MIG-02**: Migration imports existing stored data transform-first
+- [x] **SURR-MIG-02**: Migration imports existing stored data transform-first
   wherever practical, avoiding default TEI reembedding, rechunking, and entity
   re-extraction.
 
@@ -145,14 +145,14 @@ existing data, production cutover, and complete removal of legacy storage code.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SURR-RET-01 | Phase 39 | Pending |
-| SURR-RET-02 | Phase 39 | Pending |
-| SURR-RET-03 | Phase 39 | Pending |
+| SURR-RET-01 | Phase 39 | Complete |
+| SURR-RET-02 | Phase 39 | Complete |
+| SURR-RET-03 | Phase 39 | Complete |
 | SURR-EVAL-01 | Phase 40 | Pending |
 | SURR-EVAL-02 | Phase 40 | Pending |
 | SURR-EVAL-03 | Phase 40 / Phase 43 | Pending |
 | SURR-MIG-01 | Phase 41 | Pending |
-| SURR-MIG-02 | Phase 41 | Pending |
+| SURR-MIG-02 | Phase 39 / Phase 41 | Complete |
 | SURR-MIG-03 | Phase 41 / Phase 44 | Pending |
 | SURR-SEARCH-01 | Phase 42 | Pending |
 | SURR-SEARCH-02 | Phase 42 / Phase 43 | Pending |
@@ -173,4 +173,4 @@ existing data, production cutover, and complete removal of legacy storage code.
 
 ---
 *Requirements defined: 2026-06-12*
-*Last updated: 2026-06-12 after v1.8 milestone creation*
+*Last updated: 2026-06-13 after Phase 39 execution*

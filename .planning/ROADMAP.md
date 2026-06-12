@@ -150,16 +150,16 @@ categories before implementation starts.
 **Depends on:** Phase 38
 **Plans:** 1 plan
 
-- [ ] Define the target search semantics for BM25 weighted fields, vector
+- [x] Define the target search semantics for BM25 weighted fields, vector
   search, graph traversal, hybrid fusion, and reranker inputs.
-- [ ] Treat the old stack as baseline evidence only, not as a compatibility
+- [x] Treat the old stack as baseline evidence only, not as a compatibility
   target.
-- [ ] Define accepted-difference categories: improvement, harmless reorder,
+- [x] Define accepted-difference categories: improvement, harmless reorder,
   regression, and unclear.
 
 Plans:
 
-- [ ] 39-01: Define SurrealDB-native retrieval contract and migration reuse policy
+- [x] 39-01: Define SurrealDB-native retrieval contract and migration reuse policy
 
 ### Phase 40: Evaluation harness and golden queries
 
@@ -277,7 +277,7 @@ after SurrealDB cutover is accepted.
 | 36. Telegram unified sync and federated search | 2/2 | Complete    | 2026-05-10 |
 | 37. Airweave connector compatibility spike | 4/4 | Complete    | 2026-05-13 |
 | 38. Embedded SurrealDB storage spike | 5/5 | Complete    | 2026-06-12 |
-| 39. SurrealDB-native retrieval contract | v1.8 | Planned | — |
+| 39. SurrealDB-native retrieval contract | 1/1 | Complete | 2026-06-13 |
 | 40. Evaluation harness and golden queries | v1.8 | Planned | — |
 | 41. Production-grade Surreal schema and import | v1.8 | Planned | — |
 | 42. Surreal-native retrieval implementation | v1.8 | Planned | — |
