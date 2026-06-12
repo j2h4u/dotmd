@@ -91,5 +91,12 @@ CYCLE_SUMMARY: current_high=1 current_actionable=5
 
 ## Current HIGH Concerns
 
+- C1: Golden corpus label guidance may point to repo planning docs rather than actual indexed `filesystem:/mnt/...` refs, making the corpus unusable for real evaluation runs.
+
 ## Current Actionable Non-HIGH Concerns
 
+- C2: Resolve whether `contains` is automatically checked or human annotation, without violating the no-arbitrary-file-read threat mitigation.
+- C3: Make `graph-entity` the single enum-backed category string across code, corpus, and tests.
+- C4: Consider shared fixtures if fake diff rows duplicate between test files, or explicitly keep duplication small.
+- C6: Add explicit test coverage for `matched_engines` in diff rows.
+- S6: Specify acceptance JSONL behavior in runner task text.
