@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: SurrealDB-Native Storage Cutover
-status: in_progress
-stopped_at: Completed 39-01-PLAN.md
-last_updated: "2026-06-12T21:25:12.000Z"
+status: verified
+stopped_at: Phase 39 verified
+last_updated: "2026-06-12T21:28:00.000Z"
 last_activity: 2026-06-13
 progress:
   total_phases: 7
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **v1.8 — SurrealDB-Native Storage Cutover**
 
-Phase: 39
-Status: Phase 39 complete; ready for verification and Phase 40 planning
+Phase: 40 next
+Status: Phase 39 verified; ready for Phase 40 planning
 Last activity: 2026-06-13
 
 Progress: [█---------] 14% (1/7 phases complete; 1/1 plans complete)
