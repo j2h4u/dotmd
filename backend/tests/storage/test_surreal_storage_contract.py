@@ -384,3 +384,86 @@ def test_collect_sqlite_inventory_does_not_require_live_services(tmp_path: Path)
     assert "TEI" not in repr(inventory)
     assert "FalkorDB" not in repr(inventory)
     assert os.environ.get("DOTMD_EMBEDDING_URL") is None or True
+
+
+def test_surreal_record_id_codec_round_trips_special_characters_without_leaking_raw_values() -> None:
+    from dotmd.storage.surreal import (  # type: ignore[import-not-found]
+        SurrealRecordIdCodec,
+        decode_surreal_record_id,
+        encode_surreal_record_id,
+    )
+
+    codec = SurrealRecordIdCodec()
+    raw_identifiers = [
+        'chunk:alpha/one {"quoted"}',
+        'filesystem:/tmp/Doc One "quoted".md',
+        "entity/Привет мир",
+        "feedback:{42}/ spaced",
+    ]
+    forbidden_fragments = ["DROP", "RETURN", "{", "}", '"', "'", "\n", ";"]
+
+    for raw_identifier in raw_identifiers:
+        record_id = codec.encode("chunks", raw_identifier)
+        assert record_id.table_name == "chunks"
+        assert codec.decode(record_id) == raw_identifier
+        assert decode_surreal_record_id(record_id) == raw_identifier
+        assert decode_surreal_record_id(encode_surreal_record_id("chunks", raw_identifier)) == (
+            raw_identifier
+        )
+
+        encoded_identifier = str(record_id.id)
+        assert raw_identifier not in encoded_identifier
+        assert all(fragment not in encoded_identifier for fragment in forbidden_fragments)
+
+
+def test_define_dotmd_surreal_schema_declares_required_record_shapes_and_thin_scope() -> None:
+    from dotmd.storage.surreal import (  # type: ignore[import-not-found]
+        THIN_PROTOTYPE_NOTE,
+        UNSUPPORTED_PRODUCTION_BEHAVIORS,
+        define_dotmd_surreal_schema,
+    )
+
+    schema = define_dotmd_surreal_schema()
+
+    assert {
+        "documents",
+        "source_units",
+        "chunks",
+        "embeddings",
+        "vector_components",
+        "entities",
+        "relations",
+        "feedback",
+        "cursors",
+        "checkpoints",
+    }.issubset(set(schema["tables"]))
+    assert "thin prototype" in THIN_PROTOTYPE_NOTE.lower()
+    assert any("DotMDService" in item for item in UNSUPPORTED_PRODUCTION_BEHAVIORS)
+    assert any("IndexingPipeline" in item for item in UNSUPPORTED_PRODUCTION_BEHAVIORS)
+
+
+def test_surreal_stores_expose_existing_protocol_method_names(tmp_path: Path) -> None:
+    from dotmd.storage.base import GraphStoreProtocol, MetadataStoreProtocol, VectorStoreProtocol
+    from dotmd.storage.surreal import (  # type: ignore[import-not-found]
+        SurrealConnection,
+        SurrealGraphStore,
+        SurrealMetadataStore,
+        SurrealStoreConfig,
+        SurrealVectorStore,
+    )
+
+    db_path = tmp_path / "storage-contract.db"
+    config = SurrealStoreConfig(
+        url=f"surrealkv://{db_path}",
+        namespace="dotmd",
+        database="phase38_contract",
+    )
+
+    with SurrealConnection(config) as connection:
+        metadata_store = SurrealMetadataStore(connection)
+        vector_store = SurrealVectorStore(connection)
+        graph_store = SurrealGraphStore(connection)
+
+        assert isinstance(metadata_store, MetadataStoreProtocol)
+        assert isinstance(vector_store, VectorStoreProtocol)
+        assert isinstance(graph_store, GraphStoreProtocol)
