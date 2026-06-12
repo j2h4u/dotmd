@@ -74,10 +74,8 @@ typecheck-strict:
 lint-strict:
     cd {{backend}} && uv run ruff check src tests devtools --select E4,E7,E9,F,I,B,BLE,UP,C4,PIE,ISC,RSE,FLY,RUF,PERF,SIM,PTH,DTZ,PGH,PLE,LOG,G,FURB,RET,N818 --ignore RUF001,RUF002,RUF003,ISC001,E501,B008,N802,N803,N806,SIM108
 
-# Static quality gate: lint, types, imports, workflows, compile, dead code.
-# _fmt-check is available but not mandatory until the existing formatting debt is
-# paid down in a dedicated mechanical commit.
-check: _lint typecheck _import-contracts _actionlint _compile _dead-code
+# Static quality gate: format, lint, types, imports, workflows, compile, dead code.
+check: _fmt-check _lint typecheck _import-contracts _actionlint _compile _dead-code
 
 # Full local gate for agents before claiming completion.
 verify: check unit

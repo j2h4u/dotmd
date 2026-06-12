@@ -119,24 +119,50 @@ def assert_tailscale_sidecar_network() -> None:
             f"actual={network_mode} current_dotmd=container:{dotmd_id}"
         )
     if "mcp" not in networks:
-        fail(f"tailscale-dotmd is not attached to the shared mcp network: networks={sorted(networks)}")
+        fail(
+            f"tailscale-dotmd is not attached to the shared mcp network: networks={sorted(networks)}"
+        )
     ok("tailscale-dotmd is attached to the shared mcp network")
 
 
 def assert_tailscale_ready() -> None:
-    status = run(["docker", "exec", "tailscale-dotmd", "tailscale", "--socket=/tmp/tailscaled.sock", "status"])
+    status = run(
+        [
+            "docker",
+            "exec",
+            "tailscale-dotmd",
+            "tailscale",
+            "--socket=/tmp/tailscaled.sock",
+            "status",
+        ]
+    )
     if "dotmd" not in status or "offline" in status.splitlines()[0]:
         fail(f"tailscale status is not online:\n{status}")
 
     serve = run(
-        ["docker", "exec", "tailscale-dotmd", "tailscale", "--socket=/tmp/tailscaled.sock", "serve", "status"]
+        [
+            "docker",
+            "exec",
+            "tailscale-dotmd",
+            "tailscale",
+            "--socket=/tmp/tailscaled.sock",
+            "serve",
+            "status",
+        ]
     )
     proxy_targets = ("http://dotmd:8080", "http://127.0.0.1:8080")
     if "Funnel on" not in serve or not any(target in serve for target in proxy_targets):
         fail(f"tailscale Funnel is not serving dotmd:\n{serve}")
 
     netcheck = run(
-        ["docker", "exec", "tailscale-dotmd", "tailscale", "--socket=/tmp/tailscaled.sock", "netcheck"]
+        [
+            "docker",
+            "exec",
+            "tailscale-dotmd",
+            "tailscale",
+            "--socket=/tmp/tailscaled.sock",
+            "netcheck",
+        ]
     )
     required = ["* UDP: true", "* IPv4: yes", "* Nearest DERP:"]
     missing = [item for item in required if item not in netcheck]
@@ -176,7 +202,9 @@ def assert_public_oauth(base_url: str) -> None:
     )
     www_auth = challenge.headers.get("www-authenticate", "")
     if challenge.status != 401 or "resource_metadata=" not in www_auth:
-        fail(f"MCP unauthenticated challenge failed: status={challenge.status} www-authenticate={www_auth!r}")
+        fail(
+            f"MCP unauthenticated challenge failed: status={challenge.status} www-authenticate={www_auth!r}"
+        )
     ok("public health, OAuth metadata, and MCP auth challenge are reachable")
 
 
@@ -313,11 +341,15 @@ def assert_registration_is_code_gated(base_url: str) -> None:
     allowlist_configured = bool(dotmd_env("DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES"))
     if allowlist_configured:
         if result.status != 400 or payload.get("error") != "invalid_redirect_uri":
-            fail(f"untrusted redirect registration was not rejected: status={result.status} body={result.body!r}")
+            fail(
+                f"untrusted redirect registration was not rejected: status={result.status} body={result.body!r}"
+            )
         ok("configured OAuth redirect allowlist rejects untrusted callbacks")
         return
     if result.status != 201:
-        fail(f"registration should be accepted when redirect allowlist is empty: status={result.status} body={result.body!r}")
+        fail(
+            f"registration should be accepted when redirect allowlist is empty: status={result.status} body={result.body!r}"
+        )
     client_id = payload.get("client_id")
     if not isinstance(client_id, str) or not client_id:
         fail(f"registration response did not include client_id: {payload!r}")
@@ -336,15 +368,25 @@ def assert_registration_is_code_gated(base_url: str) -> None:
     )
     authorize = http_request("GET", f"{base_url}/authorize?{authorize_query}")
     if authorize.status != 200 or b"Pairing code" not in authorize.body:
-        fail(f"registered client was not held behind pairing code: status={authorize.status} body={authorize.body[:300]!r}")
+        fail(
+            f"registered client was not held behind pairing code: status={authorize.status} body={authorize.body[:300]!r}"
+        )
     cleanup_pending_oauth_client(client_id)
     ok("empty OAuth redirect allowlist accepts registration but keeps clients code-gated")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", default="", help="Public MCP base URL; defaults to DOTMD_BASE_URL inside dotmd.")
-    parser.add_argument("--client-name", default="Claude", help="OAuth client name whose token is used for tools/list.")
+    parser.add_argument(
+        "--base-url",
+        default="",
+        help="Public MCP base URL; defaults to DOTMD_BASE_URL inside dotmd.",
+    )
+    parser.add_argument(
+        "--client-name",
+        default="Claude",
+        help="OAuth client name whose token is used for tools/list.",
+    )
     parser.add_argument(
         "--skip-registration-closed",
         action="store_true",

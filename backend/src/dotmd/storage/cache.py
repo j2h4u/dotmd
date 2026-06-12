@@ -209,9 +209,7 @@ class ExtractionCache:
         self._conn = conn
         self._model_name = model_name
         self._threshold = threshold
-        self._entity_types_hash = blake3.blake3(
-            ",".join(sorted(entity_types)).encode()
-        ).hexdigest()
+        self._entity_types_hash = blake3.blake3(",".join(sorted(entity_types)).encode()).hexdigest()
         self._model_sig = blake3.blake3(
             (model_name + self._entity_types_hash + str(threshold)).encode()
         ).hexdigest()
@@ -296,17 +294,13 @@ class ExtractionCache:
         enriched text). This is correct because GLiNER runs on raw text.
         """
         chunk_text_hash = blake3.blake3(chunk_text.encode()).hexdigest()
-        return blake3.blake3(
-            (chunk_text_hash + self._model_sig).encode()
-        ).hexdigest()
+        return blake3.blake3((chunk_text_hash + self._model_sig).encode()).hexdigest()
 
     # ------------------------------------------------------------------
     # Lookup
     # ------------------------------------------------------------------
 
-    def lookup_batch(
-        self, chunks: list[Chunk]
-    ) -> tuple[dict[str, tuple[list, list]], list[Chunk]]:
+    def lookup_batch(self, chunks: list[Chunk]) -> tuple[dict[str, tuple[list, list]], list[Chunk]]:
         """Look up a batch of chunks in the extraction cache.
 
         Parameters
@@ -396,10 +390,7 @@ class ExtractionCache:
             return 0
 
         live_keys = {self._make_key(t) for t in live_chunk_texts}
-        all_keys = {
-            row[0]
-            for row in self._conn.execute("SELECT cache_key FROM extraction_cache")
-        }
+        all_keys = {row[0] for row in self._conn.execute("SELECT cache_key FROM extraction_cache")}
         orphan_keys = all_keys - live_keys
         if not orphan_keys:
             return 0

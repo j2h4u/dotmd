@@ -14,9 +14,7 @@ class SourceRegistry:
     def register(self, descriptor: SourceDescriptor) -> None:
         """Register a source descriptor."""
         if descriptor.namespace in self._descriptors:
-            raise ValueError(
-                f"source namespace already registered: {descriptor.namespace}"
-            )
+            raise ValueError(f"source namespace already registered: {descriptor.namespace}")
         self._descriptors[descriptor.namespace] = descriptor.model_copy(deep=True)
 
     def get(self, namespace: str) -> SourceDescriptor | None:
@@ -35,8 +33,4 @@ class SourceRegistry:
 
     def list(self) -> list[SourceDescriptor]:
         """Return all registered source descriptors."""
-        return [
-            descriptor.model_copy(deep=True)
-            for descriptor in self._descriptors.values()
-        ]
-
+        return [descriptor.model_copy(deep=True) for descriptor in self._descriptors.values()]

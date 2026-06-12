@@ -9,6 +9,7 @@ Covers:
 
 All tests mock encode_batch — no live TEI required.
 """
+
 import pathlib
 from typing import Any, cast
 from unittest.mock import MagicMock
@@ -16,6 +17,7 @@ from unittest.mock import MagicMock
 import pytest
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
+
 
 def _write_md(path: pathlib.Path, title: str, tags: list, body: str) -> None:
     tags_yaml = "\n".join(f"  - {t}" for t in tags) if tags else ""
@@ -31,6 +33,7 @@ def minimal_settings(tmp_path):
     """Minimal settings for pipeline construction without live TEI."""
     from dotmd.core.config import Settings
     from dotmd.core.models import ExtractDepth
+
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     index_dir = tmp_path / "index"
@@ -50,6 +53,7 @@ def minimal_settings(tmp_path):
 def _make_pipeline_with_mock_encode(settings):
     """Construct IndexingPipeline with mocked encode_batch. Returns (pipeline, call_log)."""
     from dotmd.ingestion.pipeline import IndexingPipeline
+
     dummy_vec = [0.1] * 768
     call_log = []
 
@@ -66,6 +70,7 @@ def _make_pipeline_with_mock_encode(settings):
 
 
 # ── CONCERN-01 regression: _embed_chunks returns e_text, not e_fused ─────────
+
 
 def test_embed_chunks_returns_etext_not_efused_from_cache(minimal_settings, tmp_path):
     """_embed_chunks() returns e_text from VecComponentStore, not e_fused from vec0.
@@ -167,6 +172,7 @@ def test_embed_chunks_sends_context_prefixed_text_to_encode_boundary(
 
 # ── Fast path detection ──────────────────────────────────────────────────────
 
+
 def test_metadata_only_change_calls_encode_batch_once(minimal_settings, tmp_path):
     """Tag-only change after initial index triggers exactly 1 encode_batch call (e_meta)."""
     doc = minimal_settings.data_dir / "test.md"
@@ -256,6 +262,7 @@ def test_both_body_and_metadata_change_uses_full_path(minimal_settings, tmp_path
 
 # ── e_text BLOB missing fallback ─────────────────────────────────────────────
 
+
 def test_metadata_only_with_missing_etext_falls_back_to_full_embed(minimal_settings, tmp_path):
     """Fast path with missing e_text BLOBs falls back to full embed for those chunks."""
     doc = minimal_settings.data_dir / "test.md"
@@ -288,6 +295,7 @@ def test_metadata_only_with_missing_etext_falls_back_to_full_embed(minimal_setti
 
 # ── Schema version wipe ──────────────────────────────────────────────────────
 
+
 @pytest.mark.real_schema_check
 def test_schema_version_wipe_clears_all_state(minimal_settings, tmp_path):
     """_check_schema_version() with stale version clears all 7 state components."""
@@ -312,9 +320,7 @@ def test_schema_version_wipe_clears_all_state(minimal_settings, tmp_path):
 
     # All 7 state components must be cleared
     # 1. embedding_cache
-    cache_count = pipeline._conn.execute(
-        "SELECT COUNT(*) FROM embedding_cache"
-    ).fetchone()[0]
+    cache_count = pipeline._conn.execute("SELECT COUNT(*) FROM embedding_cache").fetchone()[0]
     assert cache_count == 0, f"embedding_cache must be wiped (got {cache_count} rows)"
 
     # 2. vec_components
@@ -346,7 +352,9 @@ def test_schema_version_wipe_clears_all_state(minimal_settings, tmp_path):
         "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
         (vector_store._VEC_TABLE,),
     ).fetchone()
-    assert vec0_exists is None, f"vec0 table must be dropped by wipe (still exists: {vector_store._VEC_TABLE!r})"
+    assert vec0_exists is None, (
+        f"vec0 table must be dropped by wipe (still exists: {vector_store._VEC_TABLE!r})"
+    )
 
     # 7. vec_meta text_hash index (cleared by delete_all, not dropped)
     # Note: chunks_*, chunk_file_paths_*, and FTS5 are intentionally NOT cleared —
@@ -358,6 +366,7 @@ def test_schema_version_wipe_clears_all_state(minimal_settings, tmp_path):
 
 
 # ── Weight change recompute ──────────────────────────────────────────────────
+
 
 def test_weight_change_recomputes_fused_without_tei(minimal_settings, tmp_path):
     """Changing embedding weights recomputes e_fused from stored components, no TEI calls."""
@@ -371,6 +380,7 @@ def test_weight_change_recomputes_fused_without_tei(minimal_settings, tmp_path):
     # Change weights in settings (simulate env var change on next startup)
     from dotmd.core.config import Settings
     from dotmd.core.models import ExtractDepth
+
     new_settings = Settings(
         data_dir=minimal_settings.data_dir,
         index_dir=minimal_settings.index_dir,

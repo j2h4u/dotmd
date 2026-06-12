@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 _WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
 _INLINE_TAG_RE = re.compile(r"(?:^|(?<=\s))#([A-Za-z_][\w/-]*)", re.MULTILINE)
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+\.md(?:#[^)]*)?)\)")
+
+
 class StructuralExtractor:
     """Extract entities and relations from markdown structural elements.
 
@@ -84,7 +86,11 @@ class StructuralExtractor:
                 # Exclude lines that start with '#' as a heading (e.g. "# Title").
                 line_start = text.rfind("\n", 0, match.start()) + 1
                 line = text[line_start : match.end()]
-                if line.lstrip().startswith("# ") or line.lstrip().startswith("## ") or line.lstrip().startswith("### "):
+                if (
+                    line.lstrip().startswith("# ")
+                    or line.lstrip().startswith("## ")
+                    or line.lstrip().startswith("### ")
+                ):
                     continue
                 tag = match.group(1)
                 entity = Entity(
@@ -137,4 +143,3 @@ class StructuralExtractor:
                     )
 
         return ExtractionResult(entities=entities, relations=relations)
-

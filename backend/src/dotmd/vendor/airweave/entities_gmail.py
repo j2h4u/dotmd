@@ -58,8 +58,12 @@ def _internal_date_to_datetime(ms: str | None) -> datetime | None:
 class GmailThreadEntity(BaseEntity):
     """Schema for Gmail thread entities."""
 
-    thread_key: str = AirweaveField(..., description="Stable Airweave thread key.", is_entity_id=True)
-    gmail_thread_id: str = AirweaveField(..., description="Native Gmail thread ID", embeddable=False)
+    thread_key: str = AirweaveField(
+        ..., description="Stable Airweave thread key.", is_entity_id=True
+    )
+    gmail_thread_id: str = AirweaveField(
+        ..., description="Native Gmail thread ID", embeddable=False
+    )
     title: str = AirweaveField(..., description="Display title.", is_name=True, embeddable=True)
     last_message_at: datetime | None = AirweaveField(
         None,
@@ -68,7 +72,9 @@ class GmailThreadEntity(BaseEntity):
     )
     snippet: str | None = AirweaveField(None, description="Thread snippet.", embeddable=True)
     history_id: str | None = AirweaveField(None, description="Thread history ID.", embeddable=False)
-    message_count: int | None = AirweaveField(0, description="Number of messages.", embeddable=False)
+    message_count: int | None = AirweaveField(
+        0, description="Number of messages.", embeddable=False
+    )
     label_ids: list[str] = AirweaveField(
         default_factory=list,
         description="Thread labels.",
@@ -110,7 +116,9 @@ class GmailThreadEntity(BaseEntity):
 class GmailMessageEntity(EmailEntity):
     """Schema for Gmail message entities."""
 
-    message_key: str = AirweaveField(..., description="Stable Airweave message key.", is_entity_id=True)
+    message_key: str = AirweaveField(
+        ..., description="Stable Airweave message key.", is_entity_id=True
+    )
     message_id: str = AirweaveField(..., description="Native Gmail message ID", embeddable=False)
     subject: str = AirweaveField(..., description="Subject line.", is_name=True, embeddable=True)
     sent_at: datetime = AirweaveField(..., description="Sent timestamp.", is_created_at=True)
@@ -122,11 +130,17 @@ class GmailMessageEntity(EmailEntity):
     thread_id: str = AirweaveField(..., description="Thread ID.", embeddable=False)
     sender: str | None = AirweaveField(None, description="Sender.", embeddable=True)
     to: list[str] = AirweaveField(default_factory=list, description="Recipients.", embeddable=True)
-    cc: list[str] = AirweaveField(default_factory=list, description="CC recipients.", embeddable=True)
-    bcc: list[str] = AirweaveField(default_factory=list, description="BCC recipients.", embeddable=True)
+    cc: list[str] = AirweaveField(
+        default_factory=list, description="CC recipients.", embeddable=True
+    )
+    bcc: list[str] = AirweaveField(
+        default_factory=list, description="BCC recipients.", embeddable=True
+    )
     date: datetime | None = AirweaveField(None, description="Date header.", embeddable=True)
     snippet: str | None = AirweaveField(None, description="Message snippet.", embeddable=True)
-    label_ids: list[str] = AirweaveField(default_factory=list, description="Labels.", embeddable=True)
+    label_ids: list[str] = AirweaveField(
+        default_factory=list, description="Labels.", embeddable=True
+    )
     internal_date: datetime | None = AirweaveField(
         None,
         description="Internal Gmail timestamp.",
@@ -188,11 +202,15 @@ class GmailAttachmentEntity(FileEntity):
         description="Stable Airweave attachment key.",
         is_entity_id=True,
     )
-    filename: str = AirweaveField(..., description="Attachment filename.", is_name=True, embeddable=True)
+    filename: str = AirweaveField(
+        ..., description="Attachment filename.", is_name=True, embeddable=True
+    )
     message_id: str = AirweaveField(..., description="Message ID.", embeddable=False)
     attachment_id: str = AirweaveField(..., description="Gmail attachment ID.", embeddable=False)
     thread_id: str = AirweaveField(..., description="Thread ID.", embeddable=False)
-    web_url_value: str | None = AirweaveField(None, description="Parent message URL.", embeddable=False)
+    web_url_value: str | None = AirweaveField(
+        None, description="Parent message URL.", embeddable=False
+    )
 
     @computed_field(return_type=str)
     def web_url(self) -> str:

@@ -46,8 +46,7 @@ def run_pyright() -> dict[str, int]:
     )
     if not proc.stdout:
         sys.stderr.write(
-            f"pyright produced no JSON output (exit {proc.returncode}).\n"
-            f"stderr:\n{proc.stderr}\n"
+            f"pyright produced no JSON output (exit {proc.returncode}).\nstderr:\n{proc.stderr}\n"
         )
         sys.exit(2)
 
@@ -58,7 +57,7 @@ def run_pyright() -> dict[str, int]:
     raw = proc.stdout
     m = re.search(r'^\{\s*\n\s*"version"', raw, re.MULTILINE)
     if m:
-        raw = raw[m.start():]
+        raw = raw[m.start() :]
 
     try:
         data: dict[str, Any] = json.loads(raw)

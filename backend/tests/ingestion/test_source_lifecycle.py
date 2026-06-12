@@ -150,9 +150,7 @@ def test_telegram_runtime_bundle_uses_delegated_access_and_provider(
 
     bundle = factory.build("telegram")
 
-    assert credential_provider.calls == [
-        ("telegram", SourceCredentialRef(namespace="telegram"))
-    ]
+    assert credential_provider.calls == [("telegram", SourceCredentialRef(namespace="telegram"))]
     assert bundle.access.kind == "delegated"
     assert bundle.access.delegated_to == "mcp-telegram"
     assert isinstance(bundle.provider, TelegramApplicationSourceProvider)

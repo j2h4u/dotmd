@@ -245,12 +245,12 @@ class TestSearchCandidateRequiredFields:
         from pathlib import Path
 
         models_file = Path(__file__).parent.parent.parent / "src" / "dotmd" / "core" / "models.py"
-        with open(models_file) as f:
+        with models_file.open() as f:
             content = f.read()
             # Rough check: class SearchResult should not be defined at module level
             import re
 
             class_def = re.search(r"^class SearchResult\b", content, re.MULTILINE)
-            assert (
-                class_def is None
-            ), "SearchResult class definition found in models.py after removal"
+            assert class_def is None, (
+                "SearchResult class definition found in models.py after removal"
+            )

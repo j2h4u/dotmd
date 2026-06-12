@@ -45,10 +45,9 @@ class FalkorDBGraphStore:
             self._db = FalkorDB(host=host, port=port)
             self._graph = self._db.select_graph(graph_name)
         except Exception as exc:
-            logger.error("Cannot connect to FalkorDB at %s:%d", host, port, exc_info=True)
+            logger.exception("Cannot connect to FalkorDB at %s:%d", host, port)
             raise ConnectionError(
-                f"Cannot connect to FalkorDB at {url}. "
-                "Is the container running?"
+                f"Cannot connect to FalkorDB at {url}. Is the container running?"
             ) from exc
 
         self._graph_name = graph_name
@@ -137,8 +136,7 @@ class FalkorDBGraphStore:
             Provenance information (e.g. chunk id or file path).
         """
         self._graph.query(
-            "MERGE (e:Entity:Node {id: $id}) "
-            "SET e.type = $type, e.source = $source",
+            "MERGE (e:Entity:Node {id: $id}) SET e.type = $type, e.source = $source",
             params={"id": name, "type": entity_type, "source": source},
         )
 
@@ -232,9 +230,7 @@ class FalkorDBGraphStore:
         if not files:
             return
         self._graph.query(
-            "UNWIND $rows AS row "
-            "MERGE (f:File:Node {id: row.file_path}) "
-            "SET f.title = row.title",
+            "UNWIND $rows AS row MERGE (f:File:Node {id: row.file_path}) SET f.title = row.title",
             params={"rows": files},
         )
 
@@ -304,7 +300,8 @@ class FalkorDBGraphStore:
                 )
             except Exception:
                 logger.debug(
-                    "delete_chunks_from_graph failed for chunk_id=%s", chunk_id,
+                    "delete_chunks_from_graph failed for chunk_id=%s",
+                    chunk_id,
                     exc_info=True,
                 )
 
@@ -358,9 +355,7 @@ class FalkorDBGraphStore:
 
     def get_all_entity_names(self) -> list[str]:
         """Return all entity names in the graph."""
-        result = self._graph.ro_query(
-            "MATCH (e:Entity) RETURN e.id"
-        )
+        result = self._graph.ro_query("MATCH (e:Entity) RETURN e.id")
         return [str(row[0]) for row in result.result_set]
 
     def get_chunks_by_entity(self, entity_name: str) -> list[str]:
@@ -429,9 +424,7 @@ class FalkorDBGraphStore:
                 for row in result.result_set:
                     node = row[0]
                     node_id = node.properties.get("id", "")
-                    props = {
-                        k: v for k, v in node.properties.items() if k != "id"
-                    }
+                    props = {k: v for k, v in node.properties.items() if k != "id"}
                     # Enrich Section nodes with NER entity names
                     if label == "Section":
                         try:
@@ -442,34 +435,37 @@ class FalkorDBGraphStore:
                                 params={"sid": str(node_id)},
                             )
                             if ent_result.result_set:
-                                props["ner_entities"] = [
-                                    str(r[0]) for r in ent_result.result_set
-                                ]
+                                props["ner_entities"] = [str(r[0]) for r in ent_result.result_set]
                         except Exception:
-                            logger.debug("Failed to enrich Section %s with NER entities", node_id, exc_info=True)
-                    nodes.append({
-                        "id": str(node_id),
-                        "label": label,
-                        "properties": props,
-                    })
+                            logger.debug(
+                                "Failed to enrich Section %s with NER entities",
+                                node_id,
+                                exc_info=True,
+                            )
+                    nodes.append(
+                        {
+                            "id": str(node_id),
+                            "label": label,
+                            "properties": props,
+                        }
+                    )
             except Exception:
-                logger.debug(
-                    "Failed to query %s nodes", label, exc_info=True
-                )
+                logger.debug("Failed to query %s nodes", label, exc_info=True)
 
         edges: list[dict] = []
         try:
             result = self._graph.ro_query(
-                "MATCH (a)-[r]->(b) "
-                "RETURN a.id, b.id, r.rel_type, r.weight"
+                "MATCH (a)-[r]->(b) RETURN a.id, b.id, r.rel_type, r.weight"
             )
-            for row in result.result_set:
-                edges.append({
+            edges.extend(
+                {
                     "source": str(row[0]),
                     "target": str(row[1]),
                     "relation_type": str(row[2]),
                     "weight": float(row[3]) if row[3] is not None else 1.0,
-                })
+                }
+                for row in result.result_set
+            )
         except Exception:
             logger.debug("Failed to query edges", exc_info=True)
 

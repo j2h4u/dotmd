@@ -42,6 +42,7 @@ import pytest
 
 try:
     from dotmd.core.config import Settings as _Settings
+
     STRATEGY: str = _Settings().chunk_strategy
 except Exception:
     # Fallback for environments where DOTMD_EMBEDDING_URL is not set at collection time.
@@ -55,6 +56,7 @@ except Exception:
 # ---------------------------------------------------------------------------
 # Inline DB builder (post-v16 schema — no file_path col in chunks_*)
 # ---------------------------------------------------------------------------
+
 
 def _build_db(tmp_path: Path) -> Path:
     """Create a post-v16 schema DB with all required tables.
@@ -178,8 +180,7 @@ def _vec_meta_exists(db_path: Path, chunk_id: str) -> bool:
 def _m2m_exists(db_path: Path, chunk_id: str, file_path: str) -> bool:
     conn = sqlite3.connect(str(db_path))
     row = conn.execute(
-        f"SELECT 1 FROM chunk_file_paths_{STRATEGY} "
-        "WHERE chunk_id = ? AND file_path = ?",
+        f"SELECT 1 FROM chunk_file_paths_{STRATEGY} WHERE chunk_id = ? AND file_path = ?",
         (chunk_id, file_path),
     ).fetchone()
     conn.close()
@@ -201,14 +202,15 @@ def _get_pipeline(db_path: Path):  # type: ignore[no-untyped-def]
 # Shared chunk IDs (deterministic 64-char hex strings)
 # ---------------------------------------------------------------------------
 
-SHARED_CHUNK_ID = "a" * 64   # shared by A and B in several tests
-ORPHAN_CHUNK_ID = "b" * 64   # sole-held; should be deleted on edit
-NEW_CHUNK_ID    = "c" * 64   # produced after the edit (new content)
+SHARED_CHUNK_ID = "a" * 64  # shared by A and B in several tests
+ORPHAN_CHUNK_ID = "b" * 64  # sole-held; should be deleted on edit
+NEW_CHUNK_ID = "c" * 64  # produced after the edit (new content)
 
 
 # ---------------------------------------------------------------------------
 # Test 1: editing A preserves the chunk still held by B
 # ---------------------------------------------------------------------------
+
 
 class TestEditPreservesSharedChunkIndexRows:
     """After A is edited, a chunk still held by B must survive in all tables."""
@@ -230,14 +232,17 @@ class TestEditPreservesSharedChunkIndexRows:
         # are populated.  Both files produce SHARED_CHUNK_ID on the first pass.
         def chunk_shared(path: Path) -> list:  # type: ignore[return]
             def _fn(*args, **kwargs):  # type: ignore[no-untyped-def]
-                return [Chunk(
-                    chunk_id=SHARED_CHUNK_ID,
-                    file_paths=[path],
-                    heading_hierarchy=["Shared"],
-                    level=1,
-                    text="shared content",
-                    chunk_index=0,
-                )]
+                return [
+                    Chunk(
+                        chunk_id=SHARED_CHUNK_ID,
+                        file_paths=[path],
+                        heading_hierarchy=["Shared"],
+                        level=1,
+                        text="shared content",
+                        chunk_index=0,
+                    )
+                ]
+
             return _fn
 
         file_a.write_text("# Shared\n\nShared content.\n")
@@ -248,9 +253,15 @@ class TestEditPreservesSharedChunkIndexRows:
             pipeline.index_file(file_b)
 
         # Verify initial state: both M2M rows present, chunk + vec_meta + FTS5 populated.
-        assert _chunk_exists(db_path, SHARED_CHUNK_ID), "setup: chunk must exist after initial index"
-        assert _fts_exists(db_path, SHARED_CHUNK_ID), "setup: FTS5 row must exist after initial index"
-        assert _vec_meta_exists(db_path, SHARED_CHUNK_ID), "setup: vec_meta row must exist after initial index"
+        assert _chunk_exists(db_path, SHARED_CHUNK_ID), (
+            "setup: chunk must exist after initial index"
+        )
+        assert _fts_exists(db_path, SHARED_CHUNK_ID), (
+            "setup: FTS5 row must exist after initial index"
+        )
+        assert _vec_meta_exists(db_path, SHARED_CHUNK_ID), (
+            "setup: vec_meta row must exist after initial index"
+        )
         assert _m2m_exists(db_path, SHARED_CHUNK_ID, path_a), "setup: M2M(shared,A) must exist"
         assert _m2m_exists(db_path, SHARED_CHUNK_ID, path_b), "setup: M2M(shared,B) must exist"
 
@@ -273,21 +284,27 @@ class TestEditPreservesSharedChunkIndexRows:
             pipeline.index_file(file_a)
 
         # SHARED_CHUNK_ID must still exist in all tables (B still holds it)
-        assert _chunk_exists(db_path, SHARED_CHUNK_ID), \
+        assert _chunk_exists(db_path, SHARED_CHUNK_ID), (
             "chunks_* row for shared chunk must survive — B is still a holder"
-        assert _fts_exists(db_path, SHARED_CHUNK_ID), \
+        )
+        assert _fts_exists(db_path, SHARED_CHUNK_ID), (
             "FTS5 row for shared chunk must survive — B is still a holder"
-        assert _vec_meta_exists(db_path, SHARED_CHUNK_ID), \
+        )
+        assert _vec_meta_exists(db_path, SHARED_CHUNK_ID), (
             "vec_meta row for shared chunk must survive — B is still a holder"
-        assert _m2m_exists(db_path, SHARED_CHUNK_ID, path_b), \
+        )
+        assert _m2m_exists(db_path, SHARED_CHUNK_ID, path_b), (
             "M2M row (shared_chunk, B) must survive"
-        assert not _m2m_exists(db_path, SHARED_CHUNK_ID, path_a), \
+        )
+        assert not _m2m_exists(db_path, SHARED_CHUNK_ID, path_a), (
             "M2M row (shared_chunk, A) must be removed — A no longer produces it"
+        )
 
 
 # ---------------------------------------------------------------------------
 # Test 2: editing A cleans up orphaned chunk (sole holder)
 # ---------------------------------------------------------------------------
+
 
 class TestEditCleansUpOrphanedChunk:
     """After A is edited (old chunk no longer produced), sole-held chunk is cascaded."""
@@ -325,26 +342,29 @@ class TestEditCleansUpOrphanedChunk:
             pipeline.index_file(file_a)
 
         # ORPHAN_CHUNK_ID must be completely removed from all tables
-        assert not _chunk_exists(db_path, ORPHAN_CHUNK_ID), \
+        assert not _chunk_exists(db_path, ORPHAN_CHUNK_ID), (
             "Sole-held chunk must be removed from chunks_* after reindex drops it"
-        assert not _fts_exists(db_path, ORPHAN_CHUNK_ID), \
+        )
+        assert not _fts_exists(db_path, ORPHAN_CHUNK_ID), (
             "Sole-held chunk must be removed from FTS5 after reindex drops it"
-        assert not _vec_meta_exists(db_path, ORPHAN_CHUNK_ID), \
+        )
+        assert not _vec_meta_exists(db_path, ORPHAN_CHUNK_ID), (
             "Sole-held chunk must be removed from vec_meta after reindex drops it"
-        assert not _m2m_exists(db_path, ORPHAN_CHUNK_ID, path_a), \
+        )
+        assert not _m2m_exists(db_path, ORPHAN_CHUNK_ID, path_a), (
             "M2M row (orphan_chunk, A) must be gone"
+        )
 
 
 # ---------------------------------------------------------------------------
 # Test 3: A and B share chunk_X; B still produces chunk_X; A drops it
 # ---------------------------------------------------------------------------
 
+
 class TestEditKeepsSharedChunkWhenOtherHolderUnchanged:
     """B is still a holder of chunk_X after B's own (no-op) edit; A then drops it."""
 
-    def test_edit_keeps_shared_chunk_when_other_holder_unchanged(
-        self, tmp_path: Path
-    ) -> None:
+    def test_edit_keeps_shared_chunk_when_other_holder_unchanged(self, tmp_path: Path) -> None:
         db_path = _build_db(tmp_path)
 
         file_a = tmp_path / "file_A.md"
@@ -360,14 +380,17 @@ class TestEditKeepsSharedChunkWhenOtherHolderUnchanged:
         # Phase 1: index both A and B with SHARED_CHUNK_ID so all stores are populated.
         def chunk_shared(path: Path) -> list:  # type: ignore[return]
             def _fn(*args, **kwargs):  # type: ignore[no-untyped-def]
-                return [Chunk(
-                    chunk_id=SHARED_CHUNK_ID,
-                    file_paths=[path],
-                    heading_hierarchy=["Shared"],
-                    level=1,
-                    text="shared content",
-                    chunk_index=0,
-                )]
+                return [
+                    Chunk(
+                        chunk_id=SHARED_CHUNK_ID,
+                        file_paths=[path],
+                        heading_hierarchy=["Shared"],
+                        level=1,
+                        text="shared content",
+                        chunk_index=0,
+                    )
+                ]
+
             return _fn
 
         file_a.write_text("# Shared\n\nShared content.\n")
@@ -414,26 +437,25 @@ class TestEditKeepsSharedChunkWhenOtherHolderUnchanged:
             pipeline.index_file(file_a)
 
         # SHARED_CHUNK_ID must survive (B is still a holder)
-        assert _chunk_exists(db_path, SHARED_CHUNK_ID), \
+        assert _chunk_exists(db_path, SHARED_CHUNK_ID), (
             "Shared chunk must survive — B is still a holder after A drops it"
-        assert _fts_exists(db_path, SHARED_CHUNK_ID), \
-            "FTS5 row for shared chunk must survive"
-        assert _m2m_exists(db_path, SHARED_CHUNK_ID, path_b), \
-            "M2M (shared_chunk, B) must survive"
-        assert not _m2m_exists(db_path, SHARED_CHUNK_ID, path_a), \
+        )
+        assert _fts_exists(db_path, SHARED_CHUNK_ID), "FTS5 row for shared chunk must survive"
+        assert _m2m_exists(db_path, SHARED_CHUNK_ID, path_b), "M2M (shared_chunk, B) must survive"
+        assert not _m2m_exists(db_path, SHARED_CHUNK_ID, path_a), (
             "M2M (shared_chunk, A) must be removed"
+        )
 
 
 # ---------------------------------------------------------------------------
 # Test 4: atomicity — failure mid-cleanup rolls back to pre-edit state
 # ---------------------------------------------------------------------------
 
+
 class TestEditHolderAwareCascadeAtomicUnderFailure:
     """Injected failure in delete_orphan_chunks rolls back all cleanup changes."""
 
-    def test_edit_holder_aware_cascade_atomic_under_failure(
-        self, tmp_path: Path
-    ) -> None:
+    def test_edit_holder_aware_cascade_atomic_under_failure(self, tmp_path: Path) -> None:
         db_path = _build_db(tmp_path)
 
         file_a = tmp_path / "file_A.md"
@@ -443,18 +465,23 @@ class TestEditHolderAwareCascadeAtomicUnderFailure:
         _add_m2m(db_path, ORPHAN_CHUNK_ID, path_a)
 
         pre_chunks = _count(db_path, f"chunks_{STRATEGY}")
-        pre_m2m    = _count(db_path, f"chunk_file_paths_{STRATEGY}")
-        pre_fts    = _count(db_path, f"chunks_fts_{STRATEGY}")
+        pre_m2m = _count(db_path, f"chunk_file_paths_{STRATEGY}")
+        pre_fts = _count(db_path, f"chunks_fts_{STRATEGY}")
+
         # vec_meta count: sum across all model-variant tables (may be 0 before pipeline init)
         def _count_vec(db: Path) -> int:
             conn = sqlite3.connect(str(db))
-            tables = [r[0] for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE ?",
-                (f"vec_meta_{STRATEGY}_%",),
-            ).fetchall()]
+            tables = [
+                r[0]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE ?",
+                    (f"vec_meta_{STRATEGY}_%",),
+                ).fetchall()
+            ]
             total = sum(conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables)
             conn.close()
             return total
+
         pre_vec = _count_vec(db_path)
 
         pipeline = _get_pipeline(db_path)
@@ -476,26 +503,33 @@ class TestEditHolderAwareCascadeAtomicUnderFailure:
                 )
             ]
 
-        with patch.object(_chunker, "chunk_file", patched_chunk_file), patch(
-            "dotmd.storage.metadata.SQLiteMetadataStore.delete_orphan_chunks",
-            side_effect=RuntimeError("Simulated mid-cascade failure"),
-        ), pytest.raises(RuntimeError, match="mid-cascade"):
+        with (
+            patch.object(_chunker, "chunk_file", patched_chunk_file),
+            patch(
+                "dotmd.storage.metadata.SQLiteMetadataStore.delete_orphan_chunks",
+                side_effect=RuntimeError("Simulated mid-cascade failure"),
+            ),
+            pytest.raises(RuntimeError, match="mid-cascade"),
+        ):
             pipeline.index_file(file_a)
 
         # All tables must be in pre-edit state (ROLLBACK honoured)
-        assert _count(db_path, f"chunks_{STRATEGY}") == pre_chunks, \
+        assert _count(db_path, f"chunks_{STRATEGY}") == pre_chunks, (
             "chunks_* must be unchanged after rolled-back cleanup"
-        assert _count(db_path, f"chunk_file_paths_{STRATEGY}") == pre_m2m, \
+        )
+        assert _count(db_path, f"chunk_file_paths_{STRATEGY}") == pre_m2m, (
             "chunk_file_paths_* must be unchanged after rollback"
-        assert _count_vec(db_path) == pre_vec, \
-            "vec_meta_* must be unchanged after rollback"
-        assert _count(db_path, f"chunks_fts_{STRATEGY}") == pre_fts, \
+        )
+        assert _count_vec(db_path) == pre_vec, "vec_meta_* must be unchanged after rollback"
+        assert _count(db_path, f"chunks_fts_{STRATEGY}") == pre_fts, (
             "chunks_fts_* must be unchanged after rollback"
+        )
 
 
 # ---------------------------------------------------------------------------
 # Test 5: property — holder invariant over random ops (seeded, fast)
 # ---------------------------------------------------------------------------
+
 
 class TestPropertyReindexHolderInvariant:
     """Seeded generative: holder invariant holds after any create/edit sequence."""
@@ -519,17 +553,13 @@ class TestPropertyReindexHolderInvariant:
             ).fetchall()
         }
         fts_ids = {
-            r[0]
-            for r in conn.execute(
-                f"SELECT chunk_id FROM chunks_fts_{STRATEGY}"
-            ).fetchall()
+            r[0] for r in conn.execute(f"SELECT chunk_id FROM chunks_fts_{STRATEGY}").fetchall()
         }
         conn.close()
 
         for cid in chunk_ids_in_m2m:
             assert cid in fts_ids, (
-                f"Holder invariant violated: chunk {cid!r} is in M2M "
-                f"but missing from FTS5 table"
+                f"Holder invariant violated: chunk {cid!r} is in M2M but missing from FTS5 table"
             )
 
     def test_property_reindex_holder_invariant(self, tmp_path: Path) -> None:
@@ -546,7 +576,7 @@ class TestPropertyReindexHolderInvariant:
         rng = random.Random(42)
 
         # Pool of chunk_ids (deterministic 64-char hex)
-        CHUNK_POOL = [chr(ord('a') + i) * 64 for i in range(4)]
+        CHUNK_POOL = [chr(ord("a") + i) * 64 for i in range(4)]
         FILE_PATHS = [tmp_path / f"prop_file_{i}.md" for i in range(5)]
 
         # Track what content (chunk_ids) each file currently "has"
@@ -590,6 +620,7 @@ class TestPropertyReindexHolderInvariant:
                 def _patched(path=fp, cids=chosen):  # type: ignore[no-untyped-def]
                     def _inner(*args, **kwargs):  # type: ignore[no-untyped-def]
                         return _make_chunks_for_file(path, cids)
+
                     return _inner
 
                 with patch.object(_chunker, "chunk_file", _patched()):

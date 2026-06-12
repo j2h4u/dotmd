@@ -4,7 +4,7 @@ These tests validate the read(ref) and drill(ref) round-trips for federated-only
 Telegram refs, ensuring proper routing through the provider infrastructure.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -46,7 +46,7 @@ class TestFederatedTelegramRead:
             text="Hello from Telegram",
             order_key="67890",
             fingerprint="abc123def456",
-            updated_at=datetime.now(),
+            updated_at=datetime.now(UTC),
             metadata_json={},
         )
 
@@ -99,7 +99,7 @@ class TestFederatedTelegramRead:
             text="Test message",
             order_key="67890",
             fingerprint="abc123def456",
-            updated_at=datetime.now(),
+            updated_at=datetime.now(UTC),
             metadata_json={},
         )
 
@@ -109,7 +109,7 @@ class TestFederatedTelegramRead:
                 document_ref="dialog:12345",
                 unit_ref="dialog:12345:message:67890",
                 units=[mock_unit],
-                metadata_json={"total_chunks": 42}
+                metadata_json={"total_chunks": 42},
             )
         )
         service._telegram_provider = provider
@@ -151,9 +151,7 @@ class TestFederatedTelegramRead:
         with pytest.raises(RuntimeError, match="Telegram provider error"):
             service.read(telegram_ref, 0, 1)
 
-    def test_truly_federated_telegram_ref_routes_to_provider(
-        self, tmp_path: Path
-    ) -> None:
+    def test_truly_federated_telegram_ref_routes_to_provider(self, tmp_path: Path) -> None:
         """CRITICAL: No local entry → provider path (Cycle-2 HIGH-7)."""
         # RED: federated-only routing not implemented
         index_dir = tmp_path / "index"
@@ -187,7 +185,7 @@ class TestFederatedTelegramRead:
             text="Provider content",
             order_key="67890",
             fingerprint="abc123def456",
-            updated_at=datetime.now(),
+            updated_at=datetime.now(UTC),
             metadata_json={},
         )
 
@@ -241,6 +239,7 @@ class TestFederatedTelegramRead:
             if namespace == "telegram" and document_ref == "dialog:12345":
                 # Return a mock document
                 from dotmd.core.models import SourceDocument
+
                 return SourceDocument(
                     namespace="telegram",
                     document_ref="dialog:12345",
@@ -250,7 +249,7 @@ class TestFederatedTelegramRead:
                     media_type="text/telegram",
                     parser_name="telegram",
                     document_type="telegram",
-                    updated_at=datetime.now(),
+                    updated_at=datetime.now(UTC),
                     content_fingerprint="abc123",
                     metadata_fingerprint="def456",
                 )
@@ -270,9 +269,7 @@ class TestFederatedTelegramRead:
         # Provider should never be called
         provider.read_unit_window.assert_not_called()
 
-    def test_active_locally_indexed_telegram_ref_uses_local_path(
-        self, tmp_path: Path
-    ) -> None:
+    def test_active_locally_indexed_telegram_ref_uses_local_path(self, tmp_path: Path) -> None:
         """Active local entry uses local read path (not provider)."""
         # RED: binding-aware read routing not implemented
         index_dir = tmp_path / "index"
@@ -303,6 +300,7 @@ class TestFederatedTelegramRead:
             if namespace == "telegram" and document_ref == "dialog:12345":
                 # Return a mock document
                 from dotmd.core.models import SourceDocument
+
                 return SourceDocument(
                     namespace="telegram",
                     document_ref="dialog:12345",
@@ -312,7 +310,7 @@ class TestFederatedTelegramRead:
                     media_type="text/telegram",
                     parser_name="telegram",
                     document_type="telegram",
-                    updated_at=datetime.now(),
+                    updated_at=datetime.now(UTC),
                     content_fingerprint="abc123",
                     metadata_fingerprint="def456",
                 )
@@ -328,6 +326,7 @@ class TestFederatedTelegramRead:
         # For this test, we expect a different error (no local chunks)
         # but definitely NOT a provider call
         import contextlib
+
         with contextlib.suppress(ValueError, KeyError):
             service.read(telegram_ref, 0, 1)
 

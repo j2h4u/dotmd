@@ -1,4 +1,5 @@
 """Exclusive file lock for indexing operations."""
+
 from __future__ import annotations
 
 import fcntl
@@ -17,13 +18,11 @@ def indexing_lock(index_dir: Path):
     Lock is released automatically on process exit (kernel cleanup).
     """
     lock_path = index_dir / "indexing.lock"
-    with open(lock_path, "w") as fd:
+    with lock_path.open("w") as fd:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
-            raise IndexingLockError(
-                "Indexing already in progress. Stop the server first."
-            ) from exc
+            raise IndexingLockError("Indexing already in progress. Stop the server first.") from exc
         try:
             yield
         finally:

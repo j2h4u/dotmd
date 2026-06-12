@@ -31,7 +31,7 @@ def parse_frontmatter(content: str) -> tuple[dict, str]:
     if end == -1:
         return {}, content
     raw = content[3:end]
-    body = content[end + 3:].lstrip("\n")
+    body = content[end + 3 :].lstrip("\n")
     try:
         frontmatter = yaml.safe_load(raw)
         if not isinstance(frontmatter, dict):
@@ -144,9 +144,7 @@ def discover_files(directory: Path) -> list[FileInfo]:
                 FileInfo(
                     path=md_path,
                     title=_extract_title(content, md_path, frontmatter),
-                    last_modified=datetime.fromtimestamp(
-                        stat.st_mtime, tz=UTC
-                    ),
+                    last_modified=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
                     size_bytes=stat.st_size,
                     kind=frontmatter.get("kind", DocKind.DOCUMENT),
                     frontmatter=frontmatter,
@@ -221,9 +219,7 @@ def discover_files_multi(
             _collect_directory(Path(path_spec), exclude_names, seen, results)
 
     results.sort(key=lambda fi: fi.path)
-    logger.info(
-        "Multi-path discovery: %d files from %d path specs", len(results), len(paths)
-    )
+    logger.info("Multi-path discovery: %d files from %d path specs", len(results), len(paths))
     return results
 
 
@@ -267,7 +263,7 @@ def _collect_glob(
             root_parts.append(part)
 
     if not root_parts:
-        root = Path(".")
+        root = Path()
     else:
         root = Path(*root_parts) if len(root_parts) > 1 else Path(root_parts[0])
 

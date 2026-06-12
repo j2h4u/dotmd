@@ -50,6 +50,7 @@ class StubFederatedProvider:
 @pytest.fixture
 def slow_federated_provider():  # type: ignore[no-untyped-def]
     """Factory for a provider that sleeps before returning."""
+
     def _make(seconds: float) -> StubFederatedProvider:
         return StubFederatedProvider(
             candidates=[
@@ -67,14 +68,17 @@ def slow_federated_provider():  # type: ignore[no-untyped-def]
             ],
             sleep_seconds=seconds,
         )
+
     return _make
 
 
 @pytest.fixture
 def failing_federated_provider():  # type: ignore[no-untyped-def]
     """Factory for a provider that raises."""
+
     def _make(exc: Exception) -> StubFederatedProvider:
         return StubFederatedProvider(raises=exc)
+
     return _make
 
 
@@ -128,26 +132,34 @@ def make_federated_bundle(
         def get_checkpoint(self, namespace: str) -> dict[str, object] | None:  # type: ignore[no-untyped-def]
             return None
 
-        def commit_checkpoint(self, namespace: str, checkpoint_cursor: str | None, *, conn: Any, metadata_json: dict[str, object] | None = None) -> None:  # type: ignore[no-untyped-def]
+        def commit_checkpoint(
+            self,
+            namespace: str,
+            checkpoint_cursor: str | None,
+            *,
+            conn: Any,
+            metadata_json: dict[str, object] | None = None,
+        ) -> None:  # type: ignore[no-untyped-def]
             pass
 
         def record_error(self, namespace: str, error: str, *, conn: Any | None = None) -> None:  # type: ignore[no-untyped-def]
             pass
 
     # Create a minimal bundle
-    bundle = SourceRuntimeBundle(
+    return SourceRuntimeBundle(
         descriptor=descriptor,
         config=FilesystemSourceConfig(paths=["/stub"]),
         access=SourceAccess(kind="none"),
         cursor_store=StubCursorStore(),  # type: ignore[arg-type]
         provider=provider,  # type: ignore[arg-type]
     )
-    return bundle
 
 
 def make_misconfigured_federated_factory() -> type:
     """Factory that raises during lifecycle build for init-failure tests."""
+
     class MisconfiguredFactory:
         def build_if_configured(self, namespace: str) -> SourceRuntimeBundle | None:
             raise RuntimeError("missing config")
+
     return MisconfiguredFactory

@@ -38,7 +38,7 @@ def _telegram_unit_dict(message_id: int, text: str) -> dict[str, Any]:
 
 
 def _source_unit(message_id: int, text: str):
-    from datetime import datetime
+    from datetime import UTC, datetime
 
     from dotmd.core.models import SourceUnit
 
@@ -50,7 +50,7 @@ def _source_unit(message_id: int, text: str):
         text=text,
         order_key=f"{message_id:020d}",
         fingerprint=f"fp-{message_id}",
-        updated_at=datetime(2026, 4, 12, 8, 11, 0),
+        updated_at=datetime(2026, 4, 12, 8, 11, 0, tzinfo=UTC),
         metadata_json=_telegram_unit_dict(message_id, text),
     )
 
@@ -103,7 +103,10 @@ def test_federated_only_message_round_trip(tmp_path: Path) -> None:
     # Provider was called
     provider.read_unit_window.assert_called_once()
     call_args = provider.read_unit_window.call_args
-    assert call_args[0][0] == "dialog:42:message:99" or call_args[1].get("unit_ref") == "dialog:42:message:99"
+    assert (
+        call_args[0][0] == "dialog:42:message:99"
+        or call_args[1].get("unit_ref") == "dialog:42:message:99"
+    )
 
     # Payload contains the provider-sourced text
     assert payload["ref"] == "telegram:dialog:42:message:99"

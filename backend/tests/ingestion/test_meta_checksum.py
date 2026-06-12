@@ -1,4 +1,5 @@
 """Tests for meta_checksum change detection invariants (Phase 999.12)."""
+
 import pathlib
 
 from dotmd.ingestion.reader import chunk_checksum, meta_checksum
@@ -115,6 +116,7 @@ def test_meta_and_chunk_orthogonal(tmp_path):
 def test_embed_checksum_removed():
     """embed_checksum must not exist in reader (removed in Plan 02)."""
     import dotmd.ingestion.reader as r
+
     assert not hasattr(r, "embed_checksum"), (
         "embed_checksum must be removed from reader.py in Plan 02"
     )

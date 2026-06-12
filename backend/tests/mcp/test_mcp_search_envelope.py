@@ -35,9 +35,7 @@ class TestMCPSearchSignature:
         assert search_tool_match, "Could not find mcp search tool definition"
 
         params_str = search_tool_match.group(1)
-        assert "sources" not in params_str, (
-            "search tool should not have 'sources' parameter (D-10)"
-        )
+        assert "sources" not in params_str, "search tool should not have 'sources' parameter (D-10)"
         assert "exclude_sources" not in params_str, (
             "search tool should not have 'exclude_sources' parameter (D-10)"
         )
@@ -69,9 +67,9 @@ class TestMCPSearchAsyncBridge:
         tool_impl = search_tool_match.group(1)
 
         # Should call search_async, not asyncio.to_thread(service.search, ...)
-        assert (
-            "search_async" in tool_impl
-        ), "MCP search tool should call service.search_async (cycle-2 HIGH-5)"
+        assert "search_async" in tool_impl, (
+            "MCP search tool should call service.search_async (cycle-2 HIGH-5)"
+        )
 
         # Verify no asyncio.to_thread bridge on service.search
         if "asyncio.to_thread" in tool_impl:
@@ -79,9 +77,9 @@ class TestMCPSearchAsyncBridge:
             to_thread_matches = re.findall(
                 r"asyncio\.to_thread\s*\(\s*service\.search\s*,", tool_impl
             )
-            assert (
-                len(to_thread_matches) == 0
-            ), "MCP search should not use asyncio.to_thread(service.search, ...) (cycle-2 HIGH-5)"
+            assert len(to_thread_matches) == 0, (
+                "MCP search should not use asyncio.to_thread(service.search, ...) (cycle-2 HIGH-5)"
+            )
 
 
 class TestMCPSearchCandidateContract:
@@ -155,7 +153,4 @@ class TestMCPSearchCandidateContract:
         reparsed = SearchResponse.model_validate_json(response_json)
         assert reparsed.candidates[0].ref == full_candidate.ref
         assert reparsed.candidates[0].source_native_score == full_candidate.source_native_score
-        assert (
-            reparsed.candidates[0].provider_metadata
-            == full_candidate.provider_metadata
-        )
+        assert reparsed.candidates[0].provider_metadata == full_candidate.provider_metadata

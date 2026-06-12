@@ -84,7 +84,9 @@ class FeedbackStore:
 
     def set_status(self, feedback_id: int, status: str, reason: str | None = None) -> bool:
         if status not in _VALID_STATUSES:
-            raise ValueError(f"Invalid status {status!r}. Must be one of: {', '.join(sorted(_VALID_STATUSES))}")
+            raise ValueError(
+                f"Invalid status {status!r}. Must be one of: {', '.join(sorted(_VALID_STATUSES))}"
+            )
         now = int(time.time())
         with self._connect() as conn:
             cur = conn.execute(

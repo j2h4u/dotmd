@@ -39,12 +39,18 @@ def _populate_graph(gs: LadybugDBGraphStore) -> None:
     """
     gs.add_file_node(file_path="doc/test.md", title="Test Doc")
     gs.add_section_node(
-        chunk_id="chunk-1", heading="Intro", level=1,
-        file_path="doc/test.md", text_preview="Introduction text",
+        chunk_id="chunk-1",
+        heading="Intro",
+        level=1,
+        file_path="doc/test.md",
+        text_preview="Introduction text",
     )
     gs.add_section_node(
-        chunk_id="chunk-2", heading="Body", level=2,
-        file_path="doc/test.md", text_preview="Body text",
+        chunk_id="chunk-2",
+        heading="Body",
+        level=2,
+        file_path="doc/test.md",
+        text_preview="Body text",
     )
     gs.add_entity_node(name="Python", entity_type="technology", source="ner")
     gs.add_tag_node(name="programming")
@@ -67,8 +73,11 @@ def _populate_second_file(gs: LadybugDBGraphStore) -> None:
     """Add a second file that shares Entity 'Python' and Tag 'programming'."""
     gs.add_file_node(file_path="doc/other.md", title="Other Doc")
     gs.add_section_node(
-        chunk_id="chunk-3", heading="Appendix", level=1,
-        file_path="doc/other.md", text_preview="Appendix text",
+        chunk_id="chunk-3",
+        heading="Appendix",
+        level=1,
+        file_path="doc/other.md",
+        text_preview="Appendix text",
     )
     gs.add_edge("doc/other.md", "chunk-3", "CONTAINS")
     gs.add_edge("chunk-3", "Python", "MENTIONS")
@@ -82,9 +91,7 @@ def _populate_second_file(gs: LadybugDBGraphStore) -> None:
 class TestDetachDeleteSpike:
     """Validate that LadybugDB DETACH DELETE cascades across all 7 REL tables."""
 
-    def test_detach_delete_section_preserves_entity(
-        self, graph_store: LadybugDBGraphStore
-    ) -> None:
+    def test_detach_delete_section_preserves_entity(self, graph_store: LadybugDBGraphStore) -> None:
         """DETACH DELETE Section removes SECTION_ENTITY edges but preserves Entity node."""
         _populate_graph(graph_store)
         assert _count_nodes(graph_store, "Entity") == 1
@@ -100,9 +107,7 @@ class TestDetachDeleteSpike:
         assert _count_nodes(graph_store, "Entity") == 1
         assert _count_edges(graph_store, "SECTION_ENTITY") == 1
 
-    def test_detach_delete_section_preserves_tag(
-        self, graph_store: LadybugDBGraphStore
-    ) -> None:
+    def test_detach_delete_section_preserves_tag(self, graph_store: LadybugDBGraphStore) -> None:
         """DETACH DELETE Section removes SECTION_TAG edges but preserves Tag node."""
         _populate_graph(graph_store)
         assert _count_nodes(graph_store, "Tag") == 1
@@ -182,9 +187,7 @@ class TestDetachDeleteSpike:
 class TestDeleteFileSubgraph:
     """Tests for delete_file_subgraph method."""
 
-    def test_removes_all_sections_for_file(
-        self, graph_store: LadybugDBGraphStore
-    ) -> None:
+    def test_removes_all_sections_for_file(self, graph_store: LadybugDBGraphStore) -> None:
         """delete_file_subgraph removes all Section nodes with matching file_path."""
         _populate_graph(graph_store)
         assert _count_nodes(graph_store, "Section") == 2
@@ -193,9 +196,7 @@ class TestDeleteFileSubgraph:
 
         assert _count_nodes(graph_store, "Section") == 0
 
-    def test_removes_file_node(
-        self, graph_store: LadybugDBGraphStore
-    ) -> None:
+    def test_removes_file_node(self, graph_store: LadybugDBGraphStore) -> None:
         """delete_file_subgraph removes the File node."""
         _populate_graph(graph_store)
         assert _count_nodes(graph_store, "File") == 1
@@ -204,9 +205,7 @@ class TestDeleteFileSubgraph:
 
         assert _count_nodes(graph_store, "File") == 0
 
-    def test_preserves_entity_and_tag_nodes(
-        self, graph_store: LadybugDBGraphStore
-    ) -> None:
+    def test_preserves_entity_and_tag_nodes(self, graph_store: LadybugDBGraphStore) -> None:
         """delete_file_subgraph preserves Entity and Tag nodes (shared across files)."""
         _populate_graph(graph_store)
 
@@ -215,9 +214,7 @@ class TestDeleteFileSubgraph:
         assert _count_nodes(graph_store, "Entity") == 1
         assert _count_nodes(graph_store, "Tag") == 1
 
-    def test_preserves_other_file_sections(
-        self, graph_store: LadybugDBGraphStore
-    ) -> None:
+    def test_preserves_other_file_sections(self, graph_store: LadybugDBGraphStore) -> None:
         """delete_file_subgraph preserves Section nodes from OTHER files."""
         _populate_graph(graph_store)
         _populate_second_file(graph_store)
@@ -228,9 +225,7 @@ class TestDeleteFileSubgraph:
         assert _count_nodes(graph_store, "Section") == 1
         assert _count_nodes(graph_store, "File") == 1
 
-    def test_nonexistent_file_is_noop(
-        self, graph_store: LadybugDBGraphStore
-    ) -> None:
+    def test_nonexistent_file_is_noop(self, graph_store: LadybugDBGraphStore) -> None:
         """delete_file_subgraph on non-existent file_path is a no-op (no error)."""
         _populate_graph(graph_store)
         before_nodes = graph_store.node_count()
@@ -241,9 +236,7 @@ class TestDeleteFileSubgraph:
         assert graph_store.node_count() == before_nodes
         assert graph_store.edge_count() == before_edges
 
-    def test_node_count_decreases_correctly(
-        self, graph_store: LadybugDBGraphStore
-    ) -> None:
+    def test_node_count_decreases_correctly(self, graph_store: LadybugDBGraphStore) -> None:
         """After delete_file_subgraph, node_count decreases by expected amount."""
         _populate_graph(graph_store)
         _populate_second_file(graph_store)
@@ -280,10 +273,6 @@ class TestHolderAwareGraphDelete:
         graph_store.delete_chunks_from_graph(["chunk-1"])
 
         data = graph_store.get_graph_data()
-        section_ids = {
-            node["id"]
-            for node in data["nodes"]
-            if node["label"] == "Section"
-        }
+        section_ids = {node["id"] for node in data["nodes"] if node["label"] == "Section"}
         assert "chunk-1" not in section_ids
         assert "chunk-2" in section_ids

@@ -10,7 +10,7 @@ import asyncio
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict, cast
@@ -173,9 +173,8 @@ def _is_low_signal_federated_candidate(candidate: SearchCandidate) -> bool:
     pipeline. Non-Telegram federated candidates have different snippet
     semantics and are passed through unconditionally.
     """
-    is_telegram = (
-        candidate.namespace == "telegram"
-        or (candidate.retrieval_kind or "").startswith("tg:")
+    is_telegram = candidate.namespace == "telegram" or (candidate.retrieval_kind or "").startswith(
+        "tg:"
     )
     if is_telegram:
         return _is_low_signal_telegram_text(candidate.snippet or "")
@@ -211,10 +210,7 @@ def _merge_with_federated_quota(
     semantic content. Non-Telegram sources (e.g., Gmail) are passed through
     unconditionally because their snippet quality semantics differ.
     """
-    filtered_fed = [
-        c for c in fed_candidates
-        if not _is_low_signal_federated_candidate(c)
-    ]
+    filtered_fed = [c for c in fed_candidates if not _is_low_signal_federated_candidate(c)]
     fed_slots = min(fed_quota, len(filtered_fed))
     local_slots = top_k - fed_slots
 
@@ -274,9 +270,7 @@ class DotMDService:
         # Background trickle indexer
         self._trickle_indexer = TrickleIndexer(self._settings, self._pipeline)
         self._source_provenance_ready_strategies: set[str] = set()
-        self._source_runtime_factory: SourceRuntimeFactory = (
-            self._pipeline.source_runtime_factory
-        )
+        self._source_runtime_factory: SourceRuntimeFactory = self._pipeline.source_runtime_factory
         self._telegram_provider = self._build_telegram_provider()
 
         # Federated fan-out infrastructure (cycle-2 HIGH-6, cycle-4 HIGH)
@@ -518,8 +512,7 @@ class DotMDService:
 
         # Loop is running — must use search_async directly
         raise RuntimeError(
-            "DotMDService.search() called from a running event loop; "
-            "use search_async() instead",
+            "DotMDService.search() called from a running event loop; use search_async() instead",
         )
 
     async def search_async(
@@ -590,9 +583,7 @@ class DotMDService:
             active_pool_size = self._active_filter_pool_size(top_k, pool_size)
 
             expanded_query = (
-                self._query_expander.expand(query).expanded_text or query
-                if expand
-                else query
+                self._query_expander.expand(query).expanded_text or query if expand else query
             )
 
             loop = asyncio.get_running_loop()
@@ -630,13 +621,17 @@ class DotMDService:
                 )
                 fed_candidates = [c for outcome in fed_outcomes for c in outcome.candidates]
                 all_candidates = _merge_with_federated_quota(
-                    local_candidates, fed_candidates, top_k,
+                    local_candidates,
+                    fed_candidates,
+                    top_k,
                     self._settings.federated_result_quota,
                 )
                 fed_status = outcomes_to_source_status(fed_outcomes)
             else:
                 local_candidates = await local_coro
-                all_candidates = sorted(local_candidates, key=lambda c: c.fused_score, reverse=True)[:top_k]
+                all_candidates = sorted(
+                    local_candidates, key=lambda c: c.fused_score, reverse=True
+                )[:top_k]
                 fed_status = []
 
             return SearchResponse(
@@ -645,11 +640,10 @@ class DotMDService:
             )
 
         except Exception:
-            logger.error(
+            logger.exception(
                 "search_async failed: query=%r mode=%s",
                 query[:100],
                 mode,
-                exc_info=True,
             )
             raise
 
@@ -721,9 +715,7 @@ class DotMDService:
                 top_k=rerank_limit,
             )
             if not reranked:
-                logger.info(
-                    "reranker returned no candidates; falling back to fused ranking"
-                )
+                logger.info("reranker returned no candidates; falling back to fused ranking")
                 reranked = []
             # Blend reranker scores with fusion scores via min-max normalization
             if reranked:
@@ -1031,7 +1023,7 @@ class DotMDService:
                 try:
                     chunk = store.get_chunk(prov.chunk_id)
                     if chunk and hasattr(chunk, "text"):
-                        snippet = chunk.text[:self._settings.snippet_length]
+                        snippet = chunk.text[: self._settings.snippet_length]
                 except Exception:
                     pass
 
@@ -1061,7 +1053,7 @@ class DotMDService:
                         matched_engines=list(engine_scores.keys()),
                         source_native_score=None,
                         source_native_rank=None,
-                        engine_scores=engine_scores if engine_scores else None,
+                        engine_scores=engine_scores or None,
                         provider_metadata=None,
                     )
                 )
@@ -1070,16 +1062,12 @@ class DotMDService:
         if rerank and candidates:
             rerank_limit = min(self._settings.rerank_pool_size, len(candidates))
             # Only rerank candidates with chunk_id set (local only)
-            rerank_candidates = [
-                c for c in candidates[:rerank_limit] if c.chunk_id is not None
-            ]
+            rerank_candidates = [c for c in candidates[:rerank_limit] if c.chunk_id is not None]
 
             if rerank_candidates:
                 reranker = self._reranker_factory.get(reranker_name)
                 chunk_ids = [c.chunk_id for c in rerank_candidates if c.chunk_id is not None]
-                fused_scores_dict = {
-                    c.ref: c.fused_score for c in candidates
-                }
+                fused_scores_dict = {c.ref: c.fused_score for c in candidates}
 
                 reranked = reranker.rerank(
                     query,
@@ -1112,9 +1100,7 @@ class DotMDService:
                                 if chunk_id == cand.chunk_id:
                                     norm_re = (re_score - re_min) / re_range
                                     raw_fused = fused_scores_dict.get(cand.ref, fused_min)
-                                    norm_fused = (
-                                        raw_fused - fused_min
-                                    ) / fused_range
+                                    norm_fused = (raw_fused - fused_min) / fused_range
                                     blended_score = 0.4 * norm_fused + 0.6 * norm_re
                                     # Update candidate with blended score
                                     candidates[i] = SearchCandidate(
@@ -1321,8 +1307,7 @@ class DotMDService:
         if successful:
             reference_ids = set(successful[0]["top_chunk_ids"])
             overlap = {
-                run["name"]: len(reference_ids & set(run["top_chunk_ids"]))
-                for run in successful
+                run["name"]: len(reference_ids & set(run["top_chunk_ids"])) for run in successful
             }
 
         return {
@@ -1358,7 +1343,8 @@ class DotMDService:
         # Graph-direct: entity matching (pre-fusion peer, not seed-based)
         if mode in (SearchMode.GRAPH, SearchMode.HYBRID):
             graph_direct_hits = self._graph_direct_engine.search(
-                original_query, top_k=pool_size,
+                original_query,
+                top_k=pool_size,
             )
 
         if not semantic_hits and not keyword_hits and not graph_direct_hits:
@@ -1392,7 +1378,9 @@ class DotMDService:
             seed_ids = [cid for cid, _ in fused[:pool_size]]
             try:
                 graph_hits = self._graph_engine.search(
-                    search_query, top_k=pool_size, seed_chunk_ids=seed_ids,
+                    search_query,
+                    top_k=pool_size,
+                    seed_chunk_ids=seed_ids,
                 )
             except Exception:
                 logger.warning(
@@ -1489,9 +1477,7 @@ class DotMDService:
         except AttributeError:
             logger.debug("pipeline has no filesystem source-document backfill helper")
         else:
-            inserted_docs = int(
-                source_doc_diagnostic.get("inserted_source_documents", 0)
-            )
+            inserted_docs = int(source_doc_diagnostic.get("inserted_source_documents", 0))
             inserted_bindings = int(source_doc_diagnostic.get("inserted_bindings", 0))
             if inserted_docs or inserted_bindings:
                 logger.info(
@@ -1542,7 +1528,7 @@ class DotMDService:
                 parser_name="markdown",
                 document_type="document",
                 title=resolved.stem,
-                updated_at=datetime.fromtimestamp(resolved.stat().st_mtime),
+                updated_at=datetime.fromtimestamp(resolved.stat().st_mtime, tz=UTC),
                 content_fingerprint="",
                 metadata_fingerprint="",
                 metadata_json={},
@@ -1587,8 +1573,7 @@ class DotMDService:
             document_ref,
         ):
             return TelegramReadPath.LOCAL_ACTIVE
-        else:
-            return TelegramReadPath.LOCAL_INACTIVE
+        return TelegramReadPath.LOCAL_INACTIVE
 
     def _require_active_telegram_message_ref(self, ref: str) -> tuple[SourceDocument, str]:
         """Resolve a Telegram message ref through its active dialog binding."""
@@ -1693,10 +1678,7 @@ class DotMDService:
                 )
             except Exception as e:
                 raise RuntimeError(f"Telegram provider error: {e}") from e
-            units = [
-                self._telegram_unit_payload(unit, unit_ref)
-                for unit in window.units
-            ]
+            units = [self._telegram_unit_payload(unit, unit_ref) for unit in window.units]
             return cast(
                 ReadPayload,
                 {
@@ -1727,9 +1709,7 @@ class DotMDService:
         chunk_payloads: list[dict[str, Any]] = []
         for index, chunk in enumerate(chunks):
             source_unit_refs = (
-                chunk.provenance.source_unit_refs
-                if chunk.provenance is not None
-                else []
+                chunk.provenance.source_unit_refs if chunk.provenance is not None else []
             )
             chunk_payloads.append(
                 {
@@ -1934,9 +1914,7 @@ class DotMDService:
         try:
             conn = self._pipeline.conn
             chunks_table = self._pipeline._chunks_table
-            stats.total_chunks = conn.execute(
-                f"SELECT COUNT(*) FROM {chunks_table}"
-            ).fetchone()[0]
+            stats.total_chunks = conn.execute(f"SELECT COUNT(*) FROM {chunks_table}").fetchone()[0]
             # Phase 16 P5: file count from M2M table (chunks_* has no file_path column)
             strategy = chunks_table.removeprefix("chunks_")
             m2m_table = f"chunk_file_paths_{strategy}"
@@ -1988,19 +1966,13 @@ class DotMDService:
         stats.trickle_total = trickle_state.total_files
         stats.trickle_current_file = trickle_state.current_file
         stats.trickle_chunks_per_hour = (
-            round(trickle_state.chunks_per_hour, 1)
-            if trickle_state.chunks_per_hour > 0
-            else None
+            round(trickle_state.chunks_per_hour, 1) if trickle_state.chunks_per_hour > 0 else None
         )
         stats.trickle_files_per_hour = (
-            round(trickle_state.files_per_hour, 1)
-            if trickle_state.files_per_hour > 0
-            else None
+            round(trickle_state.files_per_hour, 1) if trickle_state.files_per_hour > 0 else None
         )
         stats.trickle_eta_minutes = (
-            round(trickle_state.eta_minutes, 1)
-            if trickle_state.eta_minutes is not None
-            else None
+            round(trickle_state.eta_minutes, 1) if trickle_state.eta_minutes is not None else None
         )
 
         return stats
@@ -2048,7 +2020,7 @@ class DotMDService:
             return None
 
         try:
-            with open(self._settings.acronyms_path) as f:
+            with self._settings.acronyms_path.open() as f:
                 return json.load(f)
         except Exception as e:
             logger.warning("Failed to load acronyms: %s", e, exc_info=True)

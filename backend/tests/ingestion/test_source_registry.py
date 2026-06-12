@@ -94,9 +94,10 @@ def test_source_descriptor_forbids_extra_fields() -> None:
 
 
 def test_source_schema_field_type_vocabulary_is_documented() -> None:
-    assert frozenset(
-        {"str", "int", "bool", "path", "list[str]", "dict[str, Any]"}
-    ) == SOURCE_SCHEMA_FIELD_TYPES
+    assert (
+        frozenset({"str", "int", "bool", "path", "list[str]", "dict[str, Any]"})
+        == SOURCE_SCHEMA_FIELD_TYPES
+    )
 
     with pytest.raises(ValidationError):
         SourceSchemaField(name="bad", field_type="json")
@@ -148,9 +149,7 @@ def test_source_registry_rejects_duplicate_namespace() -> None:
 
 
 def test_default_registry_contains_filesystem_telegram_and_gmail() -> None:
-    namespaces = {
-        descriptor.namespace for descriptor in default_source_registry().list()
-    }
+    namespaces = {descriptor.namespace for descriptor in default_source_registry().list()}
 
     assert namespaces == {"filesystem", "telegram", "gmail"}
 
@@ -189,8 +188,7 @@ def test_telegram_descriptor_shape() -> None:
     assert descriptor.auth_schema.delegated_to == "mcp-telegram"
     assert descriptor.cursor_schema.cursor_kind == "provider_checkpoint"
     assert (
-        "telegram:v1:dialog:<dialog_id>:message:<message_id>"
-        in descriptor.cursor_schema.examples
+        "telegram:v1:dialog:<dialog_id>:message:<message_id>" in descriptor.cursor_schema.examples
     )
     assert SourceCapability.LOCAL_SYNC in descriptor.capabilities
     assert SourceCapability.READ_UNIT_WINDOW in descriptor.capabilities
@@ -223,9 +221,7 @@ def test_gmail_descriptor_shape() -> None:
 
 
 def test_source_descriptor_converts_to_application_source_description() -> None:
-    description = ApplicationSourceDescription.from_descriptor(
-        telegram_source_descriptor()
-    )
+    description = ApplicationSourceDescription.from_descriptor(telegram_source_descriptor())
 
     assert description.namespace == "telegram"
     assert description.source_kind == "chat"
@@ -240,9 +236,7 @@ def test_source_descriptor_converts_to_application_source_description() -> None:
 
 
 def test_gmail_source_descriptor_converts_to_application_source_description() -> None:
-    description = ApplicationSourceDescription.from_descriptor(
-        gmail_source_descriptor()
-    )
+    description = ApplicationSourceDescription.from_descriptor(gmail_source_descriptor())
 
     assert description.namespace == "gmail"
     assert description.source_kind == "email"

@@ -108,12 +108,15 @@ class FTS5SearchEngine:
         ).fetchone()[0]
 
         if table_exists:
-            col_names = {r[1] for r in self._conn.execute(f"PRAGMA table_info({self._table})").fetchall()}
+            col_names = {
+                r[1] for r in self._conn.execute(f"PRAGMA table_info({self._table})").fetchall()
+            }
             if "title" not in col_names or "tags" not in col_names:
                 row_count = self._conn.execute(f"SELECT COUNT(*) FROM {self._table}").fetchone()[0]
                 logger.info(
                     "FTS5: dropping and recreating %s to add title+tags columns (%d rows will be lost, run reindex_fts5 to repopulate)",
-                    self._table, row_count,
+                    self._table,
+                    row_count,
                 )
                 self._conn.execute(f"DROP TABLE {self._table}")
                 self._conn.commit()
@@ -158,8 +161,7 @@ class FTS5SearchEngine:
             title, tags_csv = file_meta.get(_fp_key, ("", ""))
             rows.append((c.chunk_id, _expand_compounds(c.text), title, tags_csv))
         self._conn.executemany(
-            f"INSERT INTO {self._table}(chunk_id, text, title, tags) "
-            f"VALUES (?, ?, ?, ?)",
+            f"INSERT INTO {self._table}(chunk_id, text, title, tags) VALUES (?, ?, ?, ?)",
             rows,
         )
         self._conn.commit()
@@ -184,12 +186,8 @@ class FTS5SearchEngine:
             chunk_ids,
         )
         write_conn.executemany(
-            f"INSERT INTO {self._table}(chunk_id, text, title, tags) "
-            f"VALUES (?, ?, ?, ?)",
-            [
-                (chunk.chunk_id, _expand_compounds(chunk.text), title, tags_csv)
-                for chunk in chunks
-            ],
+            f"INSERT INTO {self._table}(chunk_id, text, title, tags) VALUES (?, ?, ?, ?)",
+            [(chunk.chunk_id, _expand_compounds(chunk.text), title, tags_csv) for chunk in chunks],
         )
         if conn is None:
             self._conn.commit()
@@ -235,18 +233,14 @@ class FTS5SearchEngine:
         all chunk texts are copied over.  This provides a seamless
         upgrade path from the old pickle-based keyword index.
         """
-        fts_count = self._conn.execute(
-            f"SELECT COUNT(*) FROM {self._table}"
-        ).fetchone()[0]
+        fts_count = self._conn.execute(f"SELECT COUNT(*) FROM {self._table}").fetchone()[0]
 
         # Derive the chunks table name from the FTS table name.
         # "chunks_fts" -> "chunks", "chunks_fts_heading_512_50" -> "chunks_heading_512_50"
         chunks_table = self._table.replace("_fts", "", 1)
 
         try:
-            chunks_count = self._conn.execute(
-                f"SELECT COUNT(*) FROM {chunks_table}"
-            ).fetchone()[0]
+            chunks_count = self._conn.execute(f"SELECT COUNT(*) FROM {chunks_table}").fetchone()[0]
         except sqlite3.OperationalError:
             # chunks table doesn't exist yet
             logger.info("FTS5: no %s table found; skipping migration", chunks_table)

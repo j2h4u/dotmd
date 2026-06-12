@@ -198,14 +198,19 @@ class LadybugDBGraphStore:
             if src_label is None or tgt_label is None:
                 logger.warning(
                     "Cannot add edge: node not found (src=%s [%s], tgt=%s [%s])",
-                    source_id, src_label, target_id, tgt_label,
+                    source_id,
+                    src_label,
+                    target_id,
+                    tgt_label,
                 )
                 return
 
             rel_table = _REL_TABLE_MAP.get((src_label, tgt_label))
             if rel_table is None:
                 logger.warning(
-                    "No relationship table for %s -> %s", src_label, tgt_label,
+                    "No relationship table for %s -> %s",
+                    src_label,
+                    tgt_label,
                 )
                 return
 
@@ -384,11 +389,13 @@ class LadybugDBGraphStore:
                         node_id = str(row["n.id"])
                         if label == "Section" and node_id in section_entities:
                             props["ner_entities"] = section_entities[node_id]
-                        nodes.append({
-                            "id": node_id,
-                            "label": label,
-                            "properties": props,
-                        })
+                        nodes.append(
+                            {
+                                "id": node_id,
+                                "label": label,
+                                "properties": props,
+                            }
+                        )
                 except Exception:
                     logger.debug("Failed to query %s nodes", label, exc_info=True)
 
@@ -396,17 +403,18 @@ class LadybugDBGraphStore:
             for rel_table in _REL_TABLE_MAP.values():
                 try:
                     result = conn.execute(
-                        f"MATCH (a)-[r:{rel_table}]->(b) "
-                        "RETURN a.id, b.id, r.rel_type, r.weight"
+                        f"MATCH (a)-[r:{rel_table}]->(b) RETURN a.id, b.id, r.rel_type, r.weight"
                     )
                     df = result.get_as_df()
                     for _, row in df.iterrows():
-                        edges.append({
-                            "source": str(row["a.id"]),
-                            "target": str(row["b.id"]),
-                            "relation_type": str(row["r.rel_type"]),
-                            "weight": float(row["r.weight"]),
-                        })
+                        edges.append(
+                            {
+                                "source": str(row["a.id"]),
+                                "target": str(row["b.id"]),
+                                "relation_type": str(row["r.rel_type"]),
+                                "weight": float(row["r.weight"]),
+                            }
+                        )
                 except Exception:
                     logger.debug("Failed to query %s edges", rel_table, exc_info=True)
 
@@ -454,8 +462,7 @@ class LadybugDBGraphStore:
         with self._connection() as conn:
             try:
                 result = conn.execute(
-                    "MATCH (s:Section)-[:SECTION_ENTITY]->(e:Entity {id: $name}) "
-                    "RETURN s.id",
+                    "MATCH (s:Section)-[:SECTION_ENTITY]->(e:Entity {id: $name}) RETURN s.id",
                     parameters={"name": entity_name},
                 )
                 df = result.get_as_df()

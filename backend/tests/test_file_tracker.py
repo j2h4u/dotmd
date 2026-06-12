@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from dotmd.core.models import FileInfo
@@ -18,7 +18,7 @@ def _make_file(tmp_path: Path, name: str, content: str) -> FileInfo:
     return FileInfo(
         path=p,
         title=name,
-        last_modified=datetime.fromtimestamp(stat.st_mtime),
+        last_modified=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
         size_bytes=stat.st_size,
     )
 
@@ -49,9 +49,7 @@ class TestFileTrackerDiff:
         from dotmd.ingestion.reader import chunk_checksum
 
         checksum = chunk_checksum(fi.path)
-        tracker.save_fingerprint(
-            str(fi.path), stat.st_mtime, stat.st_size, checksum
-        )
+        tracker.save_fingerprint(str(fi.path), stat.st_mtime, stat.st_size, checksum)
 
         diff = tracker.diff([fi])
 
@@ -66,9 +64,7 @@ class TestFileTrackerDiff:
         tracker = FileTracker(sqlite_conn)
         fi = _make_file(tmp_path, "changing.md", "original content")
         stat = fi.path.stat()
-        tracker.save_fingerprint(
-            str(fi.path), stat.st_mtime, stat.st_size, "old_fake_checksum"
-        )
+        tracker.save_fingerprint(str(fi.path), stat.st_mtime, stat.st_size, "old_fake_checksum")
 
         # Modify the file content (change size to force checksum check)
         fi.path.write_text("totally different content here")
@@ -77,7 +73,7 @@ class TestFileTrackerDiff:
         fi_new = FileInfo(
             path=fi.path,
             title="changing.md",
-            last_modified=datetime.fromtimestamp(new_stat.st_mtime),
+            last_modified=datetime.fromtimestamp(new_stat.st_mtime, tz=UTC),
             size_bytes=new_stat.st_size,
         )
 
@@ -106,9 +102,7 @@ class TestFileTrackerDiff:
         checksum = chunk_checksum(fi.path)
         # Save fingerprint with an old mtime but same checksum
         old_mtime = fi.path.stat().st_mtime - 100.0
-        tracker.save_fingerprint(
-            str(fi.path), old_mtime, fi.size_bytes, checksum
-        )
+        tracker.save_fingerprint(str(fi.path), old_mtime, fi.size_bytes, checksum)
 
         diff = tracker.diff([fi])
 
@@ -127,9 +121,7 @@ class TestFileTrackerDiff:
 class TestFileTrackerPersistence:
     """Tests for fingerprint CRUD operations."""
 
-    def test_save_fingerprint_persists_and_survives_reconnect(
-        self, tmp_dir: Path
-    ) -> None:
+    def test_save_fingerprint_persists_and_survives_reconnect(self, tmp_dir: Path) -> None:
         """Fingerprint should survive closing and reopening the connection."""
         db_path = str(tmp_dir / "persist.db")
         conn1 = sqlite3.connect(db_path)

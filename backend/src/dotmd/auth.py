@@ -50,7 +50,9 @@ def _uses_redirect_uri_prefix(client_info: OAuthClientInformationFull, prefix: s
 
 
 def _pending_client_ttl_seconds() -> int:
-    raw = os.environ.get("DOTMD_OAUTH_PENDING_CLIENT_TTL_SECONDS", str(_DEFAULT_PENDING_CLIENT_TTL_SECONDS))
+    raw = os.environ.get(
+        "DOTMD_OAUTH_PENDING_CLIENT_TTL_SECONDS", str(_DEFAULT_PENDING_CLIENT_TTL_SECONDS)
+    )
     try:
         value = int(raw)
     except ValueError:
@@ -111,7 +113,9 @@ class PairingCodeError(ValueError):
     """Raised when an OAuth pairing code is missing, expired, or already used."""
 
 
-class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, RefreshToken, AccessToken]):
+class DotMDOAuthProvider(
+    OAuthAuthorizationServerProvider[AuthorizationCode, RefreshToken, AccessToken]
+):
     """JSON-backed OAuth provider for a trusted single-user Tailnet deployment."""
 
     def __init__(self, state_path: Path) -> None:
@@ -137,11 +141,11 @@ class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
         self._load_from_disk()
 
     async def _flush(self) -> None:
-        """Write state to disk atomically using tmp file plus os.replace()."""
+        """Write state to disk atomically using tmp file plus replace."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._path.with_suffix(".tmp")
         tmp.write_text(json.dumps(self._state, indent=2, default=str), encoding="utf-8")
-        os.replace(tmp, self._path)
+        tmp.replace(self._path)
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         async with self._lock:
@@ -158,7 +162,9 @@ class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
                 await self._flush()
         return _client_from_pending_record(data) if data else None
 
-    async def create_pairing_code(self, ttl_seconds: int = _DEFAULT_PAIRING_CODE_TTL_SECONDS) -> tuple[str, float]:
+    async def create_pairing_code(
+        self, ttl_seconds: int = _DEFAULT_PAIRING_CODE_TTL_SECONDS
+    ) -> tuple[str, float]:
         if ttl_seconds <= 0:
             raise ValueError("OAuth pairing code TTL must be positive")
         raw_code = "".join(secrets.choice(_PAIRING_CODE_ALPHABET) for _ in range(8))
@@ -213,23 +219,38 @@ class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
             raise PairingCodeError("OAuth pairing code is invalid or expired")
         logger.info("OAuth: pairing code consumed client_id=%s", client_id)
 
-    def _enforce_pairing_attempt_interval_locked(self, pending: dict[str, object], client_id: str) -> None:
+    def _enforce_pairing_attempt_interval_locked(
+        self, pending: dict[str, object], client_id: str
+    ) -> None:
         now = time.time()
         raw_last_attempt_at = pending.get("last_attempt_at", 0)
-        last_attempt_at = float(raw_last_attempt_at) if isinstance(raw_last_attempt_at, int | float | str) else 0.0
+        last_attempt_at = (
+            float(raw_last_attempt_at)
+            if isinstance(raw_last_attempt_at, int | float | str)
+            else 0.0
+        )
         if now - last_attempt_at < _PAIRING_MIN_ATTEMPT_INTERVAL_SECONDS:
             logger.warning("OAuth: pairing attempt rate-limited client_id=%s", client_id)
             raise PairingCodeError("Too many pairing attempts. Wait a moment and try again.")
 
-    def _record_failed_pairing_attempt_locked(self, pending: dict[str, object], client_id: str) -> bool:
+    def _record_failed_pairing_attempt_locked(
+        self, pending: dict[str, object], client_id: str
+    ) -> bool:
         now = time.time()
         raw_failed_attempts = pending.get("failed_attempts", 0)
-        failed_attempts = int(raw_failed_attempts) + 1 if isinstance(raw_failed_attempts, int | float | str) else 1
+        failed_attempts = (
+            int(raw_failed_attempts) + 1
+            if isinstance(raw_failed_attempts, int | float | str)
+            else 1
+        )
         pending["failed_attempts"] = failed_attempts
         pending["last_attempt_at"] = now
         if failed_attempts >= _PAIRING_MAX_FAILED_ATTEMPTS:
             self._state["pending_clients"].pop(client_id, None)
-            logger.warning("OAuth: pending client removed after too many pairing attempts client_id=%s", client_id)
+            logger.warning(
+                "OAuth: pending client removed after too many pairing attempts client_id=%s",
+                client_id,
+            )
             return True
         return False
 
@@ -254,11 +275,15 @@ class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
         async with self._lock:
             self._reload_locked()
             self._purge_expired_pending_clients(now=time.time())
-            self._state["pending_clients"][client_info.client_id] = _pending_client_record(client_info)
+            self._state["pending_clients"][client_info.client_id] = _pending_client_record(
+                client_info
+            )
             await self._flush()
         logger.info("OAuth: client pending_pairing client_id=%s", client_info.client_id)
 
-    async def activate_pending_client(self, client: OAuthClientInformationFull, pairing_code: str) -> None:
+    async def activate_pending_client(
+        self, client: OAuthClientInformationFull, pairing_code: str
+    ) -> None:
         client_id = _require_client_id(client)
         async with self._lock:
             self._reload_locked()
@@ -280,7 +305,9 @@ class DotMDOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Ref
                 blocked = self._record_failed_pairing_attempt_locked(pending, client_id)
                 await self._flush()
                 if blocked:
-                    raise PairingCodeError("Too many invalid pairing attempts. Start pairing again.") from None
+                    raise PairingCodeError(
+                        "Too many invalid pairing attempts. Start pairing again."
+                    ) from None
                 raise
             client_data = pending.get("client", pending)
             self._state["clients"][client_id] = client_data

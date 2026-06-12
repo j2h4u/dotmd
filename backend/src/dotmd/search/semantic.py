@@ -80,6 +80,7 @@ class SemanticSearchEngine:
             return self._model_name  # local model, trust config
         try:
             import httpx
+
             resp = httpx.get(f"{self._embedding_url}/info", timeout=5.0)
             resp.raise_for_status()
             self._tei_model_id = resp.json().get("model_id")
@@ -160,7 +161,7 @@ class SemanticSearchEngine:
             results.extend(response.json())
 
             now = time.perf_counter()
-            is_last = (batch_idx == total_batches - 1)
+            is_last = batch_idx == total_batches - 1
             if is_last or (now - t_last_heartbeat) >= 30.0:
                 done = batch_idx + 1
                 elapsed = now - t_start
@@ -172,15 +173,21 @@ class SemanticSearchEngine:
                     eta = f"ETA ~{remaining / 60:.1f}min"
                 logger.info(
                     "TEI %d/%d (%.0f%%) %.1f batches/s, %s",
-                    done, total_batches, done / total_batches * 100,
-                    rate, eta,
+                    done,
+                    total_batches,
+                    done / total_batches * 100,
+                    rate,
+                    eta,
                 )
                 t_last_heartbeat = now
 
         elapsed = time.perf_counter() - t_start
         logger.info(
             "TEI complete: %d vectors in %.1fs (%.1f vectors/s, bs=%d)",
-            len(results), elapsed, len(results) / elapsed if elapsed > 0 else 0, bs,
+            len(results),
+            elapsed,
+            len(results) / elapsed if elapsed > 0 else 0,
+            bs,
         )
         return results
 

@@ -85,7 +85,7 @@ class QueryExpander:
 
         for token in tokens:
             # Extract just the letters (remove punctuation)
-            clean_token = re.sub(r'[^A-Z]', '', token.upper())
+            clean_token = re.sub(r"[^A-Z]", "", token.upper())
 
             if len(clean_token) >= 2:
                 # Try exact match first

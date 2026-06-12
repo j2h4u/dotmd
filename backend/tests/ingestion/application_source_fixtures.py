@@ -89,11 +89,7 @@ class FixtureApplicationSourceProvider(ApplicationSourceProviderProtocol):
             raise ValueError(f"Unknown source unit: {unit_ref}")
 
         document_units = sorted(
-            (
-                unit
-                for unit in self._units.values()
-                if unit.document_ref == target.document_ref
-            ),
+            (unit for unit in self._units.values() if unit.document_ref == target.document_ref),
             key=lambda unit: unit.order_key,
         )
         target_index = document_units.index(target)

@@ -54,7 +54,11 @@ async def _log_requests(request: Request, call_next):
     response = await call_next(request)
     elapsed_ms = (time.perf_counter() - t0) * 1000
     is_health = request.url.path == "/health"
-    log = logger.error if response.status_code >= 500 else (logger.debug if is_health else logger.info)
+    log = (
+        logger.error
+        if response.status_code >= 500
+        else (logger.debug if is_health else logger.info)
+    )
     log(
         "%s %s %d (%.0fms)",
         request.method,
@@ -72,6 +76,7 @@ async def health() -> dict:
 
 
 # -- Request / response models ------------------------------------------------
+
 
 class IndexRequest(BaseModel):
     directory: str
@@ -130,6 +135,7 @@ class GraphResponse(BaseModel):
 
 # -- Endpoints -----------------------------------------------------------------
 
+
 @app.post("/index", response_model=IndexStats)
 async def index(req: IndexRequest) -> IndexStats:
     """Index all markdown files under the given directory."""
@@ -170,11 +176,7 @@ async def compare_rerankers(
     expand: bool = Query(True),
 ) -> RerankerComparisonResponse:
     """Compare developer-selected rerankers over one shared candidate pool."""
-    names = (
-        [name.strip() for name in rerankers.split(",") if name.strip()]
-        if rerankers
-        else None
-    )
+    names = [name.strip() for name in rerankers.split(",") if name.strip()] if rerankers else None
     try:
         comparison = _get_service().compare_rerankers(
             query=q,

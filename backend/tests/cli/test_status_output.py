@@ -16,6 +16,7 @@ def _get_cli():  # type: ignore[no-untyped-def]
     from click.testing import CliRunner
 
     from dotmd.cli import main
+
     return CliRunner, main
 
 
@@ -78,12 +79,8 @@ class TestStatusCountsDistinctPathsFromM2M:
                 "VALUES (?, ?, ?)",
                 (chunk_id, fp, i),
             )
-        conn.execute(
-            f"INSERT INTO vec_meta_{strategy}_{MODEL} (chunk_id) VALUES (?)", (chunk_id,)
-        )
-        conn.execute(
-            "INSERT INTO stats (id, total_files, total_chunks) VALUES (1, 3, 1)"
-        )
+        conn.execute(f"INSERT INTO vec_meta_{strategy}_{MODEL} (chunk_id) VALUES (?)", (chunk_id,))
+        conn.execute("INSERT INTO stats (id, total_files, total_chunks) VALUES (1, 3, 1)")
         conn.commit()
         conn.close()
 
@@ -99,6 +96,5 @@ class TestStatusCountsDistinctPathsFromM2M:
         )
         # Status must report 3 distinct paths (from M2M), not 1 (from chunks_*)
         assert "3" in result.output, (
-            f"Expected '3' distinct paths in status output (from M2M), "
-            f"got: {result.output!r}"
+            f"Expected '3' distinct paths in status output (from M2M), got: {result.output!r}"
         )

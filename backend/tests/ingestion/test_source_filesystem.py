@@ -134,13 +134,7 @@ def test_source_document_converts_to_file_info_with_compatibility_fields(
 ) -> None:
     md_path = tmp_path / "note.md"
     md_path.write_text(
-        "---\n"
-        "title: Compatibility Note\n"
-        "kind: voicenote\n"
-        "tags:\n"
-        "  - source\n"
-        "---\n"
-        "Body text.\n",
+        "---\ntitle: Compatibility Note\nkind: voicenote\ntags:\n  - source\n---\nBody text.\n",
         encoding="utf-8",
     )
     document = FilesystemMarkdownSourceAdapter().discover(tmp_path)[0]
@@ -499,12 +493,8 @@ def test_bulk_index_rebinds_equivalent_inactive_filesystem_content_without_tei(
     assert rebound is not None
     assert rebound.active is True
     assert rebound.unbound_at is None
-    assert rebound.metadata_json["last_rebind"]["reused_chunks"] == len(
-        original_chunk_ids
-    )
-    assert pipeline._metadata_store.count_reused_chunks_from_bindings() == len(
-        original_chunk_ids
-    )
+    assert rebound.metadata_json["last_rebind"]["reused_chunks"] == len(original_chunk_ids)
+    assert pipeline._metadata_store.count_reused_chunks_from_bindings() == len(original_chunk_ids)
     assert rebound_chunk_ids == original_chunk_ids
     assert set(provenance) == set(original_chunk_ids)
     assert encode_calls == []
@@ -564,14 +554,11 @@ def test_bulk_index_rebinds_equivalent_content_from_new_filesystem_path_without_
     )
     assert rebound is not None
     assert rebound.active is True
-    assert rebound.metadata_json["last_rebind"]["reused_chunks"] == len(
-        original_chunk_ids
-    )
+    assert rebound.metadata_json["last_rebind"]["reused_chunks"] == len(original_chunk_ids)
     assert new_chunk_refs == original_chunk_refs
     assert set(new_provenance) == set(original_chunk_ids)
     assert all(
-        provenance.document_ref == str(new_path.resolve())
-        for provenance in new_provenance.values()
+        provenance.document_ref == str(new_path.resolve()) for provenance in new_provenance.values()
     )
     assert encode_calls == []
 
@@ -618,9 +605,7 @@ def test_index_file_rebinds_equivalent_inactive_filesystem_content_without_tei(
     assert rebound is not None
     assert rebound.active is True
     assert rebound.unbound_at is None
-    assert rebound.metadata_json["last_rebind"]["reused_chunks"] == len(
-        original_chunk_ids
-    )
+    assert rebound.metadata_json["last_rebind"]["reused_chunks"] == len(original_chunk_ids)
     assert rebound_chunk_ids == original_chunk_ids
     assert set(provenance) == set(original_chunk_ids)
     assert encode_calls == []
@@ -789,9 +774,7 @@ def test_adapter_routed_meeting_transcript_uses_kind_handler(
     )
 
     assert files[0].kind == "meeting_transcript"
-    assert [chunk.text for chunk in adapter_chunks] == [
-        chunk.text for chunk in direct_chunks
-    ]
+    assert [chunk.text for chunk in adapter_chunks] == [chunk.text for chunk in direct_chunks]
     assert adapter_chunks[0].kind == "meeting_transcript"
     assert adapter_chunks[0].provenance is not None
     assert adapter_chunks[0].provenance.source_unit_refs == []
@@ -853,22 +836,31 @@ def test_backfill_filesystem_source_documents_from_existing_provenance(
     )
     pipeline._conn.commit()
 
-    assert pipeline._metadata_store.get_source_document(
-        "filesystem",
-        str(md_path.resolve()),
-    ) is None
-    assert pipeline._metadata_store.count_missing_source_documents_from_provenance(
-        pipeline._strategy,
-    ) == 1
+    assert (
+        pipeline._metadata_store.get_source_document(
+            "filesystem",
+            str(md_path.resolve()),
+        )
+        is None
+    )
+    assert (
+        pipeline._metadata_store.count_missing_source_documents_from_provenance(
+            pipeline._strategy,
+        )
+        == 1
+    )
 
     dry_run = pipeline.backfill_filesystem_source_documents_from_provenance(
         dry_run=True,
     )
     assert dry_run["missing_source_documents"] == 1
-    assert pipeline._metadata_store.get_source_document(
-        "filesystem",
-        str(md_path.resolve()),
-    ) is None
+    assert (
+        pipeline._metadata_store.get_source_document(
+            "filesystem",
+            str(md_path.resolve()),
+        )
+        is None
+    )
 
     repaired = pipeline.backfill_filesystem_source_documents_from_provenance(
         dry_run=False,

@@ -39,6 +39,7 @@ from dotmd.core.models import (
 # _ConnProxy — thin wrapper around sqlite3.Connection
 # ---------------------------------------------------------------------------
 
+
 class _ConnProxy:
     """Thin Python-level wrapper around ``sqlite3.Connection``.
 
@@ -57,7 +58,11 @@ class _ConnProxy:
     # can be replaced (test spy) without going through __getattr__.
     @property
     def execute(self):  # type: ignore[no-untyped-def]
-        return object.__getattribute__(self, "_execute_override") if "_execute_override" in object.__getattribute__(self, "__dict__") else object.__getattribute__(self, "_real_conn").execute
+        return (
+            object.__getattribute__(self, "_execute_override")
+            if "_execute_override" in object.__getattribute__(self, "__dict__")
+            else object.__getattribute__(self, "_real_conn").execute
+        )
 
     @execute.setter
     def execute(self, value):  # type: ignore[no-untyped-def]
@@ -366,9 +371,7 @@ class SQLiteMetadataStore:
             ("data_dir", "TEXT"),
         ]:
             with contextlib.suppress(sqlite3.OperationalError):  # column already exists
-                self._conn.execute(
-                    f"ALTER TABLE stats ADD COLUMN {col} {typedef}"
-                )
+                self._conn.execute(f"ALTER TABLE stats ADD COLUMN {col} {typedef}")
         self._conn.commit()
 
     # -- M2M table management -----------------------------------------------
@@ -393,9 +396,7 @@ class SQLiteMetadataStore:
         """Create chunk_source_provenance_<strategy> and its chunk index."""
         table = f"chunk_source_provenance_{strategy}"
         idx_name = f"idx_chunk_source_provenance_{strategy}_chunk_id"
-        self._conn.execute(
-            _CREATE_CHUNK_SOURCE_PROVENANCE_TPL.format(table=table)
-        )
+        self._conn.execute(_CREATE_CHUNK_SOURCE_PROVENANCE_TPL.format(table=table))
         self._conn.execute(
             _CREATE_CHUNK_SOURCE_PROVENANCE_IDX_TPL.format(
                 idx_name=idx_name,
@@ -412,9 +413,7 @@ class SQLiteMetadataStore:
         m2m_table = f"chunk_file_paths_{strategy}"
         idx_name = f"idx_chunk_file_paths_{strategy}_file_path"
         self._conn.execute(_CREATE_M2M_TPL.format(m2m_table=m2m_table))
-        self._conn.execute(
-            _CREATE_M2M_IDX_TPL.format(idx_name=idx_name, m2m_table=m2m_table)
-        )
+        self._conn.execute(_CREATE_M2M_IDX_TPL.format(idx_name=idx_name, m2m_table=m2m_table))
         self._conn.commit()
 
     # -- source provenance --------------------------------------------------
@@ -500,9 +499,7 @@ class SQLiteMetadataStore:
                 binding.ref,
                 int(binding.active),
                 binding.bound_at.isoformat(),
-                binding.unbound_at.isoformat()
-                if binding.unbound_at is not None
-                else None,
+                binding.unbound_at.isoformat() if binding.unbound_at is not None else None,
                 binding.content_fingerprint,
                 binding.metadata_fingerprint,
                 json.dumps(binding.source_unit_refs),
@@ -578,8 +575,7 @@ class SQLiteMetadataStore:
     ) -> bool:
         """Return True when a resource binding exists and is active."""
         row = self._conn.execute(
-            "SELECT active FROM resource_bindings "
-            "WHERE namespace = ? AND resource_ref = ?",
+            "SELECT active FROM resource_bindings WHERE namespace = ? AND resource_ref = ?",
             (namespace, resource_ref),
         ).fetchone()
         return bool(row[0]) if row is not None else False
@@ -737,9 +733,7 @@ class SQLiteMetadataStore:
             "WHERE namespace = ? AND resource_ref = ?",
             (
                 int(active),
-                effective_unbound_at.isoformat()
-                if effective_unbound_at is not None
-                else None,
+                effective_unbound_at.isoformat() if effective_unbound_at is not None else None,
                 namespace,
                 resource_ref,
             ),
@@ -934,17 +928,12 @@ class SQLiteMetadataStore:
             "WHERE namespace = ? AND document_ref = ?",
             (namespace, document_ref),
         ).fetchall()
-        chunk_ids = [
-            row[0]
-            for row in rows
-            if source_unit_ref in json.loads(row[1])
-        ]
+        chunk_ids = [row[0] for row in rows if source_unit_ref in json.loads(row[1])]
         if not chunk_ids:
             return []
         placeholders = ",".join("?" for _ in chunk_ids)
         conn.execute(
-            f"DELETE FROM {provenance_table} "
-            f"WHERE chunk_id IN ({placeholders})",
+            f"DELETE FROM {provenance_table} WHERE chunk_id IN ({placeholders})",
             chunk_ids,
         )
         conn.execute(
@@ -1037,9 +1026,7 @@ class SQLiteMetadataStore:
 
     def count_reused_chunks_from_bindings(self) -> int:
         """Return durable reused chunk count recorded in binding metadata."""
-        rows = self._conn.execute(
-            "SELECT metadata_json FROM resource_bindings"
-        ).fetchall()
+        rows = self._conn.execute("SELECT metadata_json FROM resource_bindings").fetchall()
         reused = 0
         for (metadata_raw,) in rows:
             metadata = json.loads(metadata_raw or "{}")
@@ -1257,9 +1244,7 @@ class SQLiteMetadataStore:
         if _commit:
             self._conn.commit()
 
-    def get_file_paths_by_chunk_id(
-        self, strategy: str, chunk_id: str
-    ) -> list[str]:
+    def get_file_paths_by_chunk_id(self, strategy: str, chunk_id: str) -> list[str]:
         """Return all file_paths for a chunk_id, sorted lexicographically (D-01).
 
         Parameters
@@ -1276,8 +1261,7 @@ class SQLiteMetadataStore:
         """
         m2m_table = f"chunk_file_paths_{strategy}"
         rows = self._conn.execute(
-            f"SELECT DISTINCT file_path FROM {m2m_table} "
-            f"WHERE chunk_id = ? ORDER BY file_path",
+            f"SELECT DISTINCT file_path FROM {m2m_table} WHERE chunk_id = ? ORDER BY file_path",
             (chunk_id,),
         ).fetchall()
         return [r[0] for r in rows]
@@ -1317,9 +1301,7 @@ class SQLiteMetadataStore:
             result[cid].append(fp)
         return dict(result)
 
-    def get_stored_payload(
-        self, strategy: str, chunk_id: str
-    ) -> dict | None:
+    def get_stored_payload(self, strategy: str, chunk_id: str) -> dict | None:
         """Return the stored payload for a chunk_id or None if absent.
 
         Used by P3 ingest to check payload consistency on conflict.
@@ -1469,8 +1451,7 @@ class SQLiteMetadataStore:
         still_held = {
             r[0]
             for r in conn.execute(
-                f"SELECT DISTINCT chunk_id FROM {m2m_table} "
-                f"WHERE chunk_id IN ({placeholders})",
+                f"SELECT DISTINCT chunk_id FROM {m2m_table} WHERE chunk_id IN ({placeholders})",
                 affected,
             ).fetchall()
         }
@@ -1594,9 +1575,7 @@ class SQLiteMetadataStore:
 
     def save_stats(self, stats: IndexStats) -> None:
         """Persist index statistics (overwrites previous stats)."""
-        last_indexed = (
-            stats.last_indexed.isoformat() if stats.last_indexed else None
-        )
+        last_indexed = stats.last_indexed.isoformat() if stats.last_indexed else None
         self._conn.execute(
             _UPSERT_STATS,
             (
@@ -1631,9 +1610,7 @@ class SQLiteMetadataStore:
             row = cur.fetchone()
             if row is None:
                 return None
-            last_indexed = (
-                datetime.fromisoformat(row[4]) if row[4] else None
-            )
+            last_indexed = datetime.fromisoformat(row[4]) if row[4] else None
             return IndexStats(
                 total_files=row[0],
                 total_chunks=row[1],
@@ -1644,9 +1621,7 @@ class SQLiteMetadataStore:
         row = cur.fetchone()
         if row is None:
             return None
-        last_indexed = (
-            datetime.fromisoformat(row[4]) if row[4] else None
-        )
+        last_indexed = datetime.fromisoformat(row[4]) if row[4] else None
         return IndexStats(
             total_files=row[0],
             total_chunks=row[1],
@@ -1671,8 +1646,7 @@ class SQLiteMetadataStore:
         self._conn.execute("DELETE FROM source_checkpoints")
         self._conn.execute("DELETE FROM source_unit_fingerprints")
         m2m_tables = self._conn.execute(
-            "SELECT name FROM sqlite_master "
-            "WHERE type='table' AND name LIKE 'chunk_file_paths_%'"
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'chunk_file_paths_%'"
         ).fetchall()
         for (table_name,) in m2m_tables:
             self._conn.execute(f"DELETE FROM {table_name}")

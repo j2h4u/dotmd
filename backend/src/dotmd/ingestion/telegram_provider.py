@@ -34,18 +34,20 @@ LOW_SIGNAL_TEXTS = {
     "ок",
     "окей",
     "спасибо",
-    "ага",  # noqa: RUF001 - intentional Cyrillic acknowledgement.
-    "угу",  # noqa: RUF001 - intentional Cyrillic acknowledgement.
+    "ага",
+    "угу",
 }
 
 # Metadata whitelist for federated search candidates (cycle-2 MEDIUM fold-in)
-TELEGRAM_PROVIDER_METADATA_KEYS: frozenset[str] = frozenset({
-    "dialog_id",
-    "message_id",
-    "sender",
-    "sent_at",
-    "dialog_name",
-})
+TELEGRAM_PROVIDER_METADATA_KEYS: frozenset[str] = frozenset(
+    {
+        "dialog_id",
+        "message_id",
+        "sender",
+        "sent_at",
+        "dialog_name",
+    }
+)
 
 
 class TelegramSourceClientProtocol(Protocol):
@@ -199,10 +201,7 @@ class TelegramApplicationSourceProvider(ApplicationSourceProviderProtocol):
             updated_after_cursor=updated_after_cursor,
         )
         return ApplicationSourceChangeBatch(
-            changes=[
-                self._change_from_payload(change)
-                for change in payload.get("changes", [])
-            ],
+            changes=[self._change_from_payload(change) for change in payload.get("changes", [])],
             next_cursor=payload.get("next_cursor"),
             checkpoint_cursor=payload.get("checkpoint_cursor"),
             updated_after=payload.get("updated_after"),
@@ -275,9 +274,7 @@ class TelegramApplicationSourceProvider(ApplicationSourceProviderProtocol):
     def _change_from_payload(self, payload: dict) -> ApplicationSourceChange:
         document_payload = payload["document"]
         unit_payload = payload["unit"]
-        if _is_source_document_payload(document_payload) and _is_source_unit_payload(
-            unit_payload
-        ):
+        if _is_source_document_payload(document_payload) and _is_source_unit_payload(unit_payload):
             return ApplicationSourceChange(
                 document=SourceDocument(**document_payload),
                 unit=self._unit_from_payload(unit_payload),
@@ -292,9 +289,7 @@ class TelegramApplicationSourceProvider(ApplicationSourceProviderProtocol):
         document_payload: dict,
         unit_payload: dict,
     ) -> SourceDocument:
-        dialog_id = _coerce_int(
-            document_payload.get("dialog_id", unit_payload["dialog_id"])
-        )
+        dialog_id = _coerce_int(document_payload.get("dialog_id", unit_payload["dialog_id"]))
         dialog_name = str(
             document_payload.get("dialog_name")
             or unit_payload.get("dialog_name")
@@ -310,10 +305,12 @@ class TelegramApplicationSourceProvider(ApplicationSourceProviderProtocol):
         metadata_json = {
             "dialog_id": dialog_id,
             "dialog_name": dialog_name,
+            **{
+                key: value
+                for key, value in document_payload.items()
+                if key not in {"dialog_id", "dialog_name", "updated_at"}
+            },
         }
-        for key, value in document_payload.items():
-            if key not in {"dialog_id", "dialog_name", "updated_at"}:
-                metadata_json[key] = value
 
         return SourceDocument(
             namespace="telegram",
@@ -359,9 +356,7 @@ class TelegramApplicationSourceProvider(ApplicationSourceProviderProtocol):
         unit_ref = _unit_ref(payload)
         text = str(payload.get("text") or "")
         updated_at = _parse_datetime(
-            payload.get("unit_updated_at")
-            or payload.get("edit_date")
-            or payload["sent_at"]
+            payload.get("unit_updated_at") or payload.get("edit_date") or payload["sent_at"]
         )
         metadata_json = {
             "dialog_id": dialog_id,
@@ -406,9 +401,8 @@ def is_low_signal_telegram_text(text: str) -> bool:
         return True
     if not any(ch.isalnum() for ch in stripped):
         return True
-    return (
-        not any(ch.isalnum() for ch in stripped)
-        or any(unicodedata.category(ch).startswith("S") for ch in stripped)
+    return not any(ch.isalnum() for ch in stripped) or any(
+        unicodedata.category(ch).startswith("S") for ch in stripped
     )
 
 
@@ -478,7 +472,7 @@ def _parse_datetime(value: object) -> datetime:
         return value
     if not isinstance(value, str):
         raise ValueError(f"Invalid datetime value: {value!r}")
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return datetime.fromisoformat(value)
 
 
 def _sha256_json(value: dict) -> str:

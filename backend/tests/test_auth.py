@@ -98,7 +98,9 @@ def test_register_rejects_unlisted_redirect_when_allowlist_configured(
     tmp_path: Path, monkeypatch
 ) -> None:
     async def run() -> None:
-        monkeypatch.setenv("DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES", "https://trusted.example/callback")
+        monkeypatch.setenv(
+            "DOTMD_OAUTH_ALLOWED_REDIRECT_URI_PREFIXES", "https://trusted.example/callback"
+        )
         provider = DotMDOAuthProvider(tmp_path / "oauth_state.json")
         with pytest.raises(RegistrationError) as exc_info:
             await provider.register_client(_client_with_redirect("https://agent.example/callback"))

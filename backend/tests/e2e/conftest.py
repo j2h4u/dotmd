@@ -40,15 +40,13 @@ _MCP_HEADERS = {
     "Accept": "application/json, text/event-stream",
 }
 _HTTP_ACCESS_TOKEN: str | None = None
-_LIVE_DOTMD_ENV = {
-    k: v for k, v in os.environ.items()
-    if k.startswith("DOTMD_")
-}
+_LIVE_DOTMD_ENV = {k: v for k, v in os.environ.items() if k.startswith("DOTMD_")}
 
 
 # ---------------------------------------------------------------------------
 # Response helpers (transport-agnostic)
 # ---------------------------------------------------------------------------
+
 
 def _tool_result_text(data: dict) -> str:
     """Extract the first text content item from a tools/call response."""
@@ -80,6 +78,7 @@ def _is_tool_error(data: dict) -> bool:
 # HTTP transport
 # ---------------------------------------------------------------------------
 
+
 def _create_live_pairing_code() -> str:
     """Create a one-time OAuth pairing code in the live server state file."""
     provider = DotMDOAuthProvider(Path(OAUTH_STATE_PATH))
@@ -88,15 +87,19 @@ def _create_live_pairing_code() -> str:
 
 
 def _authorize_url(client_id: str, challenge: str) -> str:
-    return f"{AUTH_BASE_URL}/authorize?{urlencode({
-        'client_id': client_id,
-        'redirect_uri': 'http://localhost:8888/callback',
-        'response_type': 'code',
-        'code_challenge': challenge,
-        'code_challenge_method': 'S256',
-        'state': 'e2e',
-        'resource': os.environ['DOTMD_BASE_URL'].rstrip('/') + '/mcp',
-    })}"
+    return f"{AUTH_BASE_URL}/authorize?{
+        urlencode(
+            {
+                'client_id': client_id,
+                'redirect_uri': 'http://localhost:8888/callback',
+                'response_type': 'code',
+                'code_challenge': challenge,
+                'code_challenge_method': 'S256',
+                'state': 'e2e',
+                'resource': os.environ['DOTMD_BASE_URL'].rstrip('/') + '/mcp',
+            }
+        )
+    }"
 
 
 def _authorization_redirect_location(authorize_url: str) -> str:
@@ -148,9 +151,9 @@ def _http_access_token() -> str | None:
     client_secret = registration["client_secret"]
 
     verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
-    challenge = base64.urlsafe_b64encode(
-        hashlib.sha256(verifier.encode()).digest()
-    ).rstrip(b"=").decode()
+    challenge = (
+        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    )
     location = _authorization_redirect_location(_authorize_url(client_id, challenge))
     code = parse_qs(urlparse(location).query)["code"][0]
 
@@ -187,6 +190,7 @@ def _http_call(method: str, params: dict | None = None) -> dict:
 # Stdio transport — persistent session
 # ---------------------------------------------------------------------------
 
+
 class _StdioSession:
     """Long-lived dotmd mcp subprocess, shared across all stdio tests in a session.
 
@@ -221,12 +225,8 @@ class _StdioSession:
                         args=["mcp"],
                         env=_LIVE_DOTMD_ENV,
                     )
-                    read, write = await stack.enter_async_context(
-                        stdio_client(server)
-                    )
-                    session = await stack.enter_async_context(
-                        ClientSession(read, write)
-                    )
+                    read, write = await stack.enter_async_context(stdio_client(server))
+                    session = await stack.enter_async_context(ClientSession(read, write))
                     await session.initialize()
                     self._session = session
                     self._shutdown = asyncio.Event()
@@ -263,8 +263,7 @@ class _StdioSession:
                 return {
                     "result": {
                         "tools": [
-                            t.model_dump(mode="json", exclude_none=True)
-                            for t in result.tools
+                            t.model_dump(mode="json", exclude_none=True) for t in result.tools
                         ]
                     }
                 }
@@ -274,9 +273,7 @@ class _StdioSession:
                 result = await session.call_tool(name, args)
                 return {
                     "result": {
-                        "content": [
-                            c.model_dump(mode="json") for c in result.content
-                        ],
+                        "content": [c.model_dump(mode="json") for c in result.content],
                         "structuredContent": result.structuredContent,
                         "isError": result.isError or False,
                     }
@@ -309,6 +306,7 @@ def _stdio_session():
 # Parametrized transport fixture
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(params=["http", "stdio"], ids=["http", "stdio"])
 def mcp_call(request: pytest.FixtureRequest) -> Callable[[str, dict | None], dict]:
     """Callable mcp_call(method, params) — same interface for both transports."""
@@ -322,6 +320,7 @@ def mcp_call(request: pytest.FixtureRequest) -> Callable[[str, dict | None], dic
 # ---------------------------------------------------------------------------
 # Fail fast when live server is unreachable
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _require_live_server() -> None:

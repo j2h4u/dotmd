@@ -25,10 +25,12 @@ class _FakeGraph:
 def test_get_related_sections_uses_bounded_section_entity_section_query() -> None:
     """Two-hop enrichment must not use unbounded variable-length traversal."""
     store = FalkorDBGraphStore.__new__(FalkorDBGraphStore)
-    graph = _FakeGraph([
-        ["chunk-2", "MENTIONS", 0.7],
-        ["chunk-1", "MENTIONS", 1.0],
-    ])
+    graph = _FakeGraph(
+        [
+            ["chunk-2", "MENTIONS", 0.7],
+            ["chunk-1", "MENTIONS", 1.0],
+        ]
+    )
     store.__dict__["_graph"] = graph
 
     neighbors = store.get_related_sections("chunk-1")
@@ -40,4 +42,3 @@ def test_get_related_sections_uses_bounded_section_entity_section_query() -> Non
     assert "TAGGED" not in graph.query_text
     assert graph.params == {"id": "chunk-1"}
     assert neighbors == [("chunk-2", "MENTIONS", 0.7)]
-

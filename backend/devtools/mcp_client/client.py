@@ -54,7 +54,9 @@ class StdioMcpClient:
 
         exit_stack = AsyncExitStack()
         try:
-            read_stream, write_stream = await exit_stack.enter_async_context(stdio_client(self._server))
+            read_stream, write_stream = await exit_stack.enter_async_context(
+                stdio_client(self._server)
+            )
             session = await exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
             await session.initialize()
         except Exception as exc:
@@ -77,7 +79,9 @@ class StdioMcpClient:
             result = await session.list_tools()
         except Exception as exc:
             raise McpClientError(str(exc)) from exc
-        return [tool.model_dump(mode="json", by_alias=True, exclude_none=True) for tool in result.tools]
+        return [
+            tool.model_dump(mode="json", by_alias=True, exclude_none=True) for tool in result.tools
+        ]
 
     async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
         session = self._require_session()
@@ -119,19 +123,25 @@ def load_script_steps(script_path: Path) -> list[dict[str, Any]]:
     return normalized_steps
 
 
-async def execute_script_steps(client: StdioMcpClient, steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+async def execute_script_steps(
+    client: StdioMcpClient, steps: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     """Run one list of client actions inside a single MCP session."""
     results: list[dict[str, Any]] = []
     for index, step in enumerate(steps, start=1):
         action = step.get("action")
         if action == "list_tools":
             result = await client.list_tools()
-            _assert_step_expectations(index=index, action=action, result=result, expect=step.get("expect"))
-            results.append({
-                "step": index,
-                "action": action,
-                "result": result,
-            })
+            _assert_step_expectations(
+                index=index, action=action, result=result, expect=step.get("expect")
+            )
+            results.append(
+                {
+                    "step": index,
+                    "action": action,
+                    "result": result,
+                }
+            )
             continue
 
         if action == "call_tool":
@@ -144,13 +154,17 @@ async def execute_script_steps(client: StdioMcpClient, steps: list[dict[str, Any
                 raise ValueError(f"script step {index} field 'arguments' must be an object")
 
             result = await client.call_tool(name, arguments)
-            _assert_step_expectations(index=index, action=action, result=result, expect=step.get("expect"))
-            results.append({
-                "step": index,
-                "action": action,
-                "name": name,
-                "result": result,
-            })
+            _assert_step_expectations(
+                index=index, action=action, result=result, expect=step.get("expect")
+            )
+            results.append(
+                {
+                    "step": index,
+                    "action": action,
+                    "name": name,
+                    "result": result,
+                }
+            )
             continue
 
         raise ValueError(f"unsupported script action at step {index}: {action!r}")
@@ -193,8 +207,12 @@ def _assert_list_tools_expectations(*, index: int, result: Any, expect: dict[str
 
     tool_names_include = expect.get("tool_names_include")
     if tool_names_include is not None:
-        if not isinstance(tool_names_include, list) or not all(isinstance(item, str) for item in tool_names_include):
-            raise ValueError(f"script step {index} field 'expect.tool_names_include' must be a list of strings")
+        if not isinstance(tool_names_include, list) or not all(
+            isinstance(item, str) for item in tool_names_include
+        ):
+            raise ValueError(
+                f"script step {index} field 'expect.tool_names_include' must be a list of strings"
+            )
         tool_names = {tool.get("name") for tool in result if isinstance(tool, dict)}
         missing_names = [name for name in tool_names_include if name not in tool_names]
         if missing_names:
@@ -270,12 +288,16 @@ def _assert_text_membership(
     if expected is None:
         return
     if not isinstance(expected, list) or not all(isinstance(item, str) for item in expected):
-        raise ValueError(f"script step {index} field 'expect.{field_name}' must be a list of strings")
+        raise ValueError(
+            f"script step {index} field 'expect.{field_name}' must be a list of strings"
+        )
 
     for item in expected:
         contains = item in haystack
         if negate and contains:
-            raise McpClientError(f"script step {index} unexpectedly contained text fragment: {item!r}")
+            raise McpClientError(
+                f"script step {index} unexpectedly contained text fragment: {item!r}"
+            )
         if not negate and not contains:
             raise McpClientError(f"script step {index} is missing expected text fragment: {item!r}")
 
@@ -300,7 +322,9 @@ def _lookup_path(payload: Any, path: str) -> Any:
             try:
                 index = int(segment)
             except ValueError as exc:
-                raise McpClientError(f"cannot use non-numeric segment {segment!r} on list path {path!r}") from exc
+                raise McpClientError(
+                    f"cannot use non-numeric segment {segment!r} on list path {path!r}"
+                ) from exc
             try:
                 current = current[index]
             except IndexError as exc:
@@ -313,6 +337,8 @@ def _lookup_path(payload: Any, path: str) -> Any:
             current = current[segment]
             continue
 
-        raise McpClientError(f"cannot descend into non-container value at segment {segment!r} for path {path!r}")
+        raise McpClientError(
+            f"cannot descend into non-container value at segment {segment!r} for path {path!r}"
+        )
 
     return current

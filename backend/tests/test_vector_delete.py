@@ -31,9 +31,7 @@ def _add_three_chunks(vs: SQLiteVecVectorStore) -> None:
 class TestDeleteVectorsByChunkIds:
     """Tests for delete_vectors_by_chunk_ids method."""
 
-    def test_delete_valid_chunk_ids_returns_count(
-        self, vector_store: SQLiteVecVectorStore
-    ) -> None:
+    def test_delete_valid_chunk_ids_returns_count(self, vector_store: SQLiteVecVectorStore) -> None:
         """Deleting existing chunk_ids removes them and returns correct count."""
         _add_three_chunks(vector_store)
         assert vector_store.count() == 3
@@ -42,9 +40,7 @@ class TestDeleteVectorsByChunkIds:
         assert deleted == 2
         assert vector_store.count() == 1
 
-    def test_delete_empty_list_returns_zero(
-        self, vector_store: SQLiteVecVectorStore
-    ) -> None:
+    def test_delete_empty_list_returns_zero(self, vector_store: SQLiteVecVectorStore) -> None:
         """Deleting with empty list is a no-op returning 0."""
         _add_three_chunks(vector_store)
         deleted = vector_store.delete_vectors_by_chunk_ids([])
@@ -100,9 +96,7 @@ class TestAddChunksOverwrite:
 
         assert vector_store.count() == 2
 
-    def test_add_chunks_overwrite_false_appends(
-        self, vector_store: SQLiteVecVectorStore
-    ) -> None:
+    def test_add_chunks_overwrite_false_appends(self, vector_store: SQLiteVecVectorStore) -> None:
         """add_chunks with overwrite=False appends without wiping — count goes from N to N+M."""
         _add_three_chunks(vector_store)
         assert vector_store.count() == 3

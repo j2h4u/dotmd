@@ -5,6 +5,7 @@ This is the core correctness guarantee of Phase 999.12:
 
 No live TEI required — encode_batch is mocked.
 """
+
 import pathlib
 from unittest.mock import MagicMock
 
@@ -99,6 +100,7 @@ def _make_pipeline_with_directional_vectors(settings):  # type: ignore[no-untype
 @pytest.fixture
 def pipeline_settings(tmp_path):
     from dotmd.core.config import Settings
+
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     index_dir = tmp_path / "index"
@@ -168,7 +170,9 @@ def test_metadata_only_reindex_exactly_one_tei_call(pipeline_settings):
     )
 
     # Metadata-only change: add tags, body unchanged
-    _write_md(doc, "Test Document", ["alpha", "beta", "gamma"], "This is the body text of the document.")
+    _write_md(
+        doc, "Test Document", ["alpha", "beta", "gamma"], "This is the body text of the document."
+    )
 
     encode_calls.clear()
     pipeline.index(pipeline_settings.data_dir)

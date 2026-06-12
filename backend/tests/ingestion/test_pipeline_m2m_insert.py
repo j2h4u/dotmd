@@ -104,9 +104,7 @@ class TestInsertOrIgnoreOnRepeat:
             f"SELECT text FROM chunks_{strategy} LIMIT 1"
         ).fetchone()
 
-        assert count_after_1 == count_after_2, (
-            "Re-indexing should not add rows to chunks_*"
-        )
+        assert count_after_1 == count_after_2, "Re-indexing should not add rows to chunks_*"
         assert text_after_1 == text_after_2, (
             "Re-indexing should not overwrite text (INSERT OR IGNORE)"
         )
@@ -132,9 +130,9 @@ class TestTwoFilesIdenticalContentShareChunk:
         pipeline.index_file(file_a)
         pipeline.index_file(file_b)
 
-        chunk_count = pipeline._conn.execute(
-            f"SELECT COUNT(*) FROM chunks_{strategy}"
-        ).fetchone()[0]
+        chunk_count = pipeline._conn.execute(f"SELECT COUNT(*) FROM chunks_{strategy}").fetchone()[
+            0
+        ]
         m2m_count = pipeline._conn.execute(
             f"SELECT COUNT(*) FROM chunk_file_paths_{strategy}"
         ).fetchone()[0]
@@ -142,17 +140,13 @@ class TestTwoFilesIdenticalContentShareChunk:
         assert chunk_count == 1, (
             f"Expected 1 shared chunks_* row for identical content, got {chunk_count}"
         )
-        assert m2m_count == 2, (
-            f"Expected 2 M2M rows (one per file), got {m2m_count}"
-        )
+        assert m2m_count == 2, f"Expected 2 M2M rows (one per file), got {m2m_count}"
 
 
 class TestRepeatedHeadingInSameFile:
     """Repeated identical heading+body in same file creates two M2M rows (Decision #3)."""
 
-    def test_repeated_heading_in_same_file_creates_two_m2m_rows(
-        self, tmp_path: Path
-    ) -> None:
+    def test_repeated_heading_in_same_file_creates_two_m2m_rows(self, tmp_path: Path) -> None:
         """File with repeated heading at chunk_index 0 and 1 → 2 M2M rows sharing chunk_id."""
         from dotmd.ingestion.pipeline import IndexingPipeline
 
@@ -161,11 +155,7 @@ class TestRepeatedHeadingInSameFile:
         pipeline = IndexingPipeline(settings)
 
         # Two identical heading blocks in same file at different positions
-        body = (
-            "# Introduction\n\nSame text here.\n\n"
-            "---\n\n"
-            "# Introduction\n\nSame text here.\n"
-        )
+        body = "# Introduction\n\nSame text here.\n\n---\n\n# Introduction\n\nSame text here.\n"
         md_file = tmp_path / "repeated.md"
         md_file.write_text(body)
         pipeline.index_file(md_file)
@@ -217,9 +207,7 @@ class TestVecMetaNotRewrittenOnReindex:
 class TestPayloadMismatchLogsWarn:
     """Review-HIGH-P3: payload mismatch on chunk_id conflict is WARN-logged, row not overwritten."""
 
-    def test_payload_mismatch_logs_warn_without_overwriting(
-        self, tmp_path: Path
-    ) -> None:
+    def test_payload_mismatch_logs_warn_without_overwriting(self, tmp_path: Path) -> None:
         """Monkeypatched chunker emitting same chunk_id with different text logs WARN; first-writer survives."""
         from dotmd.core.models import Chunk
         from dotmd.ingestion.pipeline import IndexingPipeline
@@ -281,9 +269,7 @@ class TestPayloadMismatchLogsWarn:
             f"SELECT text FROM chunks_{strategy} WHERE chunk_id=?",
             (fixed_chunk_id,),
         ).fetchone()[0]
-        assert stored_text == first_text, (
-            f"First-writer text overwritten: stored={stored_text!r}"
-        )
+        assert stored_text == first_text, f"First-writer text overwritten: stored={stored_text!r}"
 
         # WARN must have been logged
         assert any("mismatch" in m.lower() for m in warn_messages), (

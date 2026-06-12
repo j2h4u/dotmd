@@ -215,8 +215,7 @@ class DefaultSourceCredentialProvider(SourceCredentialProviderProtocol):
             return SourceAccess(kind="delegated", delegated_to=delegated_to)
 
         raise SourceLifecycleConfigError(
-            f"{descriptor.namespace}.auth_kind unsupported: "
-            f"{descriptor.auth_schema.auth_kind}"
+            f"{descriptor.namespace}.auth_kind unsupported: {descriptor.auth_schema.auth_kind}"
         )
 
 

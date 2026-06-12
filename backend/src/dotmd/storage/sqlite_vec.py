@@ -106,14 +106,10 @@ class SQLiteVecVectorStore:
     def _maybe_add_text_hash_column(self, conn: sqlite3.Connection) -> None:
         """Add text_hash column to vec_meta if it doesn't exist (migration)."""
         try:
-            cols = conn.execute(
-                f"PRAGMA table_info({self._META_TABLE})"
-            ).fetchall()
+            cols = conn.execute(f"PRAGMA table_info({self._META_TABLE})").fetchall()
             col_names = {row[1] for row in cols}
             if cols and "text_hash" not in col_names:
-                conn.execute(
-                    f"ALTER TABLE {self._META_TABLE} ADD COLUMN text_hash TEXT"
-                )
+                conn.execute(f"ALTER TABLE {self._META_TABLE} ADD COLUMN text_hash TEXT")
                 logger.info("Migrated %s: added text_hash column", self._META_TABLE)
         except Exception:
             # Table might not exist yet (CREATE IF NOT EXISTS hasn't run),
@@ -174,7 +170,8 @@ class SQLiteVecVectorStore:
         if old_dim is not None:
             logger.warning(
                 "Embedding dimension changed %d → %d — recreating vector table",
-                old_dim, dim,
+                old_dim,
+                dim,
             )
 
         conn.execute(f"DROP TABLE IF EXISTS {self._VEC_TABLE}")
@@ -343,7 +340,11 @@ class SQLiteVecVectorStore:
                     )
                     total_deleted += len(rowids)
                 except sqlite3.OperationalError:
-                    logger.warning("vec0 delete failed for %s — orphaned rows possible", vec0_table, exc_info=True)
+                    logger.warning(
+                        "vec0 delete failed for %s — orphaned rows possible",
+                        vec0_table,
+                        exc_info=True,
+                    )
             conn.execute(
                 f"DELETE FROM {vm_table} WHERE chunk_id IN ({placeholders})",
                 chunk_ids,
@@ -421,9 +422,7 @@ class SQLiteVecVectorStore:
                 if text_hash not in result:
                     # Deserialize binary embedding back to float list.
                     dim = len(embedding_blob) // 4  # 4 bytes per float32
-                    result[text_hash] = list(
-                        struct.unpack(f"{dim}f", embedding_blob)
-                    )
+                    result[text_hash] = list(struct.unpack(f"{dim}f", embedding_blob))
 
         logger.debug(
             "text_hash lookup: %d requested, %d found",

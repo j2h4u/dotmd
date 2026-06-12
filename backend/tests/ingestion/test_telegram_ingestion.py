@@ -333,14 +333,20 @@ def test_save_chunks_accepts_empty_file_paths_before_telegram_refactor(
 
     store.save_chunks([chunk])
 
-    assert store._conn.execute(
-        f"SELECT COUNT(*) FROM chunks_{STRATEGY} WHERE chunk_id = ?",
-        (VALID_CHUNK_ID,),
-    ).fetchone()[0] == 1
-    assert store._conn.execute(
-        f"SELECT COUNT(*) FROM chunk_file_paths_{STRATEGY} WHERE chunk_id = ?",
-        (VALID_CHUNK_ID,),
-    ).fetchone()[0] == 0
+    assert (
+        store._conn.execute(
+            f"SELECT COUNT(*) FROM chunks_{STRATEGY} WHERE chunk_id = ?",
+            (VALID_CHUNK_ID,),
+        ).fetchone()[0]
+        == 1
+    )
+    assert (
+        store._conn.execute(
+            f"SELECT COUNT(*) FROM chunk_file_paths_{STRATEGY} WHERE chunk_id = ?",
+            (VALID_CHUNK_ID,),
+        ).fetchone()[0]
+        == 0
+    )
 
 
 def test_ingest_telegram_batch_persists_documents_bindings_units_and_checkpoint(
@@ -353,16 +359,22 @@ def test_ingest_telegram_batch_persists_documents_bindings_units_and_checkpoint(
     assert result.discovered == 3
     assert pipeline._metadata_store.get_source_document("telegram", "dialog:-1001") is not None
     assert pipeline._metadata_store.is_resource_binding_active("telegram", "dialog:-1001")
-    assert pipeline._metadata_store.get_source_unit_fingerprint(
-        "telegram",
-        "dialog:-1001",
-        "dialog:-1001:message:42",
-    ) is not None
-    assert pipeline._metadata_store.get_source_unit_fingerprint(
-        "telegram",
-        "dialog:-1001",
-        "dialog:-1001:message:43",
-    ) is not None
+    assert (
+        pipeline._metadata_store.get_source_unit_fingerprint(
+            "telegram",
+            "dialog:-1001",
+            "dialog:-1001:message:42",
+        )
+        is not None
+    )
+    assert (
+        pipeline._metadata_store.get_source_unit_fingerprint(
+            "telegram",
+            "dialog:-1001",
+            "dialog:-1001:message:43",
+        )
+        is not None
+    )
     checkpoint = pipeline._metadata_store.get_source_checkpoint("telegram")
     assert checkpoint is not None
     checkpoint_meta = cast(dict[str, Any], checkpoint["metadata_json"])
@@ -383,9 +395,7 @@ def test_ingest_application_source_uses_lifecycle_cursor_store_for_checkpoint(
 
     assert result.discovered == 3
     assert cursor_store.get_calls == ["telegram"]
-    assert cursor_store.commit_calls == [
-        ("telegram", "telegram:v1:dialog:-1001:message:44")
-    ]
+    assert cursor_store.commit_calls == [("telegram", "telegram:v1:dialog:-1001:message:44")]
     assert cursor_store.error_calls == []
 
 
@@ -423,9 +433,7 @@ def test_ingest_telegram_replay_skips_unchanged_units(tmp_path: Path) -> None:
 
     assert first.new_units == 3
     assert second.skipped_units == 3
-    assert pipeline._conn.execute(
-        f"SELECT COUNT(*) FROM chunks_{STRATEGY}"
-    ).fetchone()[0] == 2
+    assert pipeline._conn.execute(f"SELECT COUNT(*) FROM chunks_{STRATEGY}").fetchone()[0] == 2
 
 
 def test_ingest_telegram_edit_reindexes_changed_unit_only(tmp_path: Path) -> None:
@@ -452,11 +460,14 @@ def test_low_signal_message_is_not_standalone_search_chunk(tmp_path: Path) -> No
     result = pipeline.ingest_application_source(_provider(), limit=10)
 
     assert result.hidden_units == 1
-    assert pipeline._metadata_store.get_source_unit_fingerprint(
-        "telegram",
-        "dialog:-1001",
-        "dialog:-1001:message:43",
-    ) is not None
+    assert (
+        pipeline._metadata_store.get_source_unit_fingerprint(
+            "telegram",
+            "dialog:-1001",
+            "dialog:-1001:message:43",
+        )
+        is not None
+    )
     assert all(chunk.text.strip() != "ok" for chunk in _telegram_chunks(pipeline))
     assert not any(chunk.text.endswith("\nok") for chunk in _telegram_chunks(pipeline))
 
@@ -476,10 +487,13 @@ def test_telegram_chunks_with_empty_file_paths_are_saved_and_hydrated_by_provena
     )
     assert len(chunks) == 1
     assert chunks[0].file_paths == []
-    assert pipeline._conn.execute(
-        f"SELECT COUNT(*) FROM chunk_file_paths_{STRATEGY} WHERE chunk_id = ?",
-        (chunks[0].chunk_id,),
-    ).fetchone()[0] == 0
+    assert (
+        pipeline._conn.execute(
+            f"SELECT COUNT(*) FROM chunk_file_paths_{STRATEGY} WHERE chunk_id = ?",
+            (chunks[0].chunk_id,),
+        ).fetchone()[0]
+        == 0
+    )
 
 
 def test_telegram_fts_and_vector_index_without_fileinfo_frontmatter(
@@ -500,13 +514,15 @@ def test_telegram_fts_and_vector_index_without_fileinfo_frontmatter(
     assert all(title == "Project Chat" for title, _tags in fts_rows)
     assert all("telegram" in tags for _title, tags in fts_rows)
     vec_meta_table = cast(Any, pipeline._vector_store)._META_TABLE
-    assert pipeline._conn.execute(
-        f"SELECT COUNT(*) FROM {vec_meta_table} WHERE chunk_id IN "
-        f"(SELECT chunk_id FROM chunks_{STRATEGY})"
-    ).fetchone()[0] == 2
+    assert (
+        pipeline._conn.execute(
+            f"SELECT COUNT(*) FROM {vec_meta_table} WHERE chunk_id IN "
+            f"(SELECT chunk_id FROM chunks_{STRATEGY})"
+        ).fetchone()[0]
+        == 2
+    )
     metadata_inputs = [
-        text for text in encoded_texts
-        if "telegram" in text and "Project Chat" in text
+        text for text in encoded_texts if "telegram" in text and "Project Chat" in text
     ]
     assert metadata_inputs == ["telegram Project Chat dialog Project Chat -1001"]
     assert "Deployment checklist is ready" not in metadata_inputs[0]
@@ -550,26 +566,31 @@ def test_telegram_transaction_rolls_back_metadata_fts_vectors_and_checkpoint_on_
         pipeline.ingest_application_source(_provider(), limit=10)
 
     assert pipeline._metadata_store.get_source_document("telegram", "dialog:-1001") is None
-    assert pipeline._metadata_store.get_source_unit_fingerprint(
-        "telegram",
-        "dialog:-1001",
-        "dialog:-1001:message:42",
-    ) is None
+    assert (
+        pipeline._metadata_store.get_source_unit_fingerprint(
+            "telegram",
+            "dialog:-1001",
+            "dialog:-1001:message:42",
+        )
+        is None
+    )
     checkpoint = pipeline._metadata_store.get_source_checkpoint("telegram")
     assert checkpoint is not None
     assert checkpoint["checkpoint_cursor"] is None
-    assert pipeline._conn.execute(
-        f"SELECT COUNT(*) FROM chunks_{STRATEGY}"
-    ).fetchone()[0] == 0
-    assert pipeline._conn.execute(
-        f"SELECT COUNT(*) FROM chunk_source_provenance_{STRATEGY}"
-    ).fetchone()[0] == 0
-    assert pipeline._conn.execute(
-        f"SELECT COUNT(*) FROM chunks_fts_{STRATEGY}"
-    ).fetchone()[0] == 0
-    assert pipeline._conn.execute(
-        f"SELECT COUNT(*) FROM {cast(Any, pipeline._vector_store)._META_TABLE}"
-    ).fetchone()[0] == 0
+    assert pipeline._conn.execute(f"SELECT COUNT(*) FROM chunks_{STRATEGY}").fetchone()[0] == 0
+    assert (
+        pipeline._conn.execute(
+            f"SELECT COUNT(*) FROM chunk_source_provenance_{STRATEGY}"
+        ).fetchone()[0]
+        == 0
+    )
+    assert pipeline._conn.execute(f"SELECT COUNT(*) FROM chunks_fts_{STRATEGY}").fetchone()[0] == 0
+    assert (
+        pipeline._conn.execute(
+            f"SELECT COUNT(*) FROM {cast(Any, pipeline._vector_store)._META_TABLE}"
+        ).fetchone()[0]
+        == 0
+    )
 
 
 def test_initial_bootstrap_single_batch_semantics_are_explicit(tmp_path: Path) -> None:
@@ -618,9 +639,7 @@ def test_filesystem_and_telegram_chunks_coexist(tmp_path: Path) -> None:
             "text": "Filesystem body",
         }
     ]
-    assert pipeline._conn.execute(
-        f"SELECT COUNT(*) FROM chunks_{STRATEGY}"
-    ).fetchone()[0] == 3
+    assert pipeline._conn.execute(f"SELECT COUNT(*) FROM chunks_{STRATEGY}").fetchone()[0] == 3
 
 
 def test_settings_accepts_telegram_daemon_socket_only(tmp_path: Path) -> None:

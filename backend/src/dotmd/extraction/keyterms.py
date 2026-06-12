@@ -186,16 +186,16 @@ class KeyTermExtractor:
             entities = [e for e in entities if e.name.lower() in top_set]
 
         # --- Build MENTIONS relations ---
-        for ent in entities:
-            for cid in ent.chunk_ids:
-                relations.append(
-                    Relation(
-                        source_id=cid,
-                        target_id=ent.name,
-                        relation_type="MENTIONS",
-                        weight=1.0,
-                    )
-                )
+        relations.extend(
+            Relation(
+                source_id=cid,
+                target_id=ent.name,
+                relation_type="MENTIONS",
+                weight=1.0,
+            )
+            for ent in entities
+            for cid in ent.chunk_ids
+        )
 
         # --- Build CO_OCCURS relations (entities sharing chunks) ---
         # Group entities by chunk_id
@@ -205,7 +205,7 @@ class KeyTermExtractor:
                 chunk_entities.setdefault(cid, []).append(ent.name)
 
         co_occur_seen: set[tuple[str, str]] = set()
-        for _cid, ent_names in chunk_entities.items():
+        for ent_names in chunk_entities.values():
             for i, a in enumerate(ent_names):
                 for b in ent_names[i + 1 :]:
                     pair = (min(a, b), max(a, b))

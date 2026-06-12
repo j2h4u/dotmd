@@ -108,6 +108,11 @@ ignore = [
     "RUF002", # ambiguous-unicode in docstrings — Russian text is intentional
     "RUF003", # ambiguous-unicode in comments — Russian text is intentional
 ]
+allowed-confusables = [
+    "а", # Telegram low-signal Russian words
+    "г", # Telegram low-signal Russian words
+    "у", # Telegram low-signal Russian words
+]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = [

@@ -48,7 +48,6 @@ def split_default(text: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-
 def _enrich_passthrough(text: str, frontmatter: dict) -> str:
     """No-op enrichment — chunk text embedded as-is (Phase 999.12 dual-encoder).
 

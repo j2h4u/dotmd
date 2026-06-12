@@ -48,10 +48,7 @@ class FilesystemMarkdownSourceAdapter:
 
     def discover(self, directory: Path) -> list[SourceDocument]:
         """Discover markdown files under a directory."""
-        return [
-            self.document_for_file_info(file_info)
-            for file_info in discover_files(directory)
-        ]
+        return [self.document_for_file_info(file_info) for file_info in discover_files(directory)]
 
     def discover_multi(
         self,

@@ -59,7 +59,7 @@ def _split_with_overlap(
         else:
             # Segment too large — break into sentences
             sub = split_sentences(seg)
-            sentences.extend(sub if sub else [seg])
+            sentences.extend(sub or [seg])
 
     pieces: list[str] = []
     current_sentences: list[str] = []
@@ -237,7 +237,9 @@ def chunk_file(
         else:
             # Section too large – split using kind-appropriate strategy.
             sub_texts = _split_with_overlap(
-                section_text, max_tokens, overlap_tokens,
+                section_text,
+                max_tokens,
+                overlap_tokens,
                 pre_split=handler.pre_split,
             )
             for sub_text in sub_texts:

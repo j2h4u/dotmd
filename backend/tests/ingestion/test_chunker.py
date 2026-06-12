@@ -45,9 +45,7 @@ class TestChunkerEmitsNoCharOffset:
 class TestChunkerEmitsFilePaths:
     """Chunker emits file_paths as a single-element list, not file_path as Path."""
 
-    def test_chunker_emits_file_paths_as_single_element_list(
-        self, tmp_path: Path
-    ) -> None:
+    def test_chunker_emits_file_paths_as_single_element_list(self, tmp_path: Path) -> None:
         """chunk_file() returns Chunk instances with file_paths: list[Path] (single element)."""
         md_file = tmp_path / "test.md"
         md_file.write_text("# Test Heading\n\nTest content for chunker output test.\n")
@@ -62,9 +60,7 @@ class TestChunkerEmitsFilePaths:
             )
             assert not hasattr(chunk, "file_path") or isinstance(
                 getattr(chunk, "file_path", None), property
-            ), (
-                "Chunk must not have a singular file_path field after P1"
-            )
+            ), "Chunk must not have a singular file_path field after P1"
             assert isinstance(chunk.file_paths, list), (
                 f"file_paths must be a list, got {type(chunk.file_paths)!r}"
             )
@@ -79,9 +75,7 @@ class TestChunkerEmitsFilePaths:
 class TestChunkerProvenance:
     """Chunk provenance is caller-owned and does not alter chunk payloads."""
 
-    def test_chunk_file_without_provenance_returns_none(
-        self, tmp_path: Path
-    ) -> None:
+    def test_chunk_file_without_provenance_returns_none(self, tmp_path: Path) -> None:
         md_file = tmp_path / "plain.md"
         md_file.write_text("# Plain\n\nBody text.\n", encoding="utf-8")
 
@@ -90,9 +84,7 @@ class TestChunkerProvenance:
         assert chunks
         assert all(chunk.provenance is None for chunk in chunks)
 
-    def test_chunk_file_attaches_explicit_provenance(
-        self, tmp_path: Path
-    ) -> None:
+    def test_chunk_file_attaches_explicit_provenance(self, tmp_path: Path) -> None:
         md_file = tmp_path / "annotated.md"
         md_file.write_text("# Annotated\n\nBody text.\n", encoding="utf-8")
         document_ref = str(md_file.resolve())
@@ -110,9 +102,7 @@ class TestChunkerProvenance:
         assert chunks
         assert all(chunk.provenance is provenance for chunk in chunks)
 
-    def test_chunk_text_unchanged_when_provenance_is_attached(
-        self, tmp_path: Path
-    ) -> None:
+    def test_chunk_text_unchanged_when_provenance_is_attached(self, tmp_path: Path) -> None:
         md_file = tmp_path / "stable.md"
         content = (
             "---\n"
@@ -136,6 +126,4 @@ class TestChunkerProvenance:
         unannotated = chunk_file(md_file, content)
         annotated = chunk_file(md_file, content, provenance=provenance)
 
-        assert [chunk.text for chunk in annotated] == [
-            chunk.text for chunk in unannotated
-        ]
+        assert [chunk.text for chunk in annotated] == [chunk.text for chunk in unannotated]

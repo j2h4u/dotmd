@@ -66,7 +66,9 @@ class GmailSource(BaseSource):
         instance.after_date = config_dict.get("after_date")
         instance.included_labels = config_dict.get("included_labels", ["inbox", "sent"])
         instance.excluded_labels = config_dict.get("excluded_labels", ["spam", "trash"])
-        instance.excluded_categories = config_dict.get("excluded_categories", ["promotions", "social"])
+        instance.excluded_categories = config_dict.get(
+            "excluded_categories", ["promotions", "social"]
+        )
         instance.gmail_query = config_dict.get("gmail_query")
         return instance
 
@@ -124,6 +126,5 @@ class GmailSource(BaseSource):
             return False
         excluded_labels = getattr(self, "excluded_labels", None)
         return not (
-            excluded_labels
-            and any(label.lower() in label_ids for label in excluded_labels)
+            excluded_labels and any(label.lower() in label_ids for label in excluded_labels)
         )

@@ -102,17 +102,15 @@ class LanceDBVectorStore:
             return []
 
         results = table.search(query_embedding).limit(top_k).to_list()
-        return [
-            (row["chunk_id"], 1.0 / (1.0 + row["_distance"]))
-            for row in results
-        ]
+        return [(row["chunk_id"], 1.0 / (1.0 + row["_distance"])) for row in results]
 
     def delete_vectors_by_chunk_ids(self, chunk_ids: list[str]) -> int:
         """Not supported by LanceDB backend — no-op stub."""
         return 0
 
     def lookup_embeddings_by_text_hash(
-        self, text_hashes: list[str],
+        self,
+        text_hashes: list[str],
     ) -> dict[str, list[float]]:
         """Not supported by LanceDB backend — returns empty."""
         return {}

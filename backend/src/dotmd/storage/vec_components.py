@@ -178,8 +178,7 @@ class VecComponentStore:
             The embedding vector, or ``None`` if not found.
         """
         row = self._conn.execute(
-            f"SELECT embedding FROM {self._TABLE}"
-            " WHERE entity_id = ? AND component = ?",
+            f"SELECT embedding FROM {self._TABLE} WHERE entity_id = ? AND component = ?",
             (entity_id, component),
         ).fetchone()
         if row is None:
@@ -188,9 +187,7 @@ class VecComponentStore:
         dim = len(blob) // 4  # 4 bytes per float32
         return list(struct.unpack(f"{dim}f", blob))
 
-    def get_batch(
-        self, entity_ids: list[str], component: str
-    ) -> dict[str, list[float]]:
+    def get_batch(self, entity_ids: list[str], component: str) -> dict[str, list[float]]:
         """Retrieve embeddings for multiple entity IDs with one component name.
 
         Processes in batches of 500 to stay within SQLite's variable limit.
@@ -233,9 +230,7 @@ class VecComponentStore:
     def count(self) -> int:
         """Return the total number of rows in the component table."""
         try:
-            return self._conn.execute(
-                f"SELECT COUNT(*) FROM {self._TABLE}"
-            ).fetchone()[0]
+            return self._conn.execute(f"SELECT COUNT(*) FROM {self._TABLE}").fetchone()[0]
         except sqlite3.OperationalError:
             logger.warning("Failed to count vec_components rows", exc_info=True)
             return 0

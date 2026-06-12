@@ -69,6 +69,7 @@ def _populate(db_path: Path, strategy: str, chunk_id: str, file_path: str) -> No
 def _get_pipeline(db_path: Path):  # type: ignore[no-untyped-def]
     from dotmd.core.config import Settings
     from dotmd.ingestion.pipeline import IndexingPipeline
+
     settings = Settings(index_dir=db_path.parent)
     return IndexingPipeline(settings)
 

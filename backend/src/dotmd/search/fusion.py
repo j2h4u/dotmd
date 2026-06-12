@@ -125,8 +125,9 @@ def _find_left_boundary(text: str, start: int) -> int:
     if paragraph != -1:
         candidates.append(_skip_boundary_space(text, paragraph + 2))
 
-    for match in re.finditer(r"[.?!]", text[:start]):
-        candidates.append(_skip_boundary_space(text, match.end()))
+    candidates.extend(
+        _skip_boundary_space(text, match.end()) for match in re.finditer(r"[.?!]", text[:start])
+    )
 
     return max(candidate for candidate in candidates if candidate <= start)
 
@@ -177,8 +178,6 @@ def _truncate(text: str, length: int) -> str:
     if last_space > length * 0.8:
         return truncated[:last_space] + "..."
     return truncated + "..."
-
-
 
 
 def _public_ref_for_provenance(provenance: ChunkProvenance) -> str:

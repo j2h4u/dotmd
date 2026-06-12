@@ -52,7 +52,9 @@ def run_migration(
     model_suffix = _model_to_table_suffix(embedding_model)
     logger.info(
         "Starting migration: strategy=%s, model=%s (suffix=%s)",
-        strategy, embedding_model, model_suffix,
+        strategy,
+        embedding_model,
+        model_suffix,
     )
 
     # ------------------------------------------------------------------
@@ -71,6 +73,7 @@ def run_migration(
     conn.enable_load_extension(True)
     try:
         import sqlite_vec
+
         sqlite_vec.load(conn)
     except Exception:
         logger.warning("sqlite-vec extension not available — vec tables will be skipped")
@@ -78,7 +81,8 @@ def run_migration(
 
     # Register hash UDF for text_hash computation during migration
     conn.create_function(
-        "blake2b_hash", 1,
+        "blake2b_hash",
+        1,
         lambda t: hashlib.blake2b(t.encode()).hexdigest() if t else None,
     )
 
@@ -130,16 +134,9 @@ def _copy_metadata(
     conn.execute(f"ATTACH '{metadata_path}' AS meta_old")
 
     # -- chunks --------------------------------------------------------
-    conn.execute(
-        f"CREATE TABLE chunks_{strategy} AS SELECT * FROM meta_old.chunks"
-    )
-    conn.execute(
-        f"CREATE INDEX idx_chunks_{strategy}_file_path "
-        f"ON chunks_{strategy}(file_path)"
-    )
-    chunks_count = conn.execute(
-        f"SELECT COUNT(*) FROM chunks_{strategy}"
-    ).fetchone()[0]
+    conn.execute(f"CREATE TABLE chunks_{strategy} AS SELECT * FROM meta_old.chunks")
+    conn.execute(f"CREATE INDEX idx_chunks_{strategy}_file_path ON chunks_{strategy}(file_path)")
+    chunks_count = conn.execute(f"SELECT COUNT(*) FROM chunks_{strategy}").fetchone()[0]
     logger.info("Copied chunks_%s: %d rows", strategy, chunks_count)
 
     # -- FTS5 ----------------------------------------------------------
@@ -151,14 +148,13 @@ def _copy_metadata(
         f"INSERT INTO chunks_fts_{strategy}(chunk_id, text) "
         "SELECT chunk_id, text FROM meta_old.chunks_fts"
     )
-    fts_count = conn.execute(
-        f"SELECT COUNT(*) FROM chunks_fts_{strategy}"
-    ).fetchone()[0]
+    fts_count = conn.execute(f"SELECT COUNT(*) FROM chunks_fts_{strategy}").fetchone()[0]
     logger.info("Copied chunks_fts_%s: %d rows", strategy, fts_count)
 
     # -- chunk_fingerprints (from UNION of all model fp tables) --------
     fp_tables = [
-        r[0] for r in conn.execute(
+        r[0]
+        for r in conn.execute(
             "SELECT name FROM meta_old.sqlite_master "
             "WHERE name LIKE 'file_fingerprints%' AND type='table'"
         ).fetchall()
@@ -178,9 +174,9 @@ def _copy_metadata(
             f"SELECT file_path, mtime, size_bytes, checksum, indexed_at "
             f"FROM meta_old.{fp_table}"
         )
-    chunk_fp_count = conn.execute(
-        f"SELECT COUNT(*) FROM chunk_fingerprints_{strategy}"
-    ).fetchone()[0]
+    chunk_fp_count = conn.execute(f"SELECT COUNT(*) FROM chunk_fingerprints_{strategy}").fetchone()[
+        0
+    ]
     logger.info("Created chunk_fingerprints_%s: %d rows", strategy, chunk_fp_count)
 
     # -- embed_fingerprints (per model, skip legacy unsuffixed) --------
@@ -191,9 +187,7 @@ def _copy_metadata(
             logger.info("Skipping legacy %s", fp_table)
             continue
         new_name = f"embed_fingerprints_{strategy}{old_suffix}"
-        conn.execute(
-            f"CREATE TABLE {new_name} AS SELECT * FROM meta_old.{fp_table}"
-        )
+        conn.execute(f"CREATE TABLE {new_name} AS SELECT * FROM meta_old.{fp_table}")
         count = conn.execute(f"SELECT COUNT(*) FROM {new_name}").fetchone()[0]
         logger.info("Created %s: %d rows", new_name, count)
 
@@ -224,9 +218,9 @@ def _copy_vectors(
 
     # Find model-specific vec_meta tables (skip legacy unsuffixed)
     meta_tables = [
-        r[0] for r in conn.execute(
-            "SELECT name FROM vec_old.sqlite_master "
-            "WHERE name LIKE 'vec_meta_%' AND type='table'"
+        r[0]
+        for r in conn.execute(
+            "SELECT name FROM vec_old.sqlite_master WHERE name LIKE 'vec_meta_%' AND type='table'"
         ).fetchall()
     ]
     logger.info("Found vec_meta tables: %s", meta_tables)
@@ -268,14 +262,15 @@ def _copy_vectors(
             f"SELECT blake2b_hash(text) FROM chunks_{strategy} "
             f"WHERE chunk_id = {new_meta}.chunk_id)"
         ).rowcount
-        logger.info("Populated text_hash for %s: %d/%d",
-                     new_meta, updated,
-                     conn.execute(f"SELECT COUNT(*) FROM {new_meta}").fetchone()[0])
+        logger.info(
+            "Populated text_hash for %s: %d/%d",
+            new_meta,
+            updated,
+            conn.execute(f"SELECT COUNT(*) FROM {new_meta}").fetchone()[0],
+        )
 
         # vec0 virtual table + copy embeddings
-        conn.execute(
-            f"CREATE VIRTUAL TABLE {new_vec} USING vec0(embedding float[{dim}])"
-        )
+        conn.execute(f"CREATE VIRTUAL TABLE {new_vec} USING vec0(embedding float[{dim}])")
 
         # Read all embeddings via JOIN from old DB
         rows = conn.execute(
@@ -293,15 +288,15 @@ def _copy_vectors(
 
         # vec_config
         try:
-            conn.execute(
-                f"CREATE TABLE {new_config} AS "
-                f"SELECT * FROM vec_old.{old_config}"
-            )
+            conn.execute(f"CREATE TABLE {new_config} AS SELECT * FROM vec_old.{old_config}")
         except sqlite3.OperationalError:
             logger.warning("No %s to copy", old_config)
 
         logger.info(
-            "Migrated %s: %d vectors (%d-dim)", new_vec, len(rows), dim,
+            "Migrated %s: %d vectors (%d-dim)",
+            new_vec,
+            len(rows),
+            dim,
         )
 
     conn.execute("DETACH vec_old")
@@ -321,7 +316,8 @@ def _verify(conn: sqlite3.Connection, strategy: str, model_suffix: str) -> None:
     """Log row counts for verification."""
     logger.info("--- Verification ---")
     tables = [
-        r[0] for r in conn.execute(
+        r[0]
+        for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
         ).fetchall()
     ]

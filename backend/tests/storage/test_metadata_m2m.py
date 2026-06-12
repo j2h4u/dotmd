@@ -222,9 +222,7 @@ class TestGetFilePathsForChunkIdsSingleQuery:
 class TestDeleteM2MForFileReturnsOrphans:
     """delete_m2m_for_file returns chunk_ids whose holder count dropped to 0."""
 
-    def test_delete_m2m_for_file_returns_orphans_uses_caller_conn(
-        self, tmp_path: Path
-    ) -> None:
+    def test_delete_m2m_for_file_returns_orphans_uses_caller_conn(self, tmp_path: Path) -> None:
         """delete_m2m_for_file uses the caller-supplied connection; returns orphan chunk_ids."""
         store = _build_m2m_store(tmp_path)
 
@@ -304,9 +302,7 @@ class TestChunkSourceProvenance:
         assert loaded[VALID_CHUNK_ID].source_unit_refs == []
         assert loaded[VALID_CHUNK_ID].parser_name == "markdown"
 
-    def test_file_paths_still_return_for_chunk_with_provenance(
-        self, tmp_path: Path
-    ) -> None:
+    def test_file_paths_still_return_for_chunk_with_provenance(self, tmp_path: Path) -> None:
         store = _build_m2m_store(tmp_path)
         store.ensure_chunk_source_provenance_table(STRATEGY)
         md_path = tmp_path / "note.md"
@@ -327,13 +323,9 @@ class TestChunkSourceProvenance:
         )
         conn.commit()
 
-        assert store.get_file_paths_by_chunk_id(STRATEGY, VALID_CHUNK_ID) == [
-            str(md_path)
-        ]
+        assert store.get_file_paths_by_chunk_id(STRATEGY, VALID_CHUNK_ID) == [str(md_path)]
 
-    def test_chunk_provenance_batch_hydration(
-        self, tmp_path: Path
-    ) -> None:
+    def test_chunk_provenance_batch_hydration(self, tmp_path: Path) -> None:
         store = _build_m2m_store(tmp_path)
         store.ensure_chunk_source_provenance_table(STRATEGY)
         md_path = tmp_path / "note.md"
@@ -354,10 +346,7 @@ class TestChunkSourceProvenance:
         loaded = store.get_chunk_provenance_for_chunk_ids(STRATEGY, chunk_ids)
 
         assert sorted(loaded) == sorted(chunk_ids)
-        assert all(
-            provenance.source_unit_refs == []
-            for provenance in loaded.values()
-        )
+        assert all(provenance.source_unit_refs == [] for provenance in loaded.values())
 
     def test_active_chunk_provenance_excludes_inactive_retained_rows(
         self,
@@ -426,33 +415,35 @@ class TestChunkSourceProvenance:
             [active_chunk_id, inactive_chunk_id, shared_chunk_id],
         )
 
-        assert normal[inactive_chunk_id].document_ref == str(
-            inactive_path.resolve()
-        )
-        assert normal[shared_chunk_id].document_ref == str(
-            inactive_path.resolve()
-        )
+        assert normal[inactive_chunk_id].document_ref == str(inactive_path.resolve())
+        assert normal[shared_chunk_id].document_ref == str(inactive_path.resolve())
         assert inactive_chunk_id not in active
         assert active[active_chunk_id].document_ref == str(active_path.resolve())
         assert active[shared_chunk_id].document_ref == str(active_path.resolve())
 
-        assert store.get_inactive_chunk_count_for_document(
-            STRATEGY,
-            "filesystem",
-            str(inactive_path.resolve()),
-        ) == 2
-        assert store._conn.execute(
-            f"SELECT COUNT(*) FROM chunk_source_provenance_{STRATEGY} "
-            "WHERE document_ref = ?",
-            (str(inactive_path.resolve()),),
-        ).fetchone()[0] == 2
-        assert store._conn.execute(
-            f"SELECT COUNT(*) FROM chunks_{STRATEGY} WHERE chunk_id = ?",
-            (inactive_chunk_id,),
-        ).fetchone()[0] == 1
-        assert store.get_file_paths_by_chunk_id(STRATEGY, inactive_chunk_id) == [
-            str(inactive_path)
-        ]
+        assert (
+            store.get_inactive_chunk_count_for_document(
+                STRATEGY,
+                "filesystem",
+                str(inactive_path.resolve()),
+            )
+            == 2
+        )
+        assert (
+            store._conn.execute(
+                f"SELECT COUNT(*) FROM chunk_source_provenance_{STRATEGY} WHERE document_ref = ?",
+                (str(inactive_path.resolve()),),
+            ).fetchone()[0]
+            == 2
+        )
+        assert (
+            store._conn.execute(
+                f"SELECT COUNT(*) FROM chunks_{STRATEGY} WHERE chunk_id = ?",
+                (inactive_chunk_id,),
+            ).fetchone()[0]
+            == 1
+        )
+        assert store.get_file_paths_by_chunk_id(STRATEGY, inactive_chunk_id) == [str(inactive_path)]
 
     def test_active_chunk_provenance_uses_document_active_index(
         self,
@@ -475,9 +466,7 @@ class TestChunkSourceProvenance:
             (VALID_CHUNK_ID,),
         ).fetchall()
 
-        assert "idx_resource_bindings_document_active" in " ".join(
-            row[3] for row in plan
-        )
+        assert "idx_resource_bindings_document_active" in " ".join(row[3] for row in plan)
 
 
 class TestResourceBindings:
@@ -682,12 +671,8 @@ class TestDeleteAllClearsSourceProvenance:
 
         store.delete_all()
 
-        source_count = store._conn.execute(
-            "SELECT COUNT(*) FROM source_documents"
-        ).fetchone()[0]
-        binding_count = store._conn.execute(
-            "SELECT COUNT(*) FROM resource_bindings"
-        ).fetchone()[0]
+        source_count = store._conn.execute("SELECT COUNT(*) FROM source_documents").fetchone()[0]
+        binding_count = store._conn.execute("SELECT COUNT(*) FROM resource_bindings").fetchone()[0]
         checkpoint_count = store._conn.execute(
             "SELECT COUNT(*) FROM source_checkpoints"
         ).fetchone()[0]
@@ -718,17 +703,13 @@ class TestDeleteAllClearsSourceProvenance:
         store.upsert_resource_binding(
             _resource_binding(
                 first,
-            ).model_copy(
-                update={"metadata_json": {"last_rebind": {"reused_chunks": 2}}}
-            ),
+            ).model_copy(update={"metadata_json": {"last_rebind": {"reused_chunks": 2}}}),
             conn=conn,
         )
         store.upsert_resource_binding(
             _resource_binding(
                 second,
-            ).model_copy(
-                update={"metadata_json": {"last_rebind": {"reused_chunks": 3}}}
-            ),
+            ).model_copy(update={"metadata_json": {"last_rebind": {"reused_chunks": 3}}}),
             conn=conn,
         )
         conn.commit()
@@ -832,9 +813,7 @@ class TestSourceUnitFingerprints:
 
         columns = {
             row[1]
-            for row in store._conn.execute(
-                "PRAGMA table_info(source_unit_fingerprints)"
-            ).fetchall()
+            for row in store._conn.execute("PRAGMA table_info(source_unit_fingerprints)").fetchall()
         }
 
         assert "deleted_at" not in columns

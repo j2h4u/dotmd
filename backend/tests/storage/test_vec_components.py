@@ -1,4 +1,5 @@
 """Tests for VecComponentStore (Phase 999.12)."""
+
 import sqlite3
 
 import pytest
@@ -9,8 +10,7 @@ from dotmd.storage.vec_components import VecComponentStore
 @pytest.fixture
 def store(tmp_path):
     conn = sqlite3.connect(str(tmp_path / "test.db"))
-    s = VecComponentStore(conn=conn, table_name="vec_components_test")
-    return s
+    return VecComponentStore(conn=conn, table_name="vec_components_test")
 
 
 def test_store_and_get_roundtrip(store):

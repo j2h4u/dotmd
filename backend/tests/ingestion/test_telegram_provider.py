@@ -294,9 +294,9 @@ def test_provider_accepts_canonical_daemon_source_model_payload() -> None:
 
 
 def test_provider_preserves_low_signal_units_as_distinct_source_units() -> None:
-    batch = TelegramApplicationSourceProvider(
-        _TelegramSourceClientFixture()
-    ).export_changes(None, 10)
+    batch = TelegramApplicationSourceProvider(_TelegramSourceClientFixture()).export_changes(
+        None, 10
+    )
     first_ok = batch.changes[1].unit
     second_ok = batch.changes[2].unit
 
@@ -320,26 +320,34 @@ def test_low_signal_classification_is_conservative_for_en_and_ru() -> None:
 
 
 def test_edited_message_changes_fingerprint() -> None:
-    original = TelegramApplicationSourceProvider(
-        _TelegramSourceClientFixture()
-    ).export_changes(None, 10).changes[0].unit
-    edited = TelegramApplicationSourceProvider(
-        _TelegramSourceClientFixture(
-            [
-                _change(
-                    message_id=42,
-                    text="Deployment checklist is ready, smoke included",
-                    sender_id=111,
-                    sender_name="Alice",
-                    sent_at="2026-05-07T12:00:00.000000Z",
-                    topic_id=7,
-                    topic_title="Deployments",
-                    reply_to_msg_id=41,
-                    edit_date="2026-05-07T12:05:00.000000Z",
-                )
-            ]
+    original = (
+        TelegramApplicationSourceProvider(_TelegramSourceClientFixture())
+        .export_changes(None, 10)
+        .changes[0]
+        .unit
+    )
+    edited = (
+        TelegramApplicationSourceProvider(
+            _TelegramSourceClientFixture(
+                [
+                    _change(
+                        message_id=42,
+                        text="Deployment checklist is ready, smoke included",
+                        sender_id=111,
+                        sender_name="Alice",
+                        sent_at="2026-05-07T12:00:00.000000Z",
+                        topic_id=7,
+                        topic_title="Deployments",
+                        reply_to_msg_id=41,
+                        edit_date="2026-05-07T12:05:00.000000Z",
+                    )
+                ]
+            )
         )
-    ).export_changes(None, 10).changes[0].unit
+        .export_changes(None, 10)
+        .changes[0]
+        .unit
+    )
 
     assert original.unit_ref == edited.unit_ref
     assert original.fingerprint != edited.fingerprint
@@ -412,8 +420,7 @@ def test_telegram_source_client_protocol_includes_search_messages() -> None:
     from dotmd.ingestion.telegram_provider import TelegramSourceClientProtocol
 
     protocol_methods = {
-        name for name, _ in vars(TelegramSourceClientProtocol).items()
-        if not name.startswith("_")
+        name for name, _ in vars(TelegramSourceClientProtocol).items() if not name.startswith("_")
     }
     assert "search_messages" in protocol_methods
     # Verify signature has expected parameters
@@ -481,7 +488,7 @@ def test_search_native_can_read_derived_from_provider_capability() -> None:
         def search_messages(self, query: str, limit: int, dialog_id: int | None = None) -> dict:
             return {"messages": _default_search_hits()[:limit]}
 
-    provider_no_read = TelegramApplicationSourceProvider(StubClientWithoutRead())  # type: ignore
+    provider_no_read = TelegramApplicationSourceProvider(StubClientWithoutRead())  # type: ignore[arg-type]
     result_no_read = provider_no_read.search_native("kantine", limit=10)
     assert result_no_read[0].can_read is False
 
@@ -556,7 +563,7 @@ def test_search_native_propagates_daemon_failure() -> None:
         def search_messages(self, query: str, limit: int, dialog_id: int | None = None) -> dict:
             raise RuntimeError("Telegram daemon request failed: socket disconnected")
 
-    provider = TelegramApplicationSourceProvider(FailingClient())  # type: ignore
+    provider = TelegramApplicationSourceProvider(FailingClient())  # type: ignore[arg-type]
 
     with pytest.raises(RuntimeError, match="Telegram daemon request failed"):
         provider.search_native("test", limit=10)

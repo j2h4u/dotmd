@@ -21,7 +21,7 @@ def _make_file_info(path: str, title: str = "Test") -> FileInfo:
     return FileInfo(
         path=p,
         title=title,
-        last_modified=datetime(2026, 1, 1),
+        last_modified=datetime(2026, 1, 1, tzinfo=UTC),
         size_bytes=p.stat().st_size,
     )
 
@@ -297,9 +297,7 @@ class TestPipelineFullIndexDiffCounts:
     @patch("dotmd.ingestion.source.discover_files")
     @patch("dotmd.ingestion.pipeline.read_file")
     @patch("dotmd.ingestion.chunker.chunk_file")
-    def test_force_index_all_new(
-        self, mock_chunk_file, mock_read_file, mock_discover, tmp_path
-    ):
+    def test_force_index_all_new(self, mock_chunk_file, mock_read_file, mock_discover, tmp_path):
         from dotmd.ingestion.pipeline import IndexingPipeline
 
         md_dir = tmp_path / "docs"

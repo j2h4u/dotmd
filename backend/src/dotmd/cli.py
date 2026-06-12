@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import time
+from datetime import UTC
 from pathlib import Path
 
 import click
@@ -67,13 +68,16 @@ def _get_service_from_ctx(ctx: click.Context, **overrides: object) -> DotMDServi
     help="Comma-separated GLiNER entity types (e.g. 'person,technology,concept').",
 )
 @click.option(
-    "--force", "-f",
+    "--force",
+    "-f",
     is_flag=True,
     default=False,
     help="Force full re-index, bypassing incremental change detection.",
 )
 @click.pass_context
-def index(ctx: click.Context, directory: Path, extract_depth: str, entity_types: str | None, force: bool) -> None:
+def index(
+    ctx: click.Context, directory: Path, extract_depth: str, entity_types: str | None, force: bool
+) -> None:
     """Index all markdown files in DIRECTORY.
 
     DEV ONLY — in production, trickle indexer handles this automatically.
@@ -177,11 +181,7 @@ def compare(
 ) -> None:
     """Compare reranker diagnostics over one shared candidate pool."""
     service = _get_service_from_ctx(ctx)
-    names = (
-        [name.strip() for name in rerankers.split(",") if name.strip()]
-        if rerankers
-        else None
-    )
+    names = [name.strip() for name in rerankers.split(",") if name.strip()] if rerankers else None
     try:
         comparison = service.compare_rerankers(
             query=query,
@@ -257,7 +257,7 @@ def status(ctx: click.Context, verbose: bool) -> None:
         strategies: dict[str, tuple[int, int]] = {}  # strategy -> (chunks, files)
         for (name,) in rows:
             if name.startswith("chunks_") and not name.startswith("chunks_fts_"):
-                strategy = name[len("chunks_"):]
+                strategy = name[len("chunks_") :]
                 count = conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
                 m2m_table = f"chunk_file_paths_{strategy}"
                 try:
@@ -278,16 +278,14 @@ def status(ctx: click.Context, verbose: bool) -> None:
         models: dict[tuple[str, str], int] = {}  # (strategy, model) -> vectors
         for (name,) in rows:
             if name.startswith("vec_meta_"):
-                suffix = name[len("vec_meta_"):]
+                suffix = name[len("vec_meta_") :]
                 # suffix is {strategy}_{model} — find the split point
                 # by matching against known strategies
                 for strategy in strategies:
                     prefix = strategy + "_"
                     if suffix.startswith(prefix):
-                        model = suffix[len(prefix):]
-                        count = conn.execute(
-                            f"SELECT COUNT(*) FROM {name}"
-                        ).fetchone()[0]
+                        model = suffix[len(prefix) :]
+                        count = conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
                         models[(strategy, model)] = count
                         break
 
@@ -318,7 +316,9 @@ def status(ctx: click.Context, verbose: bool) -> None:
                     eta = f", ETA ~{hours:.1f}hr"
             click.echo(f"Background: indexing{progress}{rate}{eta}")
         elif stats.trickle_status == TrickleStatus.WATCHING:
-            click.echo(f"Background: watching for new files (indexed {stats.trickle_indexed or 0} total)")
+            click.echo(
+                f"Background: watching for new files (indexed {stats.trickle_indexed or 0} total)"
+            )
         elif stats.trickle_status == TrickleStatus.STOPPING:
             click.echo("Background: shutting down...")
 
@@ -530,7 +530,12 @@ def serve(host: str, port: int) -> None:
 
 
 @main.command()
-@click.option("--transport", default="stdio", type=click.Choice(["stdio", "streamable-http"]), help="MCP transport.")
+@click.option(
+    "--transport",
+    default="stdio",
+    type=click.Choice(["stdio", "streamable-http"]),
+    help="MCP transport.",
+)
 @click.option("--host", default="0.0.0.0", help="Bind host (streamable-http only).")
 @click.option("--port", "-p", default=8080, help="Bind port (streamable-http only).")
 def mcp(transport: str, host: str, port: int) -> None:
@@ -678,7 +683,7 @@ def feedback_list(ctx: click.Context, limit: int, show_all: bool) -> None:
         return
 
     for row in rows:
-        ts = datetime.datetime.fromtimestamp(row["submitted_at"]).strftime("%Y-%m-%d %H:%M")
+        ts = datetime.datetime.fromtimestamp(row["submitted_at"], tz=UTC).strftime("%Y-%m-%d %H:%M")
         severity = f"[{row['severity']}]" if row["severity"] else "[?]"
         status = f"[{row['status']}]"
         meta = f"id={row['id']} {severity} {status} {ts}"
@@ -697,10 +702,14 @@ def feedback_list(ctx: click.Context, limit: int, show_all: bool) -> None:
 
 @feedback.command("status")
 @click.argument("feedback_id", type=int)
-@click.argument("new_status", metavar="STATUS", type=click.Choice(["open", "in_progress", "done", "dismissed"]))
+@click.argument(
+    "new_status", metavar="STATUS", type=click.Choice(["open", "in_progress", "done", "dismissed"])
+)
 @click.option("--reason", default=None, help="Optional reason for the status change.")
 @click.pass_context
-def feedback_status(ctx: click.Context, feedback_id: int, new_status: str, reason: str | None) -> None:
+def feedback_status(
+    ctx: click.Context, feedback_id: int, new_status: str, reason: str | None
+) -> None:
     """Update the status of a feedback entry.
 
     STATUS must be one of: open, in_progress, done, dismissed.

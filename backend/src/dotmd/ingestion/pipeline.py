@@ -20,6 +20,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 import re
 import sqlite3
 import struct
@@ -204,7 +205,8 @@ class IndexingPipeline:
         # ONE connection shared by metadata store, vec store, FTS5, and
         # file trackers.  sqlite-vec extension loaded once here.
         self._conn = sqlite3.connect(
-            str(settings.index_db_path), check_same_thread=False,
+            str(settings.index_db_path),
+            check_same_thread=False,
             isolation_level=None,  # autocommit — pipeline manages all transactions explicitly
         )
         self._conn.execute("PRAGMA journal_mode=WAL")
@@ -242,7 +244,8 @@ class IndexingPipeline:
             from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
 
             self._vector_store: VectorStoreProtocol = SQLiteVecVectorStore(
-                conn=self._conn, table_name=vec_table,
+                conn=self._conn,
+                table_name=vec_table,
             )
         else:
             from dotmd.storage.vector import LanceDBVectorStore
@@ -258,10 +261,14 @@ class IndexingPipeline:
         #   1 TEI call (e_meta) + local fusion recompute (no body re-embed)
         # This prevents 26hr full reindex when only tags/title change.
         self._chunk_tracker = FileTracker(
-            self._conn, table_name=chunk_fp_table, checksum_fn=chunk_checksum,
+            self._conn,
+            table_name=chunk_fp_table,
+            checksum_fn=chunk_checksum,
         )
         self._meta_tracker = FileTracker(
-            self._conn, table_name=meta_fp_table, checksum_fn=meta_checksum,
+            self._conn,
+            table_name=meta_fp_table,
+            checksum_fn=meta_checksum,
         )
 
         # -- VecComponentStore: raw per-component embedding BLOBs ---------------
@@ -270,7 +277,8 @@ class IndexingPipeline:
         # the metadata-only fast path and weight-change recompute.
         vec_components_table = f"vec_components_{strategy}{model_suffix}"
         self._vec_components = VecComponentStore(
-            conn=self._conn, table_name=vec_components_table,
+            conn=self._conn,
+            table_name=vec_components_table,
         )
 
         # -- search_log table --------------------------------------------------
@@ -291,9 +299,7 @@ class IndexingPipeline:
         # id INTEGER PRIMARY KEY AUTOINCREMENT already creates an efficient rowid
         # index. The explicit index below enables efficient DELETE...ORDER BY id
         # trimming and potential future covering indexes.
-        self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS search_log_id_idx ON search_log(id)"
-        )
+        self._conn.execute("CREATE INDEX IF NOT EXISTS search_log_id_idx ON search_log(id)")
         self._conn.commit()
 
         # -- search engines (used for encoding during indexing) ----------------
@@ -305,7 +311,8 @@ class IndexingPipeline:
             use_prefix=settings.needs_embedding_prefix,
         )
         self._keyword_engine = FTS5SearchEngine(
-            self._conn, table_name=self._fts_table,
+            self._conn,
+            table_name=self._fts_table,
         )
 
         # -- extractors --------------------------------------------------------
@@ -340,15 +347,13 @@ class IndexingPipeline:
         # Survives file moves; invalidated automatically on embedding model change.
         self._embedding_cache = EmbeddingCache(self._conn, settings.embedding_model)
         if self._embedding_cache.should_invalidate():
-            logger.info(
-                "Embedding model changed — clearing embedding_cache"
-            )
+            logger.info("Embedding model changed — clearing embedding_cache")
             self._embedding_cache.clear()
         else:
             self._embedding_cache.update_model_sentinel()
 
         # Startup integrity checks (order matters: schema wipe first, then weights)
-        self._check_schema_version()   # Must run first (may wipe state)
+        self._check_schema_version()  # Must run first (may wipe state)
         self._check_weights_changed()  # Runs after schema check (uses intact state)
 
     # ------------------------------------------------------------------
@@ -406,9 +411,7 @@ class IndexingPipeline:
                 ),
             )
             # Trim oldest rows if over cap — uses indexed id column for efficiency
-            count = self._conn.execute(
-                "SELECT COUNT(*) FROM search_log"
-            ).fetchone()[0]
+            count = self._conn.execute("SELECT COUNT(*) FROM search_log").fetchone()[0]
             if count > self._SEARCH_LOG_MAX_ROWS:
                 excess = count - self._SEARCH_LOG_MAX_ROWS
                 self._conn.execute(
@@ -446,9 +449,7 @@ class IndexingPipeline:
     ) -> ApplicationSourceIngestResult:
         """Ingest exactly one lifecycle-built application-source runtime batch."""
         if bundle.provider is None:
-            raise RuntimeError(
-                f"{bundle.descriptor.namespace} lifecycle runtime has no provider"
-            )
+            raise RuntimeError(f"{bundle.descriptor.namespace} lifecycle runtime has no provider")
         return self._ingest_application_source(
             bundle.provider,
             bundle.cursor_store,
@@ -466,12 +467,8 @@ class IndexingPipeline:
         description = provider.describe_source()
         namespace = description.namespace
         checkpoint = cursor_store.get_checkpoint(namespace)
-        checkpoint_cursor = (
-            checkpoint.get("checkpoint_cursor") if checkpoint is not None else None
-        )
-        checkpoint_meta = (
-            checkpoint.get("metadata_json") if checkpoint is not None else {}
-        )
+        checkpoint_cursor = checkpoint.get("checkpoint_cursor") if checkpoint is not None else None
+        checkpoint_meta = checkpoint.get("metadata_json") if checkpoint is not None else {}
         if not isinstance(checkpoint_meta, dict):
             checkpoint_meta = {}
 
@@ -486,7 +483,8 @@ class IndexingPipeline:
             preserved_cursor = (
                 batch.checkpoint_cursor
                 if batch.checkpoint_cursor is not None
-                else checkpoint_cursor if isinstance(checkpoint_cursor, str)
+                else checkpoint_cursor
+                if isinstance(checkpoint_cursor, str)
                 else None
             )
             self._conn.execute("BEGIN")
@@ -519,9 +517,7 @@ class IndexingPipeline:
                 change.unit.document_ref,
                 change.unit.unit_ref,
             )
-            indexing_needed = (
-                existing is None or existing["fingerprint"] != change.unit.fingerprint
-            )
+            indexing_needed = existing is None or existing["fingerprint"] != change.unit.fingerprint
             if existing is None:
                 result.new_units += 1
             elif indexing_needed:
@@ -565,9 +561,7 @@ class IndexingPipeline:
                 strict=False,
             )
         )
-        e_meta_vectors = [
-            e_meta_by_source_key[item.source_key] for item in index_items
-        ]
+        e_meta_vectors = [e_meta_by_source_key[item.source_key] for item in index_items]
 
         weights = self._settings.parsed_embedding_weights
         e_fused_vectors = [
@@ -675,8 +669,7 @@ class IndexingPipeline:
                 self._vec_components.store(chunk.chunk_id, "text", e_text)
                 assert chunk.provenance is not None
                 meta_entity_id = (
-                    f"{chunk.provenance.namespace}-meta:"
-                    f"{chunk.provenance.document_ref}"
+                    f"{chunk.provenance.namespace}-meta:{chunk.provenance.document_ref}"
                 )
                 self._vec_components.store(
                     meta_entity_id,
@@ -736,11 +729,7 @@ class IndexingPipeline:
         chunk_ids = sorted({row[0] for row in rows})
         document_refs = sorted({row[1] for row in rows})
         source_unit_refs = sorted(
-            {
-                source_unit_ref
-                for row in rows
-                for source_unit_ref in json.loads(row[2])
-            }
+            {source_unit_ref for row in rows for source_unit_ref in json.loads(row[2])}
         )
         vector_component_entity_ids = [
             *chunk_ids,
@@ -822,9 +811,7 @@ class IndexingPipeline:
         unit: SourceUnit,
     ) -> Chunk:
         metadata = unit.metadata_json
-        source_label = (
-            "Dialog" if document.namespace == "telegram" else document.namespace.title()
-        )
+        source_label = "Dialog" if document.namespace == "telegram" else document.namespace.title()
         context_lines = [
             f"{source_label}: {document.title}",
             f"Sender: {metadata.get('sender_name') or metadata.get('sender_id') or ''}",
@@ -920,8 +907,7 @@ class IndexingPipeline:
         vec_table = self._vector_store._VEC_TABLE
         for chunk, embedding in zip(chunks, embeddings, strict=False):
             cur = self._conn.execute(
-                f"INSERT OR IGNORE INTO {vec_meta_table} (chunk_id, text_hash) "
-                "VALUES (?, ?)",
+                f"INSERT OR IGNORE INTO {vec_meta_table} (chunk_id, text_hash) VALUES (?, ?)",
                 (chunk.chunk_id, text_hashes.get(chunk.chunk_id)),
             )
             if cur.rowcount and cur.lastrowid:
@@ -957,7 +943,13 @@ class IndexingPipeline:
         t0 = time.perf_counter()
         documents = self._discover_documents(directory)
         files, documents_by_path = self._file_infos_by_source_document(documents)
-        logger.info("[%s] discover: %d files in %s (%.2fs)", run_id, len(files), directory, time.perf_counter() - t0)
+        logger.info(
+            "[%s] discover: %d files in %s (%.2fs)",
+            run_id,
+            len(files),
+            directory,
+            time.perf_counter() - t0,
+        )
         data_dir_str = str(directory)
 
         if force:
@@ -974,7 +966,11 @@ class IndexingPipeline:
         diff = self._chunk_tracker.diff(files)
         logger.info(
             "[%s] chunk_diff: %d new, %d modified, %d deleted, %d unchanged (%.2fs)",
-            run_id, len(diff.new), len(diff.modified), len(diff.deleted), len(diff.unchanged),
+            run_id,
+            len(diff.new),
+            len(diff.modified),
+            len(diff.deleted),
+            len(diff.unchanged),
             time.perf_counter() - t0,
         )
 
@@ -985,7 +981,11 @@ class IndexingPipeline:
             meta_changed_paths = set(meta_diff.new) | set(meta_diff.modified)
             if not meta_changed_paths:
                 self._rebind_retained_filesystem_documents(documents)
-                logger.info("[%s] no changes — skipping (%.2fs total)", run_id, time.perf_counter() - t_start)
+                logger.info(
+                    "[%s] no changes — skipping (%.2fs total)",
+                    run_id,
+                    time.perf_counter() - t_start,
+                )
                 stats = self._metadata_store.get_stats() or IndexStats()
                 stats.new_files = 0
                 stats.modified_files = 0
@@ -997,7 +997,8 @@ class IndexingPipeline:
             # Embed-only: chunks unchanged, but embeddings needed.
             logger.info(
                 "[%s] chunk_diff: no changes, but %d files need embedding",
-                run_id, len(meta_changed_paths),
+                run_id,
+                len(meta_changed_paths),
             )
             embed_only_files = [fi for fi in files if str(fi.path) in meta_changed_paths]
             self._embed_existing_chunks(embed_only_files, run_id=run_id)
@@ -1067,7 +1068,8 @@ class IndexingPipeline:
 
         logger.info(
             "Dropped vectors for strategy=%s model=%s",
-            strategy, model_suffix.lstrip("_"),
+            strategy,
+            model_suffix.lstrip("_"),
         )
 
     def drop_chunks(self) -> None:
@@ -1112,17 +1114,17 @@ class IndexingPipeline:
         prefix_embed_fp = f"embed_fingerprints_{strategy}_"
 
         tables_dropped = 0
-        rows = self._conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
+        rows = self._conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         for (name,) in rows:
-            if (
-                name.startswith(prefix_vec)
-                or name.startswith(prefix_meta)
-                or name.startswith(prefix_config)
-                or name.startswith(prefix_meta_fp)
-                or name.startswith(prefix_vec_components)
-                or name.startswith(prefix_embed_fp)
+            if name.startswith(
+                (
+                    prefix_vec,
+                    prefix_meta,
+                    prefix_config,
+                    prefix_meta_fp,
+                    prefix_vec_components,
+                    prefix_embed_fp,
+                )
             ):
                 if not re.match(r"^[a-zA-Z0-9_]+$", name):
                     logger.warning("Skipping table with unexpected name: %r", name)
@@ -1132,8 +1134,7 @@ class IndexingPipeline:
 
         remaining_paths: set[str] = set()
         m2m_rows = self._conn.execute(
-            "SELECT name FROM sqlite_master "
-            "WHERE type='table' AND name LIKE 'chunk_file_paths_%'"
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'chunk_file_paths_%'"
         ).fetchall()
         for (table_name,) in m2m_rows:
             if not re.match(r"^[a-zA-Z0-9_]+$", table_name):
@@ -1175,7 +1176,8 @@ class IndexingPipeline:
 
         logger.info(
             "Dropped strategy %s: %d tables cascaded, graph cleared",
-            strategy, tables_dropped,
+            strategy,
+            tables_dropped,
         )
 
     # ------------------------------------------------------------------
@@ -1183,7 +1185,8 @@ class IndexingPipeline:
     # ------------------------------------------------------------------
 
     def _embed_chunks(
-        self, chunks: list[Chunk],
+        self,
+        chunks: list[Chunk],
     ) -> tuple[list[list[float]], dict[str, str]]:
         """Embed chunk body text, return (e_text_vectors, text_hashes).
 
@@ -1216,24 +1219,19 @@ class IndexingPipeline:
 
         # text_hash on raw chunk.text (no enrichment) — true cross-strategy reuse
         text_hashes: dict[str, str] = {
-            c.chunk_id: blake3.blake3(c.text.encode()).hexdigest()
-            for c in chunks
+            c.chunk_id: blake3.blake3(c.text.encode()).hexdigest() for c in chunks
         }
 
         # Layer 1: VecComponentStore e_text BLOB lookup (authoritative source)
         # chunk_id is stable for unchanged body content, so this hit is always safe.
-        component_hits = self._vec_components.get_batch(
-            [c.chunk_id for c in chunks], "text"
-        )
+        component_hits = self._vec_components.get_batch([c.chunk_id for c in chunks], "text")
 
         # Layer 2: global embedding_cache (shared across strategies/models)
         # Only look up hashes not already found in VecComponentStore.
         missing_chunk_ids_for_cache = [
             c.chunk_id for c in chunks if c.chunk_id not in component_hits
         ]
-        missing_hashes = list({
-            text_hashes[cid] for cid in missing_chunk_ids_for_cache
-        })
+        missing_hashes = list({text_hashes[cid] for cid in missing_chunk_ids_for_cache})
         global_hits: dict[str, list[float]] = {}
         if missing_hashes:
             global_hits = self._embedding_cache.lookup(missing_hashes)
@@ -1268,7 +1266,10 @@ class IndexingPipeline:
         total = len(chunks)
         logger.debug(
             "embed_text: %d chunks, %d hits (%.1f%%), %d computed",
-            total, hits, hits / total * 100 if total else 0, len(to_encode_indices),
+            total,
+            hits,
+            hits / total * 100 if total else 0,
+            len(to_encode_indices),
         )
 
         return embeddings, text_hashes
@@ -1352,10 +1353,13 @@ class IndexingPipeline:
     def _chunks_for_file_with_paths(self, file_info: FileInfo) -> list[Chunk]:
         """Load stored chunks for one file with path fields restored for FTS/graph."""
         path_str = str(file_info.path)
-        chunk_ids = self._metadata_store.get_chunk_ids_by_file(
-            self._strategy,
-            path_str,
-        ) or []
+        chunk_ids = (
+            self._metadata_store.get_chunk_ids_by_file(
+                self._strategy,
+                path_str,
+            )
+            or []
+        )
         chunks = self._metadata_store.get_chunks(chunk_ids) if chunk_ids else []
         return [
             chunk.model_copy(
@@ -1625,11 +1629,9 @@ class IndexingPipeline:
         not touch chunks, FTS rows, vectors, graph artifacts, or fingerprints.
         """
         effective_strategy = strategy or self._strategy
-        refs = (
-            self._metadata_store.get_missing_source_document_refs_from_provenance(
-                effective_strategy,
-                namespace="filesystem",
-            )
+        refs = self._metadata_store.get_missing_source_document_refs_from_provenance(
+            effective_strategy,
+            namespace="filesystem",
         )
         diagnostic = {
             "missing_source_documents": len(refs),
@@ -1674,9 +1676,7 @@ class IndexingPipeline:
                     source_document,
                     conn=self._conn,
                 )
-                diagnostic["inserted_source_documents"] += (
-                    self._conn.total_changes - before
-                )
+                diagnostic["inserted_source_documents"] += self._conn.total_changes - before
 
                 before = self._conn.total_changes
                 self._upsert_active_filesystem_binding(
@@ -1696,6 +1696,7 @@ class IndexingPipeline:
     def _normalize_vector(v: list[float]) -> list[float]:
         """Normalize vector to unit length. Returns v unchanged if magnitude is 0."""
         import math
+
         mag = math.sqrt(sum(x * x for x in v))
         return [x / mag for x in v] if mag > 0.0 else list(v)
 
@@ -1810,9 +1811,7 @@ class IndexingPipeline:
         # If caller passed no chunks, load from metadata store (metadata-only path)
         if not chunks:
             canonical = self._meta_entity_id(file_info.path)
-            chunk_ids = self._metadata_store.get_chunk_ids_by_file(
-                self._strategy, canonical
-            )
+            chunk_ids = self._metadata_store.get_chunk_ids_by_file(self._strategy, canonical)
             chunks = self._metadata_store.get_chunks(chunk_ids) if chunk_ids else []
 
         if not chunks:
@@ -1838,26 +1837,24 @@ class IndexingPipeline:
         if body_changed:
             # Full path: encode chunk bodies + metadata
             e_text_vectors, text_hashes = self._embed_chunks(chunks)  # TEI outside tx
-            e_meta = self._embed_meta_component(file_info)             # TEI outside tx
-            e_fused_vectors = [
-                self._fuse_vectors(e_t, e_meta, weights) for e_t in e_text_vectors
-            ]
+            e_meta = self._embed_meta_component(file_info)  # TEI outside tx
+            e_fused_vectors = [self._fuse_vectors(e_t, e_meta, weights) for e_t in e_text_vectors]
         else:
             # Metadata-only fast path: read cached e_text, encode only e_meta
-            e_text_map = self._vec_components.get_batch(
-                [c.chunk_id for c in chunks], "text"
-            )
-            missing_chunk_ids = {
-                c.chunk_id for c in chunks if c.chunk_id not in e_text_map
-            }
+            e_text_map = self._vec_components.get_batch([c.chunk_id for c in chunks], "text")
+            missing_chunk_ids = {c.chunk_id for c in chunks if c.chunk_id not in e_text_map}
             if missing_chunk_ids:
                 logger.warning(
                     "Metadata-only fast path for %s: %d/%d e_text BLOBs missing — "
                     "falling back to full embed for those chunks",
-                    file_info.path, len(missing_chunk_ids), len(chunks),
+                    file_info.path,
+                    len(missing_chunk_ids),
+                    len(chunks),
                 )
                 missing_chunks = [c for c in chunks if c.chunk_id in missing_chunk_ids]
-                missing_e_text, missing_hashes = self._embed_chunks(missing_chunks)  # TEI outside tx
+                missing_e_text, missing_hashes = self._embed_chunks(
+                    missing_chunks
+                )  # TEI outside tx
                 for chunk, e_text in zip(missing_chunks, missing_e_text, strict=False):
                     e_text_map[chunk.chunk_id] = e_text
                 text_hashes = missing_hashes
@@ -1885,16 +1882,16 @@ class IndexingPipeline:
                         )
 
         # Store e_meta component (canonical path via _meta_entity_id)
-        self._vec_components.store(
-            self._meta_entity_id(file_info.path), "meta", e_meta
-        )
+        self._vec_components.store(self._meta_entity_id(file_info.path), "meta", e_meta)
         # Write e_fused to vec0 (add_chunks commits internally).
         # overwrite=False: _holder_aware_chunk_cleanup already removed orphan vec_meta rows.
         # Full-table wipe would destroy shared chunks still held by other files.
         self._delete_vector_rows_for_chunks(chunks)
         self._vector_store.add_chunks(
-            chunks, e_fused_vectors, overwrite=False,
-            text_hashes=text_hashes if text_hashes else None,
+            chunks,
+            e_fused_vectors,
+            overwrite=False,
+            text_hashes=text_hashes or None,
         )
         source_document = self._source_document_for_file_info(file_info)
         self._metadata_store.upsert_source_document(
@@ -1912,13 +1909,16 @@ class IndexingPipeline:
         if body_changed:
             logger.debug(
                 "Full embed for %s: %d chunks, e_text + e_meta encoded",
-                file_info.path, len(chunks),
+                file_info.path,
+                len(chunks),
             )
         else:
             logger.debug(
                 "Metadata-only fast path for %s: 1 TEI call (e_meta), "
                 "%d fused vectors recomputed locally (weights=%s)",
-                file_info.path, len(chunks), weights,
+                file_info.path,
+                len(chunks),
+                weights,
             )
 
     # ------------------------------------------------------------------
@@ -1935,9 +1935,7 @@ class IndexingPipeline:
         # Discover all distinct file paths from M2M table
         m2m_table = f"chunk_file_paths_{self._strategy}"
         try:
-            rows = self._conn.execute(
-                f"SELECT DISTINCT file_path FROM {m2m_table}"
-            ).fetchall()
+            rows = self._conn.execute(f"SELECT DISTINCT file_path FROM {m2m_table}").fetchall()
             all_file_paths = [row[0] for row in rows]
         except Exception:
             logger.warning("reindex_vectors: cannot read M2M table — falling back to no files")
@@ -1991,21 +1989,17 @@ class IndexingPipeline:
         for fi, e_meta in zip(file_infos, e_meta_all, strict=False):
             canonical_path = self._meta_entity_id(fi.path)
             self._vec_components.store(canonical_path, "meta", e_meta)
-            chunk_ids = self._metadata_store.get_chunk_ids_by_file(
-                self._strategy, canonical_path
-            ) or []
+            chunk_ids = (
+                self._metadata_store.get_chunk_ids_by_file(self._strategy, canonical_path) or []
+            )
             chunks = self._metadata_store.get_chunks(chunk_ids) if chunk_ids else []
             if not chunks:
                 continue
             e_text_vectors, text_hashes = self._embed_chunks(chunks)
             for chunk, e_text in zip(chunks, e_text_vectors, strict=False):
                 self._vec_components.store(chunk.chunk_id, "text", e_text)
-            e_fused = [
-                self._fuse_vectors(e_t, e_meta, weights) for e_t in e_text_vectors
-            ]
-            self._vector_store.add_chunks(
-                chunks, e_fused, overwrite=False, text_hashes=text_hashes
-            )
+            e_fused = [self._fuse_vectors(e_t, e_meta, weights) for e_t in e_text_vectors]
+            self._vector_store.add_chunks(chunks, e_fused, overwrite=False, text_hashes=text_hashes)
             total += len(chunks)
 
         self._conn.commit()
@@ -2013,9 +2007,7 @@ class IndexingPipeline:
             model_id = self._semantic_engine.get_tei_model_id() or self._settings.embedding_model
             self._vector_store.set_model_name(model_id)  # type: ignore[attr-defined]
             self._vector_store.set_distance_metric("cosine")  # type: ignore[attr-defined]
-        logger.info(
-            "reindex_vectors: rebuilt %d chunks from %d files", total, len(file_infos)
-        )
+        logger.info("reindex_vectors: rebuilt %d chunks from %d files", total, len(file_infos))
         return total
 
     def reindex_fts5(self) -> int:
@@ -2059,9 +2051,7 @@ class IndexingPipeline:
 
         live_texts: list[str] = []
         for strategy in self._present_strategies(self.conn):
-            rows = self.conn.execute(
-                f"SELECT text FROM chunks_{strategy}"
-            ).fetchall()
+            rows = self.conn.execute(f"SELECT text FROM chunks_{strategy}").fetchall()
             live_texts.extend(text for (text,) in rows)
 
         if not live_texts:
@@ -2123,7 +2113,8 @@ class IndexingPipeline:
         tag_names = [e.name for e in extraction.entities if e.type == "tag"]
         entity_rows = [
             {"name": e.name, "entity_type": e.type, "source": e.source}
-            for e in extraction.entities if e.type != "tag"
+            for e in extraction.entities
+            if e.type != "tag"
         ]
         relation_edges = [
             {
@@ -2140,7 +2131,9 @@ class IndexingPipeline:
 
         logger.info(
             "reindex_graph: %d chunks, %d entities, %d relations",
-            len(all_chunks), extraction.total_entities, extraction.total_relations,
+            len(all_chunks),
+            extraction.total_entities,
+            extraction.total_relations,
         )
         return len(all_chunks)
 
@@ -2172,14 +2165,18 @@ class IndexingPipeline:
         except sqlite3.OperationalError:
             pass  # FTS5 table may not exist yet
         return self._ingest_and_finalize(
-            files, list(files),
+            files,
+            list(files),
             documents_by_path=documents_by_path,
             diff_counts={"new": len(files), "modified": 0, "deleted": 0, "unchanged": 0},
-            data_dir=data_dir, run_id=run_id,
+            data_dir=data_dir,
+            run_id=run_id,
         )
 
     def _incremental_index(
-        self, all_files: list[FileInfo], diff: FileDiff,
+        self,
+        all_files: list[FileInfo],
+        diff: FileDiff,
         *,
         documents_by_path: dict[Path, SourceDocument],
         data_dir: str | None = None,
@@ -2191,14 +2188,24 @@ class IndexingPipeline:
         for path_str in diff.deleted:
             self._deactivate_filesystem_binding(path_str)
         if diff.deleted:
-            logger.info("[%s] purge_deleted: %d files (%.2fs)", run_id, len(diff.deleted), time.perf_counter() - t0)
+            logger.info(
+                "[%s] purge_deleted: %d files (%.2fs)",
+                run_id,
+                len(diff.deleted),
+                time.perf_counter() - t0,
+            )
 
         # 2. Purge modified files (data only, fingerprint updated after re-ingest)
         t0 = time.perf_counter()
         for path_str in diff.modified:
             self._purge_file(path_str)
         if diff.modified:
-            logger.info("[%s] purge_modified: %d files (%.2fs)", run_id, len(diff.modified), time.perf_counter() - t0)
+            logger.info(
+                "[%s] purge_modified: %d files (%.2fs)",
+                run_id,
+                len(diff.modified),
+                time.perf_counter() - t0,
+            )
 
         # 3. Determine files to ingest (new + modified in chunk_diff)
         changed_paths = set(diff.new) | set(diff.modified)
@@ -2212,28 +2219,34 @@ class IndexingPipeline:
             if diagnostic["rebound"]:
                 rebound_paths.add(str(fi.path))
         if rebound_paths:
-            files_to_ingest = [
-                fi for fi in files_to_ingest if str(fi.path) not in rebound_paths
-            ]
+            files_to_ingest = [fi for fi in files_to_ingest if str(fi.path) not in rebound_paths]
 
         # 4. Check meta_diff for files unchanged in chunk_diff.
         #    These files already have chunks but may need embedding
         #    (e.g. after a model switch).
-        unchanged_files = [fi for fi in all_files if str(fi.path) not in changed_paths and str(fi.path) not in set(diff.deleted)]
+        unchanged_files = [
+            fi
+            for fi in all_files
+            if str(fi.path) not in changed_paths and str(fi.path) not in set(diff.deleted)
+        ]
         embed_only_files: list[FileInfo] = []
         if unchanged_files:
             meta_diff = self._meta_tracker.diff(unchanged_files)
             meta_changed_paths = set(meta_diff.new) | set(meta_diff.modified)
             if meta_changed_paths:
-                embed_only_files = [fi for fi in unchanged_files if str(fi.path) in meta_changed_paths]
+                embed_only_files = [
+                    fi for fi in unchanged_files if str(fi.path) in meta_changed_paths
+                ]
                 logger.info(
                     "[%s] meta_diff: %d files need embedding (unchanged chunks)",
-                    run_id, len(embed_only_files),
+                    run_id,
+                    len(embed_only_files),
                 )
 
         # 5. Ingest changed files + finalize (includes embed-only pass)
         return self._ingest_and_finalize(
-            all_files, files_to_ingest,
+            all_files,
+            files_to_ingest,
             documents_by_path=documents_by_path,
             embed_only_files=embed_only_files,
             overwrite_vectors=False,
@@ -2243,7 +2256,8 @@ class IndexingPipeline:
                 "deleted": len(diff.deleted),
                 "unchanged": len(diff.unchanged),
             },
-            data_dir=data_dir, run_id=run_id,
+            data_dir=data_dir,
+            run_id=run_id,
         )
 
     # ------------------------------------------------------------------
@@ -2279,12 +2293,16 @@ class IndexingPipeline:
 
         if new_chunks:
             self._save_and_embed_chunks(
-                new_chunks, files_to_ingest,
-                overwrite_vectors=overwrite_vectors, run_id=run_id,
+                new_chunks,
+                files_to_ingest,
+                overwrite_vectors=overwrite_vectors,
+                run_id=run_id,
             )
 
         extraction_result = self._extract_and_populate_graph(
-            files_to_ingest, new_chunks, run_id,
+            files_to_ingest,
+            new_chunks,
+            run_id,
         )
 
         self._save_all_fingerprints(files_to_ingest, run_id)
@@ -2292,14 +2310,22 @@ class IndexingPipeline:
         if embed_only_files:
             t0 = time.perf_counter()
             self._embed_existing_chunks(embed_only_files, run_id=run_id)
-            logger.info("[%s] embed_only: %d files (%.1fs)", run_id, len(embed_only_files), time.perf_counter() - t0)
+            logger.info(
+                "[%s] embed_only: %d files (%.1fs)",
+                run_id,
+                len(embed_only_files),
+                time.perf_counter() - t0,
+            )
 
         all_chunks = self._rebuild_acronyms(run_id)
 
         return self._compute_stats(
-            all_files, all_chunks, extraction_result,
+            all_files,
+            all_chunks,
+            extraction_result,
             overwrite_vectors=overwrite_vectors,
-            diff_counts=diff_counts, data_dir=data_dir,
+            diff_counts=diff_counts,
+            data_dir=data_dir,
         )
 
     # ------------------------------------------------------------------
@@ -2319,15 +2345,24 @@ class IndexingPipeline:
         for fi in files:
             content = read_file(fi.path)
             source_document = documents_by_path[Path(fi.path)]
-            chunks.extend(_chunker_module.chunk_file(
-                fi.path, content,
-                max_tokens=self._settings.max_chunk_tokens,
-                overlap_tokens=self._settings.chunk_overlap_tokens,
-                kind=fi.kind,
-                chunk_strategy=self._strategy,
-                provenance=self._filesystem_chunk_provenance(source_document),
-            ))
-        logger.info("[%s] chunk: %d chunks from %d files (%.2fs)", run_id, len(chunks), len(files), time.perf_counter() - t0)
+            chunks.extend(
+                _chunker_module.chunk_file(
+                    fi.path,
+                    content,
+                    max_tokens=self._settings.max_chunk_tokens,
+                    overlap_tokens=self._settings.chunk_overlap_tokens,
+                    kind=fi.kind,
+                    chunk_strategy=self._strategy,
+                    provenance=self._filesystem_chunk_provenance(source_document),
+                )
+            )
+        logger.info(
+            "[%s] chunk: %d chunks from %d files (%.2fs)",
+            run_id,
+            len(chunks),
+            len(files),
+            time.perf_counter() - t0,
+        )
         return chunks
 
     def _save_and_embed_chunks(
@@ -2358,12 +2393,11 @@ class IndexingPipeline:
         """
         t0 = time.perf_counter()
         self._metadata_store.save_chunks(chunks)
-        source_documents = [
-            self._source_document_for_file_info(file_info)
-            for file_info in files
-        ]
+        source_documents = [self._source_document_for_file_info(file_info) for file_info in files]
         self._persist_chunk_source_provenance(chunks, source_documents)
-        logger.info("[%s] metadata_save: %d chunks (%.2fs)", run_id, len(chunks), time.perf_counter() - t0)
+        logger.info(
+            "[%s] metadata_save: %d chunks (%.2fs)", run_id, len(chunks), time.perf_counter() - t0
+        )
 
         weights = self._settings.parsed_embedding_weights
 
@@ -2373,6 +2407,7 @@ class IndexingPipeline:
         # Group chunks by their primary file path (file_paths[0])
         # Chunks with no file_paths are assigned to the first available file.
         from collections import defaultdict
+
         chunks_by_file: dict[str, list[Chunk]] = defaultdict(list)
         fallback_path = str(files[0].path) if files else ""
         for chunk in chunks:
@@ -2400,9 +2435,7 @@ class IndexingPipeline:
             # Encode file metadata → e_meta (1 TEI call per unique file)
             e_meta = self._embed_meta_component(fi)
             # Fuse per chunk
-            e_fused = [
-                self._fuse_vectors(e_t, e_meta, weights) for e_t in e_text_vectors
-            ]
+            e_fused = [self._fuse_vectors(e_t, e_meta, weights) for e_t in e_text_vectors]
             all_e_fused.extend(e_fused)
             all_text_hashes.update(text_hashes)
             chunk_order.extend(file_chunks)
@@ -2410,15 +2443,22 @@ class IndexingPipeline:
         t_embed = time.perf_counter() - t0
         logger.info(
             "[%s] embed: %d chunks (%.1fs, %.0f chunks/s)",
-            run_id, len(chunks), t_embed, len(chunks) / t_embed if t_embed > 0 else 0,
+            run_id,
+            len(chunks),
+            t_embed,
+            len(chunks) / t_embed if t_embed > 0 else 0,
         )
 
         t0 = time.perf_counter()
         self._vector_store.add_chunks(
-            chunk_order, all_e_fused, overwrite=overwrite_vectors,
+            chunk_order,
+            all_e_fused,
+            overwrite=overwrite_vectors,
             text_hashes=all_text_hashes,
         )
-        logger.info("[%s] vector_store: %d vectors (%.2fs)", run_id, len(chunks), time.perf_counter() - t0)
+        logger.info(
+            "[%s] vector_store: %d vectors (%.2fs)", run_id, len(chunks), time.perf_counter() - t0
+        )
         if hasattr(self._vector_store, "set_model_name"):
             self._vector_store.set_model_name(self._settings.embedding_model)  # type: ignore[attr-defined]
 
@@ -2435,7 +2475,8 @@ class IndexingPipeline:
         self._conn.commit()
 
     def _build_file_meta_from_fileinfo(
-        self, files: list[FileInfo],
+        self,
+        files: list[FileInfo],
     ) -> dict[str, tuple[str, str]]:
         """Build FTS5 file_meta from FileInfo objects (no disk reads needed)."""
         file_meta: dict[str, tuple[str, str]] = {}
@@ -2455,22 +2496,38 @@ class IndexingPipeline:
         """Run NER/structural extraction and populate graph."""
         t0 = time.perf_counter()
         result = self._run_extraction(chunks)
-        logger.info("[%s] extraction: %d entities, %d relations (%.1fs)", run_id, result.total_entities, result.total_relations, time.perf_counter() - t0)
+        logger.info(
+            "[%s] extraction: %d entities, %d relations (%.1fs)",
+            run_id,
+            result.total_entities,
+            result.total_relations,
+            time.perf_counter() - t0,
+        )
 
         t0 = time.perf_counter()
         self._populate_graph(files, chunks, result)
         self._frontmatter_to_graph(files)
-        logger.info("[%s] graph: %d files, %d chunks (%.1fs)", run_id, len(files), len(chunks), time.perf_counter() - t0)
+        logger.info(
+            "[%s] graph: %d files, %d chunks (%.1fs)",
+            run_id,
+            len(files),
+            len(chunks),
+            time.perf_counter() - t0,
+        )
         return result
 
     def _save_all_fingerprints(
-        self, files: list[FileInfo], run_id: str,
+        self,
+        files: list[FileInfo],
+        run_id: str,
     ) -> None:
         """Save chunk + meta fingerprints after successful ingestion."""
         t0 = time.perf_counter()
         self._update_chunk_fingerprints(files)
         self._update_meta_fingerprints(files)
-        logger.info("[%s] fingerprints: %d files (%.2fs)", run_id, len(files), time.perf_counter() - t0)
+        logger.info(
+            "[%s] fingerprints: %d files (%.2fs)", run_id, len(files), time.perf_counter() - t0
+        )
 
     def _rebuild_acronyms(self, run_id: str) -> list[Chunk]:
         """Rebuild acronym dictionary from full corpus. Returns all chunks."""
@@ -2480,16 +2537,22 @@ class IndexingPipeline:
         if acronym_dict:
             self._settings.acronyms_path.parent.mkdir(parents=True, exist_ok=True)
             fd, tmp_path = tempfile.mkstemp(
-                dir=self._settings.acronyms_path.parent, suffix=".tmp",
+                dir=self._settings.acronyms_path.parent,
+                suffix=".tmp",
             )
             try:
-                with open(fd, "w") as f:
+                with os.fdopen(fd, "w") as f:
                     json.dump(acronym_dict, f, indent=2)
                 Path(tmp_path).replace(self._settings.acronyms_path)
             except BaseException:
                 Path(tmp_path).unlink(missing_ok=True)
                 raise
-        logger.info("[%s] acronyms: %d (%.2fs)", run_id, len(acronym_dict) if acronym_dict else 0, time.perf_counter() - t0)
+        logger.info(
+            "[%s] acronyms: %d (%.2fs)",
+            run_id,
+            len(acronym_dict) if acronym_dict else 0,
+            time.perf_counter() - t0,
+        )
         return all_chunks
 
     def _compute_stats(
@@ -2561,6 +2624,7 @@ class IndexingPipeline:
         # (docker stats samplers) can correlate CPU/IO with pipeline phase
         # in real time, not from post-hoc log parsing.
         _beacon_path = self._settings.index_dir / ".phase_beacon"
+
         def _beacon(phase: str) -> None:
             if prof:
                 _beacon_path.write_text(f"{file_info.path}:{phase}")
@@ -2594,9 +2658,7 @@ class IndexingPipeline:
             # is NOT deleted here because the file is being re-indexed (it will
             # be re-populated in the graph phase below).
             _cleanup_orphan_ids: list[str] = [
-                cid
-                for orphans in cleanup_orphans_by_strategy.values()
-                for cid in orphans
+                cid for orphans in cleanup_orphans_by_strategy.values() for cid in orphans
             ]
             if _cleanup_orphan_ids:
                 try:
@@ -2610,12 +2672,14 @@ class IndexingPipeline:
                     except Exception as _ge:
                         logger.warning(
                             "graph cleanup (fallback) failed during reindex: %s (file=%s)",
-                            _ge, path_str,
+                            _ge,
+                            path_str,
                         )
                 except Exception as _ge:
                     logger.warning(
                         "graph chunk cleanup failed during reindex: %s (file=%s)",
-                        _ge, path_str,
+                        _ge,
+                        path_str,
                     )
             _beacon("chunk")
             t0 = time.perf_counter()
@@ -2651,9 +2715,7 @@ class IndexingPipeline:
                     conn=self._conn,
                 )
                 for c in chunks:
-                    existing = self._metadata_store.get_stored_payload(
-                        self._strategy, c.chunk_id
-                    )
+                    existing = self._metadata_store.get_stored_payload(self._strategy, c.chunk_id)
                     if existing is not None:
                         # Content-addressed id: same id => same content.
                         # If the stored payload disagrees this is a chunker bug or
@@ -2725,9 +2787,7 @@ class IndexingPipeline:
         metadata_only = False
         if not needs_embed:
             meta_diff = self._meta_tracker.diff([file_info])
-            needs_embed = (
-                path_str in meta_diff.new or path_str in meta_diff.modified
-            )
+            needs_embed = path_str in meta_diff.new or path_str in meta_diff.modified
             metadata_only = needs_embed
 
         if needs_embed:
@@ -2738,10 +2798,13 @@ class IndexingPipeline:
             # body_changed=False when only meta_tracker fired (metadata_only path).
             embed_chunks = chunks
             if metadata_only and not embed_chunks:
-                chunk_ids = self._metadata_store.get_chunk_ids_by_file(
-                    self._strategy,
-                    path_str,
-                ) or []
+                chunk_ids = (
+                    self._metadata_store.get_chunk_ids_by_file(
+                        self._strategy,
+                        path_str,
+                    )
+                    or []
+                )
                 embed_chunks = self._metadata_store.get_chunks(chunk_ids) if chunk_ids else []
 
             self._index_file_embed(
@@ -2771,7 +2834,12 @@ class IndexingPipeline:
             file_info.path,
             len(chunks) if chunks else 0,
             t_total,
-            t_chunk, t_save, t_extract, t_graph, t_embed, t_vec,
+            t_chunk,
+            t_save,
+            t_extract,
+            t_graph,
+            t_embed,
+            t_vec,
         )
 
         return len(chunks) if chunks else 0
@@ -2827,8 +2895,7 @@ class IndexingPipeline:
         has rows is still discovered and cleaned up.
         """
         rows = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' "
-            "AND name LIKE 'chunk_file_paths_%'"
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'chunk_file_paths_%'"
         ).fetchall()
         return [r[0].removeprefix("chunk_file_paths_") for r in rows]
 
@@ -2878,21 +2945,15 @@ class IndexingPipeline:
                 document_ref,
                 conn=conn,
             )
-            orphans = self._metadata_store.delete_m2m_for_file(
-                strategy, file_path, conn=conn
-            )
+            orphans = self._metadata_store.delete_m2m_for_file(strategy, file_path, conn=conn)
             if orphans:
                 self._metadata_store.delete_chunk_provenance(
                     strategy,
                     orphans,
                     conn=conn,
                 )
-                self._metadata_store.delete_orphan_chunks(
-                    strategy, orphans, conn=conn
-                )
-                cast(Any, self._vector_store).delete_by_chunk_ids(
-                    strategy, orphans, conn=conn
-                )
+                self._metadata_store.delete_orphan_chunks(strategy, orphans, conn=conn)
+                cast(Any, self._vector_store).delete_by_chunk_ids(strategy, orphans, conn=conn)
                 # FTS5 cascade — runs inside the same transaction.
                 fts_table = f"chunks_fts_{strategy}"
                 try:
@@ -2939,9 +3000,7 @@ class IndexingPipeline:
         all_orphans_by_strategy: dict[str, list[str]] = {}
         try:
             conn.execute("BEGIN")
-            all_orphans_by_strategy = self._holder_aware_chunk_cleanup(
-                file_path, conn=conn
-            )
+            all_orphans_by_strategy = self._holder_aware_chunk_cleanup(file_path, conn=conn)
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")
@@ -2951,15 +3010,15 @@ class IndexingPipeline:
         # Graph: holder-aware path (branch b — see docstring above).
         try:
             all_orphan_ids: list[str] = [
-                cid
-                for orphans in all_orphans_by_strategy.values()
-                for cid in orphans
+                cid for orphans in all_orphans_by_strategy.values() for cid in orphans
             ]
             self._graph_store.delete_chunks_from_graph(all_orphan_ids)
             self._graph_store.delete_file_node(file_path)
         except Exception as e:
             logger.warning(
-                "graph cleanup failed after DB commit: %s (file=%s)", e, file_path,
+                "graph cleanup failed after DB commit: %s (file=%s)",
+                e,
+                file_path,
             )
 
         # Fingerprints: keyed on file_path, safe to remove unconditionally.
@@ -2968,7 +3027,9 @@ class IndexingPipeline:
             self._meta_tracker.remove_fingerprint(file_path)
         except Exception as e:
             logger.warning(
-                "fingerprint cleanup failed after DB commit: %s (file=%s)", e, file_path,
+                "fingerprint cleanup failed after DB commit: %s (file=%s)",
+                e,
+                file_path,
             )
 
     def _deactivate_filesystem_binding(
@@ -3054,9 +3115,7 @@ class IndexingPipeline:
         for strat in strategies:
             m2m_table = f"chunk_file_paths_{strat}"
             try:
-                rows = self._conn.execute(
-                    f"SELECT DISTINCT file_path FROM {m2m_table}"
-                ).fetchall()
+                rows = self._conn.execute(f"SELECT DISTINCT file_path FROM {m2m_table}").fetchall()
                 stored_paths.update(r[0] for r in rows)
             except sqlite3.OperationalError:
                 continue
@@ -3075,7 +3134,9 @@ class IndexingPipeline:
         logger.info(
             "purge_orphaned_files: files_discovered=%d files_missing=%d paths_deactivating=%d "
             "(strategies=%s)",
-            files_discovered, files_missing, files_missing,
+            files_discovered,
+            files_missing,
+            files_missing,
             ", ".join(strategies) if strategies else "none",
         )
 
@@ -3095,7 +3156,8 @@ class IndexingPipeline:
 
         logger.info(
             "purge_orphaned_files: deactivated %d/%d orphan files",
-            files_removed, files_missing,
+            files_removed,
+            files_missing,
         )
         return files_removed, 0, 0
 
@@ -3106,26 +3168,16 @@ class IndexingPipeline:
     def _run_extraction(self, chunks: list[Chunk]) -> _ExtractionBundle:
         """Run all extractors on chunks. Returns bundled results."""
         structural_result = (
-            self._structural_extractor.extract(chunks) if chunks
-            else ExtractionResult()
+            self._structural_extractor.extract(chunks) if chunks else ExtractionResult()
         )
         ner_result = ExtractionResult()
         if self._ner_extractor is not None and chunks:
             ner_result = self._ner_extractor.extract_with_cache(chunks)
-        keyterm_result = (
-            self._keyterm_extractor.extract(chunks) if chunks
-            else ExtractionResult()
-        )
+        keyterm_result = self._keyterm_extractor.extract(chunks) if chunks else ExtractionResult()
 
-        all_entities = (
-            structural_result.entities
-            + ner_result.entities
-            + keyterm_result.entities
-        )
+        all_entities = structural_result.entities + ner_result.entities + keyterm_result.entities
         all_relations = (
-            structural_result.relations
-            + ner_result.relations
-            + keyterm_result.relations
+            structural_result.relations + ner_result.relations + keyterm_result.relations
         )
 
         return _ExtractionBundle(
@@ -3172,13 +3224,17 @@ class IndexingPipeline:
                 else:
                     entity_type = EntityType.TAG
                     name = tag_str
-                entity_rows.append({"name": name, "entity_type": entity_type, "source": "frontmatter"})
-                edge_rows.append({
-                    "source_id": file_path_str,
-                    "target_id": name,
-                    "relation_type": RelationType.HAS_TAG,
-                    "weight": 1.0,
-                })
+                entity_rows.append(
+                    {"name": name, "entity_type": entity_type, "source": "frontmatter"}
+                )
+                edge_rows.append(
+                    {
+                        "source_id": file_path_str,
+                        "target_id": name,
+                        "relation_type": RelationType.HAS_TAG,
+                        "weight": 1.0,
+                    }
+                )
 
             # --- Kind-specific metadata ---------------------------------
             if fi.kind == DocKind.MEETING_TRANSCRIPT:
@@ -3187,13 +3243,17 @@ class IndexingPipeline:
                     p_name = str(p).strip()
                     if not p_name:
                         continue
-                    entity_rows.append({"name": p_name, "entity_type": EntityType.PERSON, "source": "frontmatter"})
-                    edge_rows.append({
-                        "source_id": file_path_str,
-                        "target_id": p_name,
-                        "relation_type": "HAS_PARTICIPANT",
-                        "weight": 1.0,
-                    })
+                    entity_rows.append(
+                        {"name": p_name, "entity_type": EntityType.PERSON, "source": "frontmatter"}
+                    )
+                    edge_rows.append(
+                        {
+                            "source_id": file_path_str,
+                            "target_id": p_name,
+                            "relation_type": "HAS_PARTICIPANT",
+                            "weight": 1.0,
+                        }
+                    )
 
         if entity_rows:
             self._graph_store.batch_add_entity_nodes(entity_rows)
@@ -3210,12 +3270,10 @@ class IndexingPipeline:
         tag_names = [e.name for e in extraction.entities if e.type == "tag"]
         entity_rows = [
             {"name": e.name, "entity_type": e.type, "source": e.source}
-            for e in extraction.entities if e.type != "tag"
+            for e in extraction.entities
+            if e.type != "tag"
         ]
-        file_rows = [
-            {"file_path": str(fi.path), "title": fi.title}
-            for fi in files
-        ]
+        file_rows = [{"file_path": str(fi.path), "title": fi.title} for fi in files]
         # Phase 16: use first file_path for graph node (primary path).
         section_rows = [
             {
@@ -3288,7 +3346,9 @@ class IndexingPipeline:
             logger.warning("Cannot stat %s for fingerprint, skipping", fi.path)
             return
         tracker.save_fingerprint(
-            str(fi.path), stat.st_mtime, stat.st_size,
+            str(fi.path),
+            stat.st_mtime,
+            stat.st_size,
             tracker._checksum_fn(fi.path),
         )
 
@@ -3346,9 +3406,7 @@ class IndexingPipeline:
 
         for fi in files:
             path_str = str(fi.path)
-            chunk_ids = self._metadata_store.get_chunk_ids_by_file(
-                self._strategy, path_str
-            )
+            chunk_ids = self._metadata_store.get_chunk_ids_by_file(self._strategy, path_str)
             if not chunk_ids:
                 continue
             chunks = self._metadata_store.get_chunks(chunk_ids)
@@ -3363,10 +3421,9 @@ class IndexingPipeline:
                 texts = [c.text for c in chunks]
                 e_text_vectors = self._semantic_engine.encode_batch(texts)
                 text_hashes = {
-                    c.chunk_id: blake3.blake3(c.text.encode()).hexdigest()
-                    for c in chunks
+                    c.chunk_id: blake3.blake3(c.text.encode()).hexdigest() for c in chunks
                 }
-                e_meta = self._embed_meta_component(fi)                    # TEI: 1 call
+                e_meta = self._embed_meta_component(fi)  # TEI: 1 call
                 e_fused_vectors = [
                     self._fuse_vectors(e_t, e_meta, weights) for e_t in e_text_vectors
                 ]
@@ -3374,37 +3431,34 @@ class IndexingPipeline:
                 # VecComponentStore.store() calls are auto-committed in WAL autocommit mode.
                 for chunk, e_text in zip(chunks, e_text_vectors, strict=False):
                     self._vec_components.store(chunk.chunk_id, "text", e_text)
-                self._vec_components.store(
-                    self._meta_entity_id(fi.path), "meta", e_meta
-                )
+                self._vec_components.store(self._meta_entity_id(fi.path), "meta", e_meta)
                 self._conn.commit()  # Flush VecComponentStore stores before add_chunks
                 self._vector_store.add_chunks(
                     chunks, e_fused_vectors, overwrite=False, text_hashes=text_hashes
                 )
                 logger.info(
                     "_embed_existing_chunks (model_switch): %s — %d chunks, e_text + e_meta re-encoded",
-                    fi.path, len(chunks),
+                    fi.path,
+                    len(chunks),
                 )
 
             else:
                 # ── CACHED E_TEXT: read from VecComponentStore, only encode e_meta ──
-                e_text_map = self._vec_components.get_batch(
-                    [c.chunk_id for c in chunks], "text"
-                )
+                e_text_map = self._vec_components.get_batch([c.chunk_id for c in chunks], "text")
                 missing = [c for c in chunks if c.chunk_id not in e_text_map]
                 if missing:
                     logger.warning(
                         "_embed_existing_chunks: %d missing e_text BLOBs for %s — "
                         "falling back to full encode for missing chunks",
-                        len(missing), fi.path,
+                        len(missing),
+                        fi.path,
                     )
                     missing_vecs, _missing_hashes = self._embed_chunks(missing)
                     for chunk, e_t in zip(missing, missing_vecs, strict=False):
                         e_text_map[chunk.chunk_id] = e_t
                 e_meta = self._embed_meta_component(fi)  # 1 TEI call
                 e_fused_vectors = [
-                    self._fuse_vectors(e_text_map[c.chunk_id], e_meta, weights)
-                    for c in chunks
+                    self._fuse_vectors(e_text_map[c.chunk_id], e_meta, weights) for c in chunks
                 ]
                 # Note: no explicit BEGIN here — add_chunks() commits internally.
                 # VecComponentStore.store() calls are auto-committed in WAL autocommit mode.
@@ -3413,18 +3467,19 @@ class IndexingPipeline:
                         self._vec_components.store(
                             chunk.chunk_id, "text", e_text_map[chunk.chunk_id]
                         )
-                self._vec_components.store(
-                    self._meta_entity_id(fi.path), "meta", e_meta
-                )
+                self._vec_components.store(self._meta_entity_id(fi.path), "meta", e_meta)
                 self._conn.commit()  # Flush VecComponentStore stores before add_chunks
                 self._delete_vector_rows_for_chunks(chunks)
                 self._vector_store.add_chunks(
-                    chunks, e_fused_vectors, overwrite=False,
+                    chunks,
+                    e_fused_vectors,
+                    overwrite=False,
                 )
                 logger.info(
                     "_embed_existing_chunks (cached e_text): %s — 1 TEI call (e_meta), "
                     "%d fused vectors recomputed locally",
-                    fi.path, len(chunks),
+                    fi.path,
+                    len(chunks),
                 )
 
             source_document = self._source_document_for_file_info(fi)
@@ -3445,7 +3500,9 @@ class IndexingPipeline:
 
         logger.info(
             "[%s] embed_existing: %d files processed (model_switch=%s)",
-            run_id, len(files), model_switch,
+            run_id,
+            len(files),
+            model_switch,
         )
 
     # ------------------------------------------------------------------
@@ -3531,7 +3588,8 @@ class IndexingPipeline:
                 "_check_schema_version: stored_version=None but pre-existing data detected "
                 "(chunk_fingerprints=%d, vec_components=%d) "
                 "— treating as pre-999.12 or partial deployment; wiping stale state",
-                n_chunk_fingerprints, self._vec_components.count(),
+                n_chunk_fingerprints,
+                self._vec_components.count(),
             )
 
         else:
@@ -3539,7 +3597,8 @@ class IndexingPipeline:
             logger.warning(
                 "schema_version mismatch: stored=%r expected=%r — wiping all vector state. "
                 "trickle will rebuild from scratch. Expected rebuild time: several days.",
-                stored_version, self.SCHEMA_VERSION,
+                stored_version,
+                self.SCHEMA_VERSION,
             )
             # Fall through to wipe path below
 
@@ -3574,9 +3633,7 @@ class IndexingPipeline:
             self._meta_tracker.clear()
             # 7. Clear stored weights sentinel (re-written by _check_weights_changed)
             _wipe_step = 7
-            self._conn.execute(
-                f"DELETE FROM {config_table} WHERE key = 'weights_used'"
-            )
+            self._conn.execute(f"DELETE FROM {config_table} WHERE key = 'weights_used'")
             self._conn.commit()
             # 8. Write final sentinel (marks clean state — replaces WIPE_IN_PROGRESS)
             _wipe_step = 8
@@ -3586,7 +3643,7 @@ class IndexingPipeline:
             )
             self._conn.commit()
         except Exception:
-            logger.error("_check_schema_version: wipe failed at step %d", _wipe_step, exc_info=True)
+            logger.exception("_check_schema_version: wipe failed at step %d", _wipe_step)
             raise
 
         logger.info(
@@ -3639,16 +3696,15 @@ class IndexingPipeline:
 
         logger.info(
             "Embedding weights changed: stored=%r current=%r — recomputing e_fused from components.",
-            stored_weights_json, current_weights_json,
+            stored_weights_json,
+            current_weights_json,
         )
 
         weights = current_weights
         # Get all distinct file paths from M2M table
         m2m_table = f"chunk_file_paths_{self._strategy}"
         try:
-            rows = self._conn.execute(
-                f"SELECT DISTINCT file_path FROM {m2m_table}"
-            ).fetchall()
+            rows = self._conn.execute(f"SELECT DISTINCT file_path FROM {m2m_table}").fetchall()
             all_file_paths = [row[0] for row in rows]
         except Exception:
             logger.warning("_check_weights_changed: cannot read M2M table — skipping")
@@ -3678,37 +3734,33 @@ class IndexingPipeline:
         # Process in batches of 1000 files to avoid OOM on ~1.4M chunks (~5.6GB raw vectors)
         BATCH_SIZE = 1000
         for batch_start in range(0, len(all_file_paths), BATCH_SIZE):
-            batch = all_file_paths[batch_start: batch_start + BATCH_SIZE]
+            batch = all_file_paths[batch_start : batch_start + BATCH_SIZE]
             for fp in batch:
                 # Always use _meta_entity_id() for canonical path normalization
                 canonical_fp = self._meta_entity_id(fp)
-                chunk_ids = self._metadata_store.get_chunk_ids_by_file(
-                    self._strategy, canonical_fp
-                ) or []
+                chunk_ids = (
+                    self._metadata_store.get_chunk_ids_by_file(self._strategy, canonical_fp) or []
+                )
                 chunks = self._metadata_store.get_chunks(chunk_ids) if chunk_ids else []
                 if not chunks:
                     continue
                 e_meta = self._vec_components.get(canonical_fp, "meta")
                 if e_meta is None:
-                    logger.warning(
-                        "_check_weights_changed: no e_meta for %s — skipping file", fp
-                    )
+                    logger.warning("_check_weights_changed: no e_meta for %s — skipping file", fp)
                     files_skipped += 1
                     continue
-                e_text_map = self._vec_components.get_batch(
-                    [c.chunk_id for c in chunks], "text"
-                )
+                e_text_map = self._vec_components.get_batch([c.chunk_id for c in chunks], "text")
                 missing = [c for c in chunks if c.chunk_id not in e_text_map]
                 if missing:
                     logger.warning(
                         "_check_weights_changed: %d missing e_text BLOBs for %s — skipping file",
-                        len(missing), fp,
+                        len(missing),
+                        fp,
                     )
                     files_skipped += 1
                     continue
                 e_fused = [
-                    self._fuse_vectors(e_text_map[c.chunk_id], e_meta, weights)
-                    for c in chunks
+                    self._fuse_vectors(e_text_map[c.chunk_id], e_meta, weights) for c in chunks
                 ]
                 self._vector_store.add_chunks(chunks, e_fused, overwrite=False)
                 total_recomputed += len(chunks)
@@ -3720,7 +3772,9 @@ class IndexingPipeline:
                 "_check_weights_changed: %d/%d files skipped (%d chunks recomputed so far) — "
                 "vec0 is partially populated; search results are incomplete until next successful startup. "
                 "NOT updating weights_used sentinel; will retry on next startup.",
-                files_skipped, len(all_file_paths), total_recomputed,
+                files_skipped,
+                len(all_file_paths),
+                total_recomputed,
             )
             return
 

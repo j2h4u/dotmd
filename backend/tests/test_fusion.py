@@ -1,8 +1,9 @@
 """Tests for fusion math and weight validation (Phase 999.12)."""
+
 import math
 import os
 import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -171,7 +172,9 @@ def test_build_candidates_uses_boundary_aware_snippet() -> None:
         cast(MetadataStoreProtocol, store),
         query="target",
         ref_to_chunk={"filesystem:/mnt/chunk-1.md": ("chunk-1", "")},
-        active_provenance_map={"chunk-1": store.get_chunk_provenance_for_chunk_ids("default", ["chunk-1"])["chunk-1"]},
+        active_provenance_map={
+            "chunk-1": store.get_chunk_provenance_for_chunk_ids("default", ["chunk-1"])["chunk-1"]
+        },
         snippet_length=35,
     )
 
@@ -346,7 +349,7 @@ def test_build_candidates_missing_provenance_raises() -> None:
 
 
 def _source_document(file_path: str) -> SourceDocument:
-    now = datetime(2026, 5, 6)
+    now = datetime(2026, 5, 6, tzinfo=UTC)
     return SourceDocument(
         namespace="filesystem",
         document_ref=file_path,
@@ -432,20 +435,29 @@ def test_missing_provenance_count_and_backfill_safety(tmp_path: Path) -> None:
     raw_conn.commit()
 
     assert store.count_missing_source_provenance(strategy) == 1
-    assert store.backfill_missing_source_provenance_from_file_paths(
-        strategy,
-        dry_run=True,
-    ) == 1
+    assert (
+        store.backfill_missing_source_provenance_from_file_paths(
+            strategy,
+            dry_run=True,
+        )
+        == 1
+    )
     assert store.count_missing_source_provenance(strategy) == 1
 
-    assert store.backfill_missing_source_provenance_from_file_paths(
-        strategy,
-        dry_run=False,
-    ) == 1
-    assert store.backfill_missing_source_provenance_from_file_paths(
-        strategy,
-        dry_run=False,
-    ) == 0
+    assert (
+        store.backfill_missing_source_provenance_from_file_paths(
+            strategy,
+            dry_run=False,
+        )
+        == 1
+    )
+    assert (
+        store.backfill_missing_source_provenance_from_file_paths(
+            strategy,
+            dry_run=False,
+        )
+        == 0
+    )
     assert store.count_missing_source_provenance(strategy) == 0
     provenance = store.get_chunk_provenance_for_chunk_ids(strategy, [chunk_id])
     assert provenance[chunk_id].ref == "filesystem:/mnt/a.md"
@@ -459,10 +471,7 @@ def test_format_result_keeps_clean_visible_snippet_after_cleanup() -> None:
         descriptor_key="filesystem-mnt",
         source_kind="markdown",
         retrieval_kind="semantic",
-        snippet=(
-            "---\ntitle: Hidden\n---\n"
-            "[00:15:32] Visible target sentence survives cleanup."
-        ),
+        snippet=("---\ntitle: Hidden\n---\n[00:15:32] Visible target sentence survives cleanup."),
         fused_score=0.9,
         can_read=True,
         chunk_id="chunk-1",
@@ -478,6 +487,7 @@ def test_format_result_keeps_clean_visible_snippet_after_cleanup() -> None:
 def test_normalize_unit_vector():
     """Normalized vector has magnitude 1.0."""
     from dotmd.ingestion.pipeline import IndexingPipeline
+
     v = [3.0, 4.0]
     n = IndexingPipeline._normalize_vector(v)
     mag = math.sqrt(sum(x * x for x in n))
@@ -487,6 +497,7 @@ def test_normalize_unit_vector():
 def test_normalize_zero_vector():
     """Zero vector returned unchanged (no division by zero)."""
     from dotmd.ingestion.pipeline import IndexingPipeline
+
     v = [0.0, 0.0, 0.0]
     n = IndexingPipeline._normalize_vector(v)
     assert n == [0.0, 0.0, 0.0]
@@ -502,10 +513,12 @@ class _FakePipeline:
     @staticmethod
     def _normalize_vector(v):
         from dotmd.ingestion.pipeline import IndexingPipeline
+
         return IndexingPipeline._normalize_vector(v)
 
     def _fuse_vectors(self, e_text, e_meta, weights):
         from dotmd.ingestion.pipeline import IndexingPipeline
+
         return cast(Any, IndexingPipeline._fuse_vectors)(self, e_text, e_meta, weights)
 
 
@@ -550,6 +563,7 @@ def test_weight_validation_sum_must_be_one():
     """Settings rejects weights that don't sum to 1.0."""
     os.environ.setdefault("DOTMD_EMBEDDING_URL", "http://localhost:8088")
     from dotmd.core.config import Settings
+
     with pytest.raises(Exception, match="sum"):
         Settings(
             embedding_url="http://localhost:8088",
@@ -561,6 +575,7 @@ def test_weight_validation_accepts_valid():
     """Settings accepts valid weights."""
     os.environ.setdefault("DOTMD_EMBEDDING_URL", "http://localhost:8088")
     from dotmd.core.config import Settings
+
     s = Settings(
         embedding_url="http://localhost:8088",
         embedding_weights="text=0.7,meta=0.3",
@@ -574,6 +589,7 @@ def test_weight_validation_invalid_format():
     """Settings rejects malformed weight entries."""
     os.environ.setdefault("DOTMD_EMBEDDING_URL", "http://localhost:8088")
     from dotmd.core.config import Settings
+
     with pytest.raises(Exception):
         Settings(
             embedding_url="http://localhost:8088",
@@ -589,6 +605,7 @@ def test_weight_validation_requires_text_key():
     """
     os.environ.setdefault("DOTMD_EMBEDDING_URL", "http://localhost:8088")
     from dotmd.core.config import Settings
+
     with pytest.raises(Exception, match="text"):
         Settings(
             embedding_url="http://localhost:8088",
@@ -600,6 +617,7 @@ def test_weight_validation_requires_meta_key():
     """Settings rejects weights missing the 'meta' key."""
     os.environ.setdefault("DOTMD_EMBEDDING_URL", "http://localhost:8088")
     from dotmd.core.config import Settings
+
     with pytest.raises(Exception, match="meta"):
         Settings(
             embedding_url="http://localhost:8088",
@@ -628,7 +646,9 @@ def test_fuse_results_math_equivalence_ref_keys_vs_chunk_keys() -> None:
 
     # Verify same math: RRF is position-based, not key-based
     assert len(chunk_fused) == len(ref_fused)
-    for (_chunk_key, chunk_score), (_ref_key, ref_score) in zip(chunk_fused, ref_fused, strict=True):
+    for (_chunk_key, chunk_score), (_ref_key, ref_score) in zip(
+        chunk_fused, ref_fused, strict=True
+    ):
         assert abs(chunk_score - ref_score) < 1e-9
 
 

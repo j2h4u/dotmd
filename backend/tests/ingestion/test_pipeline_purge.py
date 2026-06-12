@@ -113,7 +113,9 @@ def _insert_chunk(db_path: Path, strategy: str, chunk_id: str, text: str) -> Non
     conn.close()
 
 
-def _add_m2m(db_path: Path, strategy: str, chunk_id: str, file_path: str, chunk_index: int = 0) -> None:
+def _add_m2m(
+    db_path: Path, strategy: str, chunk_id: str, file_path: str, chunk_index: int = 0
+) -> None:
     conn = sqlite3.connect(str(db_path))
     conn.execute(
         f"INSERT OR IGNORE INTO chunk_file_paths_{strategy} (chunk_id, file_path, chunk_index) "
@@ -226,6 +228,7 @@ def _get_pipeline(db_path: Path):  # type: ignore[no-untyped-def]
     """Deferred import of IndexingPipeline — raises ImportError until P3/P4 ships."""
     from dotmd.core.config import Settings
     from dotmd.ingestion.pipeline import IndexingPipeline
+
     settings = Settings(index_dir=db_path.parent)
     return IndexingPipeline(settings)
 
@@ -385,20 +388,21 @@ class TestPurgeSharedHolder:
         assert _count(db_path, f"chunks_{strategy}") == 1
         assert _count(db_path, f"vec_meta_{strategy}_{MODEL}") == 1
         # Only file_A's M2M row removed; file_B's survives
-        m2m_rows = sqlite3.connect(str(db_path)).execute(
-            f"SELECT file_path FROM chunk_file_paths_{strategy}"
-        ).fetchall()
+        m2m_rows = (
+            sqlite3.connect(str(db_path))
+            .execute(f"SELECT file_path FROM chunk_file_paths_{strategy}")
+            .fetchall()
+        )
         file_paths = {r[0] for r in m2m_rows}
         assert "/file_B.md" in file_paths
         assert "/file_A.md" not in file_paths
         conn = sqlite3.connect(str(db_path))
         source_refs = {
-            r[0] for r in conn.execute(
-                "SELECT document_ref FROM source_documents"
-            ).fetchall()
+            r[0] for r in conn.execute("SELECT document_ref FROM source_documents").fetchall()
         }
         provenance_refs = {
-            r[0] for r in conn.execute(
+            r[0]
+            for r in conn.execute(
                 f"SELECT document_ref FROM chunk_source_provenance_{strategy}"
             ).fetchall()
         }
@@ -430,9 +434,9 @@ class TestPurgeMixedOrphansAndShared:
 
         # X is gone, Y survives
         conn = sqlite3.connect(str(db_path))
-        surviving_ids = {r[0] for r in conn.execute(
-            f"SELECT chunk_id FROM chunks_{strategy}"
-        ).fetchall()}
+        surviving_ids = {
+            r[0] for r in conn.execute(f"SELECT chunk_id FROM chunks_{strategy}").fetchall()
+        }
         conn.close()
         assert cid_x not in surviving_ids, "Sole-held chunk should be cascaded"
         assert cid_y in surviving_ids, "Shared chunk should survive"
@@ -457,10 +461,13 @@ class TestPurgeIsTransactional:
         pipeline = _get_pipeline(db_path)
 
         # Inject failure in vector delete (mid-cascade)
-        with patch(
-            "dotmd.storage.sqlite_vec.SQLiteVecVectorStore.delete_by_chunk_ids",
-            side_effect=RuntimeError("Simulated failure in vector cascade"),
-        ), pytest.raises(RuntimeError):
+        with (
+            patch(
+                "dotmd.storage.sqlite_vec.SQLiteVecVectorStore.delete_by_chunk_ids",
+                side_effect=RuntimeError("Simulated failure in vector cascade"),
+            ),
+            pytest.raises(RuntimeError),
+        ):
             pipeline._purge_file("/file_A.md")
 
         # All tables restored to pre-purge state
@@ -507,9 +514,7 @@ class TestPurgeRunsAcrossAllStrategies:
         pipeline._purge_file("/file_A.md")
 
         for s in strategies:
-            assert _count(db_path, f"chunks_{s}") == 0, (
-                f"chunks_{s} not cleaned after purge"
-            )
+            assert _count(db_path, f"chunks_{s}") == 0, f"chunks_{s} not cleaned after purge"
             assert _count(db_path, f"chunk_file_paths_{s}") == 0, (
                 f"chunk_file_paths_{s} not cleaned after purge"
             )
@@ -518,9 +523,7 @@ class TestPurgeRunsAcrossAllStrategies:
 class TestGraphCleanupFailureDoesNotRollbackDB:
     """Graph cleanup failure after DB commit does not undo DB changes (best-effort)."""
 
-    def test_graph_cleanup_failure_does_not_rollback_db(
-        self, tmp_path: Path
-    ) -> None:
+    def test_graph_cleanup_failure_does_not_rollback_db(self, tmp_path: Path) -> None:
         """graph_store failure after DB commit: DB purge persisted, failure logged."""
         db_path = _build_post_v16_db(tmp_path)
         strategy = STRATEGIES[0]
@@ -549,9 +552,7 @@ class TestGraphCleanupFailureDoesNotRollbackDB:
 class TestGraphHolderAwarePath:
     """When graph audit flags unsafe, holder-aware path preserves shared MENTIONS edges."""
 
-    def test_graph_holder_aware_path_when_audit_flags_unsafe(
-        self, tmp_path: Path
-    ) -> None:
+    def test_graph_holder_aware_path_when_audit_flags_unsafe(self, tmp_path: Path) -> None:
         """Shared chunk's graph artefacts survive when only one holder is purged."""
         # This test validates the holder-aware path described in P4 Task 1 branch (b).
         # It intentionally invokes purge with a shared chunk and asserts that the

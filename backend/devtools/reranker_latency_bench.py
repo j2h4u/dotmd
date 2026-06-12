@@ -278,7 +278,9 @@ def summarize_rows(rows: list[JsonRow]) -> list[JsonRow]:
         summaries.append(
             {
                 "model": model,
-                "model_name": next((row.get("model_name") for row in model_rows if row.get("model_name")), model),
+                "model_name": next(
+                    (row.get("model_name") for row in model_rows if row.get("model_name")), model
+                ),
                 "hot_samples": len(hot_values),
                 "p50_rerank_ms": p50,
                 "p95_rerank_ms": p95,
@@ -301,7 +303,9 @@ def summarize_rows(rows: list[JsonRow]) -> list[JsonRow]:
     )
 
 
-def write_summary_markdown(summaries: list[JsonRow], path: Path, *, config: BenchmarkConfig, commit: str) -> None:
+def write_summary_markdown(
+    summaries: list[JsonRow], path: Path, *, config: BenchmarkConfig, commit: str
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         "# Phase 20 Canonical Reranker Latency Summary",
@@ -323,22 +327,24 @@ def write_summary_markdown(summaries: list[JsonRow], path: Path, *, config: Benc
         "| Model | Band | Hot samples | p50 rerank | p95 rerank | max rerank | cold load max | Errors | Timeouts |",
         "|---|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
-    for row in summaries:
-        lines.append(
-            "| {model} | {band} | {samples} | {p50} | {p95} | {max_hot} | {cold} | {errors} | {timeouts} |".format(
-                model=f"`{row['model']}`",
-                band=row["latency_band"],
-                samples=row["hot_samples"],
-                p50=human_ms(row["p50_rerank_ms"]),
-                p95=human_ms(row["p95_rerank_ms"]),
-                max_hot=human_ms(row["max_rerank_ms"]),
-                cold=human_ms(row["cold_load_max_ms"]),
-                errors=row["error_count"],
-                timeouts=row["timeout_count"],
-            )
+    lines.extend(
+        "| {model} | {band} | {samples} | {p50} | {p95} | {max_hot} | {cold} | {errors} | {timeouts} |".format(
+            model=f"`{row['model']}`",
+            band=row["latency_band"],
+            samples=row["hot_samples"],
+            p50=human_ms(row["p50_rerank_ms"]),
+            p95=human_ms(row["p95_rerank_ms"]),
+            max_hot=human_ms(row["max_rerank_ms"]),
+            cold=human_ms(row["cold_load_max_ms"]),
+            errors=row["error_count"],
+            timeouts=row["timeout_count"],
         )
+        for row in summaries
+    )
     lines.append("")
-    lines.append("This summary does not judge relevance quality and does not change the production default reranker.")
+    lines.append(
+        "This summary does not judge relevance quality and does not change the production default reranker."
+    )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -400,7 +406,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hot-passes", type=int, default=3)
     parser.add_argument("--model-wall-timeout-s", type=int, default=900)
     parser.add_argument("--hot-query-timeout-s", type=int, default=120)
-    parser.add_argument("--commit", default=None, help="Commit hash to record; defaults to git HEAD.")
+    parser.add_argument(
+        "--commit", default=None, help="Commit hash to record; defaults to git HEAD."
+    )
     return parser
 
 

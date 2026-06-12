@@ -85,7 +85,9 @@ def _search_candidates(data: dict) -> list:
 
 class TestSearchSmoke:
     def test_returns_results_for_generic_query(self, mcp_call: Callable):
-        data = mcp_call("tools/call", {"name": "search", "arguments": {"query": "встреча", "top_k": 3}})
+        data = mcp_call(
+            "tools/call", {"name": "search", "arguments": {"query": "встреча", "top_k": 3}}
+        )
         assert not _is_tool_error(data), f"search returned error: {_tool_result_text(data)}"
         results = _search_candidates(data)
         assert len(results) > 0, "search returned no results — index may be empty"
@@ -119,11 +121,15 @@ class TestSearchSmoke:
         assert results, "search returned no results for canonical query 'тест'"
         for index, result in enumerate(results):
             score = result["fused_score"]
-            assert isinstance(score, float), f"result {index} fused_score must be float, got {type(score)}"
+            assert isinstance(score, float), (
+                f"result {index} fused_score must be float, got {type(score)}"
+            )
             assert 0.0 <= score <= 1.0, f"result {index} fused_score out of range: {score}"
 
     def test_top_k_respected(self, mcp_call: Callable):
-        data = mcp_call("tools/call", {"name": "search", "arguments": {"query": "тест", "top_k": 2}})
+        data = mcp_call(
+            "tools/call", {"name": "search", "arguments": {"query": "тест", "top_k": 2}}
+        )
         results = _search_candidates(data)
         assert len(results) <= 2, f"top_k=2 but got {len(results)} results"
 
@@ -136,7 +142,9 @@ class TestSearchSmoke:
 class TestReadSmoke:
     def test_meta_only_returns_without_error(self, mcp_call: Callable):
         """read without end returns frontmatter + total_chunks, no chunk text."""
-        search = mcp_call("tools/call", {"name": "search", "arguments": {"query": "встреча", "top_k": 1}})
+        search = mcp_call(
+            "tools/call", {"name": "search", "arguments": {"query": "встреча", "top_k": 1}}
+        )
         results = _search_candidates(search)
         assert results, "search returned no results for canonical query 'встреча'"
 
@@ -159,12 +167,16 @@ class TestReadSmoke:
 
     def test_ranged_read_returns_chunks(self, mcp_call: Callable):
         """read with end returns chunk text in [start, end)."""
-        search = mcp_call("tools/call", {"name": "search", "arguments": {"query": "встреча", "top_k": 1}})
+        search = mcp_call(
+            "tools/call", {"name": "search", "arguments": {"query": "встреча", "top_k": 1}}
+        )
         results = _search_candidates(search)
         assert results, "search returned no results for canonical query 'встреча'"
 
         ref = results[0]["ref"]
-        data = mcp_call("tools/call", {"name": "read", "arguments": {"ref": ref, "start": 0, "end": 3}})
+        data = mcp_call(
+            "tools/call", {"name": "read", "arguments": {"ref": ref, "start": 0, "end": 3}}
+        )
         assert not _is_tool_error(data), f"read errored: {_tool_result_text(data)}"
 
         payload = _tool_result_structured(data)
@@ -203,14 +215,20 @@ class TestReadSmoke:
 
     def test_cap_at_50_chunks(self, mcp_call: Callable):
         """end - start > 50 is capped server-side."""
-        search = mcp_call("tools/call", {"name": "search", "arguments": {"query": "встреча", "top_k": 1}})
+        search = mcp_call(
+            "tools/call", {"name": "search", "arguments": {"query": "встреча", "top_k": 1}}
+        )
         results = _search_candidates(search)
         assert results, "search returned no results for canonical query 'встреча'"
 
         ref = results[0]["ref"]
-        data = mcp_call("tools/call", {"name": "read", "arguments": {"ref": ref, "start": 0, "end": 200}})
+        data = mcp_call(
+            "tools/call", {"name": "read", "arguments": {"ref": ref, "start": 0, "end": 200}}
+        )
         payload = _tool_result_structured(data)
-        assert len(payload["chunks"]) <= 50, f"cap not enforced: got {len(payload['chunks'])} chunks"
+        assert len(payload["chunks"]) <= 50, (
+            f"cap not enforced: got {len(payload['chunks'])} chunks"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +238,9 @@ class TestReadSmoke:
 
 class TestDrillSmoke:
     def test_drill_returns_source_metadata(self, mcp_call: Callable):
-        search = mcp_call("tools/call", {"name": "search", "arguments": {"query": "встреча", "top_k": 1}})
+        search = mcp_call(
+            "tools/call", {"name": "search", "arguments": {"query": "встреча", "top_k": 1}}
+        )
         results = _search_candidates(search)
         assert results, "search returned no results for canonical query 'встреча'"
 
@@ -290,8 +310,7 @@ class TestFeedbackSmoke:
                 "  Expected: a flat schema (e.g., {'type': 'string'} or {'enum': [...]})."
             )
             assert "default" not in schema, (
-                f"feedback.{field} should not expose default:null in the schema. "
-                f"Got: {schema}"
+                f"feedback.{field} should not expose default:null in the schema. Got: {schema}"
             )
 
     def test_severity_enum_preserved(self, mcp_call: Callable):
@@ -304,10 +323,13 @@ class TestFeedbackSmoke:
 
     def test_empty_message_returns_not_recorded(self, mcp_call: Callable):
         """Whitespace-only messages early-return without persisting a row."""
-        data = mcp_call("tools/call", {
-            "name": "feedback",
-            "arguments": {"message": "   "},
-        })
+        data = mcp_call(
+            "tools/call",
+            {
+                "name": "feedback",
+                "arguments": {"message": "   "},
+            },
+        )
         assert not _is_tool_error(data), f"unexpected error: {_tool_result_text(data)}"
         text = _tool_result_text(data).lower()
         assert "not recorded" in text, (
@@ -324,16 +346,19 @@ class TestFeedbackSmoke:
         marker = f"__e2e_smoke__{uuid.uuid4().hex[:12]}"
         message = f"{marker} (delete me — emitted by tests/e2e/test_mcp_smoke.py)"
 
-        data = mcp_call("tools/call", {
-            "name": "feedback",
-            "arguments": {
-                "message": message,
-                "severity": "question",
-                "context": "smoke test",
-                "model": "pytest",
-                "harness": "e2e",
+        data = mcp_call(
+            "tools/call",
+            {
+                "name": "feedback",
+                "arguments": {
+                    "message": message,
+                    "severity": "question",
+                    "context": "smoke test",
+                    "model": "pytest",
+                    "harness": "e2e",
+                },
             },
-        })
+        )
         assert not _is_tool_error(data), f"feedback errored: {_tool_result_text(data)}"
         assert "recorded" in _tool_result_text(data).lower()
 
@@ -342,8 +367,7 @@ class TestFeedbackSmoke:
             conn = sqlite3.connect(str(feedback_db))
             try:
                 row = conn.execute(
-                    "SELECT severity, context, model, harness "
-                    "FROM feedback WHERE message = ?",
+                    "SELECT severity, context, model, harness FROM feedback WHERE message = ?",
                     (message,),
                 ).fetchone()
                 assert row is not None, f"feedback row not persisted in {feedback_db}"

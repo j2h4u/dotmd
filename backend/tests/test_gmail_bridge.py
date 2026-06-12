@@ -43,7 +43,12 @@ def _encoded(text: str) -> str:
 
 @pytest.fixture
 def mock_gmail_messages_response() -> dict:
-    return {"messages": [{"id": "msg001", "threadId": "thread001"}, {"id": "msg002", "threadId": "thread002"}]}
+    return {
+        "messages": [
+            {"id": "msg001", "threadId": "thread001"},
+            {"id": "msg002", "threadId": "thread002"},
+        ]
+    }
 
 
 @pytest.fixture
@@ -124,7 +129,9 @@ def test_source_native_score_none_is_safe_for_federated_pipeline() -> None:
 
 def test_source_neutral_low_signal_filter() -> None:
     assert _is_low_signal_federated_candidate(_candidate(namespace="gmail", snippet="ok")) is False
-    assert _is_low_signal_federated_candidate(_candidate(namespace="telegram", snippet="ok")) is True
+    assert (
+        _is_low_signal_federated_candidate(_candidate(namespace="telegram", snippet="ok")) is True
+    )
 
 
 def test_search_candidate_ref_format() -> None:
@@ -166,7 +173,10 @@ def test_provider_metadata_whitelist(
     with patch.object(
         provider._bridge._client,
         "get",
-        side_effect=[_json_response(mock_gmail_messages_response), _json_response(mock_gmail_message_detail)],
+        side_effect=[
+            _json_response(mock_gmail_messages_response),
+            _json_response(mock_gmail_message_detail),
+        ],
     ):
         candidate = provider.search_native("query", limit=1)[0]
     assert set(candidate.provider_metadata or {}) <= GMAIL_PROVIDER_METADATA_KEYS
@@ -178,7 +188,9 @@ def test_read_unit_window_text_plain(
     mock_gmail_message_full: dict,
 ) -> None:
     provider = GmailApplicationSourceProvider(mock_token_provider)
-    with patch.object(provider._bridge._client, "get", return_value=_json_response(mock_gmail_message_full)):
+    with patch.object(
+        provider._bridge._client, "get", return_value=_json_response(mock_gmail_message_full)
+    ):
         result = provider.read_unit_window("gmail:message:msg001", before=0, after=0)
     assert result.namespace == "gmail"
     assert len(result.units) == 1
@@ -193,7 +205,9 @@ def test_read_unit_window_html_only(mock_token_provider: MagicMock) -> None:
         "threadId": "thread001",
         "payload": {
             "headers": [],
-            "parts": [{"mimeType": "text/html", "body": {"data": _encoded("<p>Hello <b>there</b></p>")}}],
+            "parts": [
+                {"mimeType": "text/html", "body": {"data": _encoded("<p>Hello <b>there</b></p>")}}
+            ],
         },
     }
     with patch.object(provider._bridge._client, "get", return_value=_json_response(message)):
@@ -217,7 +231,10 @@ def test_decode_gmail_body_empty_payload() -> None:
 
 
 def test_decode_gmail_body_size_limit() -> None:
-    payload = {"mimeType": "text/plain", "body": {"data": _encoded("x" * (GMAIL_BODY_MAX_BYTES + 100))}}
+    payload = {
+        "mimeType": "text/plain",
+        "body": {"data": _encoded("x" * (GMAIL_BODY_MAX_BYTES + 100))},
+    }
     result = _decode_gmail_body(payload)
     assert len(result.encode("utf-8")) <= GMAIL_BODY_MAX_BYTES + len("[truncated]")
     assert result.endswith("[truncated]")
@@ -282,11 +299,18 @@ def test_gmail_source_config_limit_validation() -> None:
 
     GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r", search_result_limit=1)
     GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r", search_result_limit=500)
-    assert GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r").search_result_limit == 20
+    assert (
+        GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r").search_result_limit
+        == 20
+    )
     with pytest.raises(ValidationError):
-        GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r", search_result_limit=0)
+        GmailSourceConfig(
+            client_id="c", client_secret="s", refresh_token="r", search_result_limit=0
+        )
     with pytest.raises(ValidationError):
-        GmailSourceConfig(client_id="c", client_secret="s", refresh_token="r", search_result_limit=501)
+        GmailSourceConfig(
+            client_id="c", client_secret="s", refresh_token="r", search_result_limit=501
+        )
     with pytest.raises(ValidationError):
         GmailSourceConfig(client_id="c", client_secret="s")  # pyright: ignore[reportCallIssue]
 
@@ -400,19 +424,25 @@ def test_to_search_candidate_generic_fields(mock_token_provider: MagicMock) -> N
     assert set(candidate.provider_metadata or {}) <= GMAIL_PROVIDER_METADATA_KEYS
 
 
-def test_gmail_provider_describe_source_raises_not_implemented(mock_token_provider: MagicMock) -> None:
+def test_gmail_provider_describe_source_raises_not_implemented(
+    mock_token_provider: MagicMock,
+) -> None:
     provider = GmailApplicationSourceProvider(mock_token_provider)
     with pytest.raises(NotImplementedError, match="federated-only source"):
         provider.describe_source()
 
 
-def test_gmail_provider_export_changes_raises_not_implemented(mock_token_provider: MagicMock) -> None:
+def test_gmail_provider_export_changes_raises_not_implemented(
+    mock_token_provider: MagicMock,
+) -> None:
     provider = GmailApplicationSourceProvider(mock_token_provider)
     with pytest.raises(NotImplementedError, match="federated-only source"):
         provider.export_changes(cursor=None, limit=10)
 
 
-def test_gmail_provider_export_changes_accepts_all_protocol_params(mock_token_provider: MagicMock) -> None:
+def test_gmail_provider_export_changes_accepts_all_protocol_params(
+    mock_token_provider: MagicMock,
+) -> None:
     provider = GmailApplicationSourceProvider(mock_token_provider)
     with pytest.raises(NotImplementedError, match="federated-only source"):
         provider.export_changes(

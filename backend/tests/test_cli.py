@@ -164,7 +164,11 @@ def test_oauth_code_create_outputs_pairing_code(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 0, result.output
-    code_line = next(line for line in result.output.splitlines() if re.fullmatch(r"[A-Z2-9]{4}-[A-Z2-9]{4}", line))
+    code_line = next(
+        line
+        for line in result.output.splitlines()
+        if re.fullmatch(r"[A-Z2-9]{4}-[A-Z2-9]{4}", line)
+    )
     assert len(code_line) == 9
     assert "Expires:" in result.output
     assert (tmp_path / "oauth_state.json").exists()

@@ -115,11 +115,9 @@ def test_no_airweave_package_required() -> None:
     import sys
 
     for mod_name in list(sys.modules.keys()):
-        assert not (
-            mod_name.startswith("airweave.domains")
-            or mod_name.startswith("airweave.core")
-            or mod_name.startswith("temporalio")
-        ), f"Unexpected heavy Airweave module loaded: {mod_name}"
+        assert not (mod_name.startswith(("airweave.domains", "airweave.core", "temporalio"))), (
+            f"Unexpected heavy Airweave module loaded: {mod_name}"
+        )
 
 
 def test_vendor_version_file_exists() -> None:

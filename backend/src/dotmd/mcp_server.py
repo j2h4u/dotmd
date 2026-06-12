@@ -218,7 +218,10 @@ class _AccessLogMiddleware(BaseHTTPMiddleware):
             }
         if request.url.path == "/token":
             try:
-                form = {key: values[-1] for key, values in parse_qs((body or b"").decode("utf-8")).items()}
+                form = {
+                    key: values[-1]
+                    for key, values in parse_qs((body or b"").decode("utf-8")).items()
+                }
             except Exception:
                 return {"parse_error": "invalid_form"}
             return {
@@ -328,7 +331,9 @@ def _pairing_form(request: Request, *, error: str | None = None) -> Response:
     )
 
 
-async def _redirect_for_authorization(request: Request, *, pairing_code: str | None = None) -> Response:
+async def _redirect_for_authorization(
+    request: Request, *, pairing_code: str | None = None
+) -> Response:
     if _provider is None:
         return JSONResponse({"error": "OAuth is not configured"}, status_code=404)
 
@@ -337,7 +342,10 @@ async def _redirect_for_authorization(request: Request, *, pairing_code: str | N
     if client is None:
         client = await _provider.get_pending_client(auth_request.client_id)
         if client is None:
-            return JSONResponse({"error": "invalid_request", "error_description": "Unknown client_id"}, status_code=400)
+            return JSONResponse(
+                {"error": "invalid_request", "error_description": "Unknown client_id"},
+                status_code=400,
+            )
         if pairing_code is None:
             return _pairing_form(request)
         await _provider.activate_pending_client(client, pairing_code)
@@ -405,7 +413,11 @@ def _oauth_metadata_response() -> JSONResponse:
             "scopes_supported": ["dotmd"],
             "response_types_supported": ["code"],
             "grant_types_supported": ["authorization_code", "refresh_token"],
-            "token_endpoint_auth_methods_supported": ["none", "client_secret_post", "client_secret_basic"],
+            "token_endpoint_auth_methods_supported": [
+                "none",
+                "client_secret_post",
+                "client_secret_basic",
+            ],
             "code_challenge_methods_supported": ["S256"],
             "authorization_response_iss_parameter_supported": True,
         },
@@ -441,20 +453,23 @@ async def oauth_protected_resource_mcp(request: Request) -> JSONResponse:
 
 def _get_service() -> DotMDService:
     if _service is None:
-        raise RuntimeError("Service not initialized — server not started via create_app() or _init_for_stdio()")
+        raise RuntimeError(
+            "Service not initialized — server not started via create_app() or _init_for_stdio()"
+        )
     return _service
 
 
 def _get_feedback() -> FeedbackStore:
     if _feedback is None:
-        raise RuntimeError("Feedback store not initialized — server not started via create_app() or _init_for_stdio()")
+        raise RuntimeError(
+            "Feedback store not initialized — server not started via create_app() or _init_for_stdio()"
+        )
     return _feedback
 
 
 def _ref_tool_error(tool_name: str, ref: str, exc: ValueError) -> RuntimeError:
     return RuntimeError(
-        f"{tool_name} failed for ref {ref!r}: {exc}. "
-        "Action: pass a ref returned by search."
+        f"{tool_name} failed for ref {ref!r}: {exc}. Action: pass a ref returned by search."
     )
 
 
@@ -675,7 +690,7 @@ async def search(
         formatted_candidates = [_format_result(r) for r in response.candidates]
         return SearchResponse(candidates=formatted_candidates, source_status=response.source_status)
     except Exception as exc:
-        logger.error("search failed: query=%r", query[:100], exc_info=True)
+        logger.exception("search failed: query=%r", query[:100])
         raise RuntimeError(f"Search failed: {exc}.") from exc
 
 
@@ -735,8 +750,10 @@ async def read_document(
         logger.warning("read ref rejected: ref=%r error=%s", ref, exc)
         raise _ref_tool_error("read", ref, exc) from exc
     except Exception as exc:
-        logger.error("read failed: ref=%r", ref, exc_info=True)
-        raise RuntimeError("Read failed. Action: retry later or submit feedback with the ref.") from exc
+        logger.exception("read failed: ref=%r", ref)
+        raise RuntimeError(
+            "Read failed. Action: retry later or submit feedback with the ref."
+        ) from exc
 
 
 @mcp.tool(
@@ -774,8 +791,10 @@ async def drill(
         logger.warning("drill ref rejected: ref=%r error=%s", ref, exc)
         raise _ref_tool_error("drill", ref, exc) from exc
     except Exception as exc:
-        logger.error("drill failed: ref=%r", ref, exc_info=True)
-        raise RuntimeError("Drill failed. Action: retry later or submit feedback with the ref.") from exc
+        logger.exception("drill failed: ref=%r", ref)
+        raise RuntimeError(
+            "Drill failed. Action: retry later or submit feedback with the ref."
+        ) from exc
 
 
 @mcp.tool(
@@ -791,23 +810,42 @@ async def drill(
 async def feedback(
     message: Annotated[
         str,
-        Field(description="What was observed; ideally include what you expected instead.", min_length=1, max_length=10000),
+        Field(
+            description="What was observed; ideally include what you expected instead.",
+            min_length=1,
+            max_length=10000,
+        ),
     ],
     severity: Annotated[
         Literal["bug", "suggestion", "question"] | None,
-        Field(description="bug — wrong output or violated contract; suggestion — new capability or UX improvement; question — unclear how something works.", json_schema_extra=_collapse_null),
+        Field(
+            description="bug — wrong output or violated contract; suggestion — new capability or UX improvement; question — unclear how something works.",
+            json_schema_extra=_collapse_null,
+        ),
     ] = None,
     context: Annotated[
         str | None,
-        Field(description="Which tool, what arguments, or what task you were trying to accomplish.", max_length=2000, json_schema_extra=_collapse_null),
+        Field(
+            description="Which tool, what arguments, or what task you were trying to accomplish.",
+            max_length=2000,
+            json_schema_extra=_collapse_null,
+        ),
     ] = None,
     model: Annotated[
         str | None,
-        Field(description="Your model name, e.g. claude-opus-4-7.", max_length=200, json_schema_extra=_collapse_null),
+        Field(
+            description="Your model name, e.g. claude-opus-4-7.",
+            max_length=200,
+            json_schema_extra=_collapse_null,
+        ),
     ] = None,
     harness: Annotated[
         str | None,
-        Field(description="Client or environment, e.g. Claude Desktop, Cursor.", max_length=200, json_schema_extra=_collapse_null),
+        Field(
+            description="Client or environment, e.g. Claude Desktop, Cursor.",
+            max_length=200,
+            json_schema_extra=_collapse_null,
+        ),
     ] = None,
 ) -> str:
     """Send feedback to the knowledgebase maintainer.
@@ -835,7 +873,7 @@ async def feedback(
         )
         return "Feedback recorded."
     except Exception as exc:
-        logger.error("feedback failed", exc_info=True)
+        logger.exception("feedback failed")
         raise RuntimeError(
             f"Failed to record feedback: {exc}. "
             "Action: the feedback was not saved; you may retry or note the issue in your response to the user."

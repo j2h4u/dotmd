@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
@@ -17,10 +17,13 @@ from dotmd.storage.metadata import SQLiteMetadataStore
 def _get_service(tmp_path: Path):  # type: ignore[no-untyped-def]
     from dotmd.api.service import DotMDService
     from dotmd.core.config import Settings
+
     # Explicitly disable Telegram socket so env vars from production deployment
     # (DOTMD_TELEGRAM_DAEMON_SOCKET) do not inject a live lifecycle bundle into
     # unit tests that only mock local search behavior.
-    settings = Settings(index_dir=tmp_path, embedding_url="http://localhost:8088", telegram_daemon_socket=None)
+    settings = Settings(
+        index_dir=tmp_path, embedding_url="http://localhost:8088", telegram_daemon_socket=None
+    )
     return DotMDService(settings)
 
 
@@ -79,6 +82,7 @@ class TestSearchReturnsFilePaths:
         service = _get_service(tmp_path)
 
         from dotmd.core.models import SearchCandidate, SearchMode, SearchResponse
+
         stub_result = SearchCandidate(
             ref="filesystem:/mnt/test.md#0",
             namespace="filesystem",
@@ -119,6 +123,7 @@ class TestSearchRespectsTopK:
         service = _get_service(tmp_path)
 
         from dotmd.core.models import SearchCandidate
+
         stub_results = [
             SearchCandidate(
                 ref=f"filesystem:/mnt/test_{i}.md#0",
@@ -139,7 +144,10 @@ class TestSearchRespectsTopK:
         # top_k=3 → merge returns at most 3 candidates sorted by fused_score desc.
         # stub_results has scores [0.0, 0.1, 0.2, 0.3, 0.4]; top 3 are [0.4, 0.3, 0.2].
         assert len(response.candidates) == 3
-        assert response.candidates == sorted(stub_results, key=lambda c: c.fused_score, reverse=True)[:3]
+        assert (
+            response.candidates
+            == sorted(stub_results, key=lambda c: c.fused_score, reverse=True)[:3]
+        )
         kwargs = execute_search.call_args.kwargs
         assert kwargs["top_k"] == 3
         assert kwargs["pool_size"] == max(
@@ -164,7 +172,7 @@ def _source_document(file_path: Path, *, namespace: str = "filesystem"):
         parser_name="markdown",
         document_type="document",
         title="Service Note",
-        updated_at=datetime(2026, 5, 6),
+        updated_at=datetime(2026, 5, 6, tzinfo=UTC),
         content_fingerprint="content",
         metadata_fingerprint="metadata",
         metadata_json={},
@@ -183,7 +191,7 @@ def _telegram_document():
         media_type="text/plain",
         parser_name="telegram-message",
         document_type="dialog",
-        updated_at=datetime(2026, 5, 7),
+        updated_at=datetime(2026, 5, 7, tzinfo=UTC),
         content_fingerprint="telegram-content",
         metadata_fingerprint="telegram-metadata",
         metadata_json={"dialog_id": -1001, "dialog_name": "Project Chat"},
@@ -201,7 +209,7 @@ def _telegram_unit(message_id: int, text: str, *, target: bool = False):
         text=text,
         order_key=f"{message_id:020d}",
         fingerprint=f"fingerprint-{message_id}",
-        updated_at=datetime(2026, 5, 7, 12, message_id % 60),
+        updated_at=datetime(2026, 5, 7, 12, message_id % 60, tzinfo=UTC),
         metadata_json={
             "dialog_id": -1001,
             "dialog_name": "Project Chat",
@@ -295,7 +303,6 @@ class TestFilesystemBindingLifecycle:
         tmp_path: Path,
     ) -> None:
         """Skipped: See class docstring."""
-        pass
 
 
 class TestActiveSearchFiltering:
@@ -435,8 +442,7 @@ class TestActiveSearchFiltering:
                     "search_query": "target",
                     "original_query": "target",
                     "fused": [
-                        (chunk_id, 1.0 - i / 100)
-                        for i, chunk_id in enumerate(inactive + active)
+                        (chunk_id, 1.0 - i / 100) for i, chunk_id in enumerate(inactive + active)
                     ],
                     "engine_results": {},
                     "semantic_hits": [],
@@ -550,9 +556,7 @@ class TestReadRefContract:
         metadata.is_resource_binding_active.return_value = True
         service._pipeline._metadata_store = metadata
 
-        document_ref, unit_ref = _parse_telegram_message_ref(
-            "telegram:dialog:-1001:message:42"
-        )
+        document_ref, unit_ref = _parse_telegram_message_ref("telegram:dialog:-1001:message:42")
         document, target_unit_ref = service._require_active_telegram_message_ref(
             "telegram:dialog:-1001:message:42"
         )
@@ -726,9 +730,7 @@ class TestReadRefContract:
         assert "file_path" not in payload
         assert payload["frontmatter"]["title"] == "Service Note"
         assert payload["total_chunks"] == 2
-        assert payload["chunks"] == [
-            {"index": 0, "heading_hierarchy": ["H"], "text": "Body"}
-        ]
+        assert payload["chunks"] == [{"index": 0, "heading_hierarchy": ["H"], "text": "Body"}]
         metadata.get_chunk_count_for_file.assert_called_once_with(
             service._settings.chunk_strategy,
             str(note_path.resolve()),
@@ -1109,7 +1111,9 @@ class TestCompareRerankers:
             isinstance(run["rerank_ms"], float) and run["rerank_ms"] >= 0.0
             for run in comparison["rerankers"]
         )
-        assert all(run["elapsed"] and run["load"] and run["rerank"] for run in comparison["rerankers"])
+        assert all(
+            run["elapsed"] and run["load"] and run["rerank"] for run in comparison["rerankers"]
+        )
         for run in comparison["rerankers"]:
             assert run["returned_count"] == len(run["top_chunk_ids"]) == len(run["scores"])
 
@@ -1142,9 +1146,7 @@ class TestCompareRerankers:
 
         comparison = service.compare_rerankers("q", ["mmarco-minilm", "msmarco-minilm"])
 
-        assert (
-            failing.rerank.call_args.kwargs["raise_on_provider_error"] is True
-        )
+        assert failing.rerank.call_args.kwargs["raise_on_provider_error"] is True
         by_name = {run["name"]: run for run in comparison["rerankers"]}
         assert by_name["mmarco-minilm"]["error"] == "boom"
         assert by_name["mmarco-minilm"]["returned_count"] == 0
@@ -1198,9 +1200,7 @@ class TestCompareRerankers:
         ]
         assert comparison["overlap_reference"] == "msmarco-minilm"
 
-    def test_compare_default_names_include_configured_models(
-        self, tmp_path: Path
-    ) -> None:
+    def test_compare_default_names_include_configured_models(self, tmp_path: Path) -> None:
         service = _get_service(tmp_path)
         service._settings.reranker_compare_names = "mmarco-minilm,msmarco-minilm"
         service._query_expander = MagicMock()
@@ -1235,9 +1235,7 @@ class TestCompareRerankers:
         assert by_name["mmarco-minilm"]["top_chunk_ids"] == ["c2", "c1"]
         assert by_name["mmarco-minilm"]["scores"] == [0.9, 0.8]
 
-    def test_compare_three_rerankers_reuses_retrieval_engines_once(
-        self, tmp_path: Path
-    ) -> None:
+    def test_compare_three_rerankers_reuses_retrieval_engines_once(self, tmp_path: Path) -> None:
         service = _get_service(tmp_path)
         service._query_expander = MagicMock()
         service._query_expander.expand.return_value = MagicMock(expanded_text="expanded q")
@@ -1315,9 +1313,7 @@ class TestCompareRerankers:
         assert comparison["overlap_reference"] == "msmarco-minilm"
         assert comparison["overlap"] == {"msmarco-minilm": 2, "mxbai-xsmall-v1": 1}
 
-    def test_compare_all_failures_returns_errors_and_empty_overlap(
-        self, tmp_path: Path
-    ) -> None:
+    def test_compare_all_failures_returns_errors_and_empty_overlap(self, tmp_path: Path) -> None:
         service = _get_service(tmp_path)
         service._query_expander = MagicMock()
         service._query_expander.expand.return_value = MagicMock(expanded_text="expanded q")
@@ -1453,9 +1449,7 @@ class TestSearchApiRerankerSurfaces:
         server._service = service
         client = TestClient(server.app)
 
-        response = client.get(
-            "/rerank/compare?q=test&rerankers=mmarco-minilm,msmarco-minilm"
-        )
+        response = client.get("/rerank/compare?q=test&rerankers=mmarco-minilm,msmarco-minilm")
 
         assert response.status_code == 200
         assert response.json()["shared_pool_size"] == 2
@@ -1575,16 +1569,14 @@ class TestSourceProvenanceSafetyGate:
         metadata = MagicMock()
         metadata.count_missing_source_provenance.return_value = 0
         service._pipeline._metadata_store = metadata
-        service._pipeline.backfill_filesystem_source_documents_from_provenance = (
-            MagicMock(
-                return_value={
-                    "missing_source_documents": 2,
-                    "inserted_source_documents": 2,
-                    "inserted_bindings": 2,
-                    "missing_files": 0,
-                    "skipped_files": 0,
-                }
-            )
+        service._pipeline.backfill_filesystem_source_documents_from_provenance = MagicMock(
+            return_value={
+                "missing_source_documents": 2,
+                "inserted_source_documents": 2,
+                "inserted_bindings": 2,
+                "missing_files": 0,
+                "skipped_files": 0,
+            }
         )
         service._collect_candidate_pool = MagicMock(
             return_value={
@@ -1617,6 +1609,7 @@ class TestMergeWithFederatedQuota:
 
     def _local(self, n: int, base_score: float = 0.9) -> list:
         from dotmd.core.models import SearchCandidate
+
         return [
             SearchCandidate(
                 ref=f"filesystem:/mnt/doc_{i}.md#0",
@@ -1633,6 +1626,7 @@ class TestMergeWithFederatedQuota:
 
     def _fed(self, n: int, snippet_template: str = "telegram message about {i}") -> list:
         from dotmd.core.models import SearchCandidate
+
         return [
             SearchCandidate(
                 ref=f"telegram:dialog:-100123:message:{i}",
@@ -1650,6 +1644,7 @@ class TestMergeWithFederatedQuota:
     def test_federated_quota_candidates_appear_when_local_fills_top_k(self) -> None:
         """Fed candidates appear even when local results could fill all top_k slots."""
         from dotmd.api.service import _merge_with_federated_quota
+
         local = self._local(10)
         fed = self._fed(3)
         result = _merge_with_federated_quota(local, fed, top_k=5, fed_quota=3)
@@ -1660,6 +1655,7 @@ class TestMergeWithFederatedQuota:
     def test_federated_quota_adaptive_slots(self) -> None:
         """When fewer fed candidates exist than quota, local fills the remainder."""
         from dotmd.api.service import _merge_with_federated_quota
+
         local = self._local(10)
         fed = self._fed(1)  # only 1 fed result, quota is 3
         result = _merge_with_federated_quota(local, fed, top_k=5, fed_quota=3)
@@ -1673,6 +1669,7 @@ class TestMergeWithFederatedQuota:
         """Low-signal fed snippets (short/emoji) are dropped before quota math."""
         from dotmd.api.service import _merge_with_federated_quota
         from dotmd.core.models import SearchCandidate
+
         low_signal = SearchCandidate(
             ref="telegram:dialog:-100123:message:99",
             namespace="telegram",
@@ -1690,6 +1687,7 @@ class TestMergeWithFederatedQuota:
     def test_federated_quota_empty_fed_returns_sorted_local(self) -> None:
         """Empty fed list returns local candidates sorted by fused_score descending."""
         from dotmd.api.service import _merge_with_federated_quota
+
         # create local in reverse score order to verify sorting
         local = self._local(5, base_score=0.5)
         local_shuffled = list(reversed(local))

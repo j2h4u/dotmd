@@ -21,8 +21,7 @@ def _make_mock_store(n: int = 5) -> MagicMock:
     """Create a mock MetadataStoreProtocol returning *n* chunks."""
     store = MagicMock()
     store.get_chunks.return_value = [
-        MagicMock(chunk_id=f"chunk-{i}", text=f"Text for chunk {i} " * 20)
-        for i in range(n)
+        MagicMock(chunk_id=f"chunk-{i}", text=f"Text for chunk {i} " * 20) for i in range(n)
     ]
     return store
 
@@ -162,7 +161,9 @@ class TestRerankerScoring:
         reranker = _make_reranker()
         mock_store = _make_mock_store(5)
 
-        results = reranker.rerank("test query", [f"chunk-{i}" for i in range(5)], mock_store, top_k=3)
+        results = reranker.rerank(
+            "test query", [f"chunk-{i}" for i in range(5)], mock_store, top_k=3
+        )
 
         assert len(results) == 3
         scores = [s for _, s in results]
@@ -217,13 +218,11 @@ class TestRerankerScoring:
     def test_init_rejects_score_threshold_parameter(self) -> None:
         """Reranker.__init__() does NOT accept score_threshold parameter."""
         with pytest.raises(TypeError):
-            Reranker(  # type: ignore[call-arg]
-                **{
-                    "model_name": "test-model",
-                    "length_penalty": False,
-                    "min_length": 100,
-                    "score_threshold": -8.0,
-                }
+            Reranker(
+                model_name="test-model",
+                length_penalty=False,
+                min_length=100,
+                score_threshold=-8.0,  # pyright: ignore[reportCallIssue]
             )
 
     def test_settings_has_no_rerank_score_threshold(self) -> None:
@@ -300,11 +299,7 @@ class TestRerankerRegistry:
         """Remote-code trust is allowlisted per model, not globally enabled."""
         from dotmd.search.reranker import BUILTIN_RERANKERS
 
-        trusted = [
-            name
-            for name, spec in BUILTIN_RERANKERS.items()
-            if spec.trust_remote_code
-        ]
+        trusted = [name for name, spec in BUILTIN_RERANKERS.items() if spec.trust_remote_code]
 
         assert trusted == []
 

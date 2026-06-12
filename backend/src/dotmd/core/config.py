@@ -44,8 +44,7 @@ RUNTIME_INDEX_DIR = Path("/dotmd-index")
 def _path_spec_is_absolute(path_spec: str) -> bool:
     """Return whether a directory/glob path spec is anchored at an absolute path."""
     wildcard_positions = [
-        pos for pos in (path_spec.find("*"), path_spec.find("?"), path_spec.find("["))
-        if pos != -1
+        pos for pos in (path_spec.find("*"), path_spec.find("?"), path_spec.find("[")) if pos != -1
     ]
     prefix = path_spec[: min(wildcard_positions)] if wildcard_positions else path_spec
     prefix = prefix.rstrip("/")
@@ -70,7 +69,7 @@ class Settings(BaseSettings):
     }
 
     # Paths
-    data_dir: Path = Path(".")
+    data_dir: Path = Path()
     index_dir: Path = Path.home() / ".dotmd"
 
     # Local SentenceTransformers model — used only when embedding_url is unset.
@@ -164,9 +163,7 @@ class Settings(BaseSettings):
             parsed[key] = w
             total += w
         if abs(total - 1.0) > 0.001:
-            raise ValueError(
-                f"embedding_weights: weights must sum to 1.0 (got {total:.4f})"
-            )
+            raise ValueError(f"embedding_weights: weights must sum to 1.0 (got {total:.4f})")
         # Require both "text" and "meta" keys — dual-encoder architecture requires both
         # components. Accepting arbitrary keys would silently omit a component from fusion.
         if "text" not in parsed:
@@ -325,11 +322,7 @@ class Settings(BaseSettings):
     @property
     def parsed_reranker_compare_names(self) -> list[str]:
         """Return configured reranker comparison names as a cleaned list."""
-        return [
-            name.strip()
-            for name in self.reranker_compare_names.split(",")
-            if name.strip()
-        ]
+        return [name.strip() for name in self.reranker_compare_names.split(",") if name.strip()]
 
     @property
     def effective_indexing_exclude(self) -> list[str]:
@@ -380,8 +373,7 @@ class Settings(BaseSettings):
                 errors.append("falkordb_url must be set when graph_backend is falkordb")
             elif self.falkordb_url == DEFAULT_FALKORDB_URL:
                 errors.append(
-                    "falkordb_url must not use DEFAULT_FALKORDB_URL "
-                    "when graph_backend is falkordb"
+                    "falkordb_url must not use DEFAULT_FALKORDB_URL when graph_backend is falkordb"
                 )
 
         if errors:
@@ -390,7 +382,9 @@ class Settings(BaseSettings):
     @property
     def config_path(self) -> Path:
         """Path to the TOML config file."""
-        toml_file = cast(str, self.model_config.get("toml_file", str(self.index_dir / "config.toml")))
+        toml_file = cast(
+            str, self.model_config.get("toml_file", str(self.index_dir / "config.toml"))
+        )
         return Path(toml_file)
 
     @property
@@ -413,7 +407,9 @@ class Settings(BaseSettings):
             return self.embedding_query_instruction
         model_lower = self.embedding_model.lower()
         if "qwen3-embedding" in model_lower:
-            return "Instruct: Given a search query, retrieve relevant passages that answer the query"
+            return (
+                "Instruct: Given a search query, retrieve relevant passages that answer the query"
+            )
         return ""
 
     @property

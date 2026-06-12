@@ -80,9 +80,7 @@ class SourceCapability(StrEnum):
     INCREMENTAL_CURSOR = "incremental_cursor"
 
 
-SOURCE_SCHEMA_FIELD_TYPES = frozenset(
-    {"str", "int", "bool", "path", "list[str]", "dict[str, Any]"}
-)
+SOURCE_SCHEMA_FIELD_TYPES = frozenset({"str", "int", "bool", "path", "list[str]", "dict[str, Any]"})
 
 
 class SourceDisplayMetadata(BaseModel):
@@ -231,9 +229,7 @@ class ResourceBinding(BaseModel):
             raise ValueError(f"ref must be {expected_ref!r}")
 
         if self.namespace == "filesystem" and self.resource_ref != self.document_ref:
-            raise ValueError(
-                "filesystem resource_ref must match document_ref"
-            )
+            raise ValueError("filesystem resource_ref must match document_ref")
 
         return self
 
@@ -294,9 +290,7 @@ class ApplicationSourceDescription(BaseModel):
             namespace=descriptor.namespace,
             source_kind=descriptor.source_kind,
             display_name=descriptor.display.display_name,
-            capabilities=[
-                capability.value for capability in descriptor.capabilities
-            ],
+            capabilities=[capability.value for capability in descriptor.capabilities],
             metadata_json=dict(descriptor.metadata_json),
         )
 
@@ -448,9 +442,7 @@ class SearchCandidate(BaseModel):
     def _validate_ref(cls, value: str) -> str:
         namespace, separator, document_ref = value.partition(":")
         if not separator or not namespace or not document_ref:
-            raise ValueError(
-                "ref must be formatted as '<namespace>:<document_ref>'"
-            )
+            raise ValueError("ref must be formatted as '<namespace>:<document_ref>'")
         return value
 
 
@@ -490,7 +482,9 @@ class IndexStats(BaseModel):
     data_dir: str | None = None
 
     # Trickle indexer progress
-    trickle_status: str | None = None  # "idle", "backlog", "watching", "stopping", or None if not running
+    trickle_status: str | None = (
+        None  # "idle", "backlog", "watching", "stopping", or None if not running
+    )
     trickle_indexed: int | None = None  # files indexed so far in current run
     trickle_total: int | None = None  # total files to index in current run
     trickle_current_file: str | None = None  # file currently being processed

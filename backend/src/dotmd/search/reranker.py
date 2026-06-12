@@ -182,9 +182,7 @@ class CrossEncoderReranker:
         # Preserve ordering alignment between ids and texts.
         chunks_by_id = {chunk.chunk_id: chunk for chunk in chunks}
         id_text_pairs: list[tuple[str, str]] = [
-            (cid, chunks_by_id[cid].text)
-            for cid in chunk_ids
-            if cid in chunks_by_id
+            (cid, chunks_by_id[cid].text) for cid in chunk_ids if cid in chunks_by_id
         ]
         if not id_text_pairs:
             return []
@@ -194,9 +192,7 @@ class CrossEncoderReranker:
             pairs = [(query, text) for _, text in id_text_pairs]
             raw_scores = model.predict(pairs)
             scores: list[float] = (
-                raw_scores.tolist()
-                if hasattr(raw_scores, "tolist")
-                else list(raw_scores)
+                raw_scores.tolist() if hasattr(raw_scores, "tolist") else list(raw_scores)
             )
         except Exception:
             if raise_on_provider_error:
@@ -230,8 +226,11 @@ class CrossEncoderReranker:
         if scored:
             logger.debug(
                 "Reranker: %d/%d passed relevance floor (%s), top=%.2f, min=%.2f",
-                len(scored), len(id_text_pairs), self._relevance_floor,
-                scored[0][1], scored[-1][1],
+                len(scored),
+                len(id_text_pairs),
+                self._relevance_floor,
+                scored[0][1],
+                scored[-1][1],
             )
         else:
             logger.debug(
@@ -248,14 +247,10 @@ def create_reranker(name: str, settings: Settings) -> RerankerProtocol:
         spec = BUILTIN_RERANKERS[name]
     except KeyError:
         available = ", ".join(available_rerankers())
-        raise ValueError(
-            f"Unknown reranker {name!r}; available: {available}"
-        ) from None
+        raise ValueError(f"Unknown reranker {name!r}; available: {available}") from None
 
     if spec.backend != "cross_encoder":
-        raise ValueError(
-            f"Unsupported reranker backend {spec.backend!r} for {name!r}"
-        )
+        raise ValueError(f"Unsupported reranker backend {spec.backend!r} for {name!r}")
 
     return CrossEncoderReranker(
         model_name=spec.model_name,

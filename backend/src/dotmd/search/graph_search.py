@@ -107,9 +107,7 @@ class GraphSearchEngine:
             valid_chunks = self._metadata_store.get_chunks(candidate_ids)
             valid_ids = {c.chunk_id for c in valid_chunks}
             aggregated_scores = {
-                cid: score
-                for cid, score in aggregated_scores.items()
-                if cid in valid_ids
+                cid: score for cid, score in aggregated_scores.items() if cid in valid_ids
             }
 
         # Sort by descending score and return top-k.

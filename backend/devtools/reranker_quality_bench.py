@@ -115,7 +115,9 @@ def load_labels(path: Path) -> list[LabelCase]:
                 continue
             raw = json.loads(line)
             if not raw.get("id") or not raw.get("query") or not raw.get("relevant"):
-                raise ValueError(f"invalid label row at line {line_number}: id/query/relevant required")
+                raise ValueError(
+                    f"invalid label row at line {line_number}: id/query/relevant required"
+                )
             labels.append(
                 LabelCase(
                     id=str(raw["id"]),
@@ -128,7 +130,9 @@ def load_labels(path: Path) -> list[LabelCase]:
     return labels
 
 
-def find_chunks_for_file_contains(service: BenchmarkService, file_path: str, contains: str) -> list[str]:
+def find_chunks_for_file_contains(
+    service: BenchmarkService, file_path: str, contains: str
+) -> list[str]:
     """Resolve a file_path + substring label to chunk ids in the active chunk strategy."""
     strategy = service._settings.chunk_strategy
     metadata_store = service._pipeline.metadata_store
@@ -274,13 +278,17 @@ def make_result_row(
         "mrr_at_10": mrr_at(top_chunk_ids, resolved.relevant_ids, resolved.maybe_ids, 10),
         "ndcg_at_10": ndcg_at(top_chunk_ids, resolved.relevant_ids, resolved.maybe_ids, 10),
         "rerank_ms": run.get("rerank_ms"),
-        "rerank": format_elapsed_ms(float(run["rerank_ms"])) if run.get("rerank_ms") is not None else None,
+        "rerank": format_elapsed_ms(float(run["rerank_ms"]))
+        if run.get("rerank_ms") is not None
+        else None,
         "error": error,
         "pool_miss": pool_miss,
     }
 
 
-def hydrate_file_paths(service: BenchmarkService, chunk_strategy: str, chunk_ids: list[str]) -> list[list[str]]:
+def hydrate_file_paths(
+    service: BenchmarkService, chunk_strategy: str, chunk_ids: list[str]
+) -> list[list[str]]:
     paths_by_id = service._pipeline.metadata_store.get_file_paths_for_chunk_ids(
         chunk_strategy, chunk_ids
     )
@@ -308,7 +316,9 @@ def summarize_rows(rows: list[JsonRow]) -> list[JsonRow]:
         summaries.append(
             {
                 "model": model,
-                "model_name": next((row.get("model_name") for row in model_rows if row.get("model_name")), model),
+                "model_name": next(
+                    (row.get("model_name") for row in model_rows if row.get("model_name")), model
+                ),
                 "valid_queries": denominator,
                 "pool_miss_count": pool_miss_count,
                 "error_count": error_count,
@@ -382,22 +392,22 @@ def write_summary_markdown(
         "| Model | Valid queries | Pool misses | Errors | Hit@1 | Hit@3 | Hit@5 | MRR@10 | nDCG@10 | p50 rerank | p95 rerank |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
-    for row in summaries:
-        lines.append(
-            "| {model} | {valid} | {misses} | {errors} | {h1} | {h3} | {h5} | {mrr} | {ndcg} | {p50} | {p95} |".format(
-                model=f"`{row['model']}`",
-                valid=row["valid_queries"],
-                misses=row["pool_miss_count"],
-                errors=row["error_count"],
-                h1=fmt_metric(row["hit_at_1"]),
-                h3=fmt_metric(row["hit_at_3"]),
-                h5=fmt_metric(row["hit_at_5"]),
-                mrr=fmt_metric(row["mrr_at_10"]),
-                ndcg=fmt_metric(row["ndcg_at_10"]),
-                p50=fmt_ms(row["p50_rerank_ms"]),
-                p95=fmt_ms(row["p95_rerank_ms"]),
-            )
+    lines.extend(
+        "| {model} | {valid} | {misses} | {errors} | {h1} | {h3} | {h5} | {mrr} | {ndcg} | {p50} | {p95} |".format(
+            model=f"`{row['model']}`",
+            valid=row["valid_queries"],
+            misses=row["pool_miss_count"],
+            errors=row["error_count"],
+            h1=fmt_metric(row["hit_at_1"]),
+            h3=fmt_metric(row["hit_at_3"]),
+            h5=fmt_metric(row["hit_at_5"]),
+            mrr=fmt_metric(row["mrr_at_10"]),
+            ndcg=fmt_metric(row["ndcg_at_10"]),
+            p50=fmt_ms(row["p50_rerank_ms"]),
+            p95=fmt_ms(row["p95_rerank_ms"]),
         )
+        for row in summaries
+    )
 
     lines.extend(["", "## Retrieval Gaps", ""])
     if pool_miss_ids:
@@ -407,7 +417,9 @@ def write_summary_markdown(
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def run_benchmark(config: BenchmarkConfig, service: BenchmarkService | None = None) -> list[JsonRow]:
+def run_benchmark(
+    config: BenchmarkConfig, service: BenchmarkService | None = None
+) -> list[JsonRow]:
     if service is None:
         service = cast(
             BenchmarkService,
@@ -494,7 +506,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mode", default="hybrid")
     parser.add_argument("--top-n", type=int, default=10)
     parser.add_argument("--pool-size", type=int, default=20)
-    parser.add_argument("--commit", default=None, help="Commit hash to record; defaults to git HEAD.")
+    parser.add_argument(
+        "--commit", default=None, help="Commit hash to record; defaults to git HEAD."
+    )
     return parser
 
 

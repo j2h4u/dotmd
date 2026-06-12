@@ -153,6 +153,7 @@ class TestRunLocalEngine:
 
     def test_run_local_engine_ok(self) -> None:
         """Successful local engine call returns ok outcome."""
+
         def _search() -> list[tuple[str, float]]:
             return [("chunk_a", 0.9), ("chunk_b", 0.7)]
 
@@ -166,6 +167,7 @@ class TestRunLocalEngine:
 
     def test_run_local_engine_error(self) -> None:
         """Exception in local engine returns error outcome."""
+
         def _search() -> list[tuple[str, float]]:
             raise RuntimeError("search failed")
 
@@ -229,9 +231,7 @@ class TestRunFederatedEngine:
     @pytest.mark.anyio
     async def test_run_federated_engine_exception(self) -> None:
         """Exception in provider returns error outcome."""
-        provider = StubFederatedProvider(
-            raises=RuntimeError("provider down")
-        )
+        provider = StubFederatedProvider(raises=RuntimeError("provider down"))
 
         outcome = await _run_federated_engine(
             "stub:fts",
@@ -265,10 +265,7 @@ class TestFanout:
 
         start = time.time()
         results = await fanout_federated(
-            {
-                name: (lambda p=p: p.search_native("query", 10))
-                for name, p in providers.items()
-            },
+            {name: (lambda p=p: p.search_native("query", 10)) for name, p in providers.items()},
             timeout=5.0,
         )
         elapsed = time.time() - start
@@ -289,10 +286,7 @@ class TestFanout:
         }
 
         results = await fanout_federated(
-            {
-                name: (lambda p=p: p.search_native("query", 10))
-                for name, p in providers.items()
-            },
+            {name: (lambda p=p: p.search_native("query", 10)) for name, p in providers.items()},
             timeout=5.0,
         )
 
@@ -428,7 +422,6 @@ class TestLocalEnginesNotConcurrent:
     @pytest.mark.skip(reason="Deferred to Task 3 - service integration")
     def test_local_engines_not_called_concurrently(self) -> None:
         """Local engines run sequentially, never concurrently."""
-        pass
 
 
 class TestAsyncSearchEventLoop:
@@ -437,42 +430,34 @@ class TestAsyncSearchEventLoop:
     @pytest.mark.skip(reason="Deferred to Task 3 - service integration")
     def test_sync_search_in_running_loop_raises_runtime_error(self) -> None:
         """Sync search from inside event loop raises loudly."""
-        pass
 
     @pytest.mark.skip(reason="Deferred to Task 3 - service integration")
     def test_async_search_in_running_loop_succeeds(self) -> None:
         """Async search from inside event loop works correctly."""
-        pass
 
     @pytest.mark.skip(reason="Deferred to Task 3 - service integration")
     def test_search_async_does_not_block_event_loop(self) -> None:
         """Local search runs off-loop; event loop unblocked (cycle-3 HIGH)."""
-        pass
 
     @pytest.mark.skip(reason="Deferred to Task 3 - service integration")
     def test_search_async_local_engines_share_one_worker_thread(self) -> None:
         """All three local engines run on the same worker thread."""
-        pass
 
     @pytest.mark.skip(reason="Deferred to Task 3 - service integration")
     def test_federated_fanout_overlaps_with_local_search_sequence(self) -> None:
         """Federated and local proceed in parallel via asyncio.gather."""
-        pass
 
     @pytest.mark.skip(reason="Deferred to Task 3 - service integration")
     def test_local_executor_has_max_workers_one(self) -> None:
         """Service._local_executor has max_workers=1 (cycle-4 HIGH structural pin)."""
-        pass
 
     @pytest.mark.skip(reason="Deferred to Task 3 - service integration")
     def test_concurrent_search_async_calls_do_not_overlap_local_sequences(self) -> None:
         """Two concurrent search_async calls serialize their local sequences."""
-        pass
 
     @pytest.mark.skip(reason="Deferred to Task 3 - service integration")
     def test_sqlite_connection_supports_cross_thread_access(self) -> None:
         """SQLite connection opened with check_same_thread=False."""
-        pass
 
 
 class TestLifecycleInitFailure:
@@ -481,12 +466,10 @@ class TestLifecycleInitFailure:
     @pytest.mark.skip(reason="Deferred to Task 3 - service integration")
     def test_misconfigured_federated_source_does_not_crash_service_init(self) -> None:
         """Service init survives per-source build failures."""
-        pass
 
     @pytest.mark.skip(reason="Deferred to Task 3 - service integration")
     def test_misconfigured_federated_source_appears_as_error_status_in_search(self) -> None:
         """Build failure surfaces as persistent SourceStatus error entry."""
-        pass
 
 
 class TestFederatedTimeoutScope:
@@ -495,7 +478,6 @@ class TestFederatedTimeoutScope:
     @pytest.mark.skip(reason="Deferred to Task 3 - service integration")
     def test_federated_timeout_does_not_apply_to_local_engines(self) -> None:
         """Local engines have no soft timeout; federated timeout applies only to federated."""
-        pass
 
 
 class TestFederatedEngineScoresNone:
@@ -504,4 +486,3 @@ class TestFederatedEngineScoresNone:
     @pytest.mark.skip(reason="Deferred to Task 3 - service integration")
     def test_federated_candidates_leave_engine_scores_none(self) -> None:
         """Federated candidates have engine_scores=None after fan-out."""
-        pass

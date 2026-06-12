@@ -114,17 +114,18 @@ class NERExtractor:
                         existing_entity.chunk_ids.append(chunk_id)
                 span_counter[d["name"]] += 1
 
-            for d in co_occurs_data:
-                relations.append(Relation(**d))
+            relations.extend(Relation(**d) for d in co_occurs_data)
 
             # Rebuild MENTIONS using current chunk_id
             for name, freq in span_counter.items():
-                relations.append(Relation(
-                    source_id=chunk_id,
-                    target_id=name,
-                    relation_type="MENTIONS",
-                    weight=float(freq),
-                ))
+                relations.append(
+                    Relation(
+                        source_id=chunk_id,
+                        target_id=name,
+                        relation_type="MENTIONS",
+                        weight=float(freq),
+                    )
+                )
 
         # Run GLiNER only on cache misses, with per-chunk attribution preserved
         if miss_chunks:
@@ -132,9 +133,7 @@ class NERExtractor:
             new_results_per_chunk: dict[str, tuple[list, list]] = {}
 
             for chunk in miss_chunks:
-                chunk_entities, chunk_relations = per_chunk_misses.get(
-                    chunk.chunk_id, ([], [])
-                )
+                chunk_entities, chunk_relations = per_chunk_misses.get(chunk.chunk_id, ([], []))
 
                 # Aggregate this chunk's entities into global result (dedup by key)
                 for e in chunk_entities:
@@ -150,17 +149,12 @@ class NERExtractor:
                 relations.extend(chunk_relations)
 
                 # Build per-chunk cache payload (entities + CO_OCCURS for THIS chunk only)
-                chunk_co_occurs = [
-                    r for r in chunk_relations if r.relation_type == "CO_OCCURS"
-                ]
+                chunk_co_occurs = [r for r in chunk_relations if r.relation_type == "CO_OCCURS"]
                 entities_to_cache = [
-                    {"name": e.name, "type": e.type, "source": e.source}
-                    for e in chunk_entities
+                    {"name": e.name, "type": e.type, "source": e.source} for e in chunk_entities
                 ]
                 co_occurs_to_cache = [r.model_dump() for r in chunk_co_occurs]
-                new_results_per_chunk[chunk.chunk_id] = (
-                    entities_to_cache, co_occurs_to_cache
-                )
+                new_results_per_chunk[chunk.chunk_id] = (entities_to_cache, co_occurs_to_cache)
 
             if new_results_per_chunk:
                 self._extraction_cache.store_batch(miss_chunks, new_results_per_chunk)

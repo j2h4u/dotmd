@@ -13,6 +13,7 @@ import pytest
 # Global env fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _dotmd_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Set minimal env vars so Settings() and IndexingPipeline can be constructed.
@@ -51,12 +52,15 @@ def _mock_semantic_engine(request: pytest.FixtureRequest) -> Generator[None, Non
     def _stub_get_tei_model_id(self) -> str | None:  # type: ignore[no-untyped-def]
         return "stub-model"
 
-    with patch(
-        "dotmd.search.semantic.SemanticSearchEngine.encode_batch",
-        side_effect=_stub_encode_batch,
-    ), patch(
-        "dotmd.search.semantic.SemanticSearchEngine.get_tei_model_id",
-        _stub_get_tei_model_id,
+    with (
+        patch(
+            "dotmd.search.semantic.SemanticSearchEngine.encode_batch",
+            side_effect=_stub_encode_batch,
+        ),
+        patch(
+            "dotmd.search.semantic.SemanticSearchEngine.get_tei_model_id",
+            _stub_get_tei_model_id,
+        ),
     ):
         yield
 
@@ -82,6 +86,7 @@ def _mock_schema_version_check(request: pytest.FixtureRequest) -> Generator[None
 # ---------------------------------------------------------------------------
 # Shared convenience fixtures (used by pre-phase-16 test files)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def tmp_dir(tmp_path: Path) -> Path:
@@ -124,8 +129,7 @@ def vector_store(tmp_path: Path):
     conn.enable_load_extension(True)
     sqlite_vec.load(conn)
     conn.enable_load_extension(False)
-    store = SQLiteVecVectorStore(table_name="vec_chunks", conn=conn)
-    return store
+    return SQLiteVecVectorStore(table_name="vec_chunks", conn=conn)
 
 
 @pytest.fixture
@@ -134,5 +138,4 @@ def graph_store(tmp_path: Path):
     from dotmd.storage.graph import LadybugDBGraphStore
 
     db_path = tmp_path / "graphdb"
-    store = LadybugDBGraphStore(db_path=db_path)
-    return store
+    return LadybugDBGraphStore(db_path=db_path)

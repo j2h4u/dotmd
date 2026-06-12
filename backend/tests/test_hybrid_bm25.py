@@ -31,8 +31,7 @@ def _make_service(tmp_path: Path) -> DotMDService:
         embedding_url="http://test:8088",
         rerank_pool_size=20,
     )
-    service = DotMDService(settings=settings)
-    return service
+    return DotMDService(settings=settings)
 
 
 def _seed_chunk_provenance(service: DotMDService, chunk_ids: list[str]) -> None:
@@ -137,10 +136,7 @@ class TestMergeBackBeyondPoolSize:
         mock_chunk.heading_hierarchy = []
         mock_chunk.text = "Some text content for testing"
         mock_chunk.file_path = Path("/test/file.md")
-        service._pipeline.metadata_store.get_chunks = MagicMock(
-            return_value=[mock_chunk]
-        )
-
+        service._pipeline.metadata_store.get_chunks = MagicMock(return_value=[mock_chunk])
 
         # Patch the service module's imported build_candidates symbol to
         # capture the fused list before it's truncated.
@@ -276,15 +272,15 @@ class TestKeywordSurvivalThroughReranking:
         mock_chunk.heading_hierarchy = []
         mock_chunk.text = "Some text"
         mock_chunk.file_path = Path("/test/file.md")
-        service._pipeline.metadata_store.get_chunks = MagicMock(
-            return_value=[mock_chunk]
-        )
+        service._pipeline.metadata_store.get_chunks = MagicMock(return_value=[mock_chunk])
 
         with patch.object(service_module, "build_candidates", side_effect=capture_build):
             service.search("test query", top_k=10, mode="hybrid", rerank=True)
 
         fused_ids = {cid for cid, _ in captured_fused}
-        assert "b1" in fused_ids, f"Keyword-only candidate 'b1' missing from final fused: {fused_ids}"
+        assert "b1" in fused_ids, (
+            f"Keyword-only candidate 'b1' missing from final fused: {fused_ids}"
+        )
         assert "s1" in fused_ids, f"Semantic candidate 's1' missing from final fused: {fused_ids}"
 
     def test_empty_reranker_output_falls_back_to_fused(self, tmp_path: Path) -> None:
@@ -569,9 +565,7 @@ class TestDiagnosticLogging:
         mock_chunk.heading_hierarchy = []
         mock_chunk.text = "Some text"
         mock_chunk.file_path = Path("/test/file.md")
-        service._pipeline.metadata_store.get_chunks = MagicMock(
-            return_value=[mock_chunk]
-        )
+        service._pipeline.metadata_store.get_chunks = MagicMock(return_value=[mock_chunk])
         _seed_chunk_provenance(service, ["s1", "b1"])
 
         captured: list[str] = []

@@ -49,7 +49,9 @@ class FakeMetadataStore:
             return {"text": "target text"}
         return None
 
-    def get_file_paths_for_chunk_ids(self, strategy: str, chunk_ids: list[str]) -> dict[str, list[str]]:
+    def get_file_paths_for_chunk_ids(
+        self, strategy: str, chunk_ids: list[str]
+    ) -> dict[str, list[str]]:
         assert strategy == "strategy-v1"
         return {chunk_id: [f"{chunk_id}.md"] for chunk_id in chunk_ids}
 

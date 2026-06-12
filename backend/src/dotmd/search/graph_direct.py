@@ -41,7 +41,8 @@ class GraphDirectEngine:
             self._entity_catalog = {name.lower(): name for name in entities}
             self._loaded = True
             logger.info(
-                "Graph entity catalog loaded: %d entities", len(self._entity_catalog),
+                "Graph entity catalog loaded: %d entities",
+                len(self._entity_catalog),
             )
         except Exception:
             logger.warning("Failed to load entity catalog", exc_info=True)
@@ -90,12 +91,12 @@ class GraphDirectEngine:
         if chunk_scores:
             max_score = max(chunk_scores.values())
             if max_score > 0:
-                chunk_scores = {
-                    cid: score / max_score for cid, score in chunk_scores.items()
-                }
+                chunk_scores = {cid: score / max_score for cid, score in chunk_scores.items()}
 
         sorted_results = sorted(
-            chunk_scores.items(), key=lambda x: x[1], reverse=True,
+            chunk_scores.items(),
+            key=lambda x: x[1],
+            reverse=True,
         )
         return sorted_results[:top_k]
 
@@ -107,7 +108,7 @@ class GraphDirectEngine:
         or "Сергей Хабаров".
         """
         query_lower = query.lower()
-        words = re.findall(r'\w+', query_lower)
+        words = re.findall(r"\w+", query_lower)
         matched: list[str] = []
         used_positions: set[int] = set()
 
@@ -116,7 +117,7 @@ class GraphDirectEngine:
             for i in range(len(words) - n + 1):
                 if any(pos in used_positions for pos in range(i, i + n)):
                     continue
-                phrase = " ".join(words[i:i + n])
+                phrase = " ".join(words[i : i + n])
                 if phrase in self._entity_catalog:
                     matched.append(self._entity_catalog[phrase])
                     used_positions.update(range(i, i + n))

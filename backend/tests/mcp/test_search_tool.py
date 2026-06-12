@@ -14,6 +14,7 @@ from dotmd.core.models import SearchCandidate, SearchResponse
 def _import_mcp():  # type: ignore[no-untyped-def]
     """Deferred import for MCP server module."""
     import dotmd.mcp_server as mcp
+
     return mcp
 
 
@@ -53,9 +54,7 @@ class TestSearchRefContract:
             chunk_id="a" * 64,
         )
         service = MagicMock()
-        service.search_async = AsyncMock(
-            return_value=SearchResponse(candidates=[stub_result])
-        )
+        service.search_async = AsyncMock(return_value=SearchResponse(candidates=[stub_result]))
         previous_service = mcp._service
         mcp._service = service
         try:

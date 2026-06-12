@@ -23,10 +23,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Small stdio MCP client for local testing.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    list_tools_parser = subparsers.add_parser("list-tools", help="Initialize the server and print tools/list.")
+    list_tools_parser = subparsers.add_parser(
+        "list-tools", help="Initialize the server and print tools/list."
+    )
     _add_common_arguments(list_tools_parser)
 
-    call_tool_parser = subparsers.add_parser("call-tool", help="Initialize the server and invoke one tool.")
+    call_tool_parser = subparsers.add_parser(
+        "call-tool", help="Initialize the server and invoke one tool."
+    )
     call_tool_parser.add_argument("--name", required=True, help="Tool name to invoke.")
     call_tool_parser.add_argument(
         "--arguments",
@@ -35,7 +39,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_common_arguments(call_tool_parser)
 
-    script_parser = subparsers.add_parser("script", help="Run several MCP actions in one session from a JSON file.")
+    script_parser = subparsers.add_parser(
+        "script", help="Run several MCP actions in one session from a JSON file."
+    )
     script_parser.add_argument("--file", required=True, help="Path to a JSON script file.")
     _add_common_arguments(script_parser)
 

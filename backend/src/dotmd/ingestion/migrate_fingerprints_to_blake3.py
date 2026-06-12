@@ -93,9 +93,7 @@ def _migrate_table(
     """
     compute = _compute_embed_checksum_blake3 if is_embed else _compute_chunk_checksum_blake3
 
-    rows = conn.execute(
-        f"SELECT file_path, checksum FROM {table}"
-    ).fetchall()
+    rows = conn.execute(f"SELECT file_path, checksum FROM {table}").fetchall()
 
     updated = 0
     missing: list[str] = []
@@ -139,7 +137,8 @@ def run_migration(index_db_path: Path, apply: bool) -> int:
     conn = sqlite3.connect(str(index_db_path))
     try:
         fp_tables = [
-            r[0] for r in conn.execute(
+            r[0]
+            for r in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' "
                 "AND (name LIKE 'chunk_fingerprints_%' OR name LIKE 'embed_fingerprints_%')"
             ).fetchall()
@@ -184,13 +183,14 @@ def run_migration(index_db_path: Path, apply: bool) -> int:
             if apply:
                 conn.execute("COMMIT")
                 print()
-                print(f"APPLIED: {total_updated} rows updated, "
-                      f"{total_missing} orphan rows deleted")
+                print(f"APPLIED: {total_updated} rows updated, {total_missing} orphan rows deleted")
             else:
                 conn.execute("ROLLBACK")
                 print()
-                print(f"DRY-RUN: would update {total_updated} rows, "
-                      f"delete {total_missing} orphan rows")
+                print(
+                    f"DRY-RUN: would update {total_updated} rows, "
+                    f"delete {total_missing} orphan rows"
+                )
                 print("Re-run with --apply to execute.")
         except Exception:
             conn.execute("ROLLBACK")
@@ -204,8 +204,9 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("index_db_path", type=Path)
-    parser.add_argument("--apply", action="store_true",
-                        help="Apply migration (default: dry-run only)")
+    parser.add_argument(
+        "--apply", action="store_true", help="Apply migration (default: dry-run only)"
+    )
     args = parser.parse_args()
     return run_migration(args.index_db_path, args.apply)
 

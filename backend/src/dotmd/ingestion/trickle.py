@@ -248,9 +248,7 @@ class TrickleIndexer:
         # 1. PRAGMA integrity_check — early corruption detection
         try:
             result = await asyncio.to_thread(
-                lambda: self._pipeline.conn.execute(
-                    "PRAGMA integrity_check"
-                ).fetchone(),
+                lambda: self._pipeline.conn.execute("PRAGMA integrity_check").fetchone(),
             )
             if result and result[0] != "ok":
                 logger.error(
@@ -278,12 +276,15 @@ class TrickleIndexer:
             )
 
             files_rm, chunks_rm, vecs_rm = await asyncio.to_thread(
-                self._pipeline.purge_orphaned_files, discovered_paths,
+                self._pipeline.purge_orphaned_files,
+                discovered_paths,
             )
             if files_rm:
                 logger.info(
                     "Orphan cleanup: removed %d files (%d chunks, %d vectors)",
-                    files_rm, chunks_rm, vecs_rm,
+                    files_rm,
+                    chunks_rm,
+                    vecs_rm,
                 )
                 self._needs_vacuum = True
             else:
@@ -339,8 +340,7 @@ class TrickleIndexer:
             else:
                 queued_str = ", ".join(basenames[:5]) + f", ... and {n_queued - 5} more"
             logger.info(
-                "Backlog: %d new, %d modified, %d deleted, %d unchanged, %d total"
-                " — queued: %s",
+                "Backlog: %d new, %d modified, %d deleted, %d unchanged, %d total — queued: %s",
                 len(diff.new),
                 len(diff.modified),
                 len(diff.deleted),
@@ -419,7 +419,12 @@ class TrickleIndexer:
 
         self._state.current_file = None
         if failed:
-            logger.warning("Backlog done: %d indexed, %d failed (of %d total)", succeeded, failed, len(unindexed))
+            logger.warning(
+                "Backlog done: %d indexed, %d failed (of %d total)",
+                succeeded,
+                failed,
+                len(unindexed),
+            )
         else:
             logger.info("Backlog complete: %d files indexed", succeeded)
 
@@ -455,15 +460,18 @@ class TrickleIndexer:
                     if not file_path.exists():
                         try:
                             await asyncio.to_thread(
-                                self._pipeline._purge_file, path_str,
+                                self._pipeline._purge_file,
+                                path_str,
                             )
                             logger.info(
-                                "Watch: purged deleted %s", Path(path_str).name,
+                                "Watch: purged deleted %s",
+                                Path(path_str).name,
                             )
                             self._needs_vacuum = True
                         except Exception:
                             logger.exception(
-                                "Watch: failed to purge %s", path_str,
+                                "Watch: failed to purge %s",
+                                path_str,
                             )
                         continue
 
@@ -474,9 +482,7 @@ class TrickleIndexer:
                     fi = FileInfo(
                         path=file_path,
                         title=file_path.stem,
-                        last_modified=datetime.fromtimestamp(
-                            stat.st_mtime, tz=UTC
-                        ),
+                        last_modified=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
                         size_bytes=stat.st_size,
                     )
                     self._state.current_file = path_str
@@ -508,7 +514,8 @@ class TrickleIndexer:
                 try:
                     logger.info("Running VACUUM (deferred)")
                     await asyncio.to_thread(
-                        self._pipeline.conn.execute, "VACUUM",
+                        self._pipeline.conn.execute,
+                        "VACUUM",
                     )
                     self._needs_vacuum = False
                     logger.info("VACUUM complete")

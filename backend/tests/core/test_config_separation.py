@@ -41,7 +41,7 @@ def test_settings_still_constructs_with_current_defaults() -> None:
     settings = Settings(embedding_url="http://localhost:8088")
 
     assert settings.embedding_url == "http://localhost:8088"
-    assert settings.data_dir == Path(".")
+    assert settings.data_dir == Path()
     assert settings.index_dir == Path.home() / ".dotmd"
     assert settings.default_top_k == 10
     assert settings.base_url is None
@@ -80,7 +80,7 @@ def test_default_falkordb_url_is_exported() -> None:
 @pytest.mark.parametrize(
     ("field", "overrides"),
     [
-        ("data_dir", {"data_dir": Path(".")}),
+        ("data_dir", {"data_dir": Path()}),
         ("index_dir", {"index_dir": Path.home() / ".dotmd"}),
         ("indexing_paths", {"indexing_paths": []}),
         ("data_dir", {"data_dir": Path("/data")}),

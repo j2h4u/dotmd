@@ -45,9 +45,7 @@ class TestGetChunkIdsByFile:
 
         assert sorted(ids) == ["c1", "c2"]
 
-    def test_returns_empty_for_unknown_file(
-        self, metadata_store: SQLiteMetadataStore
-    ) -> None:
+    def test_returns_empty_for_unknown_file(self, metadata_store: SQLiteMetadataStore) -> None:
         """Should return empty list for a file_path not in the store."""
         ids = metadata_store.get_chunk_ids_by_file(STRATEGY, "/nonexistent.md")
         assert ids == []
@@ -56,9 +54,7 @@ class TestGetChunkIdsByFile:
 class TestDeleteChunksByFile:
     """Tests for delete_chunks_by_file."""
 
-    def test_removes_chunks_and_returns_count(
-        self, metadata_store: SQLiteMetadataStore
-    ) -> None:
+    def test_removes_chunks_and_returns_count(self, metadata_store: SQLiteMetadataStore) -> None:
         """Should delete matching chunks and return the count."""
         chunks = [
             _make_chunk("c1", "/docs/a.md"),
@@ -74,9 +70,7 @@ class TestDeleteChunksByFile:
         assert metadata_store.get_chunk("c1") is None
         assert metadata_store.get_chunk("c2") is None
 
-    def test_does_not_affect_other_files(
-        self, metadata_store: SQLiteMetadataStore
-    ) -> None:
+    def test_does_not_affect_other_files(self, metadata_store: SQLiteMetadataStore) -> None:
         """Deleting chunks for one file should not touch another file's chunks."""
         chunks = [
             _make_chunk("c1", "/docs/a.md"),

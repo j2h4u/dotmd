@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -14,13 +14,14 @@ from dotmd.core.models import Chunk, FileInfo
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_file_info(path: str, title: str = "Test") -> FileInfo:
     """Create a FileInfo for a real temp file."""
     p = Path(path)
     return FileInfo(
         path=p,
         title=title,
-        last_modified=datetime(2026, 1, 1),
+        last_modified=datetime(2026, 1, 1, tzinfo=UTC),
         size_bytes=p.stat().st_size,
     )
 
@@ -43,6 +44,7 @@ def _dummy_embeddings(n: int) -> list[list[float]]:
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def md_dir(tmp_path: Path) -> Path:
@@ -371,7 +373,6 @@ class TestFingerprintTiming:
         assert "encode" in call_order
         assert "save_fingerprint" in call_order
         assert call_order.index("encode") < call_order.index("save_fingerprint")
-
 
 
 # TestPurgeFileOrder removed: phase 16 _purge_file uses M2M cascade

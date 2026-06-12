@@ -259,13 +259,9 @@ async def fanout_federated(
     list[FederatedEngineOutcome]
         One outcome per engine, in dict iteration order.
     """
-    outcomes = await asyncio.gather(
-        *[
-            _run_federated_engine(name, fn, timeout)
-            for name, fn in engine_calls.items()
-        ]
+    return await asyncio.gather(
+        *[_run_federated_engine(name, fn, timeout) for name, fn in engine_calls.items()]
     )
-    return outcomes
 
 
 # ============================================================================

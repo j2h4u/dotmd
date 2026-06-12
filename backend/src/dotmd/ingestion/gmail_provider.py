@@ -8,7 +8,7 @@ import hashlib
 import html
 import re
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
 
@@ -78,9 +78,7 @@ class GmailBridge(BaseConnectorBridge):
     ) -> None:
         self._token_provider = token_provider
         self._search_result_limit = search_result_limit
-        self._client = httpx.Client(
-            timeout=httpx.Timeout(GMAIL_API_TIMEOUT_SECONDS, connect=5.0)
-        )
+        self._client = httpx.Client(timeout=httpx.Timeout(GMAIL_API_TIMEOUT_SECONDS, connect=5.0))
 
     def search_native(self, query: str, limit: int) -> list[SearchCandidate]:
         """Search Gmail and return ranked federated candidates.
@@ -134,7 +132,7 @@ class GmailBridge(BaseConnectorBridge):
             text = str(response.get("snippet") or "")
         sent_at = _parse_gmail_date(
             _extract_header((payload.get("headers", []) or []), "date")
-        ) or datetime.fromtimestamp(0)
+        ) or datetime.fromtimestamp(0, tz=UTC)
         metadata = {
             "message_id": message_id,
             "thread_id": response.get("threadId"),

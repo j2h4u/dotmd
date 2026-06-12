@@ -146,8 +146,7 @@ class FileTracker:
                 # Content unchanged, just metadata drift (e.g. touch)
                 # Update stored mtime/size silently
                 self._conn.execute(
-                    f"UPDATE {self._table} SET mtime = ?, size_bytes = ? "
-                    "WHERE file_path = ?",
+                    f"UPDATE {self._table} SET mtime = ?, size_bytes = ? WHERE file_path = ?",
                     (stat.st_mtime, stat.st_size, path_str),
                 )
                 self._conn.commit()
