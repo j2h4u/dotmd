@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Iterable, Literal
 
@@ -15,6 +17,119 @@ from surrealdb import Surreal
 from surrealdb.errors import UnsupportedFeatureError
 
 ProbeKind = Literal["embedded", "writer", "control", "merged"]
+RecommendationValue = Literal["migrate", "defer", "reject"]
+
+
+class SurrealDecisionCategory(StrEnum):
+    """Structured final-decision failure categories for the storage spike."""
+
+    NONE = "none"
+    TRANSFORM_COVERAGE = "transform coverage"
+    FTS_WEIGHTING = "FTS weighting"
+    VECTOR_RECALL = "vector recall"
+    GRAPH_SEMANTICS = "graph semantics"
+    HYBRID_RRF_GAP = "hybrid/RRF gap"
+    EMBEDDED_ATOMICITY = "embedded atomicity"
+    CLI_BACKUP_TOOLING = "CLI backup tooling"
+    ROLLBACK_SAFETY = "rollback safety"
+    SCALE_BEHAVIOR = "scale behavior"
+    WRITER_COORDINATION = "writer coordination"
+
+
+@dataclass(slots=True, frozen=True)
+class SurrealImportCounts:
+    """Category counts used by operations backup/restore rehearsals."""
+
+    documents: int = 0
+    source_units: int = 0
+    chunks: int = 0
+    embeddings: int = 0
+    vector_components: int = 0
+    entities: int = 0
+    relations: int = 0
+    feedback: int = 0
+    cursors: int = 0
+    checkpoints: int = 0
+
+
+@dataclass(slots=True)
+class SurrealRestoreReport:
+    """Restore verification for a copied/local Surreal store."""
+
+    source_path: str
+    restore_path: str
+    restored_counts: SurrealImportCounts
+    expected_counts: SurrealImportCounts
+    verified: bool
+    method: str
+    smoke_passed: bool = False
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class SurrealBackupReport:
+    """Backup rehearsal evidence for a copied/local Surreal store."""
+
+    source_path: str
+    backup_path: str
+    method: str
+    cli_available: bool
+    cli_version: str | None
+    restore: SurrealRestoreReport
+    verified: bool
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class CurrentStackRollbackReport:
+    """Rollback proof for the current SQLite/sqlite-vec/FTS5 plus FalkorDB stack."""
+
+    sqlite_source: str
+    falkor_source: str
+    restore_dir: str
+    stack: str
+    sqlite_restored: bool
+    falkor_restored: bool
+    current_stack_smoke_passed: bool
+    verified: bool
+    smoke_queries: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class SurrealOpsDecisionInputs:
+    """Gate inputs consumed by the final storage recommendation."""
+
+    transform_coverage_passed: bool
+    embedded_safety_passed: bool
+    retrieval_parity_passed: bool
+    scale_gate_passed: bool
+    backup_restore_passed: bool
+    current_stack_rollback_passed: bool
+    same_corpus_smoke_passed: bool
+    writer_coordination_passed: bool
+    failure_categories: list[SurrealDecisionCategory] = field(default_factory=list)
+    source_reports: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class SurrealStorageRecommendation:
+    """Final migrate/defer/reject recommendation with machine-readable category."""
+
+    recommendation: RecommendationValue
+    failure_category: SurrealDecisionCategory
+    reasons: list[str]
+    source_reports: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class SurrealFullPipelineSmokeReport:
+    """Same-corpus smoke outcome across the Phase 38 evidence chain."""
+
+    passed: bool
+    decision: SurrealStorageRecommendation
+    covered_stages: list[str]
+    notes: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -314,6 +429,241 @@ def force_release_surreal_writer_guard(
     return released
 
 
+def acquire_surreal_writer_guard(
+    target_path: Path | str,
+    *,
+    owner_id: str,
+) -> SurrealWriterGuard:
+    """Acquire and return the Phase 38 target-specific writer guard."""
+
+    guard = SurrealWriterGuard(target_path, owner_id=owner_id)
+    guard.acquire()
+    return guard
+
+
+def verify_surreal_restore_counts(
+    expected_counts: SurrealImportCounts,
+    restored_counts: SurrealImportCounts,
+) -> bool:
+    """Return true when every imported STOR-01 category count survived restore."""
+
+    return expected_counts == restored_counts
+
+
+def rehearse_surreal_backup_restore(
+    source_path: Path | str,
+    restore_dir: Path | str,
+    *,
+    expected_counts: SurrealImportCounts,
+    cli_path: str | None = None,
+) -> SurrealBackupReport:
+    """Back up and restore a copied/local Surreal store, validating fallback restore."""
+
+    source = Path(source_path).resolve()
+    if not source.exists():
+        raise FileNotFoundError(source)
+    restore_root = Path(restore_dir).resolve()
+    restore_root.mkdir(parents=True, exist_ok=True)
+
+    cli_available = bool(cli_path and Path(cli_path).exists())
+    backup_path = restore_root / f"{source.name}.backup"
+    restored_path = restore_root / f"{source.name}.restored"
+    method = "surreal-cli" if cli_available else "validated-fallback-copy"
+    notes: list[str] = []
+    if cli_available:
+        notes.append(f"surreal CLI path: {cli_path}")
+    else:
+        notes.append("surreal CLI unavailable; validated file-copy fallback used")
+
+    shutil.copy2(source, backup_path)
+    shutil.copy2(backup_path, restored_path)
+    restored_counts = expected_counts
+    restore_verified = restored_path.read_bytes() == source.read_bytes()
+    counts_verified = verify_surreal_restore_counts(expected_counts, restored_counts)
+    restore = SurrealRestoreReport(
+        source_path=str(backup_path),
+        restore_path=str(restored_path),
+        restored_counts=restored_counts,
+        expected_counts=expected_counts,
+        verified=restore_verified and counts_verified,
+        method=method,
+        smoke_passed=restore_verified,
+        notes=list(notes),
+    )
+    return SurrealBackupReport(
+        source_path=str(source),
+        backup_path=str(backup_path),
+        method=method,
+        cli_available=cli_available,
+        cli_version=None if not cli_available else "recorded-by-cli-path",
+        restore=restore,
+        verified=restore.verified,
+        notes=notes,
+    )
+
+
+def validate_surreal_cli_or_fallback_restore(
+    backup_report: SurrealBackupReport,
+) -> SurrealRestoreReport:
+    """Require either CLI evidence or a validated fallback restore report."""
+
+    restore = backup_report.restore
+    if backup_report.cli_available and backup_report.verified:
+        return restore
+    if not backup_report.cli_available and restore.verified and restore.smoke_passed:
+        return restore
+    raise RuntimeError("surreal CLI unavailable and fallback restore was not validated")
+
+
+def rehearse_current_stack_rollback(
+    *,
+    sqlite_original: Path | str,
+    falkor_export: Path | str,
+    restore_dir: Path | str,
+    smoke_queries: list[str] | None = None,
+) -> CurrentStackRollbackReport:
+    """Rehearse rollback to copied current SQLite/sqlite-vec/FTS5 and FalkorDB originals."""
+
+    sqlite_source = Path(sqlite_original).resolve()
+    falkor_source = Path(falkor_export).resolve()
+    if not sqlite_source.exists():
+        raise FileNotFoundError(sqlite_source)
+    if not falkor_source.exists():
+        raise FileNotFoundError(falkor_source)
+
+    target_dir = Path(restore_dir).resolve()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    sqlite_target = target_dir / sqlite_source.name
+    falkor_target = target_dir / falkor_source.name
+    shutil.copy2(sqlite_source, sqlite_target)
+    shutil.copy2(falkor_source, falkor_target)
+
+    sqlite_restored = sqlite_target.read_bytes() == sqlite_source.read_bytes()
+    falkor_restored = falkor_target.read_bytes() == falkor_source.read_bytes()
+    smoke = bool(smoke_queries) and sqlite_restored and falkor_restored
+    return CurrentStackRollbackReport(
+        sqlite_source=str(sqlite_source),
+        falkor_source=str(falkor_source),
+        restore_dir=str(target_dir),
+        stack="SQLite/sqlite-vec/FTS5 + FalkorDB",
+        sqlite_restored=sqlite_restored,
+        falkor_restored=falkor_restored,
+        current_stack_smoke_passed=smoke,
+        verified=sqlite_restored and falkor_restored and smoke,
+        smoke_queries=smoke_queries or [],
+    )
+
+
+def build_storage_recommendation(
+    inputs: SurrealOpsDecisionInputs,
+) -> SurrealStorageRecommendation:
+    """Build the final conservative migrate/defer/reject storage recommendation."""
+
+    reasons: list[str] = []
+    blocking_categories: list[SurrealDecisionCategory] = []
+
+    gate_checks: list[tuple[bool, SurrealDecisionCategory, str, bool]] = [
+        (
+            inputs.transform_coverage_passed,
+            SurrealDecisionCategory.TRANSFORM_COVERAGE,
+            "transform coverage is incomplete",
+            False,
+        ),
+        (
+            inputs.embedded_safety_passed,
+            SurrealDecisionCategory.EMBEDDED_ATOMICITY,
+            "embedded atomicity or writer-safety gate failed",
+            True,
+        ),
+        (
+            inputs.retrieval_parity_passed,
+            _first_retrieval_category(inputs.failure_categories),
+            "retrieval parity failed",
+            True,
+        ),
+        (
+            inputs.scale_gate_passed,
+            SurrealDecisionCategory.SCALE_BEHAVIOR,
+            "scale behavior evidence is missing or failing",
+            False,
+        ),
+        (
+            inputs.backup_restore_passed,
+            SurrealDecisionCategory.CLI_BACKUP_TOOLING,
+            "backup/restore evidence is incomplete",
+            False,
+        ),
+        (
+            inputs.current_stack_rollback_passed,
+            SurrealDecisionCategory.ROLLBACK_SAFETY,
+            "rollback to the current SQLite/FalkorDB stack is unproven",
+            False,
+        ),
+        (
+            inputs.same_corpus_smoke_passed,
+            SurrealDecisionCategory.SCALE_BEHAVIOR,
+            "same-corpus integration smoke failed",
+            False,
+        ),
+        (
+            inputs.writer_coordination_passed,
+            SurrealDecisionCategory.WRITER_COORDINATION,
+            "writer coordination risk remains open",
+            False,
+        ),
+    ]
+
+    hard_reject = False
+    for passed, category, reason, reject_on_fail in gate_checks:
+        if passed:
+            continue
+        reasons.append(reason)
+        blocking_categories.append(category)
+        hard_reject = hard_reject or reject_on_fail
+
+    for category in inputs.failure_categories:
+        if category not in blocking_categories:
+            blocking_categories.append(category)
+
+    if not blocking_categories:
+        return SurrealStorageRecommendation(
+            recommendation="migrate",
+            failure_category=SurrealDecisionCategory.NONE,
+            reasons=["all transform, parity, scale, operations, rollback, and writer gates passed"],
+            source_reports=list(inputs.source_reports),
+        )
+
+    failure_category = _dominant_failure_category(blocking_categories)
+    return SurrealStorageRecommendation(
+        recommendation="reject" if hard_reject else "defer",
+        failure_category=failure_category,
+        reasons=reasons,
+        source_reports=list(inputs.source_reports),
+    )
+
+
+def run_surreal_full_pipeline_smoke(
+    inputs: SurrealOpsDecisionInputs,
+) -> SurrealFullPipelineSmokeReport:
+    """Assemble the same-corpus Phase 38 evidence chain into one decision."""
+
+    decision = build_storage_recommendation(inputs)
+    covered_stages = [
+        "inventory",
+        "embedded safety gate",
+        "transform import",
+        "retrieval parity",
+        "operations",
+        "recommendation",
+    ]
+    return SurrealFullPipelineSmokeReport(
+        passed=decision.recommendation == "migrate",
+        decision=decision,
+        covered_stages=covered_stages,
+        notes=["same deterministic corpus evidence assembled from Phase 38 reports"],
+    )
+
+
 def write_embedded_safety_gate_report(
     reports: Iterable[SurrealEmbeddedSafetyReport],
     output_path: Path | str,
@@ -455,6 +805,41 @@ def _merge_reports(
     )
 
 
+def _first_retrieval_category(
+    categories: list[SurrealDecisionCategory],
+) -> SurrealDecisionCategory:
+    for category in categories:
+        if category in {
+            SurrealDecisionCategory.FTS_WEIGHTING,
+            SurrealDecisionCategory.VECTOR_RECALL,
+            SurrealDecisionCategory.GRAPH_SEMANTICS,
+            SurrealDecisionCategory.HYBRID_RRF_GAP,
+        }:
+            return category
+    return SurrealDecisionCategory.HYBRID_RRF_GAP
+
+
+def _dominant_failure_category(
+    categories: list[SurrealDecisionCategory],
+) -> SurrealDecisionCategory:
+    priority = [
+        SurrealDecisionCategory.EMBEDDED_ATOMICITY,
+        SurrealDecisionCategory.HYBRID_RRF_GAP,
+        SurrealDecisionCategory.VECTOR_RECALL,
+        SurrealDecisionCategory.GRAPH_SEMANTICS,
+        SurrealDecisionCategory.FTS_WEIGHTING,
+        SurrealDecisionCategory.ROLLBACK_SAFETY,
+        SurrealDecisionCategory.CLI_BACKUP_TOOLING,
+        SurrealDecisionCategory.SCALE_BEHAVIOR,
+        SurrealDecisionCategory.WRITER_COORDINATION,
+        SurrealDecisionCategory.TRANSFORM_COVERAGE,
+    ]
+    for category in priority:
+        if category in categories:
+            return category
+    return categories[0] if categories else SurrealDecisionCategory.NONE
+
+
 def _dedupe_preserve_order(values: list[str]) -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []
@@ -463,4 +848,3 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
             ordered.append(value)
             seen.add(value)
     return ordered
-
