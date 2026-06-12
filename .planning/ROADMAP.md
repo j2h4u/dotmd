@@ -166,13 +166,16 @@ Plans:
 **Goal:** Build the quality evaluation surface that decides whether SurrealDB
 search is good enough to cut over.
 **Depends on:** Phase 39
-**Plans:** TBD
+**Plans:** 1 plan
 
 - [ ] Build a golden query set covering title-heavy, tag-heavy, body-heavy,
-  semantic, graph/entity, hybrid, and source-ref scenarios.
+  semantic, graph/entity, hybrid, source-ref, and mixed RU/EN scenarios.
 - [ ] Produce machine-readable diff reports for old-vs-Surreal runs.
 - [ ] Gate on user-visible quality and explainable differences, not exact rank
   parity.
+
+Plans:
+- [ ] 40-01-PLAN.md - Evaluation harness, golden corpus, diff classification, and cutover-gate reporting.
 
 ### Phase 41: Production-grade Surreal schema and import
 
