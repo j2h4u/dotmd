@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+import httpx
+
 if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
 
@@ -79,13 +81,11 @@ class SemanticSearchEngine:
         if not self._embedding_url:
             return self._model_name  # local model, trust config
         try:
-            import httpx
-
             resp = httpx.get(f"{self._embedding_url}/info", timeout=5.0)
             resp.raise_for_status()
             self._tei_model_id = resp.json().get("model_id")
             return self._tei_model_id
-        except Exception:
+        except (httpx.HTTPError, ValueError):
             logger.debug("Could not query TEI /info", exc_info=True)
             return None
 

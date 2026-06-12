@@ -16,6 +16,7 @@ from typing import Any, cast
 import real_ladybug as lb  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
+_LADYBUG_ERRORS = (RuntimeError, ValueError, KeyError, IndexError, TypeError)
 
 # Schema constants
 _SCHEMA_INIT = [
@@ -86,7 +87,7 @@ class LadybugDBGraphStore:
         for stmt in _SCHEMA_INIT:
             try:
                 self._conn.execute(stmt)
-            except Exception:
+            except _LADYBUG_ERRORS:
                 # Table already exists or other non-fatal issue
                 logger.debug("Schema statement skipped: %s", stmt, exc_info=True)
 
@@ -343,7 +344,7 @@ class LadybugDBGraphStore:
                     if count:
                         conn.execute(f"MATCH (n:{label}) WHERE NOT (n)--() DELETE n")
                         removed += count
-                except Exception:
+                except _LADYBUG_ERRORS:
                     logger.warning("delete_isolated_nodes failed for %s", label, exc_info=True)
         return removed
 
@@ -353,12 +354,12 @@ class LadybugDBGraphStore:
             for rel_table in _REL_TABLE_MAP.values():
                 try:
                     conn.execute(f"MATCH ()-[r:{rel_table}]->() DELETE r")
-                except Exception:
+                except _LADYBUG_ERRORS:
                     logger.warning("Failed to delete edges from %s", rel_table, exc_info=True)
             for label in ("File", "Section", "Entity", "Tag"):
                 try:
                     conn.execute(f"MATCH (n:{label}) DELETE n")
-                except Exception:
+                except _LADYBUG_ERRORS:
                     logger.warning("Failed to delete %s nodes", label, exc_info=True)
 
     def get_graph_data(self) -> dict:
@@ -379,7 +380,7 @@ class LadybugDBGraphStore:
                 for _, row in df.iterrows():
                     sid = str(row["s.id"])
                     section_entities.setdefault(sid, []).append(str(row["e.id"]))
-            except Exception:
+            except _LADYBUG_ERRORS:
                 logger.debug("Failed to query section-entity links", exc_info=True)
 
             # Nodes
@@ -403,7 +404,7 @@ class LadybugDBGraphStore:
                                 "properties": props,
                             }
                         )
-                except Exception:
+                except _LADYBUG_ERRORS:
                     logger.debug("Failed to query %s nodes", label, exc_info=True)
 
             # Edges
@@ -422,7 +423,7 @@ class LadybugDBGraphStore:
                                 "weight": float(cast(Any, row["r.weight"])),
                             }
                         )
-                except Exception:
+                except _LADYBUG_ERRORS:
                     logger.debug("Failed to query %s edges", rel_table, exc_info=True)
 
         return {"nodes": nodes, "edges": edges}
@@ -435,7 +436,7 @@ class LadybugDBGraphStore:
                 try:
                     df = self._query_df(conn, f"MATCH (n:{label}) RETURN count(n)")
                     total += int(df.iloc[0, 0])
-                except Exception:
+                except _LADYBUG_ERRORS:
                     logger.warning("Failed to count %s nodes", label, exc_info=True)
         return total
 
@@ -447,7 +448,7 @@ class LadybugDBGraphStore:
                 try:
                     df = self._query_df(conn, f"MATCH ()-[r:{rel_table}]->() RETURN count(r)")
                     total += int(df.iloc[0, 0])
-                except Exception:
+                except _LADYBUG_ERRORS:
                     logger.warning("Failed to count %s edges", rel_table, exc_info=True)
         return total
 
@@ -457,7 +458,7 @@ class LadybugDBGraphStore:
             try:
                 df = self._query_df(conn, "MATCH (e:Entity) RETURN e.id")
                 return [str(row["e.id"]) for _, row in df.iterrows()]
-            except Exception:
+            except _LADYBUG_ERRORS:
                 logger.debug("Failed to get entity names", exc_info=True)
                 return []
 
@@ -471,7 +472,7 @@ class LadybugDBGraphStore:
                     parameters={"name": entity_name},
                 )
                 return [str(row["s.id"]) for _, row in df.iterrows()]
-            except Exception:
+            except _LADYBUG_ERRORS:
                 logger.debug("Failed to get chunks for entity %s", entity_name, exc_info=True)
                 return []
 
@@ -486,6 +487,6 @@ class LadybugDBGraphStore:
                     parameters={"fp": file_path},
                 )
                 return sorted(str(row["e.id"]) for _, row in df.iterrows())
-            except Exception:
+            except _LADYBUG_ERRORS:
                 logger.debug("Failed to get entities for file %s", file_path, exc_info=True)
                 return []

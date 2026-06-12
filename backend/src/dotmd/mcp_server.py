@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -20,7 +21,7 @@ from mcp.server.auth.handlers.authorize import AuthorizationRequest
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
-from pydantic import BaseModel, Field, model_serializer
+from pydantic import BaseModel, Field, ValidationError, model_serializer
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -188,7 +189,7 @@ class _AccessLogMiddleware(BaseHTTPMiddleware):
             return None
         try:
             body = await request.body()
-        except Exception:
+        except (RuntimeError, ValueError):
             return None
 
         async def receive() -> dict[str, Any]:
@@ -204,7 +205,7 @@ class _AccessLogMiddleware(BaseHTTPMiddleware):
         if request.url.path == "/register":
             try:
                 payload = json.loads((body or b"").decode("utf-8"))
-            except Exception:
+            except (json.JSONDecodeError, UnicodeDecodeError):
                 return {"parse_error": "invalid_json"}
             if not isinstance(payload, dict):
                 return {"type": type(payload).__name__}
@@ -222,7 +223,7 @@ class _AccessLogMiddleware(BaseHTTPMiddleware):
                     key: values[-1]
                     for key, values in parse_qs((body or b"").decode("utf-8")).items()
                 }
-            except Exception:
+            except (UnicodeDecodeError, ValueError):
                 return {"parse_error": "invalid_form"}
             return {
                 "grant_type": form.get("grant_type"),
@@ -238,7 +239,7 @@ class _AccessLogMiddleware(BaseHTTPMiddleware):
         if request.url.path == "/mcp" and request.method == "POST":
             try:
                 payload = json.loads((body or b"").decode("utf-8"))
-            except Exception:
+            except (json.JSONDecodeError, UnicodeDecodeError):
                 return None
             if isinstance(payload, dict):
                 params = payload.get("params")
@@ -261,7 +262,7 @@ class _AccessLogMiddleware(BaseHTTPMiddleware):
             _ACCESS_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
             with _ACCESS_LOG_PATH.open("a", encoding="utf-8") as fp:
                 fp.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
-        except Exception:
+        except OSError:
             logger.exception("Failed to write access log: %s", _ACCESS_LOG_PATH)
 
 
@@ -373,7 +374,7 @@ async def authorize(request: Request) -> Response:
     """Authorize an OAuth client, prompting for a one-time code if needed."""
     try:
         return await _redirect_for_authorization(request)
-    except Exception as exc:
+    except (ValidationError, ValueError, RuntimeError) as exc:
         logger.exception("OAuth authorize failed")
         return JSONResponse(
             {"error": "invalid_request", "error_description": str(exc)},
@@ -392,7 +393,7 @@ async def authorize_pairing_code(request: Request) -> Response:
     except PairingCodeError as exc:
         logger.warning("OAuth pairing failed: %s", exc)
         return _pairing_form(request, error=str(exc))
-    except Exception as exc:
+    except (ValidationError, ValueError, RuntimeError) as exc:
         logger.exception("OAuth authorize failed")
         return JSONResponse(
             {"error": "invalid_request", "error_description": str(exc)},
@@ -518,7 +519,7 @@ async def _run_telegram_poller(
                 result.failed_units,
                 result.reused_units,
             )
-        except Exception:
+        except (RuntimeError, ValueError, OSError, sqlite3.Error):
             logger.exception("telegram_sync error during ingest")
         with suppress(TimeoutError):
             await asyncio.wait_for(shutdown_event.wait(), timeout=interval_seconds)
@@ -580,7 +581,7 @@ def create_app() -> Starlette:
                 telegram_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await telegram_task
-            except Exception:
+            except (RuntimeError, ValueError, OSError, sqlite3.Error):
                 logger.exception("Telegram poller task failed during shutdown")
         try:
             await asyncio.wait_for(indexer_task, timeout=120)
@@ -589,7 +590,7 @@ def create_app() -> Starlette:
             indexer_task.cancel()
             with suppress(asyncio.CancelledError):
                 await indexer_task
-        except Exception:
+        except (RuntimeError, ValueError, OSError, sqlite3.Error):
             logger.exception("Trickle indexer task failed during shutdown")
         _service = None
         _feedback = None
@@ -689,7 +690,7 @@ async def search(
         # response is already a SearchResponse; format candidates for MCP output
         formatted_candidates = [_format_result(r) for r in response.candidates]
         return SearchResponse(candidates=formatted_candidates, source_status=response.source_status)
-    except Exception as exc:
+    except (RuntimeError, ValueError, sqlite3.Error) as exc:
         logger.exception("search failed: query=%r", query[:100])
         raise RuntimeError(f"Search failed: {exc}.") from exc
 
@@ -749,7 +750,7 @@ async def read_document(
     except ValueError as exc:
         logger.warning("read ref rejected: ref=%r error=%s", ref, exc)
         raise _ref_tool_error("read", ref, exc) from exc
-    except Exception as exc:
+    except (RuntimeError, sqlite3.Error) as exc:
         logger.exception("read failed: ref=%r", ref)
         raise RuntimeError(
             "Read failed. Action: retry later or submit feedback with the ref."
@@ -790,7 +791,7 @@ async def drill(
     except ValueError as exc:
         logger.warning("drill ref rejected: ref=%r error=%s", ref, exc)
         raise _ref_tool_error("drill", ref, exc) from exc
-    except Exception as exc:
+    except (RuntimeError, sqlite3.Error) as exc:
         logger.exception("drill failed: ref=%r", ref)
         raise RuntimeError(
             "Drill failed. Action: retry later or submit feedback with the ref."
@@ -872,7 +873,7 @@ async def feedback(
             harness=harness,
         )
         return "Feedback recorded."
-    except Exception as exc:
+    except (RuntimeError, sqlite3.Error) as exc:
         logger.exception("feedback failed")
         raise RuntimeError(
             f"Failed to record feedback: {exc}. "

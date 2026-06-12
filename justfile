@@ -43,7 +43,7 @@ unit *args:
 
 # Run live MCP e2e tests inside the running dotMD container.
 test-e2e *args:
-    docker exec dotmd sh -lc 'cd /mnt/home/repos/j2h4u/dotmd/backend && python -m pytest tests/e2e/ -p no:cacheprovider --tb=short -q {{args}}'
+    docker exec dotmd sh -lc 'cd /mnt/home/repos/j2h4u/dotmd/backend && python -m pytest -c tests/e2e/pytest.ini tests/e2e/ -p no:cacheprovider --tb=short -q {{args}}'
 
 # Run production MCP/Funnel connectivity smoke against live containers.
 test-mcp-remote *args:
@@ -69,13 +69,12 @@ typecheck:
 typecheck-strict:
     cd {{backend}} && uv run basedpyright src --warnings
 
-# Opt-in mcp-strava-style Ruff hardening gate; not part of check until current
-# findings are intentionally fixed or ratcheted.
+# Strict Ruff hardening gate.
 lint-strict:
     cd {{backend}} && uv run ruff check src tests devtools --select E4,E7,E9,F,I,B,BLE,UP,C4,PIE,ISC,RSE,FLY,RUF,PERF,SIM,PTH,DTZ,PGH,PLE,LOG,G,FURB,RET,N818 --ignore RUF001,RUF002,RUF003,ISC001,E501,B008,N802,N803,N806,SIM108
 
 # Static quality gate: format, lint, types, imports, workflows, compile, dead code.
-check: _fmt-check _lint typecheck _import-contracts _actionlint _compile _dead-code
+check: _fmt-check lint-strict typecheck _import-contracts _actionlint _compile _dead-code
 
 # Full local gate for agents before claiming completion.
 verify: check unit

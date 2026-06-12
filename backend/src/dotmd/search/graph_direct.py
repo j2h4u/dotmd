@@ -44,7 +44,7 @@ class GraphDirectEngine:
                 "Graph entity catalog loaded: %d entities",
                 len(self._entity_catalog),
             )
-        except Exception:
+        except (RuntimeError, ValueError):
             logger.warning("Failed to load entity catalog", exc_info=True)
             self._entity_catalog = {}
             self._loaded = True

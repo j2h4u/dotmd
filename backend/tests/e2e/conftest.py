@@ -234,7 +234,7 @@ class _StdioSession:
                     await self._shutdown.wait()
                     # AsyncExitStack unwinds here — same task that created the
                     # anyio cancel scopes, so cleanup is valid.
-            except Exception as exc:
+            except (ImportError, OSError, RuntimeError, ValueError) as exc:
                 self._startup_error = exc
                 self._ready.set()
 

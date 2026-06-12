@@ -75,7 +75,7 @@ def run_migration(
         import sqlite_vec
 
         sqlite_vec.load(conn)
-    except Exception:
+    except (ImportError, sqlite3.OperationalError):
         logger.warning("sqlite-vec extension not available — vec tables will be skipped")
     conn.enable_load_extension(False)
 
@@ -93,7 +93,7 @@ def run_migration(
         _rename_graph(index_dir, strategy)
         _verify(conn, strategy, model_suffix)
         conn.commit()
-    except Exception:
+    except (sqlite3.Error, OSError):
         conn.close()
         # Remove partial index.db on failure — backups are safe
         if index_path.exists():
@@ -325,7 +325,7 @@ def _verify(conn: sqlite3.Connection, strategy: str, model_suffix: str) -> None:
         try:
             n = conn.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]
             logger.info("  %s: %d rows", t, n)
-        except Exception:
+        except sqlite3.OperationalError:
             logger.info("  %s: (virtual table)", t)
 
 

@@ -107,7 +107,7 @@ def _migrate_table(
             continue
         try:
             new_checksum = compute(path)
-        except Exception as exc:
+        except (OSError, yaml.YAMLError) as exc:
             errors.append(f"{file_path}: {type(exc).__name__}: {exc}")
             continue
         if new_checksum != old_checksum:
@@ -192,7 +192,7 @@ def run_migration(index_db_path: Path, apply: bool) -> int:
                     f"delete {total_missing} orphan rows"
                 )
                 print("Re-run with --apply to execute.")
-        except Exception:
+        except sqlite3.Error:
             conn.execute("ROLLBACK")
             raise
         return 0

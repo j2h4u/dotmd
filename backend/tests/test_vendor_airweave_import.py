@@ -96,7 +96,11 @@ def test_token_provider_concurrent_refresh_serialized() -> None:
     def get_token() -> None:
         try:
             tokens.append(provider.get_token())
-        except Exception as exc:  # pragma: no cover - assertion reports errors below.
+        except (
+            KeyError,
+            httpx.HTTPError,
+            ValueError,
+        ) as exc:  # pragma: no cover - assertion reports errors below.
             errors.append(exc)
 
     with patch("httpx.post", side_effect=mock_post):

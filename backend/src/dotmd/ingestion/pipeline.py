@@ -421,7 +421,7 @@ class IndexingPipeline:
                     (excess,),
                 )
             self._conn.commit()
-        except Exception:
+        except sqlite3.Error:
             logger.warning("search_log write failed — non-fatal", exc_info=True)
 
     # ------------------------------------------------------------------
@@ -1937,7 +1937,7 @@ class IndexingPipeline:
         try:
             rows = self._conn.execute(f"SELECT DISTINCT file_path FROM {m2m_table}").fetchall()
             all_file_paths = [row[0] for row in rows]
-        except Exception:
+        except sqlite3.Error:
             logger.warning("reindex_vectors: cannot read M2M table — falling back to no files")
             all_file_paths = []
 
@@ -1959,7 +1959,7 @@ class IndexingPipeline:
                 stat = path.stat()
                 last_modified = datetime.fromtimestamp(stat.st_mtime, tz=UTC)
                 size_bytes = stat.st_size
-            except Exception:
+            except OSError:
                 fm = {}
                 last_modified = datetime.fromtimestamp(0, tz=UTC)
                 size_bytes = 0
@@ -2572,7 +2572,7 @@ class IndexingPipeline:
             try:
                 all_entities_count = self._graph_store.node_count()
                 all_edges_count = self._graph_store.edge_count()
-            except Exception:
+            except (RuntimeError, sqlite3.Error, ValueError):
                 logger.warning("Failed to fetch graph counts for stats", exc_info=True)
 
         _dc = diff_counts or {}
@@ -2669,13 +2669,13 @@ class IndexingPipeline:
                     # re-populated in the graph phase below.
                     try:
                         self._graph_store.delete_file_subgraph(path_str)
-                    except Exception as _ge:
+                    except (RuntimeError, sqlite3.Error, ValueError) as _ge:
                         logger.warning(
                             "graph cleanup (fallback) failed during reindex: %s (file=%s)",
                             _ge,
                             path_str,
                         )
-                except Exception as _ge:
+                except (RuntimeError, sqlite3.Error, ValueError) as _ge:
                     logger.warning(
                         "graph chunk cleanup failed during reindex: %s (file=%s)",
                         _ge,
@@ -3014,7 +3014,7 @@ class IndexingPipeline:
             ]
             self._graph_store.delete_chunks_from_graph(all_orphan_ids)
             self._graph_store.delete_file_node(file_path)
-        except Exception as e:
+        except (RuntimeError, sqlite3.Error, ValueError) as e:
             logger.warning(
                 "graph cleanup failed after DB commit: %s (file=%s)",
                 e,
@@ -3025,7 +3025,7 @@ class IndexingPipeline:
         try:
             self._chunk_tracker.remove_fingerprint(file_path)
             self._meta_tracker.remove_fingerprint(file_path)
-        except Exception as e:
+        except sqlite3.Error as e:
             logger.warning(
                 "fingerprint cleanup failed after DB commit: %s (file=%s)",
                 e,
@@ -3706,7 +3706,7 @@ class IndexingPipeline:
         try:
             rows = self._conn.execute(f"SELECT DISTINCT file_path FROM {m2m_table}").fetchall()
             all_file_paths = [row[0] for row in rows]
-        except Exception:
+        except sqlite3.Error:
             logger.warning("_check_weights_changed: cannot read M2M table — skipping")
             return
 

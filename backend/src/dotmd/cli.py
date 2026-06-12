@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import sys
 import time
 from datetime import UTC
@@ -264,7 +265,7 @@ def status(ctx: click.Context, verbose: bool) -> None:
                     files = conn.execute(
                         f"SELECT COUNT(DISTINCT file_path) FROM {m2m_table}"
                     ).fetchone()[0]
-                except Exception:
+                except sqlite3.OperationalError:
                     files = 0
                 strategies[strategy] = (count, files)
 

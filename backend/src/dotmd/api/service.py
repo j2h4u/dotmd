@@ -7,7 +7,9 @@ storage, extraction, and fusion details from calling code.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import sqlite3
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -28,7 +30,7 @@ from dotmd.core.models import (
 )
 from dotmd.ingestion.pipeline import IndexingPipeline
 from dotmd.ingestion.reader import parse_frontmatter, read_file
-from dotmd.ingestion.source_lifecycle import SourceRuntimeFactory
+from dotmd.ingestion.source_lifecycle import SourceLifecycleConfigError, SourceRuntimeFactory
 from dotmd.ingestion.source_provider import ApplicationSourceProviderProtocol
 from dotmd.ingestion.telegram_provider import (
     is_low_signal_telegram_text as _is_low_signal_telegram_text,
@@ -314,7 +316,7 @@ class DotMDService:
             namespace = descriptor.namespace
             try:
                 bundle = self._source_runtime_factory.build_if_configured(namespace)
-            except Exception as exc:
+            except (SourceLifecycleConfigError, OSError, RuntimeError, ValueError) as exc:
                 logger.warning(
                     "Lifecycle build failed for source %r: %s",
                     namespace,
@@ -338,7 +340,7 @@ class DotMDService:
         """
         try:
             self._local_executor.shutdown(wait=True)
-        except Exception:
+        except (RuntimeError, OSError):
             logger.warning("local_executor shutdown failed", exc_info=True)
 
     # ------------------------------------------------------------------
@@ -355,7 +357,7 @@ class DotMDService:
         self._semantic_engine.warmup()
         try:
             self._reranker_factory.get().warmup()
-        except Exception:
+        except (RuntimeError, OSError, ValueError):
             logger.warning(
                 "reranker warmup failed; search will fall back to fused ranking",
                 exc_info=True,
@@ -789,7 +791,7 @@ class DotMDService:
                 mode=mode if isinstance(mode, str) else str(mode),
                 reranked=reranked_applied,
             )
-        except Exception:
+        except (sqlite3.Error, RuntimeError):
             logger.warning("search log failed — non-fatal", exc_info=True)
 
         return candidates
@@ -1024,7 +1026,7 @@ class DotMDService:
                     chunk = store.get_chunk(prov.chunk_id)
                     if chunk and hasattr(chunk, "text"):
                         snippet = chunk.text[: self._settings.snippet_length]
-                except Exception:
+                except (sqlite3.Error, RuntimeError):
                     pass
 
                 # Attribute engines that scored this ref
@@ -1277,7 +1279,7 @@ class DotMDService:
                         "error": None,
                     }
                 )
-            except Exception as exc:
+            except (RuntimeError, ValueError) as exc:
                 elapsed_ms = (time.perf_counter() - started_total) * 1000.0
                 if load_finished:
                     rerank_ms = max(0.0, elapsed_ms - load_ms)
@@ -1382,7 +1384,7 @@ class DotMDService:
                     top_k=pool_size,
                     seed_chunk_ids=seed_ids,
                 )
-            except Exception:
+            except (RuntimeError, ValueError):
                 logger.warning(
                     "graph enrichment failed; continuing with primary fused results",
                     exc_info=True,
@@ -1608,7 +1610,7 @@ class DotMDService:
     def _read_frontmatter(self, path: Path) -> dict[str, Any]:
         try:
             frontmatter, _ = parse_frontmatter(read_file(path))
-        except Exception:
+        except (OSError, ValueError):
             logger.warning("frontmatter parse failed: %s", path, exc_info=True)
             return {}
         return frontmatter
@@ -1787,7 +1789,7 @@ class DotMDService:
                     before=0,
                     after=0,
                 )
-            except Exception:
+            except (RuntimeError, ValueError):
                 logger.warning("telegram target metadata lookup failed", exc_info=True)
             else:
                 for unit in window.units:
@@ -1920,13 +1922,13 @@ class DotMDService:
             stats.total_files = conn.execute(
                 f"SELECT COUNT(DISTINCT file_path) FROM {m2m_table}"
             ).fetchone()[0]
-        except Exception:
+        except (AttributeError, sqlite3.Error):
             logger.debug("live chunk/file count failed", exc_info=True)
         # Live graph counts (stats table is only updated by batch run(), not trickle)
         try:
             stats.total_entities = self._pipeline.graph_store.node_count()
             stats.total_edges = self._pipeline.graph_store.edge_count()
-        except Exception:
+        except (RuntimeError, ValueError):
             logger.debug("live graph count failed", exc_info=True)
         # Change detection: run live diff against all known paths (skip for MCP)
         if live_diff:
@@ -1955,7 +1957,7 @@ class DotMDService:
                     stats.modified_files = len(diff.modified)
                     stats.deleted_files = len(diff.deleted)
                     stats.unchanged_files = len(diff.unchanged)
-            except Exception as e:
+            except (OSError, sqlite3.Error) as e:
                 logger.warning("Change detection failed: %s", e, exc_info=True)
 
         # Trickle indexer progress
@@ -2013,14 +2015,12 @@ class DotMDService:
         dict[str, list[str]] | None
             Acronym dictionary, or None if file doesn't exist.
         """
-        import json
-
         if not self._settings.acronyms_path.exists():
             return None
 
         try:
             with self._settings.acronyms_path.open() as f:
                 return json.load(f)
-        except Exception as e:
+        except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to load acronyms: %s", e, exc_info=True)
             return None

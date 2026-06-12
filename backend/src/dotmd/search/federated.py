@@ -20,10 +20,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
+
+import httpx
 
 from dotmd.core.models import SearchCandidate, SourceStatus
 
@@ -140,7 +143,7 @@ def _run_local_engine(
             reason=None,
             elapsed_ms=(time.time() - start) * 1000,
         )
-    except Exception as exc:
+    except (httpx.HTTPError, OSError, RuntimeError, sqlite3.Error, ValueError) as exc:
         logger.warning(
             "Local engine %r failed: %s",
             name,
@@ -214,7 +217,7 @@ async def _run_federated_engine(
             reason="timeout",
             elapsed_ms=(time.time() - start) * 1000,
         )
-    except Exception as exc:
+    except (httpx.HTTPError, OSError, RuntimeError, sqlite3.Error, ValueError) as exc:
         logger.warning(
             "Federated engine %r failed: %s",
             name,

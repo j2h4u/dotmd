@@ -146,7 +146,7 @@ class EmbeddingCache:
                 for text_hash, blob in rows:
                     dim = len(blob) // 4  # 4 bytes per float32
                     result[text_hash] = list(struct.unpack(f"{dim}f", blob))
-        except Exception:
+        except (sqlite3.Error, struct.error):
             logger.warning(
                 "embedding_cache lookup failed — returning empty (graceful degradation)",
                 exc_info=True,
@@ -341,7 +341,7 @@ class ExtractionCache:
                         json.loads(entities_json),
                         json.loads(co_occurs_json),
                     )
-        except Exception:
+        except (json.JSONDecodeError, sqlite3.Error, TypeError):
             logger.warning(
                 "extraction_cache lookup failed — returning empty (graceful degradation)",
                 exc_info=True,

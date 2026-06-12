@@ -11,8 +11,10 @@ import logging
 from urllib.parse import urlparse
 
 from falkordb import FalkorDB
+from redis.exceptions import RedisError
 
 logger = logging.getLogger(__name__)
+_FALKOR_ERRORS = (RedisError, RuntimeError, ValueError, KeyError, IndexError, TypeError)
 
 
 class FalkorDBGraphStore:
@@ -58,7 +60,7 @@ class FalkorDBGraphStore:
         for label in ("File", "Section", "Entity", "Tag", "Node"):
             try:
                 self._graph.query(f"CREATE INDEX FOR (n:{label}) ON (n.id)")
-            except Exception:
+            except _FALKOR_ERRORS:
                 logger.debug("Index for %s already exists or creation skipped", label)
 
     # -- node creation ------------------------------------------------------
@@ -298,7 +300,7 @@ class FalkorDBGraphStore:
                     "MATCH (s:Section {id: $id}) DETACH DELETE s",
                     params={"id": chunk_id},
                 )
-            except Exception:
+            except _FALKOR_ERRORS:
                 logger.debug(
                     "delete_chunks_from_graph failed for chunk_id=%s",
                     chunk_id,
@@ -387,14 +389,14 @@ class FalkorDBGraphStore:
         """
         try:
             self._graph.delete()
-        except Exception:
+        except _FALKOR_ERRORS:
             # Graph may not exist yet on a fresh install.
             logger.debug("delete_all: GRAPH.DELETE failed (graph may not exist)", exc_info=True)
         self._graph = self._db.select_graph(self._graph_name)
         for label in ("File", "Section", "Entity", "Tag", "Node"):
             try:
                 self._graph.query(f"CREATE INDEX FOR (n:{label}) ON (n.id)")
-            except Exception:
+            except _FALKOR_ERRORS:
                 logger.debug("Index for %s already exists or creation skipped", label)
 
     def node_count(self) -> int:
@@ -436,7 +438,7 @@ class FalkorDBGraphStore:
                             )
                             if ent_result.result_set:
                                 props["ner_entities"] = [str(r[0]) for r in ent_result.result_set]
-                        except Exception:
+                        except _FALKOR_ERRORS:
                             logger.debug(
                                 "Failed to enrich Section %s with NER entities",
                                 node_id,
@@ -449,7 +451,7 @@ class FalkorDBGraphStore:
                             "properties": props,
                         }
                     )
-            except Exception:
+            except _FALKOR_ERRORS:
                 logger.debug("Failed to query %s nodes", label, exc_info=True)
 
         edges: list[dict] = []
@@ -466,7 +468,7 @@ class FalkorDBGraphStore:
                 }
                 for row in result.result_set
             )
-        except Exception:
+        except _FALKOR_ERRORS:
             logger.debug("Failed to query edges", exc_info=True)
 
         return {"nodes": nodes, "edges": edges}
