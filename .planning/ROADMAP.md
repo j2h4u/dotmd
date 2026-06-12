@@ -1267,7 +1267,13 @@ and FalkorDB storage with one embedded SurrealDB-backed storage layer.
 **Requirements:** STOR-01, STOR-02, STOR-03, STOR-04
 **Depends on:** Phase 37
 **Backlog source:** 999.33
-**Plans:** 0/0 plans complete
+**Plans:** 0/4 plans complete
+
+Plans:
+- [ ] 38-01-PLAN.md - Current data inventory, copied snapshot evidence, and migration map
+- [ ] 38-02-PLAN.md - Surreal storage schema/adapters and transform-only import proof
+- [ ] 38-03-PLAN.md - Retrieval parity proof for FTS, vector, graph-direct, and hybrid/RRF
+- [ ] 38-04-PLAN.md - Operations proof and final migrate/defer/reject recommendation
 
 Success criteria:
 1. A minimal SurrealDB prototype models documents, source units, chunks,
