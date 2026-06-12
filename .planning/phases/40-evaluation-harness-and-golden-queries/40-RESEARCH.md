@@ -374,12 +374,18 @@ def test_report_writer(tmp_path):
 |---|-------|---------|---------------|
 | A1 | `backend/devtools/surreal_golden_queries.jsonl`, `backend/devtools/surreal_eval_runner.py`, and `backend/src/dotmd/search/surreal_eval.py` are the recommended landing paths, but the exact filenames are a planning recommendation rather than an existing locked decision. [ASSUMED] | Architecture Patterns | Low — planner can rename paths without changing the design. |
 
-## Open Questions
+## Resolved Planning Decisions
 
-1. **Should Phase 40 source-ref coverage include federated-only refs such as Gmail/Telegram, or only local indexed refs at first?**
-   - What we know: dotMD already returns source-ref-first public results and supports federated candidates with different scoring semantics. [CITED: backend/src/dotmd/api/service.py; backend/src/dotmd/core/models.py]
-   - What's unclear: the Phase 40 roadmap text says `source-ref scenarios` but does not state whether that must include federated-only sources in the first approved corpus. [CITED: .planning/ROADMAP.md]
-   - Recommendation: Start with local indexed refs plus at least one Telegram-style public ref if easily reproducible; defer Gmail-specific federated evaluation unless the planner already needs it for Phase 43 readiness. [ASSUMED]
+1. **Phase 40 source-ref coverage is local indexed source-ref coverage only.**
+   - Decision: the approved Phase 40 corpus should prove that returned refs are
+     readable and point to the intended local indexed document/unit. It should
+     not require federated-only Gmail or Telegram refs.
+   - Rationale: the v1.8 milestone is a storage cutover from SQLite/sqlite-vec
+     and FalkorDB to SurrealDB. Federated-only connectors have different live
+     scoring and availability semantics, and they are not part of the storage
+     import/retrieval cutover surface. [CITED: .planning/ROADMAP.md; docs/surrealdb-native-retrieval-contract.md]
+   - Follow-up: federated source-ref quality can get its own later evaluation
+     set if connector cutover quality becomes a milestone goal. [ASSUMED]
 
 ## Environment Availability
 
