@@ -148,7 +148,7 @@ delete the legacy stack without fallback backends or compatibility shims.
 **Goal:** Define the new SurrealDB-native search semantics and acceptance
 categories before implementation starts.
 **Depends on:** Phase 38
-**Plans:** TBD
+**Plans:** 1 plan
 
 - [ ] Define the target search semantics for BM25 weighted fields, vector
   search, graph traversal, hybrid fusion, and reranker inputs.
@@ -156,6 +156,10 @@ categories before implementation starts.
   target.
 - [ ] Define accepted-difference categories: improvement, harmless reorder,
   regression, and unclear.
+
+Plans:
+
+- [ ] 39-01: Define SurrealDB-native retrieval contract and migration reuse policy
 
 ### Phase 40: Evaluation harness and golden queries
 
