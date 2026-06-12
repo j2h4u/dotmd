@@ -172,7 +172,7 @@ See: `.planning/phases/38-evaluate-embedded-surrealdb-as-unified-storage-backend
 | 35. Filesystem unified source adapter | 2/2 | Complete    | 2026-05-10 |
 | 36. Telegram unified sync and federated search | 2/2 | Complete    | 2026-05-10 |
 | 37. Airweave connector compatibility spike | 4/4 | Complete    | 2026-05-13 |
-| 38. Embedded SurrealDB storage spike | 3/5 | In Progress|  |
+| 38. Embedded SurrealDB storage spike | 4/5 | In Progress|  |
 
 ### Backlog 999.2: Pipeline parallelism — overlap GLiNER and TEI across files
 
@@ -1466,7 +1466,7 @@ and FalkorDB storage with one embedded SurrealDB-backed storage layer.
 **Requirements:** STOR-01, STOR-02, STOR-03, STOR-04
 **Depends on:** Phase 37
 **Backlog source:** 999.33
-**Plans:** 3/5 plans executed
+**Plans:** 4/5 plans executed
 Plans:
 **Wave 1**
 
@@ -1482,7 +1482,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 38-03-PLAN.md - Retrieval parity proof for FTS, vector, graph-direct, and hybrid/RRF
+- [x] 38-03-PLAN.md - Retrieval parity proof for FTS, vector, graph-direct, and hybrid/RRF
 
 **Wave 5** *(blocked on Wave 4 completion)*
 

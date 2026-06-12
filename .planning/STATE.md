@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Storage Simplification
 status: Active
-stopped_at: Completed 38-02-PLAN.md
-last_updated: "2026-06-12T15:09:58.591Z"
+stopped_at: Completed 38-03-PLAN.md
+last_updated: "2026-06-12T15:33:21.924Z"
 last_activity: 2026-06-12
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 5
-  completed_plans: 3
-  percent: 60
+  completed_plans: 4
+  percent: 80
 ---
 
 # GSD State
@@ -31,7 +31,7 @@ Phase: 38
 Status: Active
 Last activity: 2026-06-12
 
-Progress: [██████░░░░] 60% (Phase 38: 3/5 plans complete)
+Progress: [████████░░] 80% (Phase 38: 4/5 plans complete)
 
 ## Deferred Items
 
@@ -97,6 +97,7 @@ Items acknowledged and deferred at milestone close:
 | Phase 38 P01-current-data-inventory | 21 min | 3 tasks | 5 files |
 | Phase 38 P05 | 10 min | 3 tasks | 6 files |
 | Phase 38 P02 | 13 min | 2 tasks | 5 files |
+| Phase 38 P03 | 21 min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -208,6 +209,9 @@ Recent decisions affecting current work:
 - [Phase 38]: Use a centralized Surreal record-ID codec so chunk IDs, refs, file paths, entity names, relation IDs, and feedback IDs remain data-only and cannot shape SurrealQL structure.
 - [Phase 38]: Block Surreal apply writes on the 38-05 embedded safety gate and refuse migrate-ready evidence when the gate is missing or failed.
 - [Phase 38]: Keep feedback import behind the supported provider/exporter abstraction instead of querying feedback.db directly.
+- [Phase 38]: [Plan 38-03]: Weighted-field FTS mismatch is a blocking defer signal and cannot be treated as migrate-ready parity. — Representative copied-snapshot FTS evidence showed top-k visibility drift caused by title/tags weighting versus text-only proxy behavior.
+- [Phase 38]: [Plan 38-03]: Retrieval parity must reuse copied snapshot rows and stored embeddings; no TEI calls or source indexing are allowed in the evidence path. — The parity harness used copied snapshot rows and fixed stored embeddings so the evidence measures storage behavior instead of recomputation.
+- [Phase 38]: [Plan 38-03]: Hybrid/RRF parity comparisons normalize ties by score then chunk_id for deterministic evidence. — Stable tie ordering removes flaky rank drift so hybrid parity failures reflect real attribution gaps instead of incidental sort order.
 
 ### Pending Todos
 
@@ -294,9 +298,9 @@ safe so SurrealDB evaluation does not imply unnecessary CPU-heavy recomputation.
 ## Current Position
 
 Phase: 38 (evaluate-embedded-surrealdb-as-unified-storage-backend) — ACTIVE
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
-Last activity: 2026-06-12 -- Completed 38-02 Surreal storage schema, transform-only import proof, and summary
+Last activity: 2026-06-12 -- Completed 38-03 retrieval parity harness, evidence report, and summary
 
 ## Operator Next Steps
 
@@ -304,6 +308,6 @@ Last activity: 2026-06-12 -- Completed 38-02 Surreal storage schema, transform-o
 
 ## Session
 
-**Last session:** 2026-06-12T15:09:58.576Z
-**Stopped at:** Completed 38-02-PLAN.md
+**Last session:** 2026-06-12T15:33:05.156Z
+**Stopped at:** Completed 38-03-PLAN.md
 **Resume file:** None

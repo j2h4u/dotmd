@@ -155,7 +155,7 @@ dotMD unless a later phase explicitly justifies it.
   SurrealDB: documents, source units, chunks, embeddings, entities, relations,
   feedback, cursors, and checkpoints.
 
-- [ ] **STOR-02**: The SurrealDB prototype can execute the retrieval paths dotMD
+- [x] **STOR-02**: The SurrealDB prototype can execute the retrieval paths dotMD
   depends on: full-text, vector, graph-direct entity retrieval, and hybrid/RRF
   fusion.
 
@@ -203,6 +203,6 @@ dotMD unless a later phase explicitly justifies it.
 | AIR-02 | Phase 37 | Complete |
 | AIR-03 | Phase 37 | Complete |
 | STOR-01 | Phase 38 | Complete |
-| STOR-02 | Phase 38 | Planned |
+| STOR-02 | Phase 38 | Complete |
 | STOR-03 | Phase 38 | Complete |
 | STOR-04 | Phase 38 | Complete |
