@@ -31,7 +31,7 @@ _actionlint:
 # Scan for dead code. Vendored Airweave is excluded because local deltas are
 # tracked separately in vendor notes and should stay close to upstream shape.
 _dead-code:
-    cd {{backend}} && uv run vulture src tests --min-confidence 80 --exclude "*/vendor/*"
+    cd {{backend}} && uv run vulture src tests --min-confidence 65 --exclude "*/vendor/*"
 
 # Run local backend pytest suite. Live MCP checks are opt-in.
 test *args:
