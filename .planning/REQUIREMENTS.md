@@ -163,7 +163,7 @@ dotMD unless a later phase explicitly justifies it.
   migrated from SQLite/sqlite-vec/FalkorDB without CPU-heavy rechunking,
   reembedding, or re-extraction.
 
-- [ ] **STOR-04**: The spike produces a recommendation to migrate, defer, or
+- [x] **STOR-04**: The spike produces a recommendation to migrate, defer, or
   reject SurrealDB, including operational notes for backup/restore,
   locking/concurrency, and rollback.
 
@@ -202,7 +202,7 @@ dotMD unless a later phase explicitly justifies it.
 | AIR-01 | Phase 37 | Complete |
 | AIR-02 | Phase 37 | Complete |
 | AIR-03 | Phase 37 | Complete |
-| STOR-01 | Phase 38 | Planned |
+| STOR-01 | Phase 38 | Complete |
 | STOR-02 | Phase 38 | Planned |
-| STOR-03 | Phase 38 | Planned |
-| STOR-04 | Phase 38 | Planned |
+| STOR-03 | Phase 38 | Complete |
+| STOR-04 | Phase 38 | Complete |

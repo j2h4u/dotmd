@@ -3,14 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Storage Simplification
 status: Active
-last_updated: "2026-06-12T14:23:02.223Z"
+stopped_at: Completed 38-05-PLAN.md
+last_updated: "2026-06-12T14:42:14.172Z"
 last_activity: 2026-06-12
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 5
-  completed_plans: 1
-  percent: 20
+  completed_plans: 2
+  percent: 40
 ---
 
 # GSD State
@@ -30,7 +31,7 @@ Phase: 38
 Status: Active
 Last activity: 2026-06-12
 
-Progress: [██░░░░░░░░] 20% (Phase 38: 1/5 plans complete)
+Progress: [████░░░░░░] 40% (Phase 38: 2/5 plans complete)
 
 ## Deferred Items
 
@@ -94,6 +95,7 @@ Items acknowledged and deferred at milestone close:
 | 36 | 2 | - | - |
 | 37 | 4 | - | - |
 | Phase 38 P01-current-data-inventory | 21 min | 3 tasks | 5 files |
+| Phase 38 P05 | 10 min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -200,6 +202,8 @@ Recent decisions affecting current work:
 - [Phase 27]: [Phase 27 Plan 03]: Public search filters inactive retained chunks before reranking and SearchResult hydration. — Internal engines may still return retained candidates, but public output is active-binding gated.
 - [Phase 27]: [Phase 27 Plan 03]: read(ref) and drill(ref) require active resource bindings before source-document resolution, filesystem fallback, frontmatter reads, or chunk range reads. — Prevents retained filesystem artifacts from bypassing the public visibility gate.
 - [Phase 27]: [Phase 27 Plan 03]: Binding diagnostics are count-only with active, inactive, retained, and reused keys. — No include_inactive, recycle-bin search, inactive read, or inactive list surface was added.
+- [Phase 38]: [Plan 38-05]: Embedded Surreal probes use raw SurrealQL transactions via query_raw because the embedded SDK rejects client-side begin()/commit(). — The installed embedded SDK raises UnsupportedFeatureError for begin()/commit(), so the gate proves commit and rollback semantics through raw SurrealQL on a local surrealkv target instead.
+- [Phase 38]: [Plan 38-05]: Same-target embedded writer safety is guarded with a sidecar JSON lock plus TTL stale recovery and explicit force-release. — Phase 38 needs explicit single-writer evidence before schema/import work, and the local guard preserves owner metadata for stale recovery and force-release reporting without touching live production volumes.
 
 ### Pending Todos
 
@@ -286,10 +290,16 @@ safe so SurrealDB evaluation does not imply unnecessary CPU-heavy recomputation.
 ## Current Position
 
 Phase: 38 (evaluate-embedded-surrealdb-as-unified-storage-backend) — ACTIVE
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
-Last activity: 2026-06-12 -- Completed 38-01 inventory and migration evidence
+Last activity: 2026-06-12 -- Completed 38-05 embedded safety gate and package verification
 
 ## Operator Next Steps
 
 - `$gsd-execute-phase 38`
+
+## Session
+
+**Last session:** 2026-06-12T14:42:00.153Z
+**Stopped at:** Completed 38-05-PLAN.md
+**Resume file:** None
