@@ -122,7 +122,7 @@ See: `.planning/REQUIREMENTS.md`
 
 ## v1.7 Storage Simplification (Phase 38) — ACTIVE
 
-- [ ] Phase 38: Embedded SurrealDB storage spike
+- [x] Phase 38: Embedded SurrealDB storage spike (completed 2026-06-12)
 
 Goal: Decide whether dotMD should replace separate SQLite/sqlite-vec/FTS5 and
 FalkorDB storage with one embedded SurrealDB-backed storage layer while
@@ -172,7 +172,7 @@ See: `.planning/phases/38-evaluate-embedded-surrealdb-as-unified-storage-backend
 | 35. Filesystem unified source adapter | 2/2 | Complete    | 2026-05-10 |
 | 36. Telegram unified sync and federated search | 2/2 | Complete    | 2026-05-10 |
 | 37. Airweave connector compatibility spike | 4/4 | Complete    | 2026-05-13 |
-| 38. Embedded SurrealDB storage spike | 4/5 | In Progress|  |
+| 38. Embedded SurrealDB storage spike | 5/5 | Complete   | 2026-06-12 |
 
 ### Backlog 999.2: Pipeline parallelism — overlap GLiNER and TEI across files
 
@@ -1466,7 +1466,7 @@ and FalkorDB storage with one embedded SurrealDB-backed storage layer.
 **Requirements:** STOR-01, STOR-02, STOR-03, STOR-04
 **Depends on:** Phase 37
 **Backlog source:** 999.33
-**Plans:** 4/5 plans executed
+**Plans:** 5/5 plans complete
 Plans:
 **Wave 1**
 
@@ -1486,7 +1486,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 38-04-PLAN.md - Operations proof and final migrate/defer/reject recommendation
+- [x] 38-04-PLAN.md - Operations proof and final migrate/defer/reject recommendation
 
 Success criteria:
 
