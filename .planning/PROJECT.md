@@ -38,13 +38,14 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 - ✓ GLiNER batching benchmark — slower + OOM, closed optimization path — Validated in Phase 9
 - ✓ FTS5 BM25 replacement — incremental keyword search, removed rank-bm25 dep — Validated in Phase 10
 - ✓ Trickle indexer progress reporting — rate, ETA, CLI + API — Validated in Phase 10
+- ✓ v1.7 Storage Simplification decision spike — Embedded SurrealDB is not a
+  safe single replacement backend today; final recommendation is reject due to
+  hybrid/RRF retrieval parity gap — Validated in Phase 38
 
 ### Active
 
-- v1.7 Storage Simplification — evaluate whether embedded SurrealDB can replace
-  the current SQLite/sqlite-vec/FTS5 + FalkorDB split while preserving as much
-  existing data as possible without CPU-heavy recomputation.
-  - Phase 38: Embedded SurrealDB storage spike — active.
+- No active phase. Start a new milestone before the next storage architecture
+  change.
 
 ### Out of Scope
 
@@ -147,13 +148,16 @@ capability model, lifecycle boundary, and public search/read/drill contract.
 - Airweave compatibility spike with a vendored platform slice and Gmail
   federated-search bridge.
 
-**Deferred:** Broader third-party connector rollout and storage consolidation.
-Storage consolidation is now active as Phase 38.
+**Deferred:** Broader third-party connector rollout and any production storage
+migration. Phase 38 rejected Embedded SurrealDB as a single replacement backend
+until weighted FTS and hybrid/RRF parity are solved or a narrower partial
+Surreal role is planned explicitly.
 
 ## Current State
 
-v1.6 is shipped and archived. The current project state is active v1.7 work on
-storage simplification.
+v1.7 Storage Simplification is complete. The current SQLite/sqlite-vec/FTS5 +
+FalkorDB stack remains the production storage architecture. Phase 38 added a
+SurrealDB spike/prototype and evidence reports, but no production wiring.
 
 ## Current Milestone: v1.7 Storage Simplification
 
@@ -169,7 +173,8 @@ SQLite/sqlite-vec/FTS5 + FalkorDB split with one embedded storage layer.
 - Produce a migrate/defer/reject recommendation with backup, rollback, and
   concurrency notes.
 
-**Active phase:** Phase 38 — Embedded SurrealDB storage spike.
+**Status:** Complete. Phase 38 produced `Recommendation: reject` for Embedded
+SurrealDB as a single replacement backend.
 
 Phase 33 complete (2026-05-08): Source runtimes now build through an
 inspectable lifecycle factory that combines registry descriptors, typed local
@@ -240,4 +245,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-10 after Phase 36 completion*
+*Last updated: 2026-06-12 after Phase 38 completion*

@@ -172,7 +172,7 @@ See: `.planning/phases/38-evaluate-embedded-surrealdb-as-unified-storage-backend
 | 35. Filesystem unified source adapter | 2/2 | Complete    | 2026-05-10 |
 | 36. Telegram unified sync and federated search | 2/2 | Complete    | 2026-05-10 |
 | 37. Airweave connector compatibility spike | 4/4 | Complete    | 2026-05-13 |
-| 38. Embedded SurrealDB storage spike | 5/5 | Complete   | 2026-06-12 |
+| 38. Embedded SurrealDB storage spike | 5/5 | Complete    | 2026-06-12 |
 
 ### Backlog 999.2: Pipeline parallelism — overlap GLiNER and TEI across files
 

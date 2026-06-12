@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Storage Simplification
-status: Active
-stopped_at: Completed 38-03-PLAN.md
-last_updated: "2026-06-12T16:38:24.099Z"
+status: Complete
+stopped_at: Phase 38 verified
+last_updated: "2026-06-12T17:01:22.632Z"
 last_activity: 2026-06-12
 progress:
   total_phases: 7
@@ -21,17 +21,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 38 — evaluate-embedded-surrealdb-as-unified-storage-backend
+**Current focus:** Phase 38 complete — Embedded SurrealDB rejected as single replacement backend
 
 ## Current Milestone
 
 **v1.7 — Storage Simplification**
 
 Phase: 38
-Status: Active
+Status: Milestone v1.7 complete — Phase 38 verified
 Last activity: 2026-06-12
 
-Progress: [████████░░] 80% (Phase 38: 4/5 plans complete)
+Progress: [██████████] 100% (Phase 38: 5/5 plans complete)
 
 ## Deferred Items
 
@@ -55,7 +55,7 @@ Items acknowledged and deferred at milestone close:
 
 **Velocity:**
 
-- Total plans completed: 64 (across all milestones)
+- Total plans completed: 69 (across all milestones)
 - Average duration: ~3 min
 - Total execution time: —
 
@@ -98,6 +98,7 @@ Items acknowledged and deferred at milestone close:
 | Phase 38 P05 | 10 min | 3 tasks | 6 files |
 | Phase 38 P02 | 13 min | 2 tasks | 5 files |
 | Phase 38 P03 | 21 min | 3 tasks | 3 files |
+| 38 | 5 | - | - |
 
 ## Accumulated Context
 
@@ -279,9 +280,9 @@ was moved under `.planning/notes/completed-backlog/`.
 
 ### Blockers/Concerns
 
-No active phase blocker. Phase 38 is the active v1.7 storage simplification
-spike. The main concern is preserving existing production index data wherever
-safe so SurrealDB evaluation does not imply unnecessary CPU-heavy recomputation.
+No active phase blocker. Phase 38 completed the v1.7 storage simplification
+spike and rejected Embedded SurrealDB as a single replacement backend because
+retrieval parity failed on hybrid/RRF behavior.
 
 ### Quick Tasks Completed
 
@@ -297,14 +298,15 @@ safe so SurrealDB evaluation does not imply unnecessary CPU-heavy recomputation.
 
 ## Current Position
 
-Phase: 38 (evaluate-embedded-surrealdb-as-unified-storage-backend) — ACTIVE
+Phase: 38 (evaluate-embedded-surrealdb-as-unified-storage-backend) — COMPLETE
 Plan: 5 of 5
-Status: Ready to execute
-Last activity: 2026-06-12 -- Completed 38-03 retrieval parity harness, evidence report, and summary
+Status: Verified; final recommendation rejects Embedded SurrealDB as a single replacement backend
+Last activity: 2026-06-12 -- Phase 38 verified with 30/30 must-haves; final recommendation is reject due to hybrid/RRF retrieval parity gap
 
 ## Operator Next Steps
 
-- `$gsd-execute-phase 38`
+- Review `38-RECOMMENDATION.md`
+- Start a new milestone when ready
 
 ## Session
 
