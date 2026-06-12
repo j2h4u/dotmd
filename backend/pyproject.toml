@@ -183,3 +183,45 @@ source_modules = [
 forbidden_modules = [
     "dotmd.api",
 ]
+
+[[tool.importlinter.contracts]]
+name = "Extraction layer does not depend on API or ingestion orchestration"
+type = "forbidden"
+source_modules = [
+    "dotmd.extraction",
+]
+forbidden_modules = [
+    "dotmd.api",
+    "dotmd.ingestion",
+]
+
+[[tool.importlinter.contracts]]
+name = "Utility helpers stay independent of domain layers"
+type = "forbidden"
+source_modules = [
+    "dotmd.utils",
+]
+forbidden_modules = [
+    "dotmd.api",
+    "dotmd.ingestion",
+    "dotmd.extraction",
+    "dotmd.search",
+    "dotmd.storage",
+    "dotmd.vendor",
+]
+
+[[tool.importlinter.contracts]]
+name = "Vendored platform slice stays independent of dotMD runtime"
+type = "forbidden"
+source_modules = [
+    "dotmd.vendor",
+]
+forbidden_modules = [
+    "dotmd.api",
+    "dotmd.core",
+    "dotmd.ingestion",
+    "dotmd.extraction",
+    "dotmd.search",
+    "dotmd.storage",
+    "dotmd.utils",
+]
