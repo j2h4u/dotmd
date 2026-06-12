@@ -75,13 +75,13 @@ class GmailSource(BaseSource):
     def _build_gmail_query(self) -> str | None:
         """Build Gmail API query string from filter configuration."""
         if getattr(self, "gmail_query", None):
-            self.logger.debug(f"Using custom Gmail query: {self.gmail_query}")
+            self.logger.debug("Using custom Gmail query")
             return str(self.gmail_query)
         query_parts = self._build_query_parts()
         if not query_parts:
             return None
         query = " ".join(query_parts)
-        self.logger.debug(f"Built Gmail query: {query}")
+        self.logger.debug("Built Gmail query with %d parts", len(query_parts))
         return query
 
     def _build_query_parts(self) -> list[str]:

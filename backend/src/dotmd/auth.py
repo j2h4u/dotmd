@@ -56,7 +56,7 @@ def _pending_client_ttl_seconds() -> int:
     try:
         value = int(raw)
     except ValueError:
-        logger.warning("Invalid DOTMD_OAUTH_PENDING_CLIENT_TTL_SECONDS=%r; using default", raw)
+        logger.warning("Invalid DOTMD_OAUTH_PENDING_CLIENT_TTL_SECONDS; using default")
         return _DEFAULT_PENDING_CLIENT_TTL_SECONDS
     return value if value > 0 else _DEFAULT_PENDING_CLIENT_TTL_SECONDS
 
@@ -260,9 +260,9 @@ class DotMDOAuthProvider(
         redirect_uris = {_normalize_uri(uri) for uri in client_info.redirect_uris or []}
         if not redirect_uris or not all(_redirect_uri_allowed(uri) for uri in redirect_uris):
             logger.warning(
-                "OAuth: rejected client registration client_id=%s redirect_uris=%s",
+                "OAuth: rejected client registration client_id=%s redirect_uri_count=%d",
                 client_info.client_id,
-                sorted(redirect_uris),
+                len(redirect_uris),
             )
             raise RegistrationError(
                 error="invalid_redirect_uri",
@@ -321,9 +321,9 @@ class DotMDOAuthProvider(
         redirect_uri = _normalize_uri(params.redirect_uri)
         if redirect_uri not in client_redirects or not _redirect_uri_allowed(redirect_uri):
             logger.warning(
-                "OAuth: rejected authorization client_id=%s redirect_uri=%s",
+                "OAuth: rejected authorization client_id=%s redirect_uri_len=%d",
                 client_id,
-                redirect_uri,
+                len(redirect_uri),
             )
             raise AuthorizeError(
                 error="unauthorized_client",

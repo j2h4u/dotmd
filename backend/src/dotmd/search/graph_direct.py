@@ -78,7 +78,7 @@ class GraphDirectEngine:
         if not matched:
             return []
 
-        logger.debug("Graph-direct: matched entities %s", matched)
+        logger.debug("Graph-direct: matched_entities=%d", len(matched))
 
         # Retrieve connected chunks for all matched entities
         chunk_scores: dict[str, float] = {}

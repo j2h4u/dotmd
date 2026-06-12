@@ -691,7 +691,7 @@ async def search(
         formatted_candidates = [_format_result(r) for r in response.candidates]
         return SearchResponse(candidates=formatted_candidates, source_status=response.source_status)
     except (RuntimeError, ValueError, sqlite3.Error) as exc:
-        logger.exception("search failed: query=%r", query[:100])
+        logger.exception("search failed: query_len=%d", len(query))
         raise RuntimeError(f"Search failed: {exc}.") from exc
 
 
@@ -748,10 +748,10 @@ async def read_document(
             chunks=chunks,
         )
     except ValueError as exc:
-        logger.warning("read ref rejected: ref=%r error=%s", ref, exc)
+        logger.warning("read ref rejected: ref_len=%d error_type=%s", len(ref), type(exc).__name__)
         raise _ref_tool_error("read", ref, exc) from exc
     except (RuntimeError, sqlite3.Error) as exc:
-        logger.exception("read failed: ref=%r", ref)
+        logger.exception("read failed: ref_len=%d", len(ref))
         raise RuntimeError(
             "Read failed. Action: retry later or submit feedback with the ref."
         ) from exc
@@ -789,10 +789,10 @@ async def drill(
             total_chunks=result["total_chunks"],
         )
     except ValueError as exc:
-        logger.warning("drill ref rejected: ref=%r error=%s", ref, exc)
+        logger.warning("drill ref rejected: ref_len=%d error_type=%s", len(ref), type(exc).__name__)
         raise _ref_tool_error("drill", ref, exc) from exc
     except (RuntimeError, sqlite3.Error) as exc:
-        logger.exception("drill failed: ref=%r", ref)
+        logger.exception("drill failed: ref_len=%d", len(ref))
         raise RuntimeError(
             "Drill failed. Action: retry later or submit feedback with the ref."
         ) from exc

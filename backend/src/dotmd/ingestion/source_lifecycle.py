@@ -467,7 +467,6 @@ def source_runtime_factory_from_settings(
         "DOTMD_GMAIL_REFRESH_TOKEN": _configured_string(settings.gmail_refresh_token),
     }
     gmail_set = {key for key, value in gmail_vars.items() if value}
-    gmail_missing = {key for key, value in gmail_vars.items() if not value}
     if len(gmail_set) == 3:
         gmail_client_id = gmail_vars["DOTMD_GMAIL_CLIENT_ID"]
         gmail_client_secret = gmail_vars["DOTMD_GMAIL_CLIENT_SECRET"]
@@ -490,8 +489,7 @@ def source_runtime_factory_from_settings(
     elif gmail_set:
         logger.warning(
             "Gmail source not registered: partial configuration detected. "
-            "Missing env vars: %s. Set all three to enable Gmail.",
-            ", ".join(sorted(gmail_missing)),
+            "Set all Gmail OAuth credentials to enable Gmail."
         )
 
     return SourceRuntimeFactory(

@@ -50,6 +50,14 @@ ACTIVE_FILTER_OVERFETCH_FACTOR = 5
 TELEGRAM_REF_PREFIX = "telegram:"
 
 
+def _search_mode_log_label(mode: SearchMode | str) -> str:
+    """Return a bounded label for search mode logging."""
+    try:
+        return SearchMode(mode).value
+    except ValueError:
+        return "invalid"
+
+
 class TelegramReadPath(Enum):
     """Routing decision for Telegram message read operations."""
 
@@ -561,9 +569,9 @@ class DotMDService:
         - Per D-LOOP-SAFE: search_async doesn't block the event loop.
         """
         logger.info(
-            "search_async: query=%r mode=%s top_k=%d rerank=%s",
-            query[:100],
-            mode,
+            "search_async: query_len=%d mode=%s top_k=%d rerank=%s",
+            len(query),
+            _search_mode_log_label(mode),
             top_k,
             rerank,
         )
@@ -643,9 +651,9 @@ class DotMDService:
 
         except Exception:
             logger.exception(
-                "search_async failed: query=%r mode=%s",
-                query[:100],
-                mode,
+                "search_async failed: query_len=%d mode=%s",
+                len(query),
+                _search_mode_log_label(mode),
             )
             raise
 

@@ -300,5 +300,9 @@ class FTS5SearchEngine:
             )
             return [(row[0], row[1]) for row in cur.fetchall()]
         except sqlite3.OperationalError as exc:
-            logger.warning("FTS5 search error for query %r: %s", query, exc)
+            logger.warning(
+                "FTS5 search error: query_len=%d error_type=%s",
+                len(query),
+                type(exc).__name__,
+            )
             return []

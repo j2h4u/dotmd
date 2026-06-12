@@ -392,8 +392,10 @@ def test_partial_gmail_env_vars_logs_warning(tmp_path: object) -> None:
     assert factory._config_store.get_config("gmail") is None
     warning.assert_called_once()
     warning_text = " ".join(str(arg) for arg in warning.call_args.args)
-    assert "DOTMD_GMAIL_CLIENT_SECRET" in warning_text
-    assert "DOTMD_GMAIL_REFRESH_TOKEN" in warning_text
+    assert "partial configuration detected" in warning_text
+    assert "Gmail OAuth credentials" in warning_text
+    assert "DOTMD_GMAIL_CLIENT_SECRET" not in warning_text
+    assert "DOTMD_GMAIL_REFRESH_TOKEN" not in warning_text
 
 
 def test_base_connector_bridge_is_abstract(mock_token_provider: MagicMock) -> None:
