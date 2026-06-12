@@ -100,3 +100,87 @@ CYCLE_SUMMARY: current_high=1 current_actionable=5
 - C4: Consider shared fixtures if fake diff rows duplicate between test files, or explicitly keep duplication small.
 - C6: Add explicit test coverage for `matched_engines` in diff rows.
 - S6: Specify acceptance JSONL behavior in runner task text.
+
+
+---
+
+# Cycle 2 OpenCode Review
+
+Let me verify the cited source files exist and understand the contract module.
+# Phase 40 Plan Review — Cycle 2
+
+## Verdict: APPROVED
+
+All six Cycle 1 concerns (C1, C2, C3, C4, C6, S6) are resolved or adequately addressed in the revised PLAN.md. No new HIGH or actionable MEDIUM concerns remain outside the plan.
+
+---
+
+## Prior Concern Resolution
+
+| Concern | Severity | Status | Evidence |
+|---------|----------|--------|----------|
+| **C1** — corpus labels reference non-indexed planning docs | HIGH | **RESOLVED** | Task 3 action now requires "actual indexed public `ref` anchors, preferably `filesystem:/mnt/...` refs" and explicitly forbids "fixed repo-local planning or source-file names as corpus labels unless those exact refs are present in the active index and read-resolvable". Success criteria reinforce: review ledger records read-resolvability in the active old-stack baseline. |
+| **C2** — `contains` field tension with T-40-03 | MEDIUM | **RESOLVED** | Task 1 behavior: `contains` is checked "only against supplied captured result snippets or read-evidence fields when present; without supplied evidence they remain review metadata and do not trigger automatic classification." Task 2: "when no evidence is supplied, `contains` remains review metadata and is not an automatic classification trigger." No filesystem reads during report generation. |
+| **C3** — `graph-entity` as single enum-backed category string | MEDIUM | **RESOLVED** | Task 2 defines `GoldenQueryCategory` enum with `GRAPH_ENTITY = "graph-entity"` as single source of truth. Task 1, Task 2, and Task 3 all reference `GoldenQueryCategory.GRAPH_ENTITY.value`. Source audit confirms. |
+| **C4** — shared fixtures / conftest for test deduplication | MEDIUM | **ADDRESSED** | Task 1 permits a shared `conftest.py` "only if repeated helper setup across both test files makes the tests harder to read." Gives executor pragmatic discretion without over-specifying. |
+| **C6** — `matched_engines` test coverage | LOW | **RESOLVED** | Task 1 report-shape behavior now explicitly includes "`matched_engines` keyed by public result ref with engine-name arrays" in the field checklist. |
+| **S6** — acceptance JSONL behavior specification | LOW | **RESOLVED** | Task 1: "accepted rows require `accepted_by` and `accepted_reason`, preserve raw classification and raw gate, and do not count as unresolved blockers." Task 2: "the runner exits nonzero when unresolved blocking rows remain." |
+
+---
+
+## Plan Quality Assessment
+
+**Strengths retained from Cycle 1:**
+- TDD ordering (RED → GREEN → corpus) remains correct
+- Phase boundary discipline enforced at every artifact — no Surreal implementation, no shadow execution, no reindexing, no TEI reembedding, no compatibility mode, no runtime fallback
+- Reuses Phase 39 `AcceptedDifference`/`CutoverGate`/`RetrievalSurface` via import, not string literals
+- Threat model covers JSONL tampering (T-40-01), acceptance forgery (T-40-02), path safety (T-40-03), shell injection (T-40-04), DoS (T-40-05)
+- `surreal_contract.py` verified present with correct exports (`AccepedDifference`, `CutoverGate`, `RetrievalSurface`, `default_surreal_retrieval_contract`, `SurrealRetrievalContract.cutover_gate_for()`)
+
+**Improvements in Cycle 2 plan:**
+- `GoldenQueryCategory` enum now the single source of truth for all eight categories, eliminating the `graph/entity` vs `graph-entity` ambiguity
+- `contains` semantics now fully defined as captured-evidence-only, closing the T-40-03 gap
+- Corpus guidance inverted from "use planning docs" to "prefer indexed `/mnt/` refs" with explicit prohibition on hardcoding non-indexed paths
+- All six prior concerns addressed in explicit `<review_feedback_addressed>` table for traceability
+
+---
+
+## New Observations (LOW, non-blocking)
+
+| # | Severity | Observation |
+|---|----------|-------------|
+| N1 | LOW | Corpus creation (Task 3) requires a running dotMD instance to discover "actual indexed public refs" and verify read-resolvability. The plan does not explicitly state this dependency. The executor will discover it naturally. |
+| N2 | LOW | `matched_engines` schema described at different granularity: PLAN.md says "keyed by public result ref with engine-name arrays"; RESEARCH.md nests under `baseline`/`candidate` keys. Both are consistent (PLAN describes the inner ref→engines structure, RESEARCH provides the outer grouping). The executor should reconcile against the authoritative Task 1 behavior text. |
+
+---
+
+## Threat Model Completeness
+
+All five Phase 40 threats have concrete mitigations mapped to test assertions:
+
+| Threat | Mitigation | Tested? |
+|--------|-----------|---------|
+| T-40-01 (JSONL tampering) | Strict field/enum/duplicate validation | Task 1 validate/load tests |
+| T-40-02 (acceptance forgery) | Require `accepted_by` + `accepted_reason`, preserve raw gate | Task 1 acceptance behavior test |
+| T-40-03 (path traversal reads) | No dereferencing label refs; `contains` only against supplied evidence | Task 1 scope boundary test |
+| T-40-04 (shell injection) | No shell interpolation; runner consumes JSONL through Python | Task 1 scope boundary test |
+| T-40-05 (DoS) | Stream JSONL row-by-row, fail fast with `ValueError` | Task 1 malformed-input tests |
+
+---
+
+## Summary
+
+The revised Phase 40 plan correctly addresses all Cycle 1 blocking and actionable concerns. The scope boundary is enforced, the TDD flow is sound, the contract vocabulary is correctly reused from Phase 39, and the threat mitigations are comprehensive. Ready for execution.
+
+
+## Cycle 2 Verification Coverage
+
+Source-grounding authority: grep/OpenCode file reads. Reviewer re-read revised `40-01-PLAN.md`, `40-RESEARCH.md`, `40-REVIEWS.md`, `backend/src/dotmd/search/surreal_contract.py`, and `backend/src/dotmd/search/surreal_parity.py`. Planned new symbols in `surreal_eval.py` remain skipped as new artifacts.
+
+CYCLE_SUMMARY: current_high=0 current_actionable=0
+
+## Current HIGH Concerns
+None.
+
+## Current Actionable Non-HIGH Concerns
+None.
