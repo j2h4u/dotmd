@@ -6,7 +6,7 @@ import logging
 import os
 from collections import Counter
 from itertools import combinations
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import torch
 
@@ -65,7 +65,7 @@ class NERExtractor:
         self._entity_types: list[str] = entity_types or list(_DEFAULT_ENTITY_TYPES)
         self._model_name: str = model_name
         self._threshold: float = threshold
-        self._model: GLiNER | None = None
+        self._model: object | None = None
         self._extraction_cache: ExtractionCache | None = extraction_cache
 
     # ------------------------------------------------------------------
@@ -302,15 +302,16 @@ class NERExtractor:
             logger.info("Loading GLiNER model '%s' …", self._model_name)
             from gliner import GLiNER  # type: ignore[import-untyped]
 
-            self._model = GLiNER.from_pretrained(self._model_name)
+            model = cast("GLiNER", GLiNER.from_pretrained(self._model_name))
             # ADR: Cap max sequence length to match our chunk token budget.
             # GLiNER attention is O(n^2) — shorter max_len = faster inference.
             # 512 matches our chunk_max_tokens setting.
-            if hasattr(self._model, "config") and hasattr(self._model.config, "max_len"):
-                self._model.config.max_len = 512
+            if hasattr(model, "config") and hasattr(model.config, "max_len"):
+                model.config.max_len = 512
             logger.info(
                 "GLiNER model loaded (threads=%d, max_len=%s).",
                 torch.get_num_threads(),
-                getattr(getattr(self._model, "config", None), "max_len", "?"),
+                getattr(getattr(model, "config", None), "max_len", "?"),
             )
-        return self._model
+            self._model = model
+        return cast("GLiNER", self._model)

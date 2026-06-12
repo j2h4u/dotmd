@@ -92,20 +92,20 @@ class _MarkdownEventHandler(PatternMatchingEventHandler):
         self._debounce: dict[str, float] = {}
 
     def on_created(self, event):
-        self._enqueue(event.src_path)
+        self._enqueue(self._stringify_watchdog_path(event.src_path))
 
     def on_modified(self, event):
-        self._enqueue(event.src_path)
+        self._enqueue(self._stringify_watchdog_path(event.src_path))
 
     def on_deleted(self, event):
-        self._enqueue(event.src_path)
+        self._enqueue(self._stringify_watchdog_path(event.src_path))
 
     def on_moved(self, event):
         if getattr(event, "is_directory", False):
             return
 
-        src_path = getattr(event, "src_path", "")
-        dest_path = getattr(event, "dest_path", "")
+        src_path = self._stringify_watchdog_path(getattr(event, "src_path", ""))
+        dest_path = self._stringify_watchdog_path(getattr(event, "dest_path", ""))
 
         if self._is_markdown_path(src_path):
             self._enqueue(src_path)
@@ -115,6 +115,12 @@ class _MarkdownEventHandler(PatternMatchingEventHandler):
     @staticmethod
     def _is_markdown_path(path_str: str) -> bool:
         return Path(path_str).suffix.lower() == ".md"
+
+    @staticmethod
+    def _stringify_watchdog_path(path: str | bytes) -> str:
+        if isinstance(path, bytes):
+            return path.decode()
+        return path
 
     def _enqueue(self, path_str: str) -> None:
         now = time.monotonic()
@@ -155,8 +161,15 @@ class TrickleIndexer:
         self._pipeline = pipeline
         self._state = TrickleState()
         self._file_queue: asyncio.Queue[str] = asyncio.Queue()
-        self._observer: Observer | None = None
+        self._observer = None
         self._needs_vacuum: bool = False
+
+    @property
+    def _pipeline_instance(self) -> IndexingPipeline:
+        pipeline = self._pipeline
+        if pipeline is None:
+            raise RuntimeError("TrickleIndexer pipeline must be initialized")
+        return pipeline
 
     @property
     def state(self) -> TrickleState:
@@ -248,7 +261,7 @@ class TrickleIndexer:
         # 1. PRAGMA integrity_check — early corruption detection
         try:
             result = await asyncio.to_thread(
-                lambda: self._pipeline.conn.execute("PRAGMA integrity_check").fetchone(),
+                lambda: self._pipeline_instance.conn.execute("PRAGMA integrity_check").fetchone(),
             )
             if result and result[0] != "ok":
                 logger.error(
@@ -276,7 +289,7 @@ class TrickleIndexer:
             )
 
             files_rm, chunks_rm, vecs_rm = await asyncio.to_thread(
-                self._pipeline.purge_orphaned_files,
+                self._pipeline_instance.purge_orphaned_files,
                 discovered_paths,
             )
             if files_rm:
@@ -314,7 +327,7 @@ class TrickleIndexer:
         )
 
         # Diff against file tracker to find unindexed files
-        diff = self._pipeline.file_tracker.diff(all_files)
+        diff = self._pipeline_instance.file_tracker.diff(all_files)
         unindexed_paths = set(diff.new) | set(diff.modified)
         unindexed = [fi for fi in all_files if str(fi.path) in unindexed_paths]
 
@@ -326,7 +339,7 @@ class TrickleIndexer:
             logger.info("Purging %d deleted/excluded files from index", len(diff.deleted))
             for path_str in diff.deleted:
                 try:
-                    await asyncio.to_thread(self._pipeline._purge_file, path_str)
+                    await asyncio.to_thread(self._pipeline_instance._purge_file, path_str)
                 except Exception:
                     logger.exception("Failed to purge %s", path_str)
             logger.info("Purge complete: %d files removed from all stores", len(diff.deleted))
@@ -460,7 +473,7 @@ class TrickleIndexer:
                     if not file_path.exists():
                         try:
                             await asyncio.to_thread(
-                                self._pipeline._purge_file,
+                                self._pipeline_instance._purge_file,
                                 path_str,
                             )
                             logger.info(
@@ -504,17 +517,17 @@ class TrickleIndexer:
             #   3. VACUUM                (compacts DB file)
             if self._needs_vacuum:
                 try:
-                    await asyncio.to_thread(self._pipeline.sweep_graph_orphans)
+                    await asyncio.to_thread(self._pipeline_instance.sweep_graph_orphans)
                 except Exception:
                     logger.exception("Graph orphan sweep failed")
                 try:
-                    await asyncio.to_thread(self._pipeline.prune_extraction_cache)
+                    await asyncio.to_thread(self._pipeline_instance.prune_extraction_cache)
                 except Exception:
                     logger.exception("Extraction cache prune failed")
                 try:
                     logger.info("Running VACUUM (deferred)")
                     await asyncio.to_thread(
-                        self._pipeline.conn.execute,
+                        self._pipeline_instance.conn.execute,
                         "VACUUM",
                     )
                     self._needs_vacuum = False
@@ -575,7 +588,7 @@ class TrickleIndexer:
         No other INFO lines are emitted per file from this method.
         """
         t0 = time.perf_counter()
-        n_chunks = self._pipeline.index_file(file_info)
+        n_chunks = self._pipeline_instance.index_file(file_info)
         elapsed = time.perf_counter() - t0
         if n_chunks:
             logger.info("%s — %d chunks, %.1fs", file_info.path.name, n_chunks, elapsed)
@@ -593,17 +606,18 @@ class TrickleIndexer:
         handler = _MarkdownEventHandler(
             loop, self._file_queue, self._settings.effective_indexing_exclude
         )
-        self._observer = Observer()
+        observer = Observer()
+        self._observer = observer
 
         for path_spec in self._settings.indexing_paths:
             # Only watch actual directories, not glob patterns
             if "*" not in path_spec and "?" not in path_spec:
                 watch_path = Path(path_spec)
                 if watch_path.is_dir():
-                    self._observer.schedule(handler, str(watch_path), recursive=True)
+                    observer.schedule(handler, str(watch_path), recursive=True)
                     logger.info("Watching directory: %s", watch_path)
 
-        self._observer.start()
+        observer.start()
 
     def _stop_observer(self) -> None:
         """Stop watchdog Observer cleanly to prevent thread leak."""

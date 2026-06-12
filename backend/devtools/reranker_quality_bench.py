@@ -89,7 +89,7 @@ def get_commit() -> str:
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
-    except Exception:
+    except subprocess.CalledProcessError:
         return "unknown"
 
 

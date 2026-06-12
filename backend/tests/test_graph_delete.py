@@ -7,6 +7,8 @@ the delete_file_subgraph() method behavior.
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from dotmd.storage.graph import LadybugDBGraphStore
 
 # ---------------------------------------------------------------------------
@@ -17,14 +19,14 @@ from dotmd.storage.graph import LadybugDBGraphStore
 def _count_nodes(gs: LadybugDBGraphStore, label: str) -> int:
     """Count nodes of a given label."""
     with gs._connection() as conn:
-        result = conn.execute(f"MATCH (n:{label}) RETURN count(n)")
+        result = cast(Any, conn.execute(f"MATCH (n:{label}) RETURN count(n)"))
         return int(result.get_as_df().iloc[0, 0])
 
 
 def _count_edges(gs: LadybugDBGraphStore, rel_table: str) -> int:
     """Count edges in a given relationship table."""
     with gs._connection() as conn:
-        result = conn.execute(f"MATCH ()-[r:{rel_table}]->() RETURN count(r)")
+        result = cast(Any, conn.execute(f"MATCH ()-[r:{rel_table}]->() RETURN count(r)"))
         return int(result.get_as_df().iloc[0, 0])
 
 

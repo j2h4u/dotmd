@@ -100,6 +100,7 @@ def _make_pipeline_with_directional_vectors(settings):  # type: ignore[no-untype
 @pytest.fixture
 def pipeline_settings(tmp_path):
     from dotmd.core.config import Settings
+    from dotmd.core.models import ExtractDepth
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
@@ -112,7 +113,7 @@ def pipeline_settings(tmp_path):
         indexing_paths=[str(data_dir)],
         vector_backend="sqlite-vec",
         graph_backend="ladybugdb",
-        extract_depth="structural",
+        extract_depth=ExtractDepth.STRUCTURAL,
         embedding_weights="text=0.7,meta=0.3",
     )
 

@@ -28,7 +28,10 @@ def _build_post_v16_db(tmp_path: Path) -> tuple[Path, str, str]:
     from dotmd.core.config import Settings
     from dotmd.ingestion.pipeline import _model_to_table_suffix
 
-    settings = Settings(index_dir=tmp_path)
+    settings = Settings(
+        index_dir=tmp_path,
+        embedding_url="http://localhost:18088",
+    )
     strategy = settings.chunk_strategy
     model_key = _model_to_table_suffix(settings.embedding_model).lstrip("_")
 
@@ -66,7 +69,11 @@ def _build_post_v16_db(tmp_path: Path) -> tuple[Path, str, str]:
 def _settings(tmp_path: Path):
     from dotmd.core.config import Settings
 
-    return Settings(index_dir=tmp_path, indexing_paths=[str(tmp_path)])
+    return Settings(
+        index_dir=tmp_path,
+        embedding_url="http://localhost:18088",
+        indexing_paths=[str(tmp_path)],
+    )
 
 
 class TestInsertOrIgnoreOnRepeat:

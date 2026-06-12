@@ -11,6 +11,7 @@ No live TEI required — encode_batch is mocked.
 
 import pathlib
 from datetime import UTC, datetime
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -28,6 +29,7 @@ def _write_md(path: pathlib.Path, title: str, tags: list, body: str) -> None:
 @pytest.fixture
 def pipeline_settings(tmp_path):
     from dotmd.core.config import Settings
+    from dotmd.core.models import ExtractDepth
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
@@ -40,7 +42,7 @@ def pipeline_settings(tmp_path):
         indexing_paths=[str(data_dir)],
         vector_backend="sqlite-vec",
         graph_backend="ladybugdb",
-        extract_depth="structural",
+        extract_depth=ExtractDepth.STRUCTURAL,
         embedding_weights="text=0.7,meta=0.3",
     )
 
@@ -223,7 +225,7 @@ def test_m2m_shared_chunk_behavior_documented(pipeline_settings, tmp_path):
     assert text_count > 0, "Shared chunks must have e_text stored in VecComponentStore"
 
     # vec0 must have rows (fusion produced valid fused vectors)
-    vec0_table = pipeline._vector_store._VEC_TABLE
+    vec0_table = cast(Any, pipeline._vector_store)._VEC_TABLE
     row_count = pipeline._conn.execute(f"SELECT COUNT(*) FROM {vec0_table}").fetchone()[0]
     assert row_count > 0, "vec0 must have rows after indexing shared-body files"
 

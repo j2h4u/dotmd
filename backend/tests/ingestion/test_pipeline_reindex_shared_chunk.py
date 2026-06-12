@@ -36,6 +36,7 @@ from __future__ import annotations
 import random
 import sqlite3
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -43,8 +44,8 @@ import pytest
 try:
     from dotmd.core.config import Settings as _Settings
 
-    STRATEGY: str = _Settings().chunk_strategy
-except Exception:
+    STRATEGY: str = _Settings(embedding_url="http://localhost:8088").chunk_strategy
+except (OSError, ValueError):
     # Fallback for environments where DOTMD_EMBEDDING_URL is not set at collection time.
     STRATEGY = "heading_512_50"
 # The actual vec_meta table suffix is derived from the pipeline's embedding
@@ -194,6 +195,7 @@ def _get_pipeline(db_path: Path):  # type: ignore[no-untyped-def]
     settings = Settings(
         index_dir=db_path.parent,
         indexing_paths=[str(db_path.parent)],
+        embedding_url="http://localhost:18088",
     )
     return IndexingPipeline(settings)
 
@@ -230,7 +232,7 @@ class TestEditPreservesSharedChunkIndexRows:
 
         # Phase 1: index both A and B so all stores (chunks_*, FTS5, vec_meta, M2M)
         # are populated.  Both files produce SHARED_CHUNK_ID on the first pass.
-        def chunk_shared(path: Path) -> list:  # type: ignore[return]
+        def chunk_shared(path: Path) -> Any:
             def _fn(*args, **kwargs):  # type: ignore[no-untyped-def]
                 return [
                     Chunk(
@@ -378,7 +380,7 @@ class TestEditKeepsSharedChunkWhenOtherHolderUnchanged:
         pipeline = _get_pipeline(db_path)
 
         # Phase 1: index both A and B with SHARED_CHUNK_ID so all stores are populated.
-        def chunk_shared(path: Path) -> list:  # type: ignore[return]
+        def chunk_shared(path: Path) -> Any:
             def _fn(*args, **kwargs):  # type: ignore[no-untyped-def]
                 return [
                     Chunk(
@@ -570,7 +572,11 @@ class TestPropertyReindexHolderInvariant:
         from dotmd.ingestion.pipeline import IndexingPipeline
 
         db_path = _build_db(tmp_path)
-        settings = Settings(index_dir=tmp_path, indexing_paths=[str(tmp_path)])
+        settings = Settings(
+            index_dir=tmp_path,
+            indexing_paths=[str(tmp_path)],
+            embedding_url="http://localhost:18088",
+        )
         pipeline = IndexingPipeline(settings)
 
         rng = random.Random(42)

@@ -6,6 +6,7 @@ Telegram refs, ensuring proper routing through the provider infrastructure.
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -230,12 +231,12 @@ class TestFederatedTelegramRead:
         original_is_active = service._pipeline.metadata_store.is_resource_binding_active
         original_get_doc = service._pipeline.metadata_store.get_source_document
 
-        def mock_is_active(namespace: str, document_ref: str) -> bool:
-            if namespace == "telegram" and document_ref == "dialog:12345":
+        def mock_is_active(namespace: str, resource_ref: str) -> bool:
+            if namespace == "telegram" and resource_ref == "dialog:12345":
                 return False  # INACTIVE
-            return original_is_active(namespace, document_ref)
+            return original_is_active(namespace, resource_ref)
 
-        def mock_get_doc(namespace: str, document_ref: str):
+        def mock_get_doc(namespace: str, document_ref: str, *, conn: Any | None = None):
             if namespace == "telegram" and document_ref == "dialog:12345":
                 # Return a mock document
                 from dotmd.core.models import SourceDocument
@@ -253,7 +254,7 @@ class TestFederatedTelegramRead:
                     content_fingerprint="abc123",
                     metadata_fingerprint="def456",
                 )
-            return original_get_doc(namespace, document_ref)
+            return original_get_doc(namespace, document_ref, conn=conn)
 
         service._pipeline.metadata_store.is_resource_binding_active = mock_is_active
         service._pipeline.metadata_store.get_source_document = mock_get_doc
@@ -291,12 +292,12 @@ class TestFederatedTelegramRead:
         original_is_active = service._pipeline.metadata_store.is_resource_binding_active
         original_get_doc = service._pipeline.metadata_store.get_source_document
 
-        def mock_is_active(namespace: str, document_ref: str) -> bool:
-            if namespace == "telegram" and document_ref == "dialog:12345":
+        def mock_is_active(namespace: str, resource_ref: str) -> bool:
+            if namespace == "telegram" and resource_ref == "dialog:12345":
                 return True  # ACTIVE
-            return original_is_active(namespace, document_ref)
+            return original_is_active(namespace, resource_ref)
 
-        def mock_get_doc(namespace: str, document_ref: str):
+        def mock_get_doc(namespace: str, document_ref: str, *, conn: Any | None = None):
             if namespace == "telegram" and document_ref == "dialog:12345":
                 # Return a mock document
                 from dotmd.core.models import SourceDocument
@@ -314,7 +315,7 @@ class TestFederatedTelegramRead:
                     content_fingerprint="abc123",
                     metadata_fingerprint="def456",
                 )
-            return original_get_doc(namespace, document_ref)
+            return original_get_doc(namespace, document_ref, conn=conn)
 
         service._pipeline.metadata_store.is_resource_binding_active = mock_is_active
         service._pipeline.metadata_store.get_source_document = mock_get_doc

@@ -96,6 +96,15 @@ class _TelegramSourceClientFixture:
             "metadata_json": {"dialog_id": -1001},
         }
 
+    def search_messages(
+        self,
+        query: str,
+        limit: int,
+        dialog_id: int | None = None,
+    ) -> dict[str, Any]:
+        _ = (query, dialog_id)
+        return {"messages": self._changes[:limit], "total": min(limit, len(self._changes))}
+
 
 class _KeywordRecorder:
     def __init__(self, conn, table_name: str) -> None:  # type: ignore[no-untyped-def]

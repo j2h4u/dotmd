@@ -359,9 +359,9 @@ class TestFingerprintTiming:
             call_order.append("encode")
             return _dummy_embeddings(len(texts))
 
-        def tracking_save_fp(*args):
+        def tracking_save_fp(file_path: str, mtime: float, size: int, checksum: str) -> None:
             call_order.append("save_fingerprint")
-            return original_save_fp(*args)
+            original_save_fp(file_path, mtime, size, checksum)
 
         pipeline._semantic_engine.encode_batch = tracking_encode
         original_save_fp = pipeline._chunk_tracker.save_fingerprint

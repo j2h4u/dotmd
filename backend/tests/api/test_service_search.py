@@ -290,21 +290,6 @@ class _SearchMetadataStore:
         }
 
 
-class TestFilesystemBindingLifecycle:
-    """Filesystem index/search/read lifecycle enforces active resource bindings.
-
-    NOTE: This test is deferred to Phase 35 for focused binding lifecycle validation.
-    Task 2 focuses on search_native implementation; binding lifecycle is Phase 27 scope.
-    """
-
-    @pytest.mark.skip(reason="Deferred to Phase 35 for binding lifecycle focus")
-    def test_filesystem_unbind_rebind_hides_and_restores_search_read_without_tei(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        """Skipped: See class docstring."""
-
-
 class TestActiveSearchFiltering:
     """Public search hides inactive retained candidates before rerank/hydration."""
 

@@ -101,7 +101,7 @@ class TestMCPSearchCandidateContract:
             can_materialize=False,
             chunk_id=None,  # Federated candidates have None
             heading_path=None,
-            matched_engines=["tg:fts"],
+            matched_engines=("tg:fts",),
             source_native_score=42.0,
             source_native_rank=1,
             engine_scores=None,  # Federated candidates have None

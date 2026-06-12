@@ -1028,7 +1028,7 @@ class DotMDService:
                     pass
 
                 # Attribute engines that scored this ref
-                engine_scores = {}
+                engine_scores: dict[str, float] = {}
                 for engine_name, refs in per_engine_ref.items():
                     for eng_ref, eng_score in refs:
                         if eng_ref == ref:
@@ -1050,7 +1050,7 @@ class DotMDService:
                         chunk_id=prov.chunk_id,
                         heading_path=prov.heading_path,
                         provenance=prov,
-                        matched_engines=list(engine_scores.keys()),
+                        matched_engines=tuple(engine_scores.keys()),
                         source_native_score=None,
                         source_native_rank=None,
                         engine_scores=engine_scores or None,
@@ -1737,6 +1737,7 @@ class DotMDService:
     def _drill_telegram_message(self, ref: str) -> DrillPayload:
         # Determine routing path
         path = self._resolve_telegram_read_path(ref)
+        target_metadata: dict[str, Any] = {}
 
         # Handle INACTIVE binding gate (Phase 27)
         if path == TelegramReadPath.LOCAL_INACTIVE:
@@ -1750,7 +1751,6 @@ class DotMDService:
                 _document_ref, unit_ref = _parse_telegram_message_ref(ref)
             except ValueError:
                 raise ValueError(f"Unknown source ref: {ref}") from None
-            target_metadata: dict[str, Any] = {}
             try:
                 window = self._telegram_provider.read_unit_window(
                     unit_ref,
@@ -1780,7 +1780,6 @@ class DotMDService:
 
         # Handle LOCAL_ACTIVE refs (existing path)
         document, unit_ref = self._require_active_telegram_message_ref(ref)
-        target_metadata: dict[str, Any] = {}
         if self._telegram_provider is not None:
             try:
                 window = self._telegram_provider.read_unit_window(

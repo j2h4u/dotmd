@@ -109,7 +109,7 @@ def get_commit() -> str:
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
-    except Exception:
+    except subprocess.CalledProcessError:
         return "unknown"
 
 
@@ -205,7 +205,7 @@ def run_model_sequence(
                     append_jsonl(output_path, [row])
                     if row["error"] or timed_out:
                         return
-                except Exception as exc:
+                except (KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
                     row = make_row(
                         config=config,
                         commit=commit,

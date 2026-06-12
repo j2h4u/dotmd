@@ -90,6 +90,14 @@ class LadybugDBGraphStore:
                 # Table already exists or other non-fatal issue
                 logger.debug("Schema statement skipped: %s", stmt, exc_info=True)
 
+    @staticmethod
+    def _query_df(conn: lb.Connection, query: str, parameters: dict[str, Any] | None = None) -> Any:
+        if parameters is None:
+            result = conn.execute(query)
+        else:
+            result = conn.execute(query, parameters=parameters)
+        return cast(Any, result).get_as_df()
+
     # -- node creation ------------------------------------------------------
 
     def add_file_node(
@@ -229,11 +237,12 @@ class LadybugDBGraphStore:
     def _find_node_label(self, node_id: str, conn: lb.Connection) -> str | None:
         """Find which node table a given id belongs to."""
         for label in ("File", "Section", "Entity", "Tag"):
-            result = conn.execute(
+            df = self._query_df(
+                conn,
                 f"MATCH (n:{label} {{id: $id}}) RETURN n.id",
                 parameters={"id": node_id},
             )
-            if len(result.get_as_df()) > 0:
+            if len(df) > 0:
                 return label
         return None
 
@@ -256,8 +265,7 @@ class LadybugDBGraphStore:
                 "AND r2.rel_type IN ['MENTIONS', 'HAS_TAG'] "
                 "RETURN DISTINCT s.id, r2.rel_type, r2.weight",
             ):
-                result = conn.execute(query, parameters={"id": chunk_id})
-                df = result.get_as_df()  # type: ignore[reportAttributeAccessIssue]
+                df = self._query_df(conn, query, parameters={"id": chunk_id})
                 for _, row in df.iterrows():
                     nid = str(row.iloc[0])
                     if nid == chunk_id:
@@ -328,9 +336,9 @@ class LadybugDBGraphStore:
         with self._connection() as conn:
             for label in ("Entity", "Tag"):
                 try:
-                    before_df = conn.execute(
-                        f"MATCH (n:{label}) WHERE NOT (n)--() RETURN count(n)"
-                    ).get_as_df()
+                    before_df = self._query_df(
+                        conn, f"MATCH (n:{label}) WHERE NOT (n)--() RETURN count(n)"
+                    )
                     count = int(before_df.iloc[0, 0]) if not before_df.empty else 0
                     if count:
                         conn.execute(f"MATCH (n:{label}) WHERE NOT (n)--() DELETE n")
@@ -362,12 +370,12 @@ class LadybugDBGraphStore:
             # Build a map of section_id -> list of NER entity names
             section_entities: dict[str, list[str]] = {}
             try:
-                result = conn.execute(
+                df = self._query_df(
+                    conn,
                     "MATCH (s:Section)-[r:SECTION_ENTITY]->(e:Entity) "
                     "WHERE e.source = 'ner' "
-                    "RETURN s.id, e.id, e.type"
+                    "RETURN s.id, e.id, e.type",
                 )
-                df = result.get_as_df()
                 for _, row in df.iterrows():
                     sid = str(row["s.id"])
                     section_entities.setdefault(sid, []).append(str(row["e.id"]))
@@ -382,8 +390,7 @@ class LadybugDBGraphStore:
                 ("Tag", "n.id"),
             ]:
                 try:
-                    result = conn.execute(f"MATCH (n:{label}) RETURN {cols}")
-                    df = result.get_as_df()
+                    df = self._query_df(conn, f"MATCH (n:{label}) RETURN {cols}")
                     for _, row in df.iterrows():
                         props = {c.split(".")[-1]: row[c] for c in df.columns if c != "n.id"}
                         node_id = str(row["n.id"])
@@ -402,17 +409,17 @@ class LadybugDBGraphStore:
             # Edges
             for rel_table in _REL_TABLE_MAP.values():
                 try:
-                    result = conn.execute(
-                        f"MATCH (a)-[r:{rel_table}]->(b) RETURN a.id, b.id, r.rel_type, r.weight"
+                    df = self._query_df(
+                        conn,
+                        f"MATCH (a)-[r:{rel_table}]->(b) RETURN a.id, b.id, r.rel_type, r.weight",
                     )
-                    df = result.get_as_df()
                     for _, row in df.iterrows():
                         edges.append(
                             {
                                 "source": str(row["a.id"]),
                                 "target": str(row["b.id"]),
                                 "relation_type": str(row["r.rel_type"]),
-                                "weight": float(row["r.weight"]),
+                                "weight": float(cast(Any, row["r.weight"])),
                             }
                         )
                 except Exception:
@@ -426,8 +433,7 @@ class LadybugDBGraphStore:
         with self._connection() as conn:
             for label in ("File", "Section", "Entity", "Tag"):
                 try:
-                    result = conn.execute(f"MATCH (n:{label}) RETURN count(n)")
-                    df = result.get_as_df()
+                    df = self._query_df(conn, f"MATCH (n:{label}) RETURN count(n)")
                     total += int(df.iloc[0, 0])
                 except Exception:
                     logger.warning("Failed to count %s nodes", label, exc_info=True)
@@ -439,8 +445,7 @@ class LadybugDBGraphStore:
         with self._connection() as conn:
             for rel_table in _REL_TABLE_MAP.values():
                 try:
-                    result = conn.execute(f"MATCH ()-[r:{rel_table}]->() RETURN count(r)")
-                    df = result.get_as_df()
+                    df = self._query_df(conn, f"MATCH ()-[r:{rel_table}]->() RETURN count(r)")
                     total += int(df.iloc[0, 0])
                 except Exception:
                     logger.warning("Failed to count %s edges", rel_table, exc_info=True)
@@ -450,8 +455,7 @@ class LadybugDBGraphStore:
         """Return all entity names in the graph."""
         with self._connection() as conn:
             try:
-                result = conn.execute("MATCH (e:Entity) RETURN e.id")
-                df = result.get_as_df()
+                df = self._query_df(conn, "MATCH (e:Entity) RETURN e.id")
                 return [str(row["e.id"]) for _, row in df.iterrows()]
             except Exception:
                 logger.debug("Failed to get entity names", exc_info=True)
@@ -461,11 +465,11 @@ class LadybugDBGraphStore:
         """Return chunk IDs linked to an entity."""
         with self._connection() as conn:
             try:
-                result = conn.execute(
+                df = self._query_df(
+                    conn,
                     "MATCH (s:Section)-[:SECTION_ENTITY]->(e:Entity {id: $name}) RETURN s.id",
                     parameters={"name": entity_name},
                 )
-                df = result.get_as_df()
                 return [str(row["s.id"]) for _, row in df.iterrows()]
             except Exception:
                 logger.debug("Failed to get chunks for entity %s", entity_name, exc_info=True)
@@ -475,12 +479,12 @@ class LadybugDBGraphStore:
         """Return sorted entity names mentioned in sections belonging to file_path."""
         with self._connection() as conn:
             try:
-                result = conn.execute(
+                df = self._query_df(
+                    conn,
                     "MATCH (s:Section {file_path: $fp})-[:SECTION_ENTITY]->(e:Entity) "
                     "RETURN DISTINCT e.id",
                     parameters={"fp": file_path},
                 )
-                df = result.get_as_df()
                 return sorted(str(row["e.id"]) for _, row in df.iterrows())
             except Exception:
                 logger.debug("Failed to get entities for file %s", file_path, exc_info=True)

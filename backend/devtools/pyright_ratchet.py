@@ -5,10 +5,9 @@ start and uses this script to gate the server: if any tracked file has
 *new* type errors compared to ``pyright-baseline.json``, the gate fails
 and the server does not boot.
 
-This is the "ratchet" pattern — pre-existing baseline of 135 type errors
-is acceptable, but no file is allowed to *increase* its error count.
-Errors fixed locally cause the baseline to tighten only when the operator
-re-runs ``--update`` from the host.
+This is the "ratchet" pattern: the checked-in baseline is acceptable, but no
+file is allowed to *increase* its error count. Errors fixed locally cause the
+baseline to tighten only when the operator re-runs ``--update`` from the host.
 
 Usage:
     python devtools/pyright_ratchet.py             # check only, exit 1 on regression
@@ -112,14 +111,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    baseline = load_baseline()
-    if not baseline:
+    if not BASELINE.exists():
         sys.stderr.write(
             f"No baseline at {BASELINE} — run with --update from the host first.\n"
             f"Current count would be locked in: {total} errors across {len(current)} files.\n"
         )
         return 2
 
+    baseline = load_baseline()
     regressions: list[tuple[str, int, int]] = []
     for f, n in sorted(current.items()):
         b = baseline.get(f, 0)

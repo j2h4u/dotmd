@@ -10,6 +10,7 @@ These tests guard against regression in the Chunk model contract.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -24,7 +25,7 @@ class TestChunkerEmitsNoCharOffset:
         """Chunk model has no char_offset attribute after P1 strips it."""
         # Attempt to construct a Chunk with char_offset — must fail (field no longer exists)
         with pytest.raises((TypeError, ValueError)):
-            Chunk(
+            cast(Any, Chunk)(
                 chunk_id="a" * 64,
                 file_paths=[tmp_path / "test.md"],
                 heading_hierarchy=["Test"],

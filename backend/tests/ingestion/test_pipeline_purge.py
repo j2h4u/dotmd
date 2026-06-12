@@ -229,7 +229,10 @@ def _get_pipeline(db_path: Path):  # type: ignore[no-untyped-def]
     from dotmd.core.config import Settings
     from dotmd.ingestion.pipeline import IndexingPipeline
 
-    settings = Settings(index_dir=db_path.parent)
+    settings = Settings(
+        index_dir=db_path.parent,
+        embedding_url="http://localhost:18088",
+    )
     return IndexingPipeline(settings)
 
 

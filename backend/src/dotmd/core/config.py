@@ -296,16 +296,13 @@ class Settings(BaseSettings):
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         """Set priority: init > env > dotenv > file_secret > TOML > defaults."""
-        toml_file = cast(str, cls.model_config.get("toml_file", ""))
-        toml_path = Path(toml_file)
         sources: list[PydanticBaseSettingsSource] = [
             init_settings,
             env_settings,
             dotenv_settings,
             file_secret_settings,
+            TomlConfigSettingsSource(settings_cls),
         ]
-        if toml_path.exists():
-            sources.append(TomlConfigSettingsSource(settings_cls))
         return tuple(sources)
 
     @property

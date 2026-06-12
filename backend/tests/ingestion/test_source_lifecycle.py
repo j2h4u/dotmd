@@ -86,6 +86,15 @@ class FakeTelegramClient:
             "units": [],
         }
 
+    def search_messages(
+        self,
+        query: str,
+        limit: int,
+        dialog_id: int | None = None,
+    ) -> dict[str, Any]:
+        _ = (query, limit, dialog_id)
+        return {"messages": [], "total": 0}
+
 
 def _metadata_store(tmp_path: Path) -> SQLiteMetadataStore:
     return SQLiteMetadataStore(

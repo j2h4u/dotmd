@@ -41,6 +41,7 @@ EXPECTED_TOOLS: frozenset[str] = frozenset({"search", "read", "drill", "feedback
 REQUIRED_SEARCH_RESULT_FIELDS: frozenset[str] = frozenset({"ref", "snippet", "fused_score"})
 # heading is optional — present only for docs with markdown headings.
 OPTIONAL_SEARCH_RESULT_FIELDS: frozenset[str] = frozenset({"heading"})
+EXPECTED_SEARCH_REF_PREFIXES: tuple[str, ...] = ("filesystem:", "telegram:", "gmail:")
 
 # Top-level keys returned by read().
 EXPECTED_READ_KEYS: frozenset[str] = frozenset({"ref", "total_chunks", "frontmatter", "chunks"})
@@ -83,6 +84,17 @@ def _search_candidates(data: dict) -> list:
     return []
 
 
+def _first_ref_with_prefix(results: list, prefix: str) -> str:
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        ref = result.get("ref")
+        if isinstance(ref, str) and ref.startswith(prefix):
+            return ref
+    refs = [r.get("ref") for r in results if isinstance(r, dict)]
+    raise AssertionError(f"search returned no {prefix} result: {refs}")
+
+
 class TestSearchSmoke:
     def test_returns_results_for_generic_query(self, mcp_call: Callable):
         data = mcp_call(
@@ -105,14 +117,14 @@ class TestSearchSmoke:
                 f"  Actual  : {sorted(actual_keys)}"
             )
 
-    def test_ref_is_filesystem_source_ref(self, mcp_call: Callable):
+    def test_ref_uses_known_source_namespace(self, mcp_call: Callable):
         data = mcp_call("tools/call", {"name": "search", "arguments": {"query": "тест"}})
         results = _search_candidates(data)
         assert results, "search returned no results for canonical query 'тест'"
         for index, result in enumerate(results):
             assert isinstance(result["ref"], str), f"result {index} ref must be string"
-            assert result["ref"].startswith("filesystem:"), (
-                f"result {index} ref must be filesystem source ref: {result['ref']}"
+            assert result["ref"].startswith(EXPECTED_SEARCH_REF_PREFIXES), (
+                f"result {index} ref must use known source namespace: {result['ref']}"
             )
 
     def test_score_is_float_in_range(self, mcp_call: Callable):
@@ -143,12 +155,12 @@ class TestReadSmoke:
     def test_meta_only_returns_without_error(self, mcp_call: Callable):
         """read without end returns frontmatter + total_chunks, no chunk text."""
         search = mcp_call(
-            "tools/call", {"name": "search", "arguments": {"query": "встреча", "top_k": 1}}
+            "tools/call", {"name": "search", "arguments": {"query": "встреча", "top_k": 10}}
         )
         results = _search_candidates(search)
         assert results, "search returned no results for canonical query 'встреча'"
 
-        ref = results[0]["ref"]
+        ref = _first_ref_with_prefix(results, "filesystem:")
         data = mcp_call("tools/call", {"name": "read", "arguments": {"ref": ref}})
         assert not _is_tool_error(data), f"read errored on {ref}: {_tool_result_text(data)}"
 
