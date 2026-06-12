@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Independent fork of [inventivepotter/dotmd](https://github.com/inventivepotter/dotmd) — a markdown knowledgebase search tool combining semantic search, BM25 keyword matching, and knowledge graph traversal. Deployed on a personal home server as search engine for voicenotes transcripts and documentation (~13,500 markdown files, bilingual RU/EN). Developed independently; upstream is a reference for ideas, not a merge target.
+Independent markdown knowledgebase search tool descended from the former `inventivepotter/dotmd` upstream. GitHub fork-network linkage has been removed; dotMD is now a standalone repository combining semantic search, BM25 keyword matching, and knowledge graph traversal. Deployed on a personal home server as search engine for voicenotes transcripts and documentation (~13,500 markdown files, bilingual RU/EN).
 
 ## Core Value
 
@@ -53,9 +53,9 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 - Concurrent TEI requests — benchmarked 2026-03-28, no gain (0.7→0.8 t/s within noise, TEI saturates all cores on single request)
 - GLiNER batch NER — benchmarked 2026-03-28, batching slower than sequential (0.72 vs 0.53-0.61 t/s) and OOM at bs=8 on 16GB
 - GPU acceleration — no GPU on current hardware, Jetson/Mac Mini is future consideration
-- LadybugDB removal — keep as alternative embedded backend and for upstream compatibility
+- LadybugDB removal — keep as alternative embedded backend
 - Full QMD-style query expansion/reranking — different product philosophy
-- Upstream PRs — fork has diverged too far (sqlite-vec, TEI, incremental indexing, schema migrations). Upstream is reference-only now
+- Upstream PRs — project has diverged too far (sqlite-vec, TEI, incremental indexing, schema migrations). Former upstream is historical reference only
 
 ## Context
 
@@ -70,10 +70,10 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 - /srv/knowledgebase/voicenotes/ — 227 voice recordings with transcripts (daily sync via voicenotes-sync)
 - /home/j2h4u/ — docs, scripts, AGENTS.md, repos (mounted read-only)
 
-**Upstream (reference only):**
-- inventivepotter/dotmd: 11 commits (Jan 29-31 2026), inactive since. 26 stars, 5 forks, no license
-- Useful as reference for graph search patterns and reranker tuning ideas
-- PR #1 (MCP stderr fix) approved, PR #2 (LadybugDB lock fix) submitted
+**Origin history (reference only):**
+- Descended from `inventivepotter/dotmd` (11 commits, Jan 29-31 2026). The GitHub fork relationship has been detached.
+- Historical source is useful only as context for early graph search and reranker ideas.
+- Old upstream PRs are no longer part of the active maintenance model.
 
 **Current index (after v1.2):**
 - 229 files (voicenotes), 532 chunks, 3,520 entities, 20,269 edges
@@ -93,7 +93,7 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 
 - **CPU**: Xeon E3 V2 (Ivy Bridge) — no AVX2, limits ML library versions
 - **RAM**: 16GB shared across all Docker services — TEI already uses ~2.6GB
-- **Deployment**: Docker compose, build from fork
+- **Deployment**: Docker compose, build from this repository
 - **TEI required**: `DOTMD_EMBEDDING_URL` is mandatory — no local model fallback
 
 ## Key Decisions
@@ -102,7 +102,7 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 |----------|-----------|---------|
 | sqlite-vec over lancedb | lancedb Python wheels require AVX2, server is Ivy Bridge | ✓ Good |
 | TEI over local embeddings | Avoid 2GB model duplication in memory, reuse existing container | ✓ Good |
-| Fork → independent project | Upstream inactive, architectural divergence too large for PRs | ✓ Good |
+| Fork-network detach → independent repository | Former upstream inactive, architectural divergence too large for PRs | ✓ Good |
 | TEI mandatory (no local fallback) | Prevent accidental 50-min local model indexing | ✓ Good |
 | truncate:true for TEI | Chunks exceed 512 token limit of e5-large | ✓ Good — works but loses tail context |
 | NER enabled (not structural-only) | Knowledge graph quality worth the CPU cost on first index | ⚠️ Revisit — 18min NER may not be worth it for incremental |
@@ -110,7 +110,7 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 | Pipeline timing metrics | No visibility into stage durations without instrumentation | ✓ Good — run_id correlation in logs |
 | FalkorDB over LadybugDB (production) | LadybugDB file lock prevents concurrent CLI + API | ✓ Good — concurrent access works |
 | FalkorDB adapter from scratch | LadybugDB Cypher dialect too different to port | ✓ Good — clean implementation |
-| Keep LadybugDB as alternative | Embedded use case + upstream compatibility | — Ongoing |
+| Keep LadybugDB as alternative | Embedded local-dev use case | — Ongoing |
 | Remove reranker score threshold | Cross-encoder threshold silently dropped BM25 results | ✓ Good — all fusion candidates survive |
 | TEI batch size auto-tuning | Avoid 413 errors, adapt to server capacity | ✓ Good — probe on first call |
 | Compose profiles for bundled services | Optional TEI+FalkorDB via --profile bundled | ✓ Good |

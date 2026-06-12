@@ -2,20 +2,19 @@
 
 ## Project Status
 
-dotMD is a **heavily modified fork** of an upstream markdown knowledgebase search tool.
-The upstream project appears inactive — last commit January 2026 ("docs update").
-We treat this as our own project with independent development direction.
+dotMD is an **independent markdown knowledgebase search service** descended from
+an older upstream project. GitHub fork-network linkage has been removed; this is
+now a standalone repository with its own product and architecture direction.
 
 ## Branches
 
-- **`dev`** — our working branch. All development happens here. Significantly diverged from upstream.
-- **`main`** — tracks upstream (`remotes/upstream/main`). Synced automatically by `git-sync.timer`. Do not commit directly. Exists only as a reference for upstream changes if they ever resume.
+- **`main`** — default and working branch. All development happens here.
 
-**Always work in `dev`.** Feature branches off `dev` when needed, merge back to `dev`.
+**Always work in `main`.** Feature branches off `main` when needed, merge back to `main`.
 
-## What Changed From Upstream
+## Major Product Changes Since Origin
 
-The fork has been substantially reworked:
+The project has been substantially reworked:
 
 - **Unified database**: single `index.db` (was separate `metadata.db` + `vec.db`)
 - **Two-dimensional storage**: tables keyed by `(chunk_strategy, embedding_model)` — supports multiple chunking strategies and embedding models simultaneously
