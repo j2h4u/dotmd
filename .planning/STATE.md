@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Storage Simplification
 status: Active
-last_updated: "2026-06-12T13:35:52.290Z"
+last_updated: "2026-06-12T14:23:02.223Z"
 last_activity: 2026-06-12
 progress:
-  total_phases: 1
+  total_phases: 7
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  total_plans: 5
+  completed_plans: 1
+  percent: 20
 ---
 
 # GSD State
@@ -20,7 +20,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 38 Embedded SurrealDB storage spike
+**Current focus:** Phase 38 — evaluate-embedded-surrealdb-as-unified-storage-backend
 
 ## Current Milestone
 
@@ -30,7 +30,7 @@ Phase: 38
 Status: Active
 Last activity: 2026-06-12
 
-Progress: [░░░░░░░░░░] 0% (Milestone: 0/1 phases complete)
+Progress: [██░░░░░░░░] 20% (Phase 38: 1/5 plans complete)
 
 ## Deferred Items
 
@@ -54,7 +54,7 @@ Items acknowledged and deferred at milestone close:
 
 **Velocity:**
 
-- Total plans completed: 63 (across all milestones)
+- Total plans completed: 64 (across all milestones)
 - Average duration: ~3 min
 - Total execution time: —
 
@@ -93,6 +93,7 @@ Items acknowledged and deferred at milestone close:
 | 35 | 2 | - | - |
 | 36 | 2 | - | - |
 | 37 | 4 | - | - |
+| Phase 38 P01-current-data-inventory | 21 min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -172,6 +173,9 @@ Items acknowledged and deferred at milestone close:
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
+- [Phase 38]: [Plan 38-01]: SQLite backup API is the required copied-snapshot strategy for WAL-mode source evidence. — Prevents silent loss of uncheckpointed WAL state while keeping live files read-only.
+- [Phase 38]: [Plan 38-01]: Feedback counts remain on the supported CLI exporter path; `feedback.db` snapshots are file-level evidence only. — Preserves the feedback surface constraint from AGENTS.md.
+- [Phase 38]: [Plan 38-01]: Falkor graph import planning must preserve semantic relation type in `rel_type` plus numeric `weight`. — Aggregate node/edge totals are insufficient for later transform-only import work.
 - [v1.3]: Cross-encoder auto-calibrating score floor based on cosine distance distribution
 - [v1.3]: E5 query/passage prefixes applied at embedding time
 - [Research]: pplx-embed-context-v1-0.6B is candidate replacement (MIT, 596M, 1024-dim, context-aware, no prefix needed)
@@ -282,9 +286,9 @@ safe so SurrealDB evaluation does not imply unnecessary CPU-heavy recomputation.
 ## Current Position
 
 Phase: 38 (evaluate-embedded-surrealdb-as-unified-storage-backend) — ACTIVE
-Plan: 5 of 5
+Plan: 2 of 5
 Status: Ready to execute
-Last activity: 2026-06-12 -- Phase 38 planned and verified
+Last activity: 2026-06-12 -- Completed 38-01 inventory and migration evidence
 
 ## Operator Next Steps
 
