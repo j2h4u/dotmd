@@ -132,49 +132,54 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 - **v1.4** — Search Quality & Architecture (Phases 15-26, shipped 2026-05-06)
 - **v1.5** — Telegram Source Adapter (Phases 27-31, shipped 2026-05-08)
 - **v1.6** — Unified Source Architecture (Phases 32-37, shipped 2026-05-13)
+- **v1.7** — Storage Simplification (Phase 38, shipped 2026-06-12)
 
-## Last Shipped Milestone: v1.6 Unified Source Architecture
+## Last Shipped Milestone: v1.7 Storage Simplification
 
-**Goal:** Unify filesystem, Telegram, federated/native search providers, and
-Airweave-compatible connector experiments behind one dotMD-native source
-capability model, lifecycle boundary, and public search/read/drill contract.
+**Goal:** Decide whether embedded SurrealDB can replace the current
+SQLite/sqlite-vec/FTS5 + FalkorDB split with one embedded storage layer while
+preserving as much existing data as practical.
 
 **Shipped:**
-- Source capability registry seeded by filesystem and Telegram.
-- Source lifecycle boundary for config, credentials, cursors, and runtime
-  construction.
-- Unified local/federated `SearchCandidate` contract.
-- Filesystem and Telegram routed through the unified source contract.
-- Airweave compatibility spike with a vendored platform slice and Gmail
-  federated-search bridge.
+- Read-only inventory and migration-map evidence for current
+  SQLite/sqlite-vec/FalkorDB/feedback storage.
+- Thin SurrealDB schema, transform-only import proof, and embedded safety gate.
+- Retrieval comparison harness covering full-text, vector, graph-direct, and
+  hybrid/RRF behavior.
+- Operations rehearsal for copied-store backup/restore, rollback, writer guard,
+  and conservative recommendation assembly.
 
-**Deferred:** Broader third-party connector rollout and any production storage
-migration. Phase 38 rejected Embedded SurrealDB as a single replacement backend
-until weighted FTS and hybrid/RRF parity are solved or a narrower partial
-Surreal role is planned explicitly.
+**Decision:** The first compatibility/parity-style SurrealDB replacement
+prototype is not migrate-ready. The next milestone deliberately switches to a
+SurrealDB-native retrieval contract and quality evaluation rather than trying to
+imitate the old stack.
 
 ## Current State
 
 v1.7 Storage Simplification is complete. The current SQLite/sqlite-vec/FTS5 +
-FalkorDB stack remains the production storage architecture. Phase 38 added a
-SurrealDB spike/prototype and evidence reports, but no production wiring.
+FalkorDB stack remains the production storage architecture until v1.8 cutover.
+Phase 38 added a SurrealDB spike/prototype and evidence reports, but no
+production wiring.
 
-## Current Milestone: v1.7 Storage Simplification
+## Current Milestone: v1.8 SurrealDB-Native Storage Cutover
 
-**Goal:** Decide whether embedded SurrealDB can replace the current
-SQLite/sqlite-vec/FTS5 + FalkorDB split with one embedded storage layer.
+**Goal:** Replace the current SQLite/sqlite-vec/FTS5 + FalkorDB
+storage/retrieval stack with one SurrealDB-native architecture, validate search
+quality against real user scenarios, cut production over, and delete the legacy
+stack.
 
 **Target features:**
-- Model current persistent data in SurrealDB: documents, source units, chunks,
-  embeddings, entities, relations, feedback, cursors, and checkpoints.
-- Prove or reject full-text, vector, graph-direct, and hybrid/RRF retrieval.
-- Measure how much production data can migrate from SQLite/sqlite-vec/FalkorDB
-  without CPU-heavy rechunking, reembedding, or re-extraction.
-- Produce a migrate/defer/reject recommendation with backup, rollback, and
-  concurrency notes.
-
-**Status:** Complete. Phase 38 produced `Recommendation: reject` for Embedded
-SurrealDB as a single replacement backend.
+- Define a SurrealDB-native retrieval contract instead of productizing old-stack
+  compatibility.
+- Build a golden-query evaluation harness and classify differences as
+  improvement, harmless reorder, regression, or unclear.
+- Harden SurrealDB schema/import so existing chunks, embeddings, source refs,
+  graph relations, feedback, cursors, and checkpoints migrate where practical.
+- Implement real SurrealDB weighted full-text, vector search, graph traversal,
+  hybrid fusion, and reranker inputs.
+- Shadow-run against production-derived data, then cut over production.
+- Delete SQLite/sqlite-vec/FTS5, FalkorDB, LadybugDB, temporary baseline code,
+  fallback switches, and compatibility shims after cutover acceptance.
 
 Phase 33 complete (2026-05-08): Source runtimes now build through an
 inspectable lifecycle factory that combines registry descriptors, typed local
@@ -245,4 +250,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-12 after Phase 38 completion*
+*Last updated: 2026-06-12 after v1.8 milestone creation*

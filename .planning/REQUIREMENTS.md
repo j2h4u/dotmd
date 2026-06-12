@@ -1,208 +1,176 @@
-# v1.7 Requirements: Storage Simplification
+# v1.8 Requirements: SurrealDB-Native Storage Cutover
 
-This file keeps completed v1.6 source-architecture requirements as historical
-traceability and adds the active v1.7 storage requirements below.
+**Defined:** 2026-06-12
+**Core Value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
 
 ## Goal
 
-Unify dotMD source architecture so filesystem, Telegram, federated/native search
-providers, and future Airweave-compatible connectors share one source
-capability model, lifecycle boundary, public search candidate contract, and
-`read(ref)` / `drill(ref)` surface.
+Move dotMD from the current SQLite/sqlite-vec/FTS5 + FalkorDB storage and
+retrieval stack to one SurrealDB-native persistence and retrieval architecture.
 
-This milestone should remove the risk of carrying two source planes: the old
-filesystem/Telegram paths and a new connector architecture. Filesystem and
-Telegram must be migrated into the same contract before third-party connector
-work is considered complete.
-
-## Reference Repository
-
-- Upstream: `https://github.com/airweave-ai/airweave`
-- Local checkout: `/home/j2h4u/repos/airweave-ai/airweave`
-
-Use this repository as an architectural reference for source registry,
-lifecycle, connector, and federated-search patterns. Do not copy Airweave's
-indexing, chunking, Vespa, Temporal, billing, or organization assumptions into
-dotMD unless a later phase explicitly justifies it.
+This milestone does not aim to reproduce the old search ordering exactly. The
+old stack is a baseline/evaluator only. The target is a SurrealDB-native search
+contract with demonstrably good user-facing retrieval quality, safe migration of
+existing data, production cutover, and complete removal of legacy storage code.
 
 ## Scope Summary
 
 ### Must Have
 
-- A dotMD-native source capability registry seeded with filesystem and Telegram.
-- A source lifecycle boundary for config, auth/credentials, cursor state, and
-  runtime construction.
-
-- A normalized federated/local `SearchCandidate` contract.
-- Filesystem source routed through the unified source contract without breaking
-  current trickle/search/read behavior.
-
-- Telegram source routed through the unified source contract, including the
-  deferred incremental sync/reuse behavior from v1.5 Phase 30.
-
-- Regression coverage proving callers use the same `search -> ref -> drill/read`
-  workflow regardless of whether results came from local dotMD indexes or a
-  source-native search.
+- A SurrealDB-native retrieval contract covering weighted BM25/full-text,
+  vector search, graph traversal, hybrid fusion, and reranker inputs.
+- A golden-query evaluation harness that classifies differences as improvement,
+  harmless reorder, regression, or unclear.
+- Production-grade Surreal schema/import code that migrates existing stored
+  chunks, embeddings, source refs, graph relations, feedback, cursors, and
+  checkpoints where practical.
+- SurrealDB-native retrieval implementation using real full-text/vector/graph
+  capabilities instead of Phase 38 proxy logic.
+- Shadow-run evidence on production-derived data before cutover.
+- Production cutover to SurrealDB as the single dotMD storage/retrieval backend.
+- Removal of SQLite/sqlite-vec/FTS5, FalkorDB, and LadybugDB code paths after
+  cutover acceptance.
 
 ### Should Have
 
-- MCP Telegram native FTS exposed as the first federated source-search proof.
-- A small Airweave connector compatibility spike against one low-ambiguity
-  connector or connector-like source.
+- Explainable search diff reports that make changed ranking semantics debuggable
+  without requiring exact compatibility.
+- Index build time, store size, latency, and memory evidence for production-like
+  data volume.
+- Migration tooling that avoids default rechunking, reembedding, and entity
+  re-extraction unless a phase explicitly proves there is no safe transform
+  path.
 
-- Documentation mapping Airweave source concepts to dotMD source contracts
-  without adopting Airweave indexing, chunking, Vespa, Temporal, or billing
-  assumptions.
+### Explicit Non-Goals
 
-### Deferred
-
-- Full connector marketplace.
-- Production OAuth UI for arbitrary SaaS apps.
-- Full ACL enforcement across sources.
-- Attachments/media ingestion beyond a compatibility analysis.
-- Bidirectional actions in Telegram, Slack, Notion, Google Drive, or other apps.
+- Runtime fallback backend after cutover.
+- Productized compatibility mode for the old SQLite/Falkor retrieval semantics.
+- Compatibility shims kept for hypothetical external clients.
+- Preserving legacy code after the SurrealDB cutover is accepted.
+- Reintroducing LadybugDB, LanceDB, or any alternate local backend.
 
 ## Requirements
 
-### Registry
+### Retrieval Contract
 
-- [x] **SRC-01**: dotMD can describe every source through a source descriptor
-  containing source kind, display metadata, config schema, auth schema, cursor
-  schema, and capability flags.
+- [ ] **SURR-RET-01**: dotMD has a documented SurrealDB-native retrieval
+  contract for weighted full-text, vector, graph/entity, hybrid fusion, and
+  reranker candidate inputs.
 
-- [x] **SRC-02**: Filesystem and Telegram are registered sources, not special
-  cases outside the registry.
+- [ ] **SURR-RET-02**: The retrieval contract defines quality gates in terms of
+  expected user-visible results and explainable differences, not exact rank
+  parity with the old stack.
 
-- [x] **SRC-03**: Source capability flags distinguish local sync,
-  federated/native search, read-unit windows, materialization, browse trees,
-  ACL support, and incremental cursors.
+- [ ] **SURR-RET-03**: The old stack is explicitly treated as a temporary
+  baseline/evaluator only and not as a product compatibility target.
 
-- [x] **SRC-04**: Airweave source metadata can be mapped into the dotMD source
-  descriptor model without making Airweave a runtime dependency.
+### Evaluation
 
-### Lifecycle
+- [ ] **SURR-EVAL-01**: A golden query set covers title-heavy, tag-heavy,
+  body-heavy, semantic, graph/entity, hybrid, source-ref, and mixed RU/EN
+  queries.
 
-- [ ] **LIFE-01**: dotMD can construct source runtimes through one lifecycle
-  service/factory from registry entry, typed config, credentials, and cursor
-  state.
+- [ ] **SURR-EVAL-02**: Old-vs-Surreal diff reports classify changed results as
+  improvement, harmless reorder, regression, or unclear.
 
-- [ ] **LIFE-02**: Credentials are accessed through a provider interface;
-  source adapters do not read raw secret storage directly.
+- [ ] **SURR-EVAL-03**: Regressions block cutover unless fixed or explicitly
+  accepted as a deliberate search semantics change.
 
-- [ ] **LIFE-03**: Cursor/checkpoint commits happen only after local persistence
-  succeeds.
+### Migration
 
-- [ ] **LIFE-04**: Filesystem and Telegram construction paths use the lifecycle
-  boundary instead of bespoke adapter setup.
+- [ ] **SURR-MIG-01**: The production Surreal schema represents documents,
+  source units, chunks, embeddings, source refs, file/resource bindings,
+  fingerprints, graph entities/relations, feedback, cursors, and checkpoints.
 
-### Search
+- [ ] **SURR-MIG-02**: Migration imports existing stored data transform-first
+  wherever practical, avoiding default TEI reembedding, rechunking, and entity
+  re-extraction.
 
-- [ ] **SEARCH-01**: Local dotMD results and source-native federated results
-  can be represented as one `SearchCandidate` shape.
+- [ ] **SURR-MIG-03**: Migration has explicit backup, restore, rollback, and
+  partial-failure semantics before production cutover.
 
-- [ ] **SEARCH-02**: `SearchCandidate` includes stable `ref`, source identity,
-  title/snippet, retrieval kind, provenance, source-native score/rank,
-  `can_read`, and `can_materialize`.
+### Surreal Retrieval
 
-- [ ] **SEARCH-03**: Federated/native source-search scores are fused without
-  pretending every provider score is directly comparable.
+- [ ] **SURR-SEARCH-01**: SurrealDB full-text search uses real BM25/full-text
+  indexes with weighted title, tags, and body/text contributions.
 
-- [ ] **SEARCH-04**: MCP Telegram native FTS can participate as a federated
-  provider while preserving the same public `read(ref)` / `drill(ref)` flow.
+- [ ] **SURR-SEARCH-02**: SurrealDB vector search uses the selected HNSW or
+  DISKANN strategy with production-like build-time and latency evidence.
 
-### Filesystem
+- [ ] **SURR-SEARCH-03**: Graph/entity retrieval runs through Surreal relation
+  records and preserves relation labels, weights, and metadata needed by dotMD
+  search.
 
-- [x] **FS-01**: Filesystem discovery, trickle indexing, local file reads,
-  delete detection, parser routing, and content-addressed reuse continue to
-  work through the unified source contract.
+- [ ] **SURR-SEARCH-04**: Hybrid fusion runs over Surreal result sets and
+  produces explainable engine attribution for returned candidates.
 
-- [x] **FS-02**: Filesystem internals keep paths only where they are still
-  required for discovery, holder semantics, local reads, display, and delete
-  detection.
+### Cutover
 
-- [x] **FS-03**: The filesystem adapter no longer bypasses source registry or
-  lifecycle when participating in indexing/search/read.
+- [ ] **SURR-CUT-01**: A shadow run compares old stack and Surreal stack on
+  production-derived data and records quality, latency, build-time, store-size,
+  and memory evidence.
 
-### Telegram
+- [ ] **SURR-CUT-02**: dotMD production runtime can start and serve MCP/API/CLI
+  search/read/drill/trickle flows using SurrealDB as the single
+  storage/retrieval backend.
 
-- [x] **TG-01**: Telegram registers sync/export, read-unit-window,
-  incremental-cursor, and federated-search capabilities where available.
+- [ ] **SURR-CUT-03**: Cutover acceptance is verified against live production
+  surfaces before legacy code removal begins.
 
-- [x] **TG-02**: Repeated Telegram sync processes only new or changed source
-  units; unchanged history is not rechunked/reembedded.
+### Legacy Removal
 
-- [x] **TG-03**: Telegram sync reporting exposes discovered, new, changed,
-  rebound, skipped, hidden, failed, and reused counts where practical.
+- [ ] **SURR-DEL-01**: SQLite/sqlite-vec/FTS5 storage and retrieval code paths
+  are deleted after cutover acceptance.
 
-- [x] **TG-04**: A Telegram result has the same API shape whether it came from
-  local dotMD indexing or MCP Telegram native search.
+- [ ] **SURR-DEL-02**: FalkorDB and LadybugDB graph/storage code paths,
+  configs, docs, tests, env vars, and deployment assumptions are deleted after
+  cutover acceptance.
 
-### Compatibility
+- [ ] **SURR-DEL-03**: Temporary evaluator/baseline code used only for migration
+  is deleted once the milestone no longer needs old-stack comparisons.
 
-- [x] **AIR-01**: dotMD can run one compatibility spike that adapts third-party
-  Airweave connector-style output into dotMD `SourceDocument`, `SourceUnit`,
-  optional `SourceAsset`, and `SearchCandidate` contracts.
-
-- [x] **AIR-02**: The spike identifies which Airweave pieces are reusable
-  directly, which require shims, and which should be avoided.
-
-- [x] **AIR-03**: The compatibility spike does not introduce an Airweave-only
-  integration lane separate from filesystem and Telegram.
-
-### Storage
-
-- [x] **STOR-01**: dotMD can model its current persistent data in embedded
-  SurrealDB: documents, source units, chunks, embeddings, entities, relations,
-  feedback, cursors, and checkpoints.
-
-- [x] **STOR-02**: The SurrealDB prototype can execute the retrieval paths dotMD
-  depends on: full-text, vector, graph-direct entity retrieval, and hybrid/RRF
-  fusion.
-
-- [x] **STOR-03**: The spike measures how much current production data can be
-  migrated from SQLite/sqlite-vec/FalkorDB without CPU-heavy rechunking,
-  reembedding, or re-extraction.
-
-- [x] **STOR-04**: The spike produces a recommendation to migrate, defer, or
-  reject SurrealDB, including operational notes for backup/restore,
-  locking/concurrency, and rollback.
+- [ ] **SURR-DEL-04**: Final verification proves no fallback backend switches,
+  compat shims, dead legacy imports, or obsolete docs remain.
 
 ## Out Of Scope
 
-- Replacing dotMD's local chunking, embeddings, FTS5, graph retrieval, or
-  reranking stack with Airweave's stack.
-
-- Building production support for every Airweave connector.
-- Adding connector UI or multi-tenant billing/organization concepts.
-- Full full-text ACL correctness across third-party SaaS sources.
+| Feature | Reason |
+|---------|--------|
+| Exact old-stack search parity | The milestone targets improved SurrealDB-native semantics, not imitation of the old architecture. |
+| Runtime fallback backend | The project has no backward-compatibility obligation and should not keep old systems alive after cutover. |
+| Broad connector marketplace work | Storage cutover is already a full milestone. |
+| New embedding/reranker model selection | The milestone may preserve and migrate existing embeddings; model changes require a separate quality effort. |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SRC-01 | Phase 32 | Complete |
-| SRC-02 | Phase 32 | Complete |
-| SRC-03 | Phase 32 | Complete |
-| SRC-04 | Phase 32 | Complete |
-| LIFE-01 | Phase 33 | Complete |
-| LIFE-02 | Phase 33 | Complete |
-| LIFE-03 | Phase 33 | Complete |
-| LIFE-04 | Phase 33 | Complete |
-| SEARCH-01 | Phase 34 | Complete |
-| SEARCH-02 | Phase 34 | Complete |
-| SEARCH-03 | Phase 34 | Complete |
-| SEARCH-04 | Phase 34 | Complete |
-| FS-01 | Phase 35 | Complete |
-| FS-02 | Phase 35 | Complete |
-| FS-03 | Phase 35 | Complete |
-| TG-01 | Phase 36 | Complete |
-| TG-02 | Phase 36 | Complete |
-| TG-03 | Phase 36 | Complete |
-| TG-04 | Phase 36 | Complete |
-| AIR-01 | Phase 37 | Complete |
-| AIR-02 | Phase 37 | Complete |
-| AIR-03 | Phase 37 | Complete |
-| STOR-01 | Phase 38 | Complete |
-| STOR-02 | Phase 38 | Complete |
-| STOR-03 | Phase 38 | Complete |
-| STOR-04 | Phase 38 | Complete |
+| SURR-RET-01 | Phase 39 | Pending |
+| SURR-RET-02 | Phase 39 | Pending |
+| SURR-RET-03 | Phase 39 | Pending |
+| SURR-EVAL-01 | Phase 40 | Pending |
+| SURR-EVAL-02 | Phase 40 | Pending |
+| SURR-EVAL-03 | Phase 40 / Phase 43 | Pending |
+| SURR-MIG-01 | Phase 41 | Pending |
+| SURR-MIG-02 | Phase 41 | Pending |
+| SURR-MIG-03 | Phase 41 / Phase 44 | Pending |
+| SURR-SEARCH-01 | Phase 42 | Pending |
+| SURR-SEARCH-02 | Phase 42 / Phase 43 | Pending |
+| SURR-SEARCH-03 | Phase 42 | Pending |
+| SURR-SEARCH-04 | Phase 42 | Pending |
+| SURR-CUT-01 | Phase 43 | Pending |
+| SURR-CUT-02 | Phase 44 | Pending |
+| SURR-CUT-03 | Phase 44 | Pending |
+| SURR-DEL-01 | Phase 45 | Pending |
+| SURR-DEL-02 | Phase 45 | Pending |
+| SURR-DEL-03 | Phase 45 | Pending |
+| SURR-DEL-04 | Phase 45 | Pending |
+
+**Coverage:**
+- v1.8 requirements: 20 total
+- Mapped to phases: 20
+- Unmapped: 0
+
+---
+*Requirements defined: 2026-06-12*
+*Last updated: 2026-06-12 after v1.8 milestone creation*

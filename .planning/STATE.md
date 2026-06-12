@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.7
-milestone_name: Storage Simplification
-status: Complete
-stopped_at: Phase 38 verified
-last_updated: "2026-06-12T17:01:22.632Z"
+milestone: v1.8
+milestone_name: SurrealDB-Native Storage Cutover
+status: planning
+stopped_at: Milestone v1.8 created
+last_updated: "2026-06-12T17:35:00.000Z"
 last_activity: 2026-06-12
 progress:
   total_phases: 7
-  completed_phases: 1
-  total_plans: 5
-  completed_plans: 5
-  percent: 14
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # GSD State
@@ -21,33 +21,30 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 38 complete — Embedded SurrealDB rejected as single replacement backend
+**Current focus:** v1.8 SurrealDB-native storage cutover planning
 
 ## Current Milestone
 
-**v1.7 — Storage Simplification**
+**v1.8 — SurrealDB-Native Storage Cutover**
 
-Phase: 38
-Status: Milestone v1.7 complete — Phase 38 verified
+Phase: 39 next
+Status: Planning; roadmap and requirements defined
 Last activity: 2026-06-12
 
-Progress: [██████████] 100% (Phase 38: 5/5 plans complete)
+Progress: [----------] 0% (0/7 phases complete)
 
 ## Deferred Items
 
-Items acknowledged and deferred at milestone close:
+Items acknowledged and deferred at v1.7 milestone close:
 
 | Category | Item | Status |
 |----------|------|--------|
-| quick_task | 260402-vua-phase-14-frontmatter-driven-indexing | missing |
-| quick_task | 260425-m79-log-clarity-kaizen-6-point-cleanup-of-do | missing |
-| quick_task | 260425-rel-serve-start-sh-trickle-lifespan-mcp-serv | missing |
-| quick_task | 260502-scv-normalize-dotmd-planning-docs-separate-a | missing |
+| quick_task | 260510-0nb-adaptive-slot-quota-for-federated-search | unknown |
 | todo | 2026-03-23-scout-other-dotmd-forks-for-ideas.md | pending |
-| todo | 2026-03-24-migrate-graph-store-from-ladybugdb-to-falkordb.md | pending |
 | todo | 2026-03-27-background-trickle-indexer.md | pending |
 | todo | 2026-03-27-smoke-tests.md | pending |
 | todo | 2026-03-28-soft-delete-with-ttl-for-removed-source-files.md | pending |
+| todo | 2026-03-30-evaluate-pplx-embed-context-as-e5-large-replacement.md | pending |
 | seed | SEED-001-safe-migration-architecture | dormant |
 | seed | SEED-002-promote-content-addressed-bindings-before-telegram | dormant |
 
@@ -298,15 +295,14 @@ retrieval parity failed on hybrid/RRF behavior.
 
 ## Current Position
 
-Phase: 38 (evaluate-embedded-surrealdb-as-unified-storage-backend) — COMPLETE
-Plan: 5 of 5
-Status: Verified; final recommendation rejects Embedded SurrealDB as a single replacement backend
-Last activity: 2026-06-12 -- Phase 38 verified with 30/30 must-haves; final recommendation is reject due to hybrid/RRF retrieval parity gap
+Phase: Milestone v1.7 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-06-12 — Milestone v1.7 completed and archived
 
 ## Operator Next Steps
 
-- Review `38-RECOMMENDATION.md`
-- Start a new milestone when ready
+- Start the next milestone with /gsd-new-milestone
 
 ## Session
 

@@ -10,7 +10,8 @@
 - [x] **v1.4 Search Quality & Architecture** — Phases 15-26 (shipped 2026-05-06)
 - [x] **v1.5 Telegram Source Adapter** — Phases 27-31 (shipped 2026-05-08)
 - [x] **v1.6 Unified Source Architecture** — Phases 32-37 (shipped 2026-05-13)
-- 🚧 **v1.7 Storage Simplification** — Phase 38 (active)
+- [x] **v1.7 Storage Simplification** — Phase 38 (shipped 2026-06-12)
+- 🚧 **v1.8 SurrealDB-Native Storage Cutover** — Phases 39-45 (active)
 
 <details>
 <summary>v1.1 Incremental Indexing (Phases 1-3) — SHIPPED 2026-03-26</summary>
@@ -104,23 +105,22 @@ See: `.planning/milestones/v1.5-ROADMAP.md`
 
 </details>
 
-## v1.6 Unified Source Architecture (Phases 32-37) — SHIPPED
+<details>
+<summary>v1.6 Unified Source Architecture (Phases 32-37) — SHIPPED 2026-05-13</summary>
 
-Reference:
+- [x] Phase 32: Source capability registry
+- [x] Phase 33: Source lifecycle/config/auth/cursor boundary
+- [x] Phase 34: Federated SearchCandidate contract
+- [x] Phase 35: Filesystem unified source adapter
+- [x] Phase 36: Telegram unified sync and federated search
+- [x] Phase 37: Airweave connector compatibility spike
 
-- Upstream: `https://github.com/airweave-ai/airweave`
-- Local checkout: `/home/j2h4u/repos/airweave-ai/airweave`
+See: `.planning/milestones/v1.6-ROADMAP.md`
 
-- [x] Phase 32: Source capability registry (completed 2026-05-08)
-- [x] Phase 33: Source lifecycle/config/auth/cursor boundary (completed 2026-05-08)
-- [x] Phase 34: Federated SearchCandidate contract (completed 2026-05-10)
-- [x] Phase 35: Filesystem unified source adapter (completed 2026-05-10)
-- [x] Phase 36: Telegram unified sync and federated search (completed 2026-05-10)
-- [x] Phase 37: Airweave connector compatibility spike (completed 2026-05-13)
+</details>
 
-See: `.planning/REQUIREMENTS.md`
-
-## v1.7 Storage Simplification (Phase 38) — ACTIVE
+<details>
+<summary>v1.7 Storage Simplification (Phase 38) — SHIPPED 2026-06-12</summary>
 
 - [x] Phase 38: Embedded SurrealDB storage spike (completed 2026-06-12)
 
@@ -129,7 +129,107 @@ FalkorDB storage with one embedded SurrealDB-backed storage layer while
 migrating existing production data wherever safe instead of recomputing chunks,
 embeddings, or extracted entities on CPU.
 
-See: `.planning/phases/38-evaluate-embedded-surrealdb-as-unified-storage-backend/38-CONTEXT.md`
+Outcome: first compatibility/parity-style prototype rejected as migrate-ready;
+Phase 38 evidence becomes the input to v1.8 SurrealDB-native cutover planning.
+
+See: `.planning/milestones/v1.7-ROADMAP.md`
+
+</details>
+
+## v1.8 SurrealDB-Native Storage Cutover (Phases 39-45) — ACTIVE
+
+Goal: Replace the current SQLite/sqlite-vec/FTS5 + FalkorDB storage/retrieval
+stack with one SurrealDB-native persistence and retrieval architecture,
+validate search quality against real user scenarios, cut production over, and
+delete the legacy stack without fallback backends or compatibility shims.
+
+### Phase 39: SurrealDB-native retrieval contract
+
+**Goal:** Define the new SurrealDB-native search semantics and acceptance
+categories before implementation starts.
+**Depends on:** Phase 38
+**Plans:** TBD
+
+- [ ] Define the target search semantics for BM25 weighted fields, vector
+  search, graph traversal, hybrid fusion, and reranker inputs.
+- [ ] Treat the old stack as baseline evidence only, not as a compatibility
+  target.
+- [ ] Define accepted-difference categories: improvement, harmless reorder,
+  regression, and unclear.
+
+### Phase 40: Evaluation harness and golden queries
+
+**Goal:** Build the quality evaluation surface that decides whether SurrealDB
+search is good enough to cut over.
+**Depends on:** Phase 39
+**Plans:** TBD
+
+- [ ] Build a golden query set covering title-heavy, tag-heavy, body-heavy,
+  semantic, graph/entity, hybrid, and source-ref scenarios.
+- [ ] Produce machine-readable diff reports for old-vs-Surreal runs.
+- [ ] Gate on user-visible quality and explainable differences, not exact rank
+  parity.
+
+### Phase 41: Production-grade Surreal schema and import
+
+**Goal:** Convert the Phase 38 schema/import proof into production migration
+tooling that preserves existing data where practical.
+**Depends on:** Phase 39 and Phase 40
+**Plans:** TBD
+
+- [ ] Harden the Phase 38 schema/import proof into production migration code.
+- [ ] Preserve existing chunks, embeddings, source refs, graph relations,
+  feedback, cursors, checkpoints, and retained artifacts where practical.
+- [ ] Avoid default rechunking, reembedding, and entity re-extraction unless a
+  phase explicitly proves there is no safe transform path.
+
+### Phase 42: Surreal-native retrieval implementation
+
+**Goal:** Implement full-text, vector, graph, and hybrid retrieval on real
+SurrealDB capabilities instead of Phase 38 proxy logic.
+**Depends on:** Phase 39 and Phase 41
+**Plans:** TBD
+
+- [ ] Implement real SurrealDB BM25/full-text indexes with weighted fields.
+- [ ] Implement Surreal vector search using the chosen HNSW/DISKANN strategy.
+- [ ] Implement graph relation traversal and hybrid fusion over Surreal result
+  sets.
+
+### Phase 43: Shadow run and quality gate
+
+**Goal:** Compare the old stack and SurrealDB stack on production-derived data
+and classify every material difference.
+**Depends on:** Phase 40, Phase 41, and Phase 42
+**Plans:** TBD
+
+- [ ] Run old stack and Surreal stack side by side on production-derived data.
+- [ ] Record search quality, latency, index build time, store size, and memory
+  evidence.
+- [ ] Resolve every regression or explicitly accept the new semantics.
+
+### Phase 44: Production cutover
+
+**Goal:** Switch live dotMD runtime to SurrealDB as the single
+storage/retrieval backend after quality acceptance.
+**Depends on:** Phase 43
+**Plans:** TBD
+
+- [ ] Switch dotMD runtime to SurrealDB as the single storage/retrieval backend.
+- [ ] Verify MCP/API/CLI/trickle behavior against live production surfaces.
+- [ ] Keep rollback operationally available only until the cutover is accepted.
+
+### Phase 45: Legacy stack removal
+
+**Goal:** Delete the old SQLite/sqlite-vec/FTS5, FalkorDB, and LadybugDB stack
+after SurrealDB cutover is accepted.
+**Depends on:** Phase 44
+**Plans:** TBD
+
+- [ ] Delete SQLite/sqlite-vec/FTS5, FalkorDB, and LadybugDB storage/retrieval
+  code paths, configs, tests, docs, env vars, and deployment assumptions.
+- [ ] Remove temporary evaluator/baseline code that only exists for migration.
+- [ ] Verify there are no fallback backend switches, compat shims, or dead
+  legacy imports left.
 
 ## Progress
 
@@ -173,6 +273,13 @@ See: `.planning/phases/38-evaluate-embedded-surrealdb-as-unified-storage-backend
 | 36. Telegram unified sync and federated search | 2/2 | Complete    | 2026-05-10 |
 | 37. Airweave connector compatibility spike | 4/4 | Complete    | 2026-05-13 |
 | 38. Embedded SurrealDB storage spike | 5/5 | Complete    | 2026-06-12 |
+| 39. SurrealDB-native retrieval contract | v1.8 | Planned | — |
+| 40. Evaluation harness and golden queries | v1.8 | Planned | — |
+| 41. Production-grade Surreal schema and import | v1.8 | Planned | — |
+| 42. Surreal-native retrieval implementation | v1.8 | Planned | — |
+| 43. Shadow run and quality gate | v1.8 | Planned | — |
+| 44. Production cutover | v1.8 | Planned | — |
+| 45. Legacy stack removal | v1.8 | Planned | — |
 
 ### Backlog 999.2: Pipeline parallelism — overlap GLiNER and TEI across files
 
