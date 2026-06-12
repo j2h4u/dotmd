@@ -120,7 +120,6 @@ Three `autouse=True` fixtures apply to every test by default:
 **`_dotmd_test_env`** — sets minimal env vars via `monkeypatch.setenv`:
 - `DOTMD_EMBEDDING_URL=http://test-tei:8088` (non-routable stub)
 - `DOTMD_EXTRACT_DEPTH=structural` (prevents NER model load)
-- `DOTMD_GRAPH_BACKEND=ladybugdb` (embedded graph, no container)
 - `DOTMD_FALKORDB_URL=redis://127.0.0.1:1` (unreachable fallback)
 
 **`_mock_semantic_engine`** — patches `SemanticSearchEngine.encode_batch` to return zero-vectors (dimension 8) and `get_tei_model_id` to return `"stub-model"`. Opt out with:
@@ -183,12 +182,12 @@ class StubFederatedProvider:
 - External HTTP calls (TEI embedding server) — always mocked in unit/integration tests
 - `discover_files` / `read_file` / `chunk_file` when testing pipeline orchestration logic
 - `encode_batch` — replaced by zero-vector stub globally via autouse fixture
-- FalkorDB — avoided entirely by forcing `ladybugdb` backend via `_dotmd_test_env`
+- FalkorDB — avoided in unit tests by patching graph-store construction to an in-memory test double
 - Settings — constructed either as real `Settings(...)` with temp dirs or as `MagicMock()` with explicit attributes
 
 **What NOT to mock:**
 - SQLite / sqlite-vec storage — real in-memory or temp-file databases used directly
-- LadybugDB (embedded graph) — real embedded instance against `tmp_path`
+- FalkorDB connectivity — only in explicit live/integration tests
 - Chunker logic — real chunker runs in most integration tests
 - Pydantic model construction and validation — always real
 
@@ -210,8 +209,8 @@ def vector_store(tmp_path: Path):
     ...
 
 @pytest.fixture
-def graph_store(tmp_path: Path):
-    """LadybugDBGraphStore backed by a temp directory."""
+def graph_store():
+    """InMemoryGraphStore test double."""
     ...
 ```
 
@@ -278,7 +277,7 @@ python -m pytest --cov=src/dotmd --cov-report=term-missing
 **Unit tests** (majority):
 - Scope: single function or class method in isolation
 - Location: `backend/tests/` root and subdirs
-- Use real SQLite/LadybugDB; mock only TEI and external HTTP
+- Use real SQLite/sqlite-vec; mock TEI, external HTTP, and graph-store construction unless the test is explicitly live
 
 **Integration tests:**
 - Scope: full pipeline end-to-end with real storage backends and mocked embeddings

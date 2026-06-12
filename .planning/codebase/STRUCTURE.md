@@ -65,10 +65,8 @@ dotmd/                              # Repo root
 │   │       │   ├── metadata.py     # SQLiteMetadataStore (chunks, FTS5, fingerprints, bindings)
 │   │       │   ├── sqlite_vec.py   # SQLiteVecVectorStore (sqlite-vec)
 │   │       │   ├── vec_components.py  # VecComponentStore (low-level vec table ops)
-│   │       │   ├── falkordb_graph.py  # FalkorDBGraphStore (production)
-│   │       │   ├── graph.py        # LadybugDBGraphStore (local dev, embedded)
+│   │       │   ├── falkordb_graph.py  # FalkorDBGraphStore
 │   │       │   ├── cache.py        # EmbeddingCache + ExtractionCache
-│   │       │   └── vector.py       # Shared vector helpers
 │   │       └── utils/              # Shared utilities
 │   │           ├── logging.py      # setup_logging()
 │   │           └── text.py         # Text manipulation helpers
@@ -185,11 +183,12 @@ dotmd/                              # Repo root
 5. If federated search: add `SourceCapability.FEDERATED_SEARCH` to the descriptor's `capabilities`
 6. Tests: `backend/tests/ingestion/`
 
-**New storage backend:**
-- Implement the relevant Protocol(s) from `backend/src/dotmd/storage/base.py`
-- Place in `backend/src/dotmd/storage/<name>.py`
-- Wire in `IndexingPipeline.__init__` in `backend/src/dotmd/ingestion/pipeline.py` (graph_backend config switch is the pattern to follow)
-- Tests: `backend/tests/storage/`
+**Storage changes:**
+- The active storage stack is SQLite/FTS5/sqlite-vec plus FalkorDB.
+- New storage backend work should be treated as an architecture phase, not an
+  ad-hoc config switch.
+- Protocols live in `backend/src/dotmd/storage/base.py`; concrete stores live
+  under `backend/src/dotmd/storage/`.
 
 **New extractor:**
 - Implement `ExtractorProtocol` from `backend/src/dotmd/extraction/base.py`

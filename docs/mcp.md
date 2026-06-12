@@ -137,7 +137,7 @@ The server uses the same `DOTMD_` settings as the CLI and REST API. Important va
 |----------|-------------|
 | `DOTMD_INDEX_DIR` | Index storage directory |
 | `DOTMD_EMBEDDING_URL` | TEI-compatible embedding endpoint |
-| `DOTMD_GRAPH_BACKEND` | `ladybugdb` or `falkordb` |
+| `DOTMD_FALKORDB_URL` | FalkorDB Redis URL |
 | `DOTMD_BASE_URL` | Public HTTPS base URL for OAuth-enabled remote MCP |
 
 See the main [README](../README.md) for the full configuration table.

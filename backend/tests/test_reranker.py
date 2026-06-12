@@ -29,12 +29,12 @@ def _make_mock_store(n: int = 5) -> MagicMock:
 class TestRerankerScoring:
     """Reranker preserves candidate mapping and optional floor behavior."""
 
-    @patch("sentence_transformers.CrossEncoder", autospec=True)
+    @patch("dotmd.search.reranker._load_cross_encoder_class", autospec=True)
     def test_candidate_texts_are_scored_in_chunk_id_order(self, MockCE: MagicMock) -> None:
         """Model input order follows requested chunk_ids, not store return order."""
         mock_model = MagicMock()
         mock_model.predict.return_value = np.array([1.0, 2.0, 3.0])
-        MockCE.return_value = mock_model
+        MockCE.return_value.return_value = mock_model
 
         store = MagicMock()
         store.get_chunks.return_value = [
@@ -57,12 +57,12 @@ class TestRerankerScoring:
             ("test query", "Text C"),
         ]
 
-    @patch("sentence_transformers.CrossEncoder", autospec=True)
+    @patch("dotmd.search.reranker._load_cross_encoder_class", autospec=True)
     def test_scores_map_back_to_original_chunk_ids(self, MockCE: MagicMock) -> None:
         """Returned scores remain attached to the original requested chunk IDs."""
         mock_model = MagicMock()
         mock_model.predict.return_value = np.array([0.2, 9.0, 1.5])
-        MockCE.return_value = mock_model
+        MockCE.return_value.return_value = mock_model
 
         reranker = _make_reranker()
         mock_store = _make_mock_store(3)
@@ -76,12 +76,12 @@ class TestRerankerScoring:
 
         assert results == [("chunk-1", 9.0), ("chunk-2", 1.5), ("chunk-0", 0.2)]
 
-    @patch("sentence_transformers.CrossEncoder", autospec=True)
+    @patch("dotmd.search.reranker._load_cross_encoder_class", autospec=True)
     def test_relevance_floor_none_keeps_low_scores(self, MockCE: MagicMock) -> None:
         """None disables raw-score filtering, including negative scores."""
         mock_model = MagicMock()
         mock_model.predict.return_value = np.array([-20.0, -10.0, -5.0])
-        MockCE.return_value = mock_model
+        MockCE.return_value.return_value = mock_model
 
         reranker = _make_reranker()
         mock_store = _make_mock_store(3)
@@ -95,12 +95,12 @@ class TestRerankerScoring:
 
         assert results == [("chunk-2", -5.0), ("chunk-1", -10.0), ("chunk-0", -20.0)]
 
-    @patch("sentence_transformers.CrossEncoder", autospec=True)
+    @patch("dotmd.search.reranker._load_cross_encoder_class", autospec=True)
     def test_relevance_floor_filters_when_configured(self, MockCE: MagicMock) -> None:
         """Configured floors filter scores below the threshold."""
         mock_model = MagicMock()
         mock_model.predict.return_value = np.array([-1.0, 0.5, 2.0])
-        MockCE.return_value = mock_model
+        MockCE.return_value.return_value = mock_model
 
         reranker = Reranker(
             model_name="test-model",
@@ -119,7 +119,7 @@ class TestRerankerScoring:
 
         assert results == [("chunk-2", 2.0), ("chunk-1", 0.5)]
 
-    @patch("sentence_transformers.CrossEncoder", autospec=True)
+    @patch("dotmd.search.reranker._load_cross_encoder_class", autospec=True)
     def test_length_penalty_lowers_short_chunk_with_negative_scores(
         self,
         MockCE: MagicMock,
@@ -127,7 +127,7 @@ class TestRerankerScoring:
         """Length penalty lowers short chunks even when raw scores are negative."""
         mock_model = MagicMock()
         mock_model.predict.return_value = np.array([-5.0, -5.0])
-        MockCE.return_value = mock_model
+        MockCE.return_value.return_value = mock_model
 
         store = MagicMock()
         store.get_chunks.return_value = [
@@ -151,12 +151,12 @@ class TestRerankerScoring:
         assert results[0][0] == "long"
         assert results[1][0] == "short"
 
-    @patch("sentence_transformers.CrossEncoder", autospec=True)
+    @patch("dotmd.search.reranker._load_cross_encoder_class", autospec=True)
     def test_top_k_truncation_works(self, MockCE: MagicMock) -> None:
         """top_k limits output even when more candidates pass relevance floor."""
         mock_model = MagicMock()
         mock_model.predict.return_value = np.array([1.0, 3.0, 5.0, 7.0, 9.0])
-        MockCE.return_value = mock_model
+        MockCE.return_value.return_value = mock_model
 
         reranker = _make_reranker()
         mock_store = _make_mock_store(5)
@@ -176,7 +176,7 @@ class TestRerankerScoring:
         results = reranker.rerank("test query", [], mock_store, top_k=10)
         assert results == []
 
-    @patch("sentence_transformers.CrossEncoder", autospec=True)
+    @patch("dotmd.search.reranker._load_cross_encoder_class", autospec=True)
     def test_provider_failure_can_raise_for_diagnostics(
         self,
         MockCE: MagicMock,
@@ -184,7 +184,7 @@ class TestRerankerScoring:
         """Diagnostic comparison can distinguish provider failure from empty output."""
         mock_model = MagicMock()
         mock_model.predict.side_effect = RuntimeError("provider failed")
-        MockCE.return_value = mock_model
+        MockCE.return_value.return_value = mock_model
 
         reranker = _make_reranker()
         mock_store = _make_mock_store(1)
@@ -198,7 +198,7 @@ class TestRerankerScoring:
                 raise_on_provider_error=True,
             )
 
-    @patch("sentence_transformers.CrossEncoder", autospec=True)
+    @patch("dotmd.search.reranker._load_cross_encoder_class", autospec=True)
     def test_provider_failure_still_falls_back_for_normal_search(
         self,
         MockCE: MagicMock,
@@ -206,7 +206,7 @@ class TestRerankerScoring:
         """Normal search keeps the existing fused-ranking fallback behavior."""
         mock_model = MagicMock()
         mock_model.predict.side_effect = RuntimeError("provider failed")
-        MockCE.return_value = mock_model
+        MockCE.return_value.return_value = mock_model
 
         reranker = _make_reranker()
         mock_store = _make_mock_store(1)
@@ -341,7 +341,7 @@ class TestRerankerFactory:
 
         assert factory.get("mmarco-minilm") is factory.get("mmarco-minilm")
 
-    @patch("sentence_transformers.CrossEncoder", autospec=True)
+    @patch("dotmd.search.reranker._load_cross_encoder_class", autospec=True)
     def test_cross_encoder_reranker_warmup_loads_model_without_scoring(
         self,
         MockCE: MagicMock,
@@ -350,15 +350,16 @@ class TestRerankerFactory:
         from dotmd.search.reranker import CrossEncoderReranker
 
         mock_model = MagicMock()
-        MockCE.return_value = mock_model
+        MockCE.return_value.return_value = mock_model
 
         reranker = CrossEncoderReranker(model_name="test-model", name="test")
         reranker.warmup()
 
-        MockCE.assert_called_once_with("test-model", trust_remote_code=False)
+        MockCE.assert_called_once_with()
+        MockCE.return_value.assert_called_once_with("test-model", trust_remote_code=False)
         mock_model.predict.assert_not_called()
 
-    @patch("sentence_transformers.CrossEncoder", autospec=True)
+    @patch("dotmd.search.reranker._load_cross_encoder_class", autospec=True)
     def test_cross_encoder_reranker_warmup_can_trust_remote_code(
         self,
         MockCE: MagicMock,
@@ -367,7 +368,7 @@ class TestRerankerFactory:
         from dotmd.search.reranker import CrossEncoderReranker
 
         mock_model = MagicMock()
-        MockCE.return_value = mock_model
+        MockCE.return_value.return_value = mock_model
 
         reranker = CrossEncoderReranker(
             model_name="test-model",
@@ -376,7 +377,8 @@ class TestRerankerFactory:
         )
         reranker.warmup()
 
-        MockCE.assert_called_once_with("test-model", trust_remote_code=True)
+        MockCE.assert_called_once_with()
+        MockCE.return_value.assert_called_once_with("test-model", trust_remote_code=True)
         mock_model.predict.assert_not_called()
 
     def test_create_reranker_passes_settings_to_adapter(self) -> None:

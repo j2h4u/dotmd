@@ -35,10 +35,10 @@
          │
          ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                    Storage Layer (3 backends)                                │
-│  SQLiteMetadataStore   SQLiteVecVectorStore   FalkorDB / LadybugDB          │
+│                    Storage Layer                                             │
+│  SQLiteMetadataStore   SQLiteVecVectorStore   FalkorDB                      │
 │  `storage/metadata.py` `storage/sqlite_vec.py` `storage/falkordb_graph.py` │
-│              unified `index.db` (sqlite)       `storage/graph.py`           │
+│              unified `index.db` (sqlite)                                    │
 └─────────────────────────────────────────────────────────────────────────────┘
          │
          ▼
@@ -64,7 +64,7 @@
 | `GraphSearchEngine` | Post-fusion graph enrichment: seed chunks → graph neighbors | `search/graph_search.py` |
 | `SQLiteMetadataStore` | Chunk metadata, FTS5 tables, fingerprints, source_documents, resource_bindings | `storage/metadata.py` |
 | `SQLiteVecVectorStore` | sqlite-vec embedding store; two-dimensional `(strategy, model)` tables | `storage/sqlite_vec.py` |
-| `FalkorDB / LadybugDB` | Knowledge graph (production/local-dev alternatives) | `storage/falkordb_graph.py`, `storage/graph.py` |
+| `FalkorDBGraphStore` | Knowledge graph | `storage/falkordb_graph.py` |
 | `FastMCP server` | MCP tool registration (search, read, drill, feedback), OAuth, HTTP middleware | `mcp_server.py` |
 | `QueryExpander` | Acronym expansion for query enrichment | `search/query.py` |
 | `RerankerFactory` | Loads cross-encoder model; blends reranker score with fusion score (0.6/0.4) | `search/reranker.py` |
@@ -107,7 +107,7 @@
 **Storage (`storage/`):**
 - Purpose: Persistence for chunks (metadata+FTS5), vectors, and graph
 - Location: `backend/src/dotmd/storage/`
-- Contains: `base.py` (protocols), `metadata.py` (SQLiteMetadataStore), `sqlite_vec.py` (SQLiteVecVectorStore), `vec_components.py`, `falkordb_graph.py`, `graph.py` (LadybugDB), `cache.py` (EmbeddingCache, ExtractionCache), `vector.py`
+- Contains: `base.py` (protocols), `metadata.py` (SQLiteMetadataStore), `sqlite_vec.py` (SQLiteVecVectorStore), `vec_components.py`, `falkordb_graph.py`, `cache.py` (EmbeddingCache, ExtractionCache)
 - Depends on: `core/`
 - Used by: `ingestion/pipeline.py`, `api/service.py`, `search/`
 
@@ -201,7 +201,7 @@
 **Storage Protocols:**
 - Purpose: Swappable backends without changing call sites
 - File: `storage/base.py` — `VectorStoreProtocol`, `GraphStoreProtocol`, `MetadataStoreProtocol`
-- Pattern: `@runtime_checkable Protocol`; concrete implementations: `SQLiteVecVectorStore`, `FalkorDBGraphStore`/`LadybugDBGraphStore`, `SQLiteMetadataStore`
+- Pattern: `@runtime_checkable Protocol`; concrete implementations: `SQLiteVecVectorStore`, `FalkorDBGraphStore`, `SQLiteMetadataStore`
 
 ## Entry Points
 

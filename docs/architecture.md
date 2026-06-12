@@ -38,9 +38,7 @@ flowchart TD
     end
 
     subgraph Graph
-        ENT --> G{Graph backend}
-        G -->|production| FALKOR[FalkorDB]
-        G -->|local dev default| LADYBUG[LadybugDB]
+        ENT --> FALKOR[FalkorDB]
     end
 
     subgraph Query["Query pipeline"]
@@ -58,7 +56,6 @@ flowchart TD
     VEC -.-> SEM
     FTS -.-> KW
     FALKOR -.-> GD
-    LADYBUG -.-> GD
     META -.-> RR
     M2M -.-> OUT
 
@@ -90,7 +87,7 @@ flowchart TD
 | Metadata | SQLite `index.db` | Chunks, source documents, active resource bindings, M2M file paths, index stats |
 | Keyword | SQLite FTS5 | Incremental keyword index with title/tag weighting |
 | Vector | sqlite-vec in `index.db` | Embeddings keyed by chunk strategy and embedding model |
-| Graph | FalkorDB or LadybugDB | Files, sections, entities, tags, and relations |
+| Graph | FalkorDB | Files, sections, entities, tags, and relations |
 | Feedback | SQLite `feedback.db` | Agent feedback submissions |
 
 The schema is two-dimensional where needed: `(chunk_strategy, embedding_model)`. This lets multiple chunking strategies and embedding models coexist in one index.
@@ -100,14 +97,13 @@ The schema is two-dimensional where needed: `(chunk_strategy, embedding_model)`.
 - TEI is the normal embedding runtime.
 - Document title/context is prepended at encode time where configured.
 - `text_hash` enables embedding reuse across compatible chunk strategies.
-- sqlite-vec avoids the AVX2 dependency that made LanceDB fragile on older CPUs. LanceDB remains a legacy optional backend.
+- sqlite-vec keeps vector storage embedded in `index.db` without an external vector service.
 
 ### 4. Extraction and Graph
 
 - Structural extraction handles headings, tags, wikilinks, markdown links, and frontmatter-derived signals.
 - GLiNER NER can add named entities when `DOTMD_EXTRACT_DEPTH=ner`.
-- FalkorDB is the production graph backend.
-- LadybugDB remains the embedded local-dev default.
+- FalkorDB is the graph backend.
 
 ### 5. Query Pipeline
 

@@ -159,17 +159,13 @@ def _model_to_table_suffix(model_name: str) -> str:
 
 
 def _create_graph_store(settings: Settings) -> GraphStoreProtocol:
-    """Instantiate the configured graph store backend."""
-    if settings.graph_backend == "falkordb":
-        from dotmd.storage.falkordb_graph import FalkorDBGraphStore
+    """Instantiate the production graph store backend."""
+    from dotmd.storage.falkordb_graph import FalkorDBGraphStore
 
-        return FalkorDBGraphStore(
-            url=settings.falkordb_url,
-            graph_name="dotmd",
-        )
-    from dotmd.storage.graph import LadybugDBGraphStore
-
-    return LadybugDBGraphStore(settings.graph_db_path)
+    return FalkorDBGraphStore(
+        url=settings.falkordb_url,
+        graph_name="dotmd",
+    )
 
 
 class IndexingPipeline:
@@ -240,17 +236,12 @@ class IndexingPipeline:
             self._metadata_store,
         )
 
-        if settings.vector_backend == "sqlite-vec":
-            from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
+        from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
 
-            self._vector_store: VectorStoreProtocol = SQLiteVecVectorStore(
-                conn=self._conn,
-                table_name=vec_table,
-            )
-        else:
-            from dotmd.storage.vector import LanceDBVectorStore
-
-            self._vector_store = LanceDBVectorStore(settings.lancedb_path)
+        self._vector_store: VectorStoreProtocol = SQLiteVecVectorStore(
+            conn=self._conn,
+            table_name=vec_table,
+        )
 
         self._graph_store = _create_graph_store(settings)
 
@@ -2663,18 +2654,6 @@ class IndexingPipeline:
             if _cleanup_orphan_ids:
                 try:
                     self._graph_store.delete_chunks_from_graph(_cleanup_orphan_ids)
-                except AttributeError:
-                    # Graph store lacks narrow helper (e.g. LadybugDB) — fall
-                    # back to broad subgraph delete.  The graph will be
-                    # re-populated in the graph phase below.
-                    try:
-                        self._graph_store.delete_file_subgraph(path_str)
-                    except (RuntimeError, sqlite3.Error, ValueError) as _ge:
-                        logger.warning(
-                            "graph cleanup (fallback) failed during reindex: %s (file=%s)",
-                            _ge,
-                            path_str,
-                        )
                 except (RuntimeError, sqlite3.Error, ValueError) as _ge:
                     logger.warning(
                         "graph chunk cleanup failed during reindex: %s (file=%s)",

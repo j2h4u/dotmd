@@ -231,10 +231,7 @@ def status(ctx: click.Context, verbose: bool) -> None:
     click.echo(f"Edges:    {stats.total_edges}")
     # Graph backend info
     settings = load_settings()
-    if settings.graph_backend == "falkordb":
-        click.echo(f"Graph:    falkordb @ {settings.falkordb_url}/dotmd")
-    else:
-        click.echo(f"Graph:    ladybugdb @ {settings.graph_db_path}")
+    click.echo(f"Graph:    falkordb @ {settings.falkordb_url}/dotmd")
     if stats.last_indexed:
         click.echo(f"Last indexed: {stats.last_indexed.isoformat()}")
     if stats.data_dir:

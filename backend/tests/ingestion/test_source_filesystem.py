@@ -197,8 +197,6 @@ def test_pipeline_helper_builds_filesystem_chunk_provenance(
             data_dir=data_dir,
             index_dir=index_dir,
             embedding_url="http://localhost:18088",
-            vector_backend="sqlite-vec",
-            graph_backend="ladybugdb",
             extract_depth=ExtractDepth.STRUCTURAL,
             indexing_paths=[str(data_dir)],
         )
@@ -227,8 +225,6 @@ def _pipeline_with_mock_embedding(data_dir: Path, index_dir: Path):
             data_dir=data_dir,
             index_dir=index_dir,
             embedding_url="http://localhost:18088",
-            vector_backend="sqlite-vec",
-            graph_backend="ladybugdb",
             extract_depth=ExtractDepth.STRUCTURAL,
             indexing_paths=[str(data_dir)],
         )

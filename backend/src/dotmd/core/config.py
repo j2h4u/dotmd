@@ -1,6 +1,5 @@
 """Application settings via pydantic-settings."""
 
-import warnings
 from pathlib import Path
 from typing import Literal, cast
 
@@ -89,8 +88,6 @@ class Settings(BaseSettings):
     # If set, queries are encoded as: "<instruction>\nQuery: <query>"
     # Auto-detected from embedding_model name if not explicitly set.
     embedding_query_instruction: str | None = None
-
-    vector_backend: Literal["lancedb", "sqlite-vec"] = "sqlite-vec"
 
     # Reranker
     reranker_backend: Literal["cross_encoder"] = "cross_encoder"
@@ -207,8 +204,7 @@ class Settings(BaseSettings):
 
     # Graph
     graph_max_hops: int = DEFAULT_GRAPH_MAX_HOPS
-    graph_backend: Literal["ladybugdb", "falkordb"] = "ladybugdb"
-    # FalkorDB connection URL (Redis protocol). Only used when graph_backend="falkordb".
+    # FalkorDB connection URL (Redis protocol).
     falkordb_url: str = DEFAULT_FALKORDB_URL
 
     # Base URL for OAuth 2.0 endpoints served by FastMCP.
@@ -365,13 +361,10 @@ class Settings(BaseSettings):
             if value == "":
                 errors.append(f"{field_name} must not be empty for runtime startup")
 
-        if self.graph_backend == "falkordb":
-            if not self.falkordb_url:
-                errors.append("falkordb_url must be set when graph_backend is falkordb")
-            elif self.falkordb_url == DEFAULT_FALKORDB_URL:
-                errors.append(
-                    "falkordb_url must not use DEFAULT_FALKORDB_URL when graph_backend is falkordb"
-                )
+        if not self.falkordb_url:
+            errors.append("falkordb_url must be set for runtime startup")
+        elif self.falkordb_url == DEFAULT_FALKORDB_URL:
+            errors.append("falkordb_url must not use DEFAULT_FALKORDB_URL for runtime startup")
 
         if errors:
             raise ValueError("; ".join(errors))
@@ -410,35 +403,9 @@ class Settings(BaseSettings):
         return ""
 
     @property
-    def lancedb_path(self) -> Path:
-        return self.index_dir / "lancedb"
-
-    @property
     def index_db_path(self) -> Path:
         """Path to the unified SQLite index database (metadata + vec + FTS5)."""
         return self.index_dir / "index.db"
-
-    @property
-    def sqlite_vec_path(self) -> Path:
-        warnings.warn(
-            "sqlite_vec_path is deprecated — use index_db_path",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.index_db_path
-
-    @property
-    def graph_db_path(self) -> Path:
-        return self.index_dir / f"graphdb_{self.chunk_strategy}"
-
-    @property
-    def sqlite_path(self) -> Path:
-        warnings.warn(
-            "sqlite_path is deprecated — use index_db_path",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.index_db_path
 
     @property
     def acronyms_path(self) -> Path:

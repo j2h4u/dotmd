@@ -23,7 +23,7 @@ keeps only `mmarco-minilm`; rejected historical candidates remain documented in
 - Unified SQLite `index.db` for metadata, FTS5, fingerprints, and sqlite-vec vectors
 - Multiple chunk strategies and embedding models in the same index
 - External TEI embedding server support
-- FalkorDB production graph backend with LadybugDB as the embedded local default
+- FalkorDB graph backend
 - Background trickle indexer for incremental file changes
 
 ## Requirements
@@ -35,7 +35,7 @@ keeps only `mmarco-minilm`; rejected historical candidates remain documented in
 | Docker and Docker Compose | Containerized runtime and bundled services |
 | just | Development task runner |
 | TEI | Required embedding server for normal indexing/search |
-| FalkorDB | Production graph backend when `DOTMD_GRAPH_BACKEND=falkordb` |
+| FalkorDB | Required graph backend |
 
 Optional tools:
 
@@ -196,10 +196,9 @@ Set these for the live container:
 | `DOTMD_INDEX_DIR` | `/dotmd-index` | Persistent index directory inside the container |
 | `DOTMD_INDEXING_PATHS` | `["/mnt"]` | Roots or glob patterns watched by the trickle indexer |
 | `DOTMD_EMBEDDING_URL` | `http://tei:80` | TEI-compatible embedding endpoint |
-| `DOTMD_GRAPH_BACKEND` | `ladybugdb` | `ladybugdb` or `falkordb` |
-| `DOTMD_FALKORDB_URL` | `redis://falkordb:6379` | Required only when `DOTMD_GRAPH_BACKEND=falkordb` |
+| `DOTMD_FALKORDB_URL` | `redis://falkordb:6379` | Required FalkorDB Redis URL |
 
-When `DOTMD_GRAPH_BACKEND=falkordb`, set `DOTMD_FALKORDB_URL=redis://falkordb:6379` or another reachable Redis URL. The runtime validator rejects the unsafe `redis://localhost:6379` default in FalkorDB mode because it usually points at the container itself, not the graph service.
+Set `DOTMD_FALKORDB_URL=redis://falkordb:6379` or another reachable Redis URL. The runtime validator rejects the unsafe `redis://localhost:6379` default because it usually points at the container itself, not the graph service.
 
 Path filtering:
 
@@ -241,7 +240,6 @@ These values can be changed for experiments but are not the primary operator che
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DOTMD_TEI_BATCH_SIZE` | `4` | Initial embedding batch size before TEI auto-tuning |
-| `DOTMD_VECTOR_BACKEND` | `sqlite-vec` | Vector backend; LanceDB remains legacy/optional |
 | `DOTMD_GRAPH_MAX_HOPS` | `2` | Graph traversal depth for graph-direct search |
 | `DOTMD_DEFAULT_TOP_K` | `10` | Default result count |
 | `DOTMD_FUSION_K` | `60` | Reciprocal rank fusion constant |
@@ -262,7 +260,7 @@ backend/src/dotmd/
 ├── core/          # Pydantic models, settings, exceptions
 ├── ingestion/     # Reader, chunker, pipeline, trickle indexer, migration
 ├── extraction/    # Structural extraction and GLiNER NER
-├── storage/       # SQLite metadata/FTS5/sqlite-vec, FalkorDB, LadybugDB
+├── storage/       # SQLite metadata/FTS5/sqlite-vec, FalkorDB
 ├── search/        # Semantic, FTS5, graph-direct, fusion, reranker
 ├── api/           # DotMDService facade and FastAPI server
 ├── mcp_server.py  # FastMCP server

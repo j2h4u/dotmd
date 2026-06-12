@@ -33,16 +33,14 @@
 
 **ML / NLP:**
 - `sentence-transformers >=3.0` — local embedding and CrossEncoder reranking (lazy-loaded)
-- `transformers >=4.45,<5` — backbone for sentence-transformers and GLiNER
-- `torch <2.5` — CPU-only constraint (AVX2 absent on deployment hardware)
+- `transformers >=5.11.0,<6` — backbone for sentence-transformers and GLiNER
+- `torch <2.13` — CPU-only runtime dependency
 - `einops >=0.8` — tensor ops for transformer models
 - `gliner >=0.2` — zero-shot NER via `urchade/gliner_multi-v2.1` (`backend/src/dotmd/extraction/ner.py`)
 
 **Storage:**
 - `sqlite-vec >=0.1.6` — SQLite extension for vector similarity search (`backend/src/dotmd/storage/sqlite_vec.py`); no AVX2 requirement
 - `FalkorDB >=1.6.0` — Redis-protocol graph database client (`backend/src/dotmd/storage/falkordb_graph.py`)
-- `real_ladybug >=0.1` — embedded graph DB for local dev (no container needed)
-- `pandas >=2.0` — used in pipeline data processing
 
 **Utilities:**
 - `blake3 >=1.0` — content hashing for chunk fingerprints (`backend/src/dotmd/ingestion/`)
@@ -61,9 +59,8 @@
 ## Key Dependencies
 
 **Critical:**
-- `sqlite-vec` — replaces LanceDB for vector storage; no AVX2 needed; embedded in unified `index.db`
-- `FalkorDB` — production graph backend (Redis protocol, external container)
-- `real_ladybug` — embedded graph backend for local dev; kept as alternative
+- `sqlite-vec` — vector storage; no AVX2 needed; embedded in unified `index.db`
+- `FalkorDB` — graph backend (Redis protocol, external container)
 - `mcp[cli]` — MCP protocol implementation; both stdio and HTTP transports exposed
 - `sentence-transformers` + `torch` — local fallback for embeddings (TEI preferred in prod)
 - `gliner` — zero-shot NER, loaded lazily on first extraction call
@@ -75,7 +72,6 @@
 - `httpx` — TEI HTTP client with auto-tuning batch size (down on 413 errors)
 
 **Optional / Conditional:**
-- `lancedb >=0.6` — legacy vector backend, available as optional extra `[lancedb]`; not used in production
 - `modal` — GPU embedding offload (`modal/embed.py`); separate workspace, not part of main package
 
 ## Configuration
@@ -93,11 +89,10 @@
 - `embedding_model` — HuggingFace model ID (TEI ignores this; TEI determines actual model)
 - `embedding_url` — required; TEI server base URL
 - `embedding_weights` — dual-encoder fusion weights, format `"text=0.7,meta=0.3"` (must sum to 1.0)
-- `graph_backend` — `"ladybugdb"` (default/dev) or `"falkordb"` (prod)
 - `chunk_strategy` — default `"heading_512_50"`
 - `reranker_model` — default `"cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"`
 - `ner_model_name` — default `"urchade/gliner_multi-v2.1"`
-- `vector_backend` — `"sqlite-vec"` (default) or `"lancedb"` (legacy)
+- `falkordb_url` — required FalkorDB Redis URL
 
 **Build:**
 - `backend/pyproject.toml` — hatchling build, ruff config, pyright config, pytest config
@@ -109,7 +104,7 @@
 - Python 3.12+
 - SQLite with sqlite-vec extension loadable
 - TEI server required (no embedded fallback in production config)
-- LadybugDB for graph in dev (no separate container)
+- FalkorDB for graph; unit tests use an in-memory test double instead of a dev graph backend
 
 **Production:**
 - Docker container `dotmd` (bind-mount source for hot-reload without rebuild)

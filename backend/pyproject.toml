@@ -16,14 +16,12 @@ dependencies = [
     "torch<2.13",
     "einops>=0.8",
     "sqlite-vec>=0.1.6",
-    "real_ladybug>=0.1",
     "FalkorDB>=1.6.0",
     "gliner>=0.2",
     "pydantic>=2.0",
     "pydantic-settings[toml]>=2.14.1",
     "watchdog>=6.0",
     "pyyaml>=6.0",
-    "pandas>=2.0",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.49.0",
     "mcp[cli]>=1.27.2",
@@ -43,10 +41,6 @@ dev = [
     "pytest-xdist>=3.8.0",
     "actionlint-py>=1.7.12.24",
 ]
-lancedb = [
-    "lancedb>=0.6",
-]
-
 [project.scripts]
 dotmd = "dotmd.cli:main"
 

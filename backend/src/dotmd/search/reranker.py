@@ -66,6 +66,12 @@ def available_rerankers() -> list[str]:
     return sorted(BUILTIN_RERANKERS)
 
 
+def _load_cross_encoder_class() -> Any:
+    from sentence_transformers import CrossEncoder  # type: ignore[import-untyped]
+
+    return CrossEncoder
+
+
 class CrossEncoderReranker:
     """Cross-encoder reranker with lazy model loading and length penalty.
 
@@ -118,10 +124,9 @@ class CrossEncoderReranker:
     def _load_model(self) -> Any:
         """Load the cross-encoder model on first use."""
         if self._model is None:
-            from sentence_transformers import CrossEncoder  # type: ignore[import-untyped]
-
             logger.info("Loading cross-encoder model: %s", self._model_name)
-            self._model = CrossEncoder(
+            cross_encoder_cls = _load_cross_encoder_class()
+            self._model = cross_encoder_cls(
                 self._model_name,
                 trust_remote_code=self._trust_remote_code,
             )

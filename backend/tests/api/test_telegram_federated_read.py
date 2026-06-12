@@ -30,8 +30,6 @@ class TestFederatedTelegramRead:
                 indexing_paths=[str(tmp_path)],
                 index_dir=index_dir,
                 embedding_url="http://localhost:18088",
-                vector_backend="sqlite-vec",
-                graph_backend="ladybugdb",
                 extract_depth=ExtractDepth.STRUCTURAL,
             )
         )
@@ -82,8 +80,6 @@ class TestFederatedTelegramRead:
                 indexing_paths=[str(tmp_path)],
                 index_dir=index_dir,
                 embedding_url="http://localhost:18088",
-                vector_backend="sqlite-vec",
-                graph_backend="ladybugdb",
                 extract_depth=ExtractDepth.STRUCTURAL,
             )
         )
@@ -133,8 +129,6 @@ class TestFederatedTelegramRead:
                 indexing_paths=[str(tmp_path)],
                 index_dir=index_dir,
                 embedding_url="http://localhost:18088",
-                vector_backend="sqlite-vec",
-                graph_backend="ladybugdb",
                 extract_depth=ExtractDepth.STRUCTURAL,
             )
         )
@@ -162,8 +156,6 @@ class TestFederatedTelegramRead:
                 indexing_paths=[str(tmp_path)],
                 index_dir=index_dir,
                 embedding_url="http://localhost:18088",
-                vector_backend="sqlite-vec",
-                graph_backend="ladybugdb",
                 extract_depth=ExtractDepth.STRUCTURAL,
             )
         )
@@ -218,8 +210,6 @@ class TestFederatedTelegramRead:
                 indexing_paths=[str(tmp_path)],
                 index_dir=index_dir,
                 embedding_url="http://localhost:18088",
-                vector_backend="sqlite-vec",
-                graph_backend="ladybugdb",
                 extract_depth=ExtractDepth.STRUCTURAL,
             )
         )
@@ -280,8 +270,6 @@ class TestFederatedTelegramRead:
                 indexing_paths=[str(tmp_path)],
                 index_dir=index_dir,
                 embedding_url="http://localhost:18088",
-                vector_backend="sqlite-vec",
-                graph_backend="ladybugdb",
                 extract_depth=ExtractDepth.STRUCTURAL,
             )
         )
@@ -344,8 +332,6 @@ class TestFederatedTelegramRead:
                 indexing_paths=[str(tmp_path)],
                 index_dir=index_dir,
                 embedding_url="http://localhost:18088",
-                vector_backend="sqlite-vec",
-                graph_backend="ladybugdb",
                 extract_depth=ExtractDepth.STRUCTURAL,
             )
         )

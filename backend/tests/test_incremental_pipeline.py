@@ -70,7 +70,6 @@ def mock_settings(index_dir: Path, md_dir: Path):
     settings = MagicMock()
     settings.index_dir = index_dir
     settings.index_db_path = index_dir / "index.db"
-    settings.graph_db_path = index_dir / "graphdb"
 
     settings.acronyms_path = index_dir / "acronyms.json"
     settings.embedding_model = "test-model"
@@ -85,8 +84,6 @@ def mock_settings(index_dir: Path, md_dir: Path):
     settings.max_chunk_tokens = 512
     settings.chunk_overlap_tokens = 50
     settings.read_only = False
-    settings.vector_backend = "sqlite-vec"
-    settings.lancedb_path = index_dir / "lancedb"
     settings.tei_batch_size = 32
     settings.needs_embedding_prefix = False
     return settings

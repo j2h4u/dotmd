@@ -1071,14 +1071,14 @@ Plans:
 
 ---
 
-### Backlog 999.32: Remove LanceDB and LadybugDB completely
+### Backlog 999.32: Remove LanceDB and LadybugDB completely (DONE 2026-06-12)
 
 **Goal:** Delete unused legacy storage backends and all references to them.
 
 **Context captured 2026-06-12:**
 - Production uses SQLite/FTS5/sqlite-vec plus FalkorDB.
-- LanceDB remains only as a legacy optional code path and dependency extra.
-- LadybugDB remains only as a local-dev graph fallback.
+- LanceDB existed only as a legacy optional code path and dependency extra.
+- LadybugDB existed only as a local-dev graph fallback.
 - We do not want to preserve either compatibility layer.
 
 **Proposed scope:**
@@ -1090,7 +1090,7 @@ Plans:
 **Plans:** 0 plans
 
 Plans:
-- [ ] TBD (promote when ready)
+- [x] Removed legacy backends directly from backlog cleanup.
 
 ---
 

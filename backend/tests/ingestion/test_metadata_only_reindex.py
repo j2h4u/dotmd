@@ -111,8 +111,6 @@ def pipeline_settings(tmp_path):
         index_dir=index_dir,
         embedding_url="http://localhost:18088",
         indexing_paths=[str(data_dir)],
-        vector_backend="sqlite-vec",
-        graph_backend="ladybugdb",
         extract_depth=ExtractDepth.STRUCTURAL,
         embedding_weights="text=0.7,meta=0.3",
     )

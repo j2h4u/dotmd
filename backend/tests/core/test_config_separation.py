@@ -30,7 +30,6 @@ def _runtime_settings(**overrides: object) -> Settings:
         "reranker_model": "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
         "reranker_backend": "cross_encoder",
         "embedding_weights": "text=0.7,meta=0.3",
-        "graph_backend": "falkordb",
         "falkordb_url": "redis://falkordb:6379",
     }
     values.update(overrides)
@@ -135,18 +134,6 @@ def test_runtime_validation_rejects_missing_or_default_falkordb_url(
 
     with pytest.raises(ValueError, match="falkordb_url"):
         settings.validate_for_runtime()
-
-
-@pytest.mark.parametrize("falkordb_url", ["", config.DEFAULT_FALKORDB_URL])
-def test_runtime_validation_allows_ladybugdb_without_falkordb_url(
-    falkordb_url: str,
-) -> None:
-    settings = _runtime_settings(
-        graph_backend="ladybugdb",
-        falkordb_url=falkordb_url,
-    )
-
-    settings.validate_for_runtime()
 
 
 def test_base_url_none_remains_valid() -> None:

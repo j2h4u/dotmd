@@ -8,8 +8,6 @@ from collections import Counter
 from itertools import combinations
 from typing import TYPE_CHECKING, Any, cast
 
-import torch
-
 from dotmd.core.models import Chunk, Entity, ExtractDepth, ExtractionResult, Relation
 
 if TYPE_CHECKING:
@@ -18,15 +16,6 @@ if TYPE_CHECKING:
     from dotmd.storage.cache import ExtractionCache
 
 logger = logging.getLogger(__name__)
-
-# ADR: Maximize CPU utilization for GLiNER inference.
-# Without this, PyTorch defaults to a heuristic that often underutilizes
-# available cores (observed: 4.5/8 cores on Xeon E3 V2).
-# OMP_NUM_THREADS env var takes precedence if set.
-_cpu_count = os.cpu_count() or 4
-if not os.environ.get("OMP_NUM_THREADS"):
-    torch.set_num_threads(_cpu_count)
-    torch.set_num_interop_threads(max(1, _cpu_count // 2))
 
 _DEFAULT_ENTITY_TYPES: list[str] = [
     "person",
@@ -37,6 +26,18 @@ _DEFAULT_ENTITY_TYPES: list[str] = [
 ]
 
 _DEFAULT_MODEL_NAME = "urchade/gliner_multi-v2.1"
+
+
+def _configure_torch_threads() -> int | None:
+    """Configure PyTorch thread counts only when NER is actually used."""
+    if os.environ.get("OMP_NUM_THREADS"):
+        return None
+    import torch
+
+    cpu_count = os.cpu_count() or 4
+    torch.set_num_threads(cpu_count)
+    torch.set_num_interop_threads(max(1, cpu_count // 2))
+    return torch.get_num_threads()
 
 
 class NERExtractor:
@@ -300,6 +301,7 @@ class NERExtractor:
         """Lazily load and cache the GLiNER model."""
         if self._model is None:
             logger.info("Loading GLiNER model '%s' …", self._model_name)
+            torch_threads = _configure_torch_threads()
             from gliner import GLiNER  # type: ignore[import-untyped]
 
             model = cast("GLiNER", GLiNER.from_pretrained(self._model_name))
@@ -311,7 +313,7 @@ class NERExtractor:
                 model_config.max_len = 512
             logger.info(
                 "GLiNER model loaded (threads=%d, max_len=%s).",
-                torch.get_num_threads(),
+                torch_threads or 0,
                 getattr(model_config, "max_len", "?"),
             )
             self._model = model

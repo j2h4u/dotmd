@@ -220,7 +220,7 @@ class SQLiteVecVectorStore:
         conn = self._get_conn()
 
         if overwrite:
-            # Clear existing data (matches LanceDB's mode="overwrite")
+            # Clear existing data before bulk replacement.
             conn.execute(f"DELETE FROM {self._VEC_TABLE}")
             conn.execute(f"DELETE FROM {self._META_TABLE}")
 

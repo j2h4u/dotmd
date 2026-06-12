@@ -56,7 +56,7 @@
 - Implementation: `backend/src/dotmd/feedback.py`
 - Access: `dotmd feedback` CLI commands only (never query directly)
 
-**FalkorDB (production graph backend):**
+**FalkorDB (graph backend):**
 - Stores: knowledge graph — File, Section, Entity, Tag nodes with relationships
 - Connection: Redis protocol (`DOTMD_FALKORDB_URL`, e.g. `redis://falkordb:6379`)
 - Client: `FalkorDB >=1.6.0` Python SDK
@@ -66,13 +66,6 @@
 - Implementation: `backend/src/dotmd/storage/falkordb_graph.py` (`FalkorDBGraphStore`)
 - Indexes: range indexes auto-created on startup for `File`, `Section`, `Entity`, `Tag`, `Node` labels
 - Shared container: standalone FalkorDB at `/opt/docker/falkordb/` (also used by other services — graph name isolation required)
-
-**LadybugDB (local dev graph backend):**
-- Embedded graph DB, no separate container required
-- Package: `real_ladybug >=0.1`
-- Selected when `DOTMD_GRAPH_BACKEND=ladybugdb` (default)
-- Data path: `{index_dir}/graphdb_{chunk_strategy}`
-- Implementation: `backend/src/dotmd/storage/graph.py`
 
 **File Storage:**
 - Source markdown files: bind-mounted at `/mnt/` inside container (`DOTMD_DATA_DIR=/mnt`, locked — never narrow)
@@ -135,8 +128,7 @@
 - `DOTMD_DATA_DIR` — source markdown root (locked to `/mnt`)
 - `DOTMD_INDEX_DIR` — index directory (locked to `/dotmd-index`)
 - `DOTMD_INDEXING_PATHS` — absolute path specs for markdown discovery (comma-separated)
-- `DOTMD_GRAPH_BACKEND` — `falkordb` (prod) or `ladybugdb` (dev)
-- `DOTMD_FALKORDB_URL` — FalkorDB Redis URL (required when `graph_backend=falkordb`)
+- `DOTMD_FALKORDB_URL` — required FalkorDB Redis URL
 - `DOTMD_FALKORDB_GRAPH_NAME` — graph name in FalkorDB instance
 
 **Optional env vars:**

@@ -57,7 +57,7 @@
 - `typeCheckingMode = "standard"` — not strict
 - `reportMissingTypeStubs = false` — stubs absent for several ML/DB libs; acceptable
 - `# type: ignore[...]` used narrowly and always with a specific error code at the callsite
-- Common suppression sites: untyped third-party imports (`sqlite_vec`, `yaml`, `real_ladybug`, `gliner`, `sentence_transformers`), Protocol method-assign workarounds
+- Common suppression sites: untyped third-party imports (`sqlite_vec`, `yaml`, `gliner`, `sentence_transformers`), Protocol method-assign workarounds
 
 ## Import Organization
 

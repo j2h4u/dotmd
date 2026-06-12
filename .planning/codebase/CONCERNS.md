@@ -4,23 +4,11 @@
 
 ## Tech Debt
 
-**Dead `LanceDBVectorStore` backend:**
-- Issue: `LanceDB` was replaced by `sqlite-vec` but the full implementation remains in `storage/vector.py` (129 lines). `delete_vectors_by_chunk_ids` and `lookup_embeddings_by_text_hash` are no-op stubs that silently return `0`/`{}`. The backend can still be activated via `DOTMD_VECTOR_BACKEND=lancedb` in config, and `lancedb` has an optional extras entry in `pyproject.toml`. If someone accidentally sets the env var, incremental deletes and embedding reuse are silently broken.
-- Files: `backend/src/dotmd/storage/vector.py`, `backend/src/dotmd/core/config.py:93`, `backend/src/dotmd/ingestion/pipeline.py:240-249`
-- Impact: Silent data correctness failure if backend is ever switched. Dead code inflates maintenance surface.
-- Fix approach: Delete `storage/vector.py`, remove `vector_backend` config option and the `lancedb` optional extra, hard-code `sqlite-vec` in `pipeline.py`. The `lancedb` path has not been tested since Phase 12.
-
 **Protocol-breaking `hasattr` duck-typing on `VectorStoreProtocol`:**
 - Issue: Five call sites in `pipeline.py` use `hasattr()` guards for methods that are part of the protocol contract (`delete_by_chunk_ids`, `set_model_name`, `set_distance_metric`, `_tables_ensured`). This breaks the protocol abstraction and forces callers to have implementation knowledge.
 - Files: `backend/src/dotmd/ingestion/pipeline.py:1058`, `1336`, `2005`, `2008`, `2415`, `3152`
 - Impact: Adding a new backend requires knowing which `hasattr` guards to satisfy; protocol violations are invisible to the type checker; `# type: ignore[attr-defined]` follows every call.
-- Fix approach: Promote `delete_by_chunk_ids`, `set_model_name`, and `set_distance_metric` into `VectorStoreProtocol` in `storage/base.py`. Add no-op default implementations for the LadybugDB graph store.
-
-**`GraphStoreProtocol` missing `delete_frontmatter_edges`:**
-- Issue: `pipeline.py:3152` uses `hasattr(self._graph_store, "delete_frontmatter_edges")` before calling it. The method exists on `FalkorDBGraphStore` but is not in `GraphStoreProtocol`. Same `# type: ignore[attr-defined]` pattern.
-- Files: `backend/src/dotmd/ingestion/pipeline.py:3152`, `backend/src/dotmd/storage/base.py`
-- Impact: FalkorDB-specific graph cleanup is silently skipped when using LadybugDB backend. Protocol is incomplete.
-- Fix approach: Add `delete_frontmatter_edges(file_path: str) -> None` to `GraphStoreProtocol` and add a no-op implementation in `LadybugDBGraphStore`.
+- Fix approach: Promote `delete_by_chunk_ids`, `set_model_name`, and `set_distance_metric` into `VectorStoreProtocol` in `storage/base.py`.
 
 **Private attribute access across module boundary:**
 - Issue: `pipeline.py:2050` accesses `self._ner_extractor._extraction_cache` directly — a private attribute on `NERExtractor`. If `NERExtractor` refactors its internals, this line silently breaks.
@@ -51,12 +39,6 @@
 - Files: `backend/pyproject.toml`
 - Impact: Inflates container image, installs a cloud SDK with network credentials support in a container that doesn't need it.
 - Fix approach: Remove from `[project.dependencies]`. If modal was used for a dev experiment, move to `[project.optional-dependencies]` dev.
-
-**`pandas` listed as core dependency, used only through LadybugDB `.get_as_df()`:**
-- Issue: `pandas>=2.0` is in `[project.dependencies]`. The only usage is via `result.get_as_df()` in `storage/graph.py` — a LadybugDB-internal call that returns a DataFrame, which `graph.py` then iterates row by row. `pandas` is not used directly in dotMD source code.
-- Files: `backend/src/dotmd/storage/graph.py`, `backend/pyproject.toml`
-- Impact: Unnecessary ~35MB dependency. LadybugDB (real_ladybug) likely pulls it transitively anyway, so this may be harmless, but the explicit pin creates a false impression that dotMD directly uses pandas.
-- Fix approach: Remove from `pyproject.toml`; if real_ladybug requires it, it will pull it transitively.
 
 **`descriptor_key` hardcoded as `"filesystem-mnt"` in fusion:**
 - Issue: `search/fusion.py:373` hardcodes `descriptor_key="filesystem-mnt"` for all local chunks. This is a source-registry identifier that should come from the source descriptor, not be baked into the search path.
@@ -132,12 +114,6 @@
 - Risk: The bug (see Known Bugs above) exists silently.
 - Priority: Medium
 
-**`LanceDB` backend code paths have zero test coverage:**
-- What's not tested: `storage/vector.py` methods (`delete_vectors_by_chunk_ids`, `lookup_embeddings_by_text_hash` stubs). No test exercises `vector_backend=lancedb`.
-- Files: `backend/src/dotmd/storage/vector.py`
-- Risk: Low (backend is default-off) but the silent no-op stubs mean any accidental activation corrupts incremental indexes without error.
-- Priority: Low (resolve by deleting the backend entirely)
-
 **`_ConnProxy` spy behavior is not tested directly:**
 - What's not tested: The `_execute_override` mechanism in `_ConnProxy` — only tested indirectly through `test_metadata_m2m.py`. The proxy's `__getattr__`/`__setattr__` paths under error conditions are untested.
 - Files: `backend/src/dotmd/storage/metadata.py:42-76`
@@ -146,20 +122,14 @@
 
 ## Dependencies at Risk
 
-**`torch<2.5` hard upper bound:**
-- Risk: The `<2.5` pin exists because the production server's Xeon E3 V2 CPU lacks AVX2, and PyTorch 2.5+ requires AVX2. This is documented in memory (`hardware_cpu_limits.md`). The pin will block `sentence-transformers`, `gliner`, and other torch-dependent packages from receiving upstream fixes.
-- Impact: Security and bug fix updates to the torch ecosystem are blocked.
-- Migration plan: This is a hardware constraint. Resolution requires either: (a) CPU upgrade, (b) migrating NER/reranker to ONNX Runtime (no AVX2 requirement), or (c) containerizing the torch workload on a separate host.
-
-**`real_ladybug` is an unlisted/private package:**
-- Risk: `real_ladybug>=0.1` in `pyproject.toml` is the embedded LadybugDB graph backend. It has no PyPI entry and appears to be an internal build or private fork. `import real_ladybug as lb` with `type: ignore[import-untyped]` signals no stubs. Version pinning is only a lower bound.
-- Impact: No upstream security disclosures, no changelog, no reliable update mechanism.
-- Migration plan: Ensure the package source is tracked; add an explicit version pin (not just `>=0.1`). Production uses FalkorDB so the immediate risk is low (LadybugDB is dev-only default).
-
-**`mcp[cli]>=1.0` broad version range:**
-- Risk: The MCP SDK is at an early major version (1.x). Breaking protocol changes in minor releases are likely. The `>=1.0` pin with no upper bound accepts any future 1.x or 2.x release.
-- Impact: Container image rebuild could pick up a breaking MCP version that changes SSE/streamable-http framing.
-- Migration plan: Add an upper bound `mcp[cli]>=1.0,<2.0` and pin the tested minor version in the lockfile.
+**`torch<2.13` upper bound without a patched release for current advisory:**
+- Risk: The current dependency refresh keeps torch at the latest resolvable
+  version under the project constraint, but Dependabot still reports a low
+  severity torch advisory with no patched version.
+- Impact: The alert cannot be resolved by an ordinary package bump until an
+  upstream patched release exists.
+- Migration plan: Track Dependabot advisory status; avoid using the affected
+  `torch.jit.script` surface in dotMD code paths.
 
 ## Scaling Limits
 
