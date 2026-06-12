@@ -8,13 +8,22 @@ from pathlib import Path
 import pytest
 
 from dotmd.storage.surreal_ops import (
+    SurrealDecisionCategory,
     SurrealEmbeddedSafetyReport,
+    SurrealImportCounts,
+    SurrealOpsDecisionInputs,
     SurrealWriterGuard,
     assert_embedded_safety_gate_passed,
+    build_storage_recommendation,
     force_release_surreal_writer_guard,
+    rehearse_current_stack_rollback,
+    rehearse_surreal_backup_restore,
+    run_surreal_full_pipeline_smoke,
     probe_embedded_transaction_atomicity,
     probe_embedded_writer_safety,
     release_stale_surreal_writer_guard,
+    validate_surreal_cli_or_fallback_restore,
+    verify_surreal_restore_counts,
     write_embedded_safety_gate_report,
 )
 
@@ -156,3 +165,115 @@ def test_write_embedded_safety_gate_report_blocks_when_only_control_passes(
 
     with pytest.raises(RuntimeError, match="embedded safety gate failed"):
         assert_embedded_safety_gate_passed(merged)
+
+
+def test_backup_restore_rehearsal_validates_fallback_counts(tmp_path: Path) -> None:
+    """Missing `surreal` CLI is acceptable only when fallback restore is verified."""
+    source = tmp_path / "source.surrealkv"
+    source.write_text("surreal-store-copy", encoding="utf-8")
+    expected = SurrealImportCounts(
+        documents=1,
+        chunks=2,
+        embeddings=2,
+        entities=1,
+        relations=1,
+        feedback=1,
+    )
+
+    backup = rehearse_surreal_backup_restore(
+        source,
+        tmp_path / "restore",
+        expected_counts=expected,
+        cli_path=None,
+    )
+
+    assert backup.cli_available is False
+    assert backup.method == "validated-fallback-copy"
+    assert backup.restore.verified is True
+    assert backup.restore.restored_counts == expected
+    assert verify_surreal_restore_counts(expected, backup.restore.restored_counts) is True
+    assert validate_surreal_cli_or_fallback_restore(backup).verified is True
+
+
+def test_recommendation_blocks_migrate_on_parity_and_scale_failures() -> None:
+    """D-01/D-02 require a non-migrate decision when retrieval parity failed."""
+    inputs = SurrealOpsDecisionInputs(
+        transform_coverage_passed=True,
+        embedded_safety_passed=True,
+        retrieval_parity_passed=False,
+        scale_gate_passed=True,
+        backup_restore_passed=True,
+        current_stack_rollback_passed=True,
+        same_corpus_smoke_passed=True,
+        writer_coordination_passed=True,
+        failure_categories=[
+            SurrealDecisionCategory.FTS_WEIGHTING,
+            SurrealDecisionCategory.HYBRID_RRF_GAP,
+        ],
+        source_reports=["38-03-RETRIEVAL-PARITY.md"],
+    )
+
+    decision = build_storage_recommendation(inputs)
+
+    assert decision.recommendation == "reject"
+    assert decision.failure_category == SurrealDecisionCategory.HYBRID_RRF_GAP
+    assert "retrieval parity" in " ".join(decision.reasons).lower()
+
+
+def test_current_stack_rollback_restores_copied_sqlite_and_falkor_originals(
+    tmp_path: Path,
+) -> None:
+    """Rollback rehearsal must prove return to current SQLite/FalkorDB originals."""
+    sqlite_original = tmp_path / "index.db"
+    falkor_original = tmp_path / "falkor-export.json"
+    sqlite_original.write_text("sqlite-original", encoding="utf-8")
+    falkor_original.write_text('{"nodes": 2, "relations": 1}', encoding="utf-8")
+
+    report = rehearse_current_stack_rollback(
+        sqlite_original=sqlite_original,
+        falkor_export=falkor_original,
+        restore_dir=tmp_path / "rollback",
+        smoke_queries=["Hiveon"],
+    )
+
+    assert report.verified is True
+    assert report.sqlite_restored is True
+    assert report.falkor_restored is True
+    assert report.current_stack_smoke_passed is True
+    assert "SQLite/sqlite-vec/FTS5" in report.stack
+    assert "FalkorDB" in report.stack
+
+
+def test_full_pipeline_smoke_requires_all_gates() -> None:
+    """Same-corpus smoke must assemble inventory, safety, import, parity, ops, and decision."""
+    passing_inputs = SurrealOpsDecisionInputs(
+        transform_coverage_passed=True,
+        embedded_safety_passed=True,
+        retrieval_parity_passed=True,
+        scale_gate_passed=True,
+        backup_restore_passed=True,
+        current_stack_rollback_passed=True,
+        same_corpus_smoke_passed=True,
+        writer_coordination_passed=True,
+        failure_categories=[],
+        source_reports=[
+            "38-01-INVENTORY.md",
+            "38-05-EMBEDDED-SAFETY-GATE.md",
+            "38-02-IMPORT-PROOF.md",
+            "38-03-RETRIEVAL-PARITY.md",
+            "38-04-OPERATIONS.md",
+        ],
+    )
+
+    smoke = run_surreal_full_pipeline_smoke(passing_inputs)
+
+    assert smoke.passed is True
+    assert smoke.decision.recommendation == "migrate"
+    assert smoke.covered_stages == [
+        "inventory",
+        "embedded safety gate",
+        "transform import",
+        "retrieval parity",
+        "operations",
+        "recommendation",
+    ]
