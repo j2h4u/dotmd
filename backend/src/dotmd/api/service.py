@@ -568,14 +568,6 @@ class DotMDService:
         - Per D-09: Federated providers get per-source soft timeout (3-5s).
         - Per D-LOOP-SAFE: search_async doesn't block the event loop.
         """
-        logger.info(
-            "search_async: query_len=%d mode=%s top_k=%d rerank=%s",
-            len(query),
-            _search_mode_log_label(mode),
-            top_k,
-            rerank,
-        )
-
         try:
             # Stage 0: Persistent lifecycle init errors (D-08, HIGH-6)
             persistent_status: list[SourceStatus] = [
