@@ -107,9 +107,8 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 | NER enabled (not structural-only) | Knowledge graph quality worth the CPU cost on first index | ⚠️ Revisit — 18min NER may not be worth it for incremental |
 | Reuse global DotMDService in API | LadybugDB file lock prevents concurrent connections | ✓ Good — fixes /index endpoint crash |
 | Pipeline timing metrics | No visibility into stage durations without instrumentation | ✓ Good — run_id correlation in logs |
-| FalkorDB over LadybugDB (production) | LadybugDB file lock prevents concurrent CLI + API | ✓ Good — concurrent access works |
+| FalkorDB over LadybugDB | LadybugDB file lock prevents concurrent CLI + API | ✓ Good — LadybugDB removed in 999.32 |
 | FalkorDB adapter from scratch | LadybugDB Cypher dialect too different to port | ✓ Good — clean implementation |
-| Keep LadybugDB as alternative | Embedded local-dev use case | — Ongoing |
 | Remove reranker score threshold | Cross-encoder threshold silently dropped BM25 results | ✓ Good — all fusion candidates survive |
 | TEI batch size auto-tuning | Avoid 413 errors, adapt to server capacity | ✓ Good — probe on first call |
 | Compose profiles for bundled services | Optional TEI+FalkorDB via --profile bundled | ✓ Good |
@@ -131,61 +130,46 @@ Fast, incremental search indexing — so the daily sync of new voicenotes doesn'
 - **v1.3** — Production Packaging & Background Indexing (Phases 7-10, shipped 2026-03-28)
 - **v1.4** — Search Quality & Architecture (Phases 15-26, shipped 2026-05-06)
 - **v1.5** — Telegram Source Adapter (Phases 27-31, shipped 2026-05-08)
+- **v1.6** — Unified Source Architecture (Phases 32-37, shipped 2026-05-13)
 
-## Last Shipped Milestone: v1.5 Telegram Source Adapter
+## Last Shipped Milestone: v1.6 Unified Source Architecture
 
-**Goal:** Add Telegram as a first-class dotMD source through the existing
-`mcp-telegram` runtime and validate the reusable application-source foundation.
+**Goal:** Unify filesystem, Telegram, federated/native search providers, and
+Airweave-compatible connector experiments behind one dotMD-native source
+capability model, lifecycle boundary, and public search/read/drill contract.
 
 **Shipped:**
-- Resource bindings and retained artifact visibility gates.
-- Application source provider contract with source documents, source units,
-  fingerprints, cursors, and source-unit windows.
-- Telegram MVP ingestion via `mcp-telegram`, not a direct Telegram API client
-  inside dotMD.
-- Telegram message refs that round-trip through `search -> drill/read`.
-- Live Telegram smoke over 100 messages.
+- Source capability registry seeded by filesystem and Telegram.
+- Source lifecycle boundary for config, credentials, cursors, and runtime
+  construction.
+- Unified local/federated `SearchCandidate` contract.
+- Filesystem and Telegram routed through the unified source contract.
+- Airweave compatibility spike with a vendored platform slice and Gmail
+  federated-search bridge.
 
-**Deferred:** Repeated incremental Telegram sync/reuse moved to Backlog 999.30
-so it can land through the unified source architecture instead of a
-Telegram-only legacy path.
+**Deferred:** Broader third-party connector rollout and storage consolidation.
+Storage consolidation is now active as Phase 38.
 
 ## Current State
 
-v1.5 is shipped and archived. The current project state is between milestones.
-The next milestone should promote the Airweave-inspired unified source
-architecture backlog line when ready: source capability registry,
-lifecycle/config/auth/cursor boundary, federated search candidates, filesystem
-unification, Telegram unification, and connector compatibility.
+v1.6 is shipped and archived. The current project state is active v1.7 work on
+storage simplification.
 
-Root `.planning/REQUIREMENTS.md` was archived for v1.5 and should be recreated
-by the next milestone workflow.
+## Current Milestone: v1.7 Storage Simplification
 
-## Current Milestone: v1.6 Unified Source Architecture
-
-**Goal:** Unify filesystem, Telegram, federated/native search providers, and
-future Airweave-compatible connectors behind one dotMD-native source
-capability model, lifecycle boundary, and public search/read/drill contract.
+**Goal:** Decide whether embedded SurrealDB can replace the current
+SQLite/sqlite-vec/FTS5 + FalkorDB split with one embedded storage layer.
 
 **Target features:**
-- Source capability registry seeded by filesystem and Telegram.
-- Typed source lifecycle boundary for config, auth/credentials, cursors, and
-  runtime construction. Phase 33 completed this boundary for filesystem and
-  Telegram construction paths.
-- Normalized local/federated `SearchCandidate` contract.
-- Filesystem adapter migrated onto the unified source contract.
-- Telegram adapter migrated onto the unified source contract, including
-  deferred incremental sync/reuse and native federated search.
-- Airweave connector compatibility spike after local sources prove the
-  contract.
+- Model current persistent data in SurrealDB: documents, source units, chunks,
+  embeddings, entities, relations, feedback, cursors, and checkpoints.
+- Prove or reject full-text, vector, graph-direct, and hybrid/RRF retrieval.
+- Measure how much production data can migrate from SQLite/sqlite-vec/FalkorDB
+  without CPU-heavy rechunking, reembedding, or re-extraction.
+- Produce a migrate/defer/reject recommendation with backup, rollback, and
+  concurrency notes.
 
-**Reference repository:**
-- Upstream: `https://github.com/airweave-ai/airweave`
-- Local checkout: `/home/j2h4u/repos/airweave-ai/airweave`
-
-Agents may inspect the local checkout as an architectural reference, but dotMD
-should not adopt Airweave's indexing, chunking, Vespa, Temporal, billing, or
-organization assumptions wholesale.
+**Active phase:** Phase 38 — Embedded SurrealDB storage spike.
 
 Phase 33 complete (2026-05-08): Source runtimes now build through an
 inspectable lifecycle factory that combines registry descriptors, typed local

@@ -1,4 +1,7 @@
-# v1.6 Requirements: Unified Source Architecture
+# v1.7 Requirements: Storage Simplification
+
+This file keeps completed v1.6 source-architecture requirements as historical
+traceability and adds the active v1.7 storage requirements below.
 
 ## Goal
 
@@ -153,25 +156,25 @@ dotMD unless a later phase explicitly justifies it.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SRC-01 | Phase 32 | Planned |
-| SRC-02 | Phase 32 | Planned |
-| SRC-03 | Phase 32 | Planned |
-| SRC-04 | Phase 32 | Planned |
-| LIFE-01 | Phase 33 | Planned |
-| LIFE-02 | Phase 33 | Planned |
-| LIFE-03 | Phase 33 | Planned |
-| LIFE-04 | Phase 33 | Planned |
-| SEARCH-01 | Phase 34 | Planned |
-| SEARCH-02 | Phase 34 | Planned |
-| SEARCH-03 | Phase 34 | Planned |
-| SEARCH-04 | Phase 34 | Planned |
-| FS-01 | Phase 35 | Planned |
-| FS-02 | Phase 35 | Planned |
-| FS-03 | Phase 35 | Planned |
-| TG-01 | Phase 36 | Planned |
-| TG-02 | Phase 36 | Planned |
-| TG-03 | Phase 36 | Planned |
-| TG-04 | Phase 36 | Planned |
+| SRC-01 | Phase 32 | Complete |
+| SRC-02 | Phase 32 | Complete |
+| SRC-03 | Phase 32 | Complete |
+| SRC-04 | Phase 32 | Complete |
+| LIFE-01 | Phase 33 | Complete |
+| LIFE-02 | Phase 33 | Complete |
+| LIFE-03 | Phase 33 | Complete |
+| LIFE-04 | Phase 33 | Complete |
+| SEARCH-01 | Phase 34 | Complete |
+| SEARCH-02 | Phase 34 | Complete |
+| SEARCH-03 | Phase 34 | Complete |
+| SEARCH-04 | Phase 34 | Complete |
+| FS-01 | Phase 35 | Complete |
+| FS-02 | Phase 35 | Complete |
+| FS-03 | Phase 35 | Complete |
+| TG-01 | Phase 36 | Complete |
+| TG-02 | Phase 36 | Complete |
+| TG-03 | Phase 36 | Complete |
+| TG-04 | Phase 36 | Complete |
 | AIR-01 | Phase 37 | Complete |
 | AIR-02 | Phase 37 | Complete |
 | AIR-03 | Phase 37 | Complete |

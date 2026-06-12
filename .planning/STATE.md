@@ -263,9 +263,9 @@ was moved under `.planning/notes/completed-backlog/`.
 
 ### Blockers/Concerns
 
-No active phase blocker. v1.6 starts by promoting Backlog 999.26-999.31 into a
-single ordered milestone. Phase 30 remains deferred as part of Phase 36, not as
-a standalone Telegram-specific legacy phase.
+No active phase blocker. Phase 38 is the active v1.7 storage simplification
+spike. The main concern is preserving existing production index data wherever
+safe so SurrealDB evaluation does not imply unnecessary CPU-heavy recomputation.
 
 ### Quick Tasks Completed
 
@@ -277,15 +277,15 @@ a standalone Telegram-specific legacy phase.
 | 260510-0nb | Adaptive slot quota for federated search merge — ensures tg:fts candidates appear in results despite heterogeneous score spaces | 2026-05-10 | 654cdf1 | [260510-0nb-adaptive-slot-quota-for-federated-search](./quick/260510-0nb-adaptive-slot-quota-for-federated-search/) |
 
 ---
-*Last updated: 2026-05-13*
+*Last updated: 2026-06-12*
 
 ## Current Position
 
-Phase: 37 (airweave-connector-compatibility-spike) — COMPLETE
-Plan: 4 of 4
-Status: Milestone complete
-Last activity: 2026-05-13 -- Phase 37 verified and v1.6 marked complete
+Phase: 38 (evaluate-embedded-surrealdb-as-unified-storage-backend) — ACTIVE
+Plan: 0 of 0
+Status: Active
+Last activity: 2026-06-12 -- Phase 38 promoted from Backlog 999.33
 
 ## Operator Next Steps
 
-- `$gsd-complete-milestone`
+- `$gsd-plan-phase 38`

@@ -9,7 +9,8 @@
 - [x] **v1.3 Production Packaging & Background Indexing** — Phases 7-10 (shipped 2026-03-28)
 - [x] **v1.4 Search Quality & Architecture** — Phases 15-26 (shipped 2026-05-06)
 - [x] **v1.5 Telegram Source Adapter** — Phases 27-31 (shipped 2026-05-08)
-- 🚧 **v1.6 Unified Source Architecture** — Phases 32-37 (active)
+- [x] **v1.6 Unified Source Architecture** — Phases 32-37 (shipped 2026-05-13)
+- 🚧 **v1.7 Storage Simplification** — Phase 38 (active)
 
 <details>
 <summary>v1.1 Incremental Indexing (Phases 1-3) — SHIPPED 2026-03-26</summary>
@@ -99,20 +100,31 @@ See: `.planning/milestones/v1.5-ROADMAP.md`
 
 </details>
 
-## v1.6 Unified Source Architecture (Phases 32-37) — ACTIVE
+## v1.6 Unified Source Architecture (Phases 32-37) — SHIPPED
 
 Reference:
 - Upstream: `https://github.com/airweave-ai/airweave`
 - Local checkout: `/home/j2h4u/repos/airweave-ai/airweave`
 
-- [ ] Phase 32: Source capability registry
-- [ ] Phase 33: Source lifecycle/config/auth/cursor boundary
-- [ ] Phase 34: Federated SearchCandidate contract
+- [x] Phase 32: Source capability registry (completed 2026-05-08)
+- [x] Phase 33: Source lifecycle/config/auth/cursor boundary (completed 2026-05-08)
+- [x] Phase 34: Federated SearchCandidate contract (completed 2026-05-10)
 - [x] Phase 35: Filesystem unified source adapter (completed 2026-05-10)
 - [x] Phase 36: Telegram unified sync and federated search (completed 2026-05-10)
 - [x] Phase 37: Airweave connector compatibility spike (completed 2026-05-13)
 
 See: `.planning/REQUIREMENTS.md`
+
+## v1.7 Storage Simplification (Phase 38) — ACTIVE
+
+- [ ] Phase 38: Embedded SurrealDB storage spike
+
+Goal: Decide whether dotMD should replace separate SQLite/sqlite-vec/FTS5 and
+FalkorDB storage with one embedded SurrealDB-backed storage layer while
+migrating existing production data wherever safe instead of recomputing chunks,
+embeddings, or extracted entities on CPU.
+
+See: `.planning/phases/38-evaluate-embedded-surrealdb-as-unified-storage-backend/38-CONTEXT.md`
 
 ## Progress
 
@@ -151,10 +163,11 @@ See: `.planning/REQUIREMENTS.md`
 | 31. Telegram search/read/drill smoke | 1/1 | Complete | 2026-05-08 |
 | 32. Source capability registry | 4/4 | Complete    | 2026-05-08 |
 | 33. Source lifecycle/config/auth/cursor boundary | 3/3 | Complete    | 2026-05-08 |
-| 34. Federated SearchCandidate contract | v1.6 | Not started | — |
+| 34. Federated SearchCandidate contract | 3/3 | Complete | 2026-05-10 |
 | 35. Filesystem unified source adapter | 2/2 | Complete    | 2026-05-10 |
 | 36. Telegram unified sync and federated search | 2/2 | Complete    | 2026-05-10 |
 | 37. Airweave connector compatibility spike | 4/4 | Complete    | 2026-05-13 |
+| 38. Embedded SurrealDB storage spike | v1.7 | Active | — |
 
 ### Backlog 999.2: Pipeline parallelism — overlap GLiNER and TEI across files
 
