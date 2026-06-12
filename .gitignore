@@ -41,3 +41,7 @@ Thumbs.db
 
 # Local agent state
 .claude/
+
+# Generated graph analysis artifacts
+.planning/graphs/
+graphify-out/
