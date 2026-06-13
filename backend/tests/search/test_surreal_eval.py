@@ -95,9 +95,7 @@ def test_load_golden_queries_rejects_duplicate_ids_and_unknown_categories(
 
 
 def test_approved_corpus_file_covers_required_categories() -> None:
-    corpus = (
-        Path(__file__).resolve().parents[2] / "devtools" / "surreal_golden_queries.jsonl"
-    )
+    corpus = Path(__file__).resolve().parents[2] / "devtools" / "surreal_golden_queries.jsonl"
 
     rows = load_golden_queries(corpus)
 
@@ -146,12 +144,8 @@ def test_classify_difference_marks_same_accepted_set_as_harmless_reorder() -> No
         relevant=[{"ref": "filesystem:/mnt/relevant.md"}],
         maybe=[{"ref": "filesystem:/mnt/maybe.md"}],
     )
-    baseline = _result(
-        top_refs=("filesystem:/mnt/relevant.md", "filesystem:/mnt/maybe.md")
-    )
-    candidate = _result(
-        top_refs=("filesystem:/mnt/maybe.md", "filesystem:/mnt/relevant.md")
-    )
+    baseline = _result(top_refs=("filesystem:/mnt/relevant.md", "filesystem:/mnt/maybe.md"))
+    candidate = _result(top_refs=("filesystem:/mnt/maybe.md", "filesystem:/mnt/relevant.md"))
 
     diff = classify_difference(query=query, baseline=baseline, candidate=candidate)
 

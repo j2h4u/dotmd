@@ -62,7 +62,9 @@ def _load_acceptances(path: Path | None) -> list[DiffAcceptance]:
             if not query_id:
                 raise ValueError(f"{path} line {line_number}: query_id is required")
             if query_id in seen_ids:
-                raise ValueError(f"{path} line {line_number}: duplicate acceptance for {query_id!r}")
+                raise ValueError(
+                    f"{path} line {line_number}: duplicate acceptance for {query_id!r}"
+                )
             if not accepted_by:
                 raise ValueError(f"{path} line {line_number}: accepted_by is required")
             if not accepted_reason:
@@ -148,12 +150,8 @@ def run_eval(config: EvalRunnerConfig) -> EvalRunResult:
     """Compare baseline and candidate result captures against the golden corpus."""
 
     golden_queries = load_golden_queries(config.golden_queries)
-    baseline_results = {
-        row.query_id: row for row in load_eval_results(config.baseline_results)
-    }
-    candidate_results = {
-        row.query_id: row for row in load_eval_results(config.candidate_results)
-    }
+    baseline_results = {row.query_id: row for row in load_eval_results(config.baseline_results)}
+    candidate_results = {row.query_id: row for row in load_eval_results(config.candidate_results)}
     acceptances = _load_acceptances(config.acceptance)
 
     raw_rows: list[SurrealEvalDiffRow] = []

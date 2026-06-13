@@ -231,14 +231,18 @@ def load_golden_queries(path: Path) -> list[GoldenQuery]:
             GoldenQuery(
                 id=query_id,
                 query=query,
-                category=_parse_category(payload.get("category"), path=path, line_number=line_number),
+                category=_parse_category(
+                    payload.get("category"), path=path, line_number=line_number
+                ),
                 primary_surface=_parse_surface(
                     payload.get("primary_surface"),
                     path=path,
                     line_number=line_number,
                 ),
                 languages=tuple(str(language) for language in payload.get("languages", [])),
-                relevant=_parse_label_list(payload.get("relevant"), path=path, line_number=line_number),
+                relevant=_parse_label_list(
+                    payload.get("relevant"), path=path, line_number=line_number
+                ),
                 maybe=_parse_label_list(payload.get("maybe"), path=path, line_number=line_number),
                 expected_engines=tuple(
                     str(engine) for engine in payload.get("expected_engines", [])
@@ -327,7 +331,9 @@ def _matches_contains_anchor(result: EvalResult, label: JsonObject) -> tuple[boo
     return any(needle in text for text in evidence), True
 
 
-def _matched_approved_refs(result: EvalResult, labels: tuple[JsonObject, ...]) -> tuple[set[str], bool]:
+def _matched_approved_refs(
+    result: EvalResult, labels: tuple[JsonObject, ...]
+) -> tuple[set[str], bool]:
     matched: set[str] = set()
     evidence_failure = False
     top_refs = set(result.top_refs)
@@ -379,7 +385,9 @@ def classify_difference(
     approved_labels = query.relevant + query.maybe
     approved_refs = _label_refs(approved_labels)
     baseline_matched, baseline_evidence_failure = _matched_approved_refs(baseline, approved_labels)
-    candidate_matched, candidate_evidence_failure = _matched_approved_refs(candidate, approved_labels)
+    candidate_matched, candidate_evidence_failure = _matched_approved_refs(
+        candidate, approved_labels
+    )
 
     baseline_relevant, _ = _matched_approved_refs(baseline, query.relevant)
     candidate_relevant, _ = _matched_approved_refs(candidate, query.relevant)
@@ -387,10 +395,7 @@ def classify_difference(
     baseline_rank_map = _result_rank_map(baseline)
     candidate_rank_map = _result_rank_map(candidate)
     shared_refs = sorted(set(baseline_rank_map) & set(candidate_rank_map))
-    rank_deltas = {
-        ref: candidate_rank_map[ref] - baseline_rank_map[ref]
-        for ref in shared_refs
-    }
+    rank_deltas = {ref: candidate_rank_map[ref] - baseline_rank_map[ref] for ref in shared_refs}
 
     rationale_codes: list[str] = []
     classification: AcceptedDifference
@@ -469,11 +474,7 @@ def summarize_diffs(
         for row in resolved_rows
         if row.cutover_gate is CutoverGate.REQUIRES_ACCEPTANCE and not row.accepted
     )
-    accepted_query_ids = tuple(
-        row.query_id
-        for row in resolved_rows
-        if row.accepted
-    )
+    accepted_query_ids = tuple(row.query_id for row in resolved_rows if row.accepted)
     classification_counts: dict[AcceptedDifference, int] = {
         difference: 0 for difference in AcceptedDifference
     }
