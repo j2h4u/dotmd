@@ -186,7 +186,8 @@ Plans:
 **Goal:** Convert the Phase 38 schema/import proof into production migration
 tooling that preserves existing data where practical.
 **Depends on:** Phase 39 and Phase 40
-**Plans:** TBD
+**Requirements:** SURR-MIG-01, SURR-MIG-02, SURR-MIG-03
+**Plans:** 3 plans
 
 - [ ] Harden the Phase 38 schema/import proof into production migration code.
 - [ ] Preserve existing chunks, embeddings, source refs, graph relations,
@@ -194,6 +195,12 @@ tooling that preserves existing data where practical.
 
 - [ ] Avoid default rechunking, reembedding, and entity re-extraction unless a
   phase explicitly proves there is no safe transform path.
+
+Plans:
+
+- [ ] 41-01-PLAN.md - Production schema catalog and storage DDL contract.
+- [ ] 41-02-PLAN.md - Production migration runner, overwrite policy, checkpoints, and data preservation verification.
+- [ ] 41-03-PLAN.md - Migration evidence reports, restore manifests, devtool runner, and runbook.
 
 ### Phase 42: Surreal-native retrieval implementation
 
