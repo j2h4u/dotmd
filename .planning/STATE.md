@@ -4,7 +4,7 @@ milestone: v1.8
 milestone_name: SurrealDB-Native Storage Cutover
 status: planning
 stopped_at: Completed 38-03-PLAN.md
-last_updated: "2026-06-13T09:32:30.473Z"
+last_updated: "2026-06-13T09:52:51.636Z"
 last_activity: 2026-06-13
 progress:
   total_phases: 14
@@ -21,17 +21,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 40 — evaluation-harness-and-golden-queries
+**Current focus:** Phase 41 — production-grade-surreal-schema-and-import
 
 ## Current Milestone
 
 **v1.8 — SurrealDB-Native Storage Cutover**
 
-Phase: 40 next
-Status: Phase 39 verified; ready for Phase 40 planning
+Phase: 41
+Status: Phase 40 complete; ready for Phase 41 planning
 Last activity: 2026-06-13
 
-Progress: [█---------] 14% (1/7 phases complete; 1/1 plans complete)
+Progress: [███-------] 43% (3/7 phases complete; 7/7 plans complete)
 
 ## Deferred Items
 
@@ -52,7 +52,7 @@ Items acknowledged and deferred at v1.7 milestone close:
 
 **Velocity:**
 
-- Total plans completed: 69 (across all milestones)
+- Total plans completed: 70 (across all milestones)
 - Average duration: ~3 min
 - Total execution time: —
 
@@ -97,6 +97,7 @@ Items acknowledged and deferred at v1.7 milestone close:
 | Phase 38 P03 | 21 min | 3 tasks | 3 files |
 | 38 | 5 | - | - |
 | Phase 40 P01 | 15 min | 3 tasks | 7 files |
+| 40 | 1 | - | - |
 
 ## Accumulated Context
 
@@ -299,14 +300,14 @@ retrieval parity failed on hybrid/RRF behavior.
 
 ## Current Position
 
-Phase: 40 (evaluation-harness-and-golden-queries) — EXECUTING
-Plan: 1 of 1
-Status: Phase complete — ready for verification
-Last activity: 2026-06-13 -- Phase 40 execution started
+Phase: 41 (production-grade-surreal-schema-and-import) — NEXT
+Plan: Not started
+Status: Phase 40 complete — ready for Phase 41 planning
+Last activity: 2026-06-13 -- Phase 40 verified and completed
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Plan Phase 41 with `/gsd-plan-phase 41`
 
 ## Session
 
