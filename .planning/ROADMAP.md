@@ -187,20 +187,20 @@ Plans:
 tooling that preserves existing data where practical.
 **Depends on:** Phase 39 and Phase 40
 **Requirements:** SURR-MIG-01, SURR-MIG-02, SURR-MIG-03
-**Plans:** 3 plans
+**Plans:** 3/3 plans complete
 
-- [ ] Harden the Phase 38 schema/import proof into production migration code.
-- [ ] Preserve existing chunks, embeddings, source refs, graph relations,
+- [x] Harden the Phase 38 schema/import proof into production migration code.
+- [x] Preserve existing chunks, embeddings, source refs, graph relations,
   feedback, cursors, checkpoints, and retained artifacts where practical.
 
-- [ ] Avoid default rechunking, reembedding, and entity re-extraction unless a
+- [x] Avoid default rechunking, reembedding, and entity re-extraction unless a
   phase explicitly proves there is no safe transform path.
 
 Plans:
 
-- [ ] 41-01-PLAN.md - Production schema catalog, category coverage, and storage DDL safety contract.
-- [ ] 41-02-PLAN.md - Production migration runner, source-capture manifests, overwrite policy, checkpoints, and partial-write semantics.
-- [ ] 41-03-PLAN.md - Migration evidence reports, verified restore rehearsal, devtool runner, and runbook.
+- [x] 41-01-PLAN.md - Production schema catalog, category coverage, and storage DDL safety contract.
+- [x] 41-02-PLAN.md - Production migration runner, source-capture manifests, overwrite policy, checkpoints, and partial-write semantics.
+- [x] 41-03-PLAN.md - Migration evidence reports, verified restore rehearsal, devtool runner, and runbook.
 
 ### Phase 42: Surreal-native retrieval implementation
 
@@ -296,7 +296,7 @@ after SurrealDB cutover is accepted.
 | 38. Embedded SurrealDB storage spike | 5/5 | Complete    | 2026-06-12 |
 | 39. SurrealDB-native retrieval contract | 1/1 | Complete | 2026-06-13 |
 | 40. Evaluation harness and golden queries | 1/1 | Complete    | 2026-06-13 |
-| 41. Production-grade Surreal schema and import | v1.8 | Planned | — |
+| 41. Production-grade Surreal schema and import | v1.8 | Complete | 2026-06-14 |
 | 42. Surreal-native retrieval implementation | v1.8 | Planned | — |
 | 43. Shadow run and quality gate | v1.8 | Planned | — |
 | 44. Production cutover | v1.8 | Planned | — |

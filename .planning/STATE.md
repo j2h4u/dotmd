@@ -21,17 +21,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 41 — production-grade-surreal-schema-and-import
+**Current focus:** Phase 42 — Surreal-native retrieval implementation
 
 ## Current Milestone
 
 **v1.8 — SurrealDB-Native Storage Cutover**
 
-Phase: 41
-Status: Phase 40 complete; ready for Phase 41 planning
-Last activity: 2026-06-13
+Phase: 42
+Status: Phase 41 complete; ready for Phase 42 planning
+Last activity: 2026-06-14
 
-Progress: [███-------] 43% (3/7 phases complete; 7/7 plans complete)
+Progress: [██████----] 57% (4/7 phases complete; 10/10 currently planned plans complete; phases 42-45 remain to be planned)
 
 ## Deferred Items
 
@@ -307,9 +307,7 @@ Last activity: 2026-06-13 -- Phase 41 verified and completed
 
 ## Operator Next Steps
 
-- Review or plan the next SurrealDB cutover phase.
-
-- Execute Phase 41 with `/gsd-execute-phase 41`
+- Plan Phase 42 with `/gsd-plan-phase 42`.
 
 ## Session
 
