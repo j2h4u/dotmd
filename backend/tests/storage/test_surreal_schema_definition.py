@@ -88,9 +88,12 @@ def test_build_dotmd_surreal_schema_plan_covers_required_categories_and_tokens()
         statement.startswith("DEFINE TABLE documents SCHEMAFULL") for statement in plan.statements
     )
     assert any(
-        statement.startswith("DEFINE TABLE relations TYPE RELATION") for statement in plan.statements
+        statement.startswith("DEFINE TABLE relations TYPE RELATION")
+        for statement in plan.statements
     )
-    assert any("DEFINE FIELD metadata ON TABLE documents TYPE option<object>" in s for s in plan.statements)
+    assert any(
+        "DEFINE FIELD metadata ON TABLE documents TYPE option<object>" in s for s in plan.statements
+    )
     assert any(
         "DEFINE FIELD properties ON TABLE relations TYPE option<object>" in statement
         for statement in plan.statements

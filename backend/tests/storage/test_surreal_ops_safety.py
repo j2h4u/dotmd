@@ -19,8 +19,8 @@ from dotmd.storage.surreal_ops import (
     SurrealRestoreManifest,
     SurrealWriterGuard,
     assert_embedded_safety_gate_passed,
-    build_surreal_restore_manifest,
     build_storage_recommendation,
+    build_surreal_restore_manifest,
     classify_surreal_migration_report,
     force_release_surreal_writer_guard,
     probe_embedded_transaction_atomicity,
@@ -31,8 +31,8 @@ from dotmd.storage.surreal_ops import (
     run_surreal_full_pipeline_smoke,
     validate_surreal_cli_or_fallback_restore,
     verify_surreal_restore_counts,
-    write_surreal_migration_evidence_reports,
     write_embedded_safety_gate_report,
+    write_surreal_migration_evidence_reports,
 )
 
 

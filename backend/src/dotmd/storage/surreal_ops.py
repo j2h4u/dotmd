@@ -579,7 +579,9 @@ def classify_surreal_migration_report(
                 f"Phase checkpoint {phase_payload['phase_name']} is {phase_payload['status']}."
             )
 
-    mode_value = getattr(getattr(migration_report, "mode", None), "value", str(migration_report.mode))
+    mode_value = getattr(
+        getattr(migration_report, "mode", None), "value", str(migration_report.mode)
+    )
     target_mode_value = getattr(
         getattr(migration_report, "target_mode", None), "value", str(migration_report.target_mode)
     )
@@ -590,10 +592,10 @@ def classify_surreal_migration_report(
     )
 
     partial_writes_present = bool(getattr(migration_report, "partial_writes_present", False))
-    embedding_reuse_verified = bool(
-        getattr(migration_report, "embedding_reuse_verified", False)
+    embedding_reuse_verified = bool(getattr(migration_report, "embedding_reuse_verified", False))
+    last_successful_phase = getattr(
+        getattr(migration_report, "last_successful_phase", None), "value", None
     )
-    last_successful_phase = getattr(getattr(migration_report, "last_successful_phase", None), "value", None)
     failed_phase = getattr(getattr(migration_report, "failed_phase", None), "value", None)
 
     if mode_value == "apply" and not restore_manifest.verified:
@@ -606,14 +608,11 @@ def classify_surreal_migration_report(
         blockers.append("No-recompute verification failed or was not recorded.")
     if overwrite_policy_value == "refuse" and partial_writes_present:
         blockers.append("Unsafe overwrite state remains after a partial apply.")
-    for error in getattr(migration_report, "errors", []):
-        blockers.append(str(error))
+    blockers.extend(str(error) for error in getattr(migration_report, "errors", []))
 
     report_status = "verified" if not blockers else "blocked"
     recommendation = (
-        "proceed_to_phase_42_evidence_review"
-        if report_status == "verified"
-        else "stop_and_restore"
+        "proceed_to_phase_42_evidence_review" if report_status == "verified" else "stop_and_restore"
     )
     source_capture_manifest = getattr(migration_report, "source_capture_manifest", None)
     if source_capture_manifest is not None:
@@ -712,12 +711,12 @@ def write_surreal_migration_evidence_reports(
         lines.append(f"- `{key}`: expected `{expected}`, actual `{actual}`")
 
     lines.extend(["", "## Phase Checkpoints", ""])
-    for checkpoint in evidence.phase_checkpoints:
-        lines.append(
-            "- `{phase_name}`: planned `{planned_count}`, applied `{applied_count}`, verified `{verified_count}`, status `{status}`".format(
-                **checkpoint
-            )
+    lines.extend(
+        "- `{phase_name}`: planned `{planned_count}`, applied `{applied_count}`, verified `{verified_count}`, status `{status}`".format(
+            **checkpoint
         )
+        for checkpoint in evidence.phase_checkpoints
+    )
 
     lines.extend(["", "## Verification Evidence", ""])
     lines.append(f"- embedding_reuse_verified: {str(evidence.embedding_reuse_verified).lower()}")
@@ -752,7 +751,9 @@ def write_surreal_migration_evidence_reports(
     lines.append(f"- source_target: {evidence.restore_manifest.source_target}")
     lines.append(f"- backup_path: {evidence.restore_manifest.backup_path}")
     lines.append(f"- restore_path: {evidence.restore_manifest.restore_path}")
-    lines.append(f"- rehearsal_target: {evidence.restore_manifest.rehearsal_target or 'not recorded'}")
+    lines.append(
+        f"- rehearsal_target: {evidence.restore_manifest.rehearsal_target or 'not recorded'}"
+    )
     lines.append(f"- restore_status: {evidence.restore_manifest.restore_status}")
     lines.append(f"- verified: {str(evidence.restore_manifest.verified).lower()}")
     if evidence.restore_manifest.notes:

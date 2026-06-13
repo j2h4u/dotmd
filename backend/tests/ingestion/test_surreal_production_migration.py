@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TypedDict
 
 import pytest
 
@@ -13,7 +14,14 @@ from tests.ingestion.test_surreal_transform_only_migration import (
 )
 
 
-def _build_inputs(tmp_path: Path) -> dict[str, object]:
+class _MigrationInputs(TypedDict):
+    sqlite_snapshot_path: Path
+    graph_export_path: Path
+    feedback_export_path: Path
+    fixture_ids: dict[str, str]
+
+
+def _build_inputs(tmp_path: Path) -> _MigrationInputs:
     db_path = tmp_path / "production-source.db"
     fixture_ids = _create_transform_only_fixture(db_path)
     feedback_provider = _FakeFeedbackProvider()
@@ -212,7 +220,9 @@ def test_apply_refuses_populated_target_without_explicit_replace(
     assert any("explicit_replace" in error.lower() for error in report.errors)
 
 
-def test_explicit_replace_is_the_only_destructive_path_and_records_pre_counts(tmp_path: Path) -> None:
+def test_explicit_replace_is_the_only_destructive_path_and_records_pre_counts(
+    tmp_path: Path,
+) -> None:
     from dotmd.ingestion.migrate_surreal import (  # type: ignore[import-not-found]
         SurrealMigrationMode,
         SurrealOverwritePolicy,
@@ -292,9 +302,7 @@ def test_apply_reports_phase_checkpoints_embedding_reuse_and_verification_depths
     assert report.recompute_guard_status == "passed"
     assert report.cheap_invariants
     assert report.deep_sample_checks == []
-    assert [
-        checkpoint.phase_name.value for checkpoint in report.phase_checkpoints
-    ] == [
+    assert [checkpoint.phase_name.value for checkpoint in report.phase_checkpoints] == [
         "schema",
         "documents",
         "source_units",

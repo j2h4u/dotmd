@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from devtools.surreal_migration_runner import (
     SurrealMigrationRunnerConfig,
     build_parser,
@@ -15,13 +14,14 @@ from devtools.surreal_migration_runner import (
     main,
     run_migration_command,
 )
+from tests.ingestion.test_surreal_production_migration import _build_inputs
+from tests.ingestion.test_surreal_transform_only_migration import _write_gate_report
+
 from dotmd.ingestion.migrate_surreal import (
     SurrealMigrationMode,
     SurrealTargetMode,
     run_surreal_migration,
 )
-from tests.ingestion.test_surreal_production_migration import _build_inputs
-from tests.ingestion.test_surreal_transform_only_migration import _write_gate_report
 
 
 def _write_json(path: Path, payload: dict[str, object]) -> Path:
@@ -156,7 +156,7 @@ def test_run_migration_command_writes_json_markdown_and_preserves_non_ascii(
     assert payload["redaction_policy"] == "plain"
     assert payload["sample_limit"] == 1
     assert "оператор" in payload["target"]["owner_id"]
-    assert "verified_with_fallback" == restore_payload["restore_status"]
+    assert restore_payload["restore_status"] == "verified_with_fallback"
     assert "оператор" in markdown
 
 

@@ -193,7 +193,7 @@ class SurrealConnection:
                 mode = _extract_table_mode(definition)
                 if mode is not None:
                     table_modes[str(table_name)] = mode
-        except Exception:  # pragma: no cover - best-effort fallback for different backends
+        except (AttributeError, KeyError, TypeError, ValueError):  # pragma: no cover
             pass
 
         return {"schema_version": schema_version, "table_modes": table_modes}
@@ -818,10 +818,7 @@ class SurrealGraphStore:
     ) -> int:
         replaced = 0
         section_rows = list(sections or [])
-        section_ids = {
-            str(row.get("original_id") or row.get("chunk_id"))
-            for row in section_rows
-        }
+        section_ids = {str(row.get("original_id") or row.get("chunk_id")) for row in section_rows}
         tag_rows = list(tags or [])
         tag_names = {str(row.get("name")) for row in tag_rows}
         entity_rows = list(entities)

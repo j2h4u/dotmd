@@ -538,6 +538,7 @@ def test_run_surreal_migration_dry_run_counts_transformable_rows_without_writing
     assert report.expected_counts["feedback"] == 2
     assert report.expected_counts["cursors"] == 2
     assert report.expected_counts["checkpoints"] == 1
+    assert report.source_capture_manifest is not None
     assert report.source_capture_manifest.skew_policy == "bounded_skew_accepted"
     assert report.target_inspection_performed is False
     assert not (tmp_path / "dry-run.db").exists()
@@ -585,9 +586,7 @@ def test_run_surreal_migration_apply_preserves_ids_vectors_feedback_and_graph_pr
     assert report.gate_status == "passed"
     assert report.embedding_reuse_verified is True
     assert report.expected_vector_dimension == 3
-    assert {
-        checkpoint.phase_name.value for checkpoint in report.phase_checkpoints
-    } >= {
+    assert {checkpoint.phase_name.value for checkpoint in report.phase_checkpoints} >= {
         "schema",
         "documents",
         "chunks",

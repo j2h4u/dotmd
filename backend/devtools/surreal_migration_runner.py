@@ -124,9 +124,7 @@ def _read_json(path: Path) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"{path.name} line {exc.lineno} column {exc.colno}: invalid JSON"
-        ) from exc
+        raise ValueError(f"{path.name} line {exc.lineno} column {exc.colno}: invalid JSON") from exc
 
 
 def _require_row_fields(
@@ -246,7 +244,10 @@ def _rehearse_restore(
 ) -> SurrealRestoreManifest:
     expected = _counts_from_expected_counts(expected_counts)
     target_path = config.target_url.removeprefix("surrealkv://")
-    if mode is not SurrealMigrationMode.APPLY or target_mode is not SurrealTargetMode.EMBEDDED_LOCAL:
+    if (
+        mode is not SurrealMigrationMode.APPLY
+        or target_mode is not SurrealTargetMode.EMBEDDED_LOCAL
+    ):
         return build_surreal_restore_manifest(
             source_target=config.target_url,
             backup_path=str(config.restore_manifest_json or ""),
@@ -373,9 +374,12 @@ def run_migration_command(config: SurrealMigrationRunnerConfig) -> SurrealMigrat
 
     if mode is SurrealMigrationMode.APPLY and config.source_capture_manifest_json is None:
         raise ValueError("source_capture_manifest_json is required for apply mode")
-    if mode is SurrealMigrationMode.APPLY and target_mode is SurrealTargetMode.EMBEDDED_LOCAL:
-        if config.gate_report is None:
-            raise ValueError("gate_report is required for apply mode")
+    if (
+        mode is SurrealMigrationMode.APPLY
+        and target_mode is SurrealTargetMode.EMBEDDED_LOCAL
+        and config.gate_report is None
+    ):
+        raise ValueError("gate_report is required for apply mode")
     if mode is SurrealMigrationMode.APPLY and not config.target_url:
         raise ValueError("target_url is required for apply mode")
 
@@ -386,7 +390,8 @@ def run_migration_command(config: SurrealMigrationRunnerConfig) -> SurrealMigrat
         sqlite_snapshot_path=config.sqlite_snapshot,
         graph_export_path=config.graph_export_json,
         feedback_export_path=config.feedback_export_json,
-        target_url=config.target_url or f"surrealkv://{config.sqlite_snapshot.with_suffix('.surreal.db')}",
+        target_url=config.target_url
+        or f"surrealkv://{config.sqlite_snapshot.with_suffix('.surreal.db')}",
         target_mode=target_mode,
         target_namespace=config.target_namespace,
         target_database=config.target_database,
@@ -394,14 +399,21 @@ def run_migration_command(config: SurrealMigrationRunnerConfig) -> SurrealMigrat
     if config.manifest_json is not None:
         config.manifest_json.parent.mkdir(parents=True, exist_ok=True)
         config.manifest_json.write_text(
-            json.dumps(_manifest_to_jsonable(manifest), ensure_ascii=False, indent=2, sort_keys=True)
+            json.dumps(
+                _manifest_to_jsonable(manifest), ensure_ascii=False, indent=2, sort_keys=True
+            )
             + "\n",
             encoding="utf-8",
         )
     if config.source_capture_manifest_json is not None:
         config.source_capture_manifest_json.parent.mkdir(parents=True, exist_ok=True)
         config.source_capture_manifest_json.write_text(
-            json.dumps(asdict(manifest.source_capture_manifest), ensure_ascii=False, indent=2, sort_keys=True)
+            json.dumps(
+                asdict(manifest.source_capture_manifest),
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
             + "\n",
             encoding="utf-8",
         )
@@ -439,7 +451,8 @@ def run_migration_command(config: SurrealMigrationRunnerConfig) -> SurrealMigrat
     if config.restore_manifest_json is not None:
         config.restore_manifest_json.parent.mkdir(parents=True, exist_ok=True)
         config.restore_manifest_json.write_text(
-            json.dumps(asdict(restore_manifest), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            json.dumps(asdict(restore_manifest), ensure_ascii=False, indent=2, sort_keys=True)
+            + "\n",
             encoding="utf-8",
         )
     if config.report_json is not None and config.report_markdown is not None:

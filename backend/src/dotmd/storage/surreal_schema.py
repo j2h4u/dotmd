@@ -122,11 +122,9 @@ _KNOWN_COMPATIBLE_PREVIOUS_VERSIONS = {"41.0.0"}
 
 
 class _SchemaConnectionProtocol(Protocol):
-    def query(self, statement: str, variables: dict[str, Any] | None = None) -> Any:
-        ...
+    def query(self, statement: str, variables: dict[str, Any] | None = None) -> Any: ...
 
-    def inspect_schema(self) -> dict[str, Any]:
-        ...
+    def inspect_schema(self) -> dict[str, Any]: ...
 
 
 @dataclass(slots=True, frozen=True)
@@ -217,7 +215,9 @@ def _field_statement(table_name: str, field_def: SurrealFieldDefinition) -> str:
 def _index_statement(table_name: str, index_def: SurrealIndexDefinition) -> str:
     unique_fragment = " UNIQUE" if index_def.unique else ""
     columns = ", ".join(index_def.columns)
-    return f"DEFINE INDEX {index_def.name} ON TABLE {table_name} COLUMNS {columns}{unique_fragment};"
+    return (
+        f"DEFINE INDEX {index_def.name} ON TABLE {table_name} COLUMNS {columns}{unique_fragment};"
+    )
 
 
 def _table(
@@ -286,7 +286,15 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
                 _field("fingerprint", "string", required=False),
                 _field("metadata", "object", required=False, flexible_json=True),
             ),
-            indexes=(_index("source_units_identity_idx", "namespace", "document_ref", "unit_ref", unique=True),),
+            indexes=(
+                _index(
+                    "source_units_identity_idx",
+                    "namespace",
+                    "document_ref",
+                    "unit_ref",
+                    unique=True,
+                ),
+            ),
         ),
         _table(
             "chunks",
@@ -330,7 +338,9 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
                 _field("chunk_index", "int"),
                 _field("metadata", "object", required=False, flexible_json=True),
             ),
-            indexes=(_index("chunk_file_bindings_chunk_file_idx", "chunk_id", "file_path", unique=True),),
+            indexes=(
+                _index("chunk_file_bindings_chunk_file_idx", "chunk_id", "file_path", unique=True),
+            ),
         ),
         _table(
             "bindings",
@@ -394,7 +404,11 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
                 _field("embedding", "array<float>"),
                 _field("metadata", "object", required=False, flexible_json=True),
             ),
-            indexes=(_index("vector_components_chunk_component_idx", "chunk_id", "component", unique=True),),
+            indexes=(
+                _index(
+                    "vector_components_chunk_component_idx", "chunk_id", "component", unique=True
+                ),
+            ),
             optional=True,
             derived_from=("embeddings",),
         ),
@@ -532,10 +546,8 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
     statements: list[str] = []
     for table in tables:
         statements.append(table.statement)
-        for field_def in table.fields:
-            statements.append(_field_statement(table.name, field_def))
-        for index_def in table.indexes:
-            statements.append(_index_statement(table.name, index_def))
+        statements.extend(_field_statement(table.name, field_def) for field_def in table.fields)
+        statements.extend(_index_statement(table.name, index_def) for index_def in table.indexes)
 
     return SurrealSchemaPlan(
         schema_version=SURREAL_SCHEMA_VERSION,
@@ -565,7 +577,9 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
 
 def validate_dotmd_surreal_schema_plan(plan: SurrealSchemaPlan) -> None:
     tables_by_name = {table.name: table for table in plan.tables}
-    missing_tables = [name for name in required_migration_categories() if name not in tables_by_name]
+    missing_tables = [
+        name for name in required_migration_categories() if name not in tables_by_name
+    ]
     if missing_tables:
         raise ValueError(f"missing required schema categories: {', '.join(missing_tables)}")
 
@@ -574,7 +588,9 @@ def validate_dotmd_surreal_schema_plan(plan: SurrealSchemaPlan) -> None:
         if table is None:
             continue
         field_names = {field.name for field in table.fields}
-        missing_fields = [field_name for field_name in required_fields if field_name not in field_names]
+        missing_fields = [
+            field_name for field_name in required_fields if field_name not in field_names
+        ]
         if missing_fields:
             raise ValueError(
                 f"table {table_name} missing required fields: {', '.join(missing_fields)}"
@@ -678,7 +694,9 @@ def _serialize_table(table: SurrealTableDefinition) -> dict[str, Any]:
     }
 
 
-def define_dotmd_surreal_schema(connection: _SchemaConnectionProtocol | None = None) -> dict[str, Any]:
+def define_dotmd_surreal_schema(
+    connection: _SchemaConnectionProtocol | None = None,
+) -> dict[str, Any]:
     plan = build_dotmd_surreal_schema_plan()
     validate_dotmd_surreal_schema_plan(plan)
 

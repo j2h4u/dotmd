@@ -468,9 +468,15 @@ def test_define_dotmd_surreal_schema_declares_required_record_shapes_and_schema_
     assert "stats" in schema["unsupported_categories"]
     assert "search_log" in schema["unsupported_categories"]
     assert "chunk_file_bindings" in schema["required_categories"]
-    assert any("DEFINE TABLE documents SCHEMAFULL" in statement for statement in schema["statements"])
-    assert any("DEFINE TABLE relations TYPE RELATION" in statement for statement in schema["statements"])
-    assert not any("DEFINE TABLE documents SCHEMALESS" in statement for statement in schema["statements"])
+    assert any(
+        "DEFINE TABLE documents SCHEMAFULL" in statement for statement in schema["statements"]
+    )
+    assert any(
+        "DEFINE TABLE relations TYPE RELATION" in statement for statement in schema["statements"]
+    )
+    assert not any(
+        "DEFINE TABLE documents SCHEMALESS" in statement for statement in schema["statements"]
+    )
 
 
 def test_surreal_stores_expose_existing_protocol_method_names(tmp_path: Path) -> None:

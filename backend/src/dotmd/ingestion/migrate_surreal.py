@@ -581,7 +581,9 @@ def load_sqlite_rows_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
         "expected_vector_dimension": vector_dimension,
         "embedding_model": embedding_model,
         "internal_tables": sorted(
-            table_name for table_name in known_tables if table_name.startswith(_SQLITE_INTERNAL_PREFIXES)
+            table_name
+            for table_name in known_tables
+            if table_name.startswith(_SQLITE_INTERNAL_PREFIXES)
         ),
     }
 
@@ -633,7 +635,9 @@ def load_graph_rows_for_surreal(graph_export_path: Path) -> dict[str, Any]:
 def load_feedback_rows_for_surreal(feedback_export_path: Path) -> dict[str, Any]:
     payload = json.loads(Path(feedback_export_path).read_text(encoding="utf-8"))
     if payload.get("truncated"):
-        raise RuntimeError("feedback export is truncated and cannot claim production-derived parity")
+        raise RuntimeError(
+            "feedback export is truncated and cannot claim production-derived parity"
+        )
     rows = [
         {
             "schema_version": SURREAL_SCHEMA_VERSION,
@@ -722,7 +726,8 @@ def _build_source_capture_manifest(
         },
         feedback_export={
             "path": str(feedback_export_path),
-            "exported_at": feedback_rows.get("exported_at") or _isoformat_mtime(feedback_export_path),
+            "exported_at": feedback_rows.get("exported_at")
+            or _isoformat_mtime(feedback_export_path),
             "sha256": _sha256_for_file(feedback_export_path),
             "counts": feedback_counts,
         },
@@ -1025,9 +1030,7 @@ def verify_surreal_migration_target(
         else:
             report.errors.append("vector dimension mismatch detected")
 
-    expected_embeddings = {
-        str(row["chunk_id"]): row for row in sqlite_rows["embeddings"]
-    }
+    expected_embeddings = {str(row["chunk_id"]): row for row in sqlite_rows["embeddings"]}
     report.embedding_reuse_verified = all(
         any(
             str(stored.get("chunk_id")) == chunk_id
@@ -1041,13 +1044,17 @@ def verify_surreal_migration_target(
     if report.embedding_reuse_verified:
         report.cheap_invariants.append("embedding reuse verified")
     else:
-        report.errors.append("stored embeddings did not preserve text_hash/vector_rowid/value triples")
+        report.errors.append(
+            "stored embeddings did not preserve text_hash/vector_rowid/value triples"
+        )
 
     if verification_depth is SurrealVerificationDepth.DEEP:
         if stored_relations:
             relation_sample = stored_relations[0]
             if relation_sample.get("rel_type") and "properties" in relation_sample:
-                report.deep_sample_checks.append("relation payload sample preserved rel_type and properties")
+                report.deep_sample_checks.append(
+                    "relation payload sample preserved rel_type and properties"
+                )
         if stored_feedback:
             report.deep_sample_checks.append("feedback sample preserved provider-exported rows")
         if stored_cursors:
@@ -1055,7 +1062,9 @@ def verify_surreal_migration_target(
         if stored_checkpoints:
             report.deep_sample_checks.append("checkpoint sample preserved source checkpoint data")
         if graph_rows["relations"]:
-            report.deep_sample_checks.append("relation payload compared against graph export sample")
+            report.deep_sample_checks.append(
+                "relation payload compared against graph export sample"
+            )
         if feedback_rows["rows"]:
             report.deep_sample_checks.append("feedback sample compared against feedback export")
 
@@ -1184,24 +1193,27 @@ def run_surreal_migration(
         target_namespace=target_namespace,
         target_database=target_database,
     )
-    if "SCHEMALESS" in schema_info.get("table_modes", "") and overwrite_policy is not SurrealOverwritePolicy.EXPLICIT_REPLACE:
+    if (
+        "SCHEMALESS" in schema_info.get("table_modes", "")
+        and overwrite_policy is not SurrealOverwritePolicy.EXPLICIT_REPLACE
+    ):
         report.status = "schema_mismatch"
         report.errors.append(
             "existing target includes SCHEMALESS Phase 38 tables; explicit_replace is required"
         )
         return report
 
-    if any(count > 0 for count in report.target_pre_counts.values()) and overwrite_policy is SurrealOverwritePolicy.REFUSE:
+    if (
+        any(count > 0 for count in report.target_pre_counts.values())
+        and overwrite_policy is SurrealOverwritePolicy.REFUSE
+    ):
         report.status = "target_not_empty"
         report.errors.append(
             "target contains existing rows; explicit_replace is required before destructive apply"
         )
         return report
 
-    phase_checkpoints = {
-        name: _make_phase_checkpoint(name, 0)
-        for name in _MIGRATION_PHASE_ORDER
-    }
+    phase_checkpoints = {name: _make_phase_checkpoint(name, 0) for name in _MIGRATION_PHASE_ORDER}
     phase_checkpoints["schema"].planned_count = 1
     phase_checkpoints["documents"].planned_count = len(sqlite_rows["documents"])
     phase_checkpoints["source_units"].planned_count = len(sqlite_rows["source_units"])
@@ -1212,7 +1224,9 @@ def run_surreal_migration(
     phase_checkpoints["fingerprints"].planned_count = len(sqlite_rows["fingerprints"])
     phase_checkpoints["embeddings"].planned_count = len(sqlite_rows["embeddings"])
     phase_checkpoints["vector_components"].planned_count = len(sqlite_rows["vector_components"])
-    phase_checkpoints["graph"].planned_count = len(graph_rows["entities"]) + len(graph_rows["relations"])
+    phase_checkpoints["graph"].planned_count = len(graph_rows["entities"]) + len(
+        graph_rows["relations"]
+    )
     phase_checkpoints["feedback"].planned_count = len(feedback_rows["rows"])
     phase_checkpoints["cursors"].planned_count = len(sqlite_rows["cursors"])
     phase_checkpoints["checkpoints"].planned_count = len(sqlite_rows["checkpoints"])
@@ -1312,7 +1326,7 @@ def run_surreal_migration(
                 report=report,
                 writer=lambda: metadata_store.replace_checkpoint_rows(sqlite_rows["checkpoints"]),
             )
-    except Exception as exc:
+    except (KeyError, RuntimeError, TypeError, ValueError) as exc:
         report.status = "failed"
         report.committed_success = False
         report.partial_writes_present = report.last_successful_phase is not None
