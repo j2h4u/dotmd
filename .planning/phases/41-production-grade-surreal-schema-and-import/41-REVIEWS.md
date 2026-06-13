@@ -320,3 +320,54 @@ The completed Codex review found that all Cycle 1 HIGH concerns are now incorpor
 Current unresolved HIGH concerns: 0.
 
 Current unresolved actionable non-HIGH concerns: 1.
+
+---
+
+## Final Cycle Review — after apply-safety fix commit 67a7f24
+
+Reviewed at: 2026-06-13T18:15:55Z
+
+Plans reviewed:
+
+- `.planning/phases/41-production-grade-surreal-schema-and-import/41-01-PLAN.md`
+- `.planning/phases/41-production-grade-surreal-schema-and-import/41-02-PLAN.md`
+- `.planning/phases/41-production-grade-surreal-schema-and-import/41-03-PLAN.md`
+
+Review history reviewed:
+
+- `.planning/phases/41-production-grade-surreal-schema-and-import/41-REVIEWS.md`
+
+### Tooling Passes
+
+- GSD core pre-flight was available through `/home/j2h4u/.codex/gsd-core/bin/gsd-tools.cjs`; `workflow.plan_review_convergence=true`, Phase 41 was found, and `plan_count=3`.
+- The bare `gsd` shell command was not on PATH, so the final pass used direct reviewer CLI invocations plus artifact review.
+- Initial Codex invocation failed before review because `codex exec` rejected the obsolete `--ask-for-approval` flag. The corrected invocation completed.
+- OpenCode completed with `CYCLE_SUMMARY: current_high=0 current_actionable=0`.
+- Codex completed with `CYCLE_SUMMARY: current_high=0 current_actionable=0`.
+
+### Artifact Review
+
+The prior actionable Cycle 2 concern is resolved. The former blanket APPLY requirement for a passed embedded safety gate in `41-02-PLAN.md` now states that APPLY requires target-mode-specific safety checks: `embedded_local` uses the embedded writer/safety gate, `remote_service` requires explicit target identity plus overwrite policy, and both refuse non-empty targets under default `SurrealOverwritePolicy.REFUSE`.
+
+The later implementation task already had matching semantics: APPLY checks `embedded_local` and `remote_service` separately, and neither mode may infer safety from the other. The RED test task also requires `embedded_local` versus `remote_service` target-mode coverage, so the prior concern should be visible to execution.
+
+Previously raised HIGH concerns remain incorporated in executable plan content:
+
+- `chunk_file_bindings` is required in schema coverage, migration phases, checkpoints, expected counts, and verification.
+- Partial APPLY failure semantics preserve partial-write evidence and do not claim rollback or committed success.
+- Source capture consistency is represented by `SurrealSourceCaptureManifest` timestamps, checksums, counts, source identity, and skew policy.
+- Live old-store reads are rejected by default in favor of copied SQLite snapshots and materialized graph/feedback exports.
+- Relation endpoint rejection risk is addressed by avoiding default `ENFORCED` relation constraints unless exporter-shape validation and tests prove safety.
+- Restore evidence requires count and smoke verification against a restored target before restore success can be reported.
+
+### Final Convergence Summary
+
+CYCLE_SUMMARY: current_high=0 current_actionable=0
+
+## Current HIGH Concerns
+
+None.
+
+## Current Actionable Non-HIGH Concerns
+
+None.
