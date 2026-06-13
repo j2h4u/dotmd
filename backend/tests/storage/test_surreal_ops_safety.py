@@ -14,10 +14,14 @@ from dotmd.storage.surreal_ops import (
     SurrealDecisionCategory,
     SurrealEmbeddedSafetyReport,
     SurrealImportCounts,
+    SurrealMigrationEvidenceReport,
     SurrealOpsDecisionInputs,
+    SurrealRestoreManifest,
     SurrealWriterGuard,
     assert_embedded_safety_gate_passed,
+    build_surreal_restore_manifest,
     build_storage_recommendation,
+    classify_surreal_migration_report,
     force_release_surreal_writer_guard,
     probe_embedded_transaction_atomicity,
     probe_embedded_writer_safety,
@@ -27,6 +31,7 @@ from dotmd.storage.surreal_ops import (
     run_surreal_full_pipeline_smoke,
     validate_surreal_cli_or_fallback_restore,
     verify_surreal_restore_counts,
+    write_surreal_migration_evidence_reports,
     write_embedded_safety_gate_report,
 )
 
@@ -286,3 +291,223 @@ def test_full_pipeline_smoke_requires_all_gates() -> None:
         "operations",
         "recommendation",
     ]
+
+
+def test_build_surreal_restore_manifest_requires_verified_fallback_rehearsal(
+    tmp_path: Path,
+) -> None:
+    expected = SurrealImportCounts(
+        documents=2,
+        chunks=3,
+        embeddings=3,
+        entities=1,
+        relations=1,
+        feedback=1,
+    )
+
+    blocked = build_surreal_restore_manifest(
+        source_target=str(tmp_path / "source.db"),
+        backup_path=str(tmp_path / "backup.surql"),
+        restore_path=str(tmp_path / "restore.db"),
+        method="surreal-export-import",
+        cli_path=None,
+        expected_counts=expected,
+        restored_counts=expected,
+        smoke_passed=True,
+        rehearsal_target=str(tmp_path / "restore.db"),
+        notes=["CLI unavailable in this environment"],
+    )
+
+    assert blocked.restore_status == "not_verified"
+    assert blocked.cli_available is False
+    assert blocked.verified is False
+    assert any("fallback rehearsal" in note.lower() for note in blocked.notes)
+
+    verified = build_surreal_restore_manifest(
+        source_target=str(tmp_path / "source.db"),
+        backup_path=str(tmp_path / "backup.surql"),
+        restore_path=str(tmp_path / "restore.db"),
+        method="validated-fallback-copy",
+        cli_path=None,
+        expected_counts=expected,
+        restored_counts=expected,
+        smoke_passed=True,
+        rehearsal_target=str(tmp_path / "restore.db"),
+        fallback_rehearsal_verified=True,
+        notes=["Counts and smoke checks passed on fallback rehearsal"],
+    )
+
+    assert verified.restore_status == "verified_with_fallback"
+    assert verified.cli_available is False
+    assert verified.verified is True
+    assert verified.restored_counts == expected
+    assert verified.rehearsal_target == str(tmp_path / "restore.db")
+
+
+def test_classify_surreal_migration_report_blocks_false_success_paths() -> None:
+    from dotmd.ingestion.migrate_surreal import (  # type: ignore[import-not-found]
+        SurrealMigrationMode,
+        SurrealMigrationPhaseCheckpoint,
+        SurrealMigrationPhaseName,
+        SurrealMigrationReport,
+        SurrealOverwritePolicy,
+        SurrealTargetMode,
+    )
+
+    report = SurrealMigrationReport(
+        schema_version="41.1.0",
+        mode=SurrealMigrationMode.APPLY,
+        status="applied",
+        target_mode=SurrealTargetMode.EMBEDDED_LOCAL,
+        overwrite_policy=SurrealOverwritePolicy.REFUSE,
+        target_url="surrealkv:///tmp/phase41.db",
+        target_namespace="dotmd",
+        target_database="phase41_migration",
+        source_capture_manifest=None,
+        expected_counts={"documents": 2},
+        actual_counts={"documents": 2},
+        phase_checkpoints=[
+            SurrealMigrationPhaseCheckpoint(
+                phase_name=SurrealMigrationPhaseName.SCHEMA,
+                planned_count=1,
+                applied_count=1,
+                verified_count=1,
+                status="verified",
+            ),
+            SurrealMigrationPhaseCheckpoint(
+                phase_name=SurrealMigrationPhaseName.GRAPH,
+                planned_count=2,
+                applied_count=1,
+                verified_count=0,
+                status="failed",
+                error="relation import failed",
+            ),
+        ],
+        embedding_reuse_verified=False,
+        committed_success=True,
+        partial_writes_present=True,
+        last_successful_phase=SurrealMigrationPhaseName.SCHEMA,
+        failed_phase=SurrealMigrationPhaseName.GRAPH,
+    )
+
+    restore_manifest = SurrealRestoreManifest(
+        source_target="/tmp/source.db",
+        backup_path="/tmp/backup.surql",
+        restore_path="/tmp/restore.db",
+        method="surreal-export-import",
+        cli_available=True,
+        cli_path="/usr/local/bin/surreal",
+        expected_counts=SurrealImportCounts(documents=2),
+        restored_counts=SurrealImportCounts(documents=1),
+        smoke_passed=False,
+        rehearsal_target="/tmp/restore.db",
+        restore_status="restore_required",
+        verified=False,
+        notes=["Restore evidence missing count and smoke verification"],
+    )
+
+    classified = classify_surreal_migration_report(
+        report,
+        restore_manifest=restore_manifest,
+        no_recompute_verified=False,
+    )
+
+    assert classified.report_status == "blocked"
+    assert classified.partial_writes_present is True
+    assert classified.failed_phase == "graph"
+    assert classified.last_successful_phase == "schema"
+    assert classified.no_recompute_verified is False
+    assert classified.embedding_reuse_verified is False
+    assert any("restore evidence" in blocker.lower() for blocker in classified.unresolved_blockers)
+    assert any("partial write" in blocker.lower() for blocker in classified.unresolved_blockers)
+    assert any("phase checkpoint" in blocker.lower() for blocker in classified.unresolved_blockers)
+
+
+def test_write_surreal_migration_evidence_reports_preserves_non_ascii_and_redacts_samples(
+    tmp_path: Path,
+) -> None:
+    report_json = tmp_path / "migration-report.json"
+    report_markdown = tmp_path / "migration-report.md"
+    restore_manifest = SurrealRestoreManifest(
+        source_target="/mnt/источник/index.db",
+        backup_path="/tmp/backup.surql",
+        restore_path="/tmp/restore.db",
+        method="validated-fallback-copy",
+        cli_available=False,
+        cli_path=None,
+        expected_counts=SurrealImportCounts(documents=2, feedback=1),
+        restored_counts=SurrealImportCounts(documents=2, feedback=1),
+        smoke_passed=True,
+        rehearsal_target="/tmp/restore.db",
+        restore_status="verified_with_fallback",
+        verified=True,
+        notes=["Проверка восстановления пройдена"],
+    )
+    evidence = SurrealMigrationEvidenceReport(
+        schema_version="41.1.0",
+        mode="verify",
+        target_mode="embedded-local",
+        overwrite_policy="refuse",
+        target={
+            "url": "surrealkv:///tmp/phase41.db",
+            "namespace": "dotmd",
+            "database": "phase41_migration",
+        },
+        source_capture_manifest={
+            "sqlite_snapshot": {"path": "/mnt/копия/index.db", "counts": {"documents": 2}},
+            "graph_export": {"path": "/tmp/graph.json", "counts": {"relations": 1}},
+            "feedback_export": {"path": "/tmp/feedback.json", "counts": {"rows": 1}},
+            "skew_policy": "bounded_skew_accepted",
+        },
+        phase_checkpoints=[
+            {
+                "phase_name": "schema",
+                "planned_count": 1,
+                "applied_count": 1,
+                "verified_count": 1,
+                "status": "verified",
+            }
+        ],
+        expected_counts={"documents": 2, "feedback": 1},
+        actual_counts={"documents": 2, "feedback": 1},
+        cheap_invariants=["Документы совпали"],
+        deep_sample_checks=["Сообщение: всё хорошо"],
+        embedding_reuse_verified=True,
+        no_recompute_verified=True,
+        unsupported_categories=["search_log"],
+        redaction_policy="redacted",
+        sample_limit=1,
+        restore_manifest=restore_manifest,
+        rollback_evidence="fallback rehearsal counts+smoke verified",
+        partial_writes_present=False,
+        last_successful_phase="checkpoints",
+        failed_phase=None,
+        unresolved_blockers=[],
+        recommendation="proceed_to_phase_42_evidence_review",
+        report_status="verified",
+        report_samples={
+            "feedback_messages": ["секрет: скрыто"],
+            "graph_metadata": ["граф: скрыто"],
+        },
+    )
+
+    write_surreal_migration_evidence_reports(
+        evidence,
+        json_path=report_json,
+        markdown_path=report_markdown,
+        max_report_samples=1,
+        redact_report_samples=True,
+    )
+
+    payload = json.loads(report_json.read_text(encoding="utf-8"))
+    markdown = report_markdown.read_text(encoding="utf-8")
+
+    assert payload["restore_manifest"]["restore_status"] == "verified_with_fallback"
+    assert payload["redaction_policy"] == "redacted"
+    assert payload["sample_limit"] == 1
+    assert payload["report_samples"]["feedback_messages"] == ["[redacted]"]
+    assert "источник" in report_json.read_text(encoding="utf-8")
+    assert "ensure_ascii=False" not in report_json.read_text(encoding="utf-8")
+    assert "verified_with_fallback" in markdown
+    assert "Документы совпали" in markdown
+    assert "[redacted]" in markdown
