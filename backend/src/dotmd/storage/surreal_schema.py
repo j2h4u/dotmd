@@ -376,7 +376,7 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
                 _field("embedding_model", "string"),
                 _field("text_hash", "string"),
                 _field("vector_rowid", "int"),
-                _field("embedding", "array", required=False),
+                _field("embedding", "array<float>", required=False),
                 _field("metadata", "object", required=False, flexible_json=True),
             ),
             indexes=(
@@ -391,7 +391,7 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
                 _field("schema_version", "string"),
                 _field("chunk_id", "string"),
                 _field("component", "string"),
-                _field("embedding", "array"),
+                _field("embedding", "array<float>"),
                 _field("metadata", "object", required=False, flexible_json=True),
             ),
             indexes=(_index("vector_components_chunk_component_idx", "chunk_id", "component", unique=True),),
@@ -426,6 +426,7 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
             fields=(
                 _field("schema_version", "string"),
                 _field("original_id", "string"),
+                _field("original_entity_name", "string", required=False),
                 _field("name", "string"),
                 _field("metadata", "object", required=False, flexible_json=True),
             ),

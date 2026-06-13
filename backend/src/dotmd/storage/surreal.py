@@ -169,7 +169,8 @@ class SurrealConnection:
     def inspect_schema(self) -> dict[str, Any]:
         """Best-effort schema inspection for apply-status decisions."""
 
-        meta = self.select("schema_meta:dotmd_schema")
+        meta_rows = self.scan_table("schema_meta")
+        meta = meta_rows[0] if meta_rows else self.select("schema_meta:dotmd_schema")
         schema_version = None
         if isinstance(meta, dict):
             raw_version = meta.get("schema_version")
@@ -177,14 +178,23 @@ class SurrealConnection:
                 schema_version = raw_version
 
         table_modes: dict[str, str] = {}
-        for table in build_dotmd_surreal_schema_plan().tables:
-            try:
-                info = self.query_raw(f"INFO FOR TABLE {table.name};")
-            except Exception:  # pragma: no cover - best-effort fallback for different backends
-                continue
-            mode = _extract_table_mode(info)
-            if mode is not None:
-                table_modes[table.name] = mode
+        try:
+            db_info = self.query_raw("INFO FOR DB;")
+            raw_tables = {}
+            if isinstance(db_info, dict):
+                results = db_info.get("result")
+                if isinstance(results, list) and results:
+                    first = results[0]
+                    if isinstance(first, dict):
+                        inner = first.get("result")
+                        if isinstance(inner, dict):
+                            raw_tables = dict(inner.get("tables", {}))
+            for table_name, definition in raw_tables.items():
+                mode = _extract_table_mode(definition)
+                if mode is not None:
+                    table_modes[str(table_name)] = mode
+        except Exception:  # pragma: no cover - best-effort fallback for different backends
+            pass
 
         return {"schema_version": schema_version, "table_modes": table_modes}
 
@@ -198,11 +208,14 @@ class SurrealConnection:
             deleted += 1
         return deleted
 
-    def clear_phase38_tables(self) -> int:
+    def clear_schema_owned_tables(self) -> int:
         deleted = 0
         for table_name in _schema_table_names():
             deleted += self.delete_all_from_table(table_name)
         return deleted
+
+    def clear_phase38_tables(self) -> int:
+        return self.clear_schema_owned_tables()
 
 
 class SurrealMetadataStore:
@@ -409,7 +422,7 @@ class SurrealMetadataStore:
     def replace_cursor_rows(self, rows: list[dict[str, Any]]) -> int:
         for row in rows:
             self._connection.upsert(
-                self._codec.encode("cursors", str(row["cursor_id"])),
+                self._codec.encode("cursors", str(row["ref"])),
                 dict(row),
             )
         return len(rows)
@@ -489,7 +502,8 @@ class SurrealVectorStore:
 
     def replace_vector_component_rows(self, rows: list[dict[str, Any]]) -> int:
         for row in rows:
-            component_id = f"{row['entity_id']}::{row['component']}"
+            component_owner = row.get("chunk_id") or row.get("entity_id")
+            component_id = f"{component_owner}::{row['component']}"
             self._connection.upsert(
                 self._codec.encode("vector_components", component_id),
                 dict(row),
@@ -739,52 +753,120 @@ class SurrealGraphStore:
         return {"nodes": nodes, "edges": edges}
 
     def replace_entity_rows(self, rows: list[dict[str, Any]]) -> int:
-        file_nodes: set[str] = set()
-        section_nodes: dict[str, dict[str, Any]] = {}
-        tag_nodes: set[str] = set()
         for row in rows:
-            source = str(row.get("source", ""))
-            self.add_entity_node(str(row["name"]), str(row["entity_type"]), source)
-            if source:
-                section_nodes.setdefault(
-                    source,
-                    {
-                        "chunk_id": source,
-                        "heading": "Imported Section",
-                        "level": 0,
-                        "file_path": "",
-                        "text_preview": "",
-                    },
-                )
-        for row in section_nodes.values():
-            self.add_section_node(**row)
-        for file_path in file_nodes:
-            self.add_file_node(file_path, Path(file_path).name)
-        for tag_name in tag_nodes:
-            self.add_tag_node(tag_name)
-        return len(rows)
-
-    def replace_relation_rows(self, rows: list[dict[str, Any]]) -> int:
-        for row in rows:
-            relation_type = str(row["relation_type"])
-            target_id = str(row["target_id"])
-            if relation_type == "HAS_TAG":
-                self.add_tag_node(target_id)
-            elif not self._connection.select(self._codec.encode("entities", target_id)):
-                self.add_entity_node(target_id, "Entity", str(row["source_id"]))
-            self.add_section_node(
-                chunk_id=str(row["source_id"]),
-                heading="Imported Section",
-                level=0,
-                file_path="",
-                text_preview="",
-            )
             payload = dict(row)
+            payload.setdefault("original_entity_name", str(payload.get("name", "")))
             self._connection.upsert(
-                self._codec.encode("relations", str(row["relation_id"])),
+                self._codec.encode("entities", str(payload["name"])),
                 payload,
             )
         return len(rows)
+
+    def replace_relation_rows(self, rows: list[dict[str, Any]]) -> int:
+        payloads: list[dict[str, Any]] = []
+        for row in rows:
+            payload = dict(row)
+            payload.setdefault("rel_type", payload.get("relation_type"))
+            payload.setdefault("relation_type", payload.get("rel_type"))
+            relation_id = str(payload.pop("relation_id"))
+            payload["id"] = str(self._codec.encode("relations", relation_id).id)
+            source_table = str(payload.get("source_table", "sections"))
+            target_table = str(payload.get("target_table", "entities"))
+            payload.setdefault("in", self._codec.encode(source_table, str(payload["source_id"])))
+            payload.setdefault("out", self._codec.encode(target_table, str(payload["target_id"])))
+            payloads.append(payload)
+        if payloads:
+            self._connection.query("INSERT RELATION INTO relations $rows;", {"rows": payloads})
+        return len(rows)
+
+    def replace_file_rows(self, rows: list[dict[str, Any]]) -> int:
+        for row in rows:
+            payload = dict(row)
+            payload.setdefault("schema_version", "41.1.0")
+            payload.setdefault("metadata", {})
+            original_id = str(payload.get("original_id") or payload.get("path"))
+            self._connection.upsert(self._codec.encode("files", original_id), payload)
+        return len(rows)
+
+    def replace_section_rows(self, rows: list[dict[str, Any]]) -> int:
+        for row in rows:
+            payload = dict(row)
+            payload.setdefault("schema_version", "41.1.0")
+            payload.setdefault("metadata", {})
+            original_id = str(payload.get("original_id") or payload.get("chunk_id"))
+            self._connection.upsert(self._codec.encode("sections", original_id), payload)
+        return len(rows)
+
+    def replace_tag_rows(self, rows: list[dict[str, Any]]) -> int:
+        for row in rows:
+            payload = dict(row)
+            payload.setdefault("schema_version", "41.1.0")
+            payload.setdefault("metadata", {})
+            payload.setdefault("original_id", str(payload.get("name")))
+            name = str(payload.get("name"))
+            self._connection.upsert(self._codec.encode("tags", name), payload)
+        return len(rows)
+
+    def replace_graph_rows(
+        self,
+        *,
+        entities: list[dict[str, Any]],
+        relations: list[dict[str, Any]],
+        files: list[dict[str, Any]] | None = None,
+        sections: list[dict[str, Any]] | None = None,
+        tags: list[dict[str, Any]] | None = None,
+    ) -> int:
+        replaced = 0
+        section_rows = list(sections or [])
+        section_ids = {
+            str(row.get("original_id") or row.get("chunk_id"))
+            for row in section_rows
+        }
+        tag_rows = list(tags or [])
+        tag_names = {str(row.get("name")) for row in tag_rows}
+        entity_rows = list(entities)
+        entity_names = {str(row.get("name")) for row in entity_rows}
+
+        for relation in relations:
+            source_id = str(relation["source_id"])
+            if source_id not in section_ids:
+                section_rows.append(
+                    {
+                        "original_id": source_id,
+                        "document_ref": source_id,
+                        "metadata": {},
+                    }
+                )
+                section_ids.add(source_id)
+
+            relation_type = str(relation.get("relation_type") or relation.get("rel_type"))
+            target_id = str(relation["target_id"])
+            if relation_type == "HAS_TAG":
+                if target_id not in tag_names:
+                    tag_rows.append({"original_id": target_id, "name": target_id, "metadata": {}})
+                    tag_names.add(target_id)
+            elif target_id not in entity_names:
+                entity_rows.append(
+                    {
+                        "original_id": target_id,
+                        "original_entity_name": target_id,
+                        "name": target_id,
+                        "entity_type": "Entity",
+                        "source": source_id,
+                        "metadata": {},
+                    }
+                )
+                entity_names.add(target_id)
+
+        if files:
+            replaced += self.replace_file_rows(files)
+        if section_rows:
+            replaced += self.replace_section_rows(section_rows)
+        if tag_rows:
+            replaced += self.replace_tag_rows(tag_rows)
+        replaced += self.replace_entity_rows(entity_rows)
+        replaced += self.replace_relation_rows(relations)
+        return replaced
 
 
 class SurrealFeedbackStore:

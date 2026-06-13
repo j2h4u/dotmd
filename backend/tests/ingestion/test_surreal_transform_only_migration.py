@@ -290,7 +290,7 @@ def _create_transform_only_fixture(db_path: Path) -> dict[str, str]:
         conn.execute(
             "INSERT INTO vec_meta_contextual_512_50_multilingual_e5_large "
             "(rowid, chunk_id, text_hash) VALUES (1, ?, ?), (2, ?, ?)",
-            (weird_chunk_id, "hash-α", "chunk:plain", "hash-β"),
+            (weird_chunk_id, "hash-alpha", "chunk:plain", "hash-beta"),
         )
         conn.execute(
             "INSERT INTO vec_chunks_contextual_512_50_multilingual_e5_large (rowid, embedding) "
@@ -617,7 +617,7 @@ def test_run_surreal_migration_apply_preserves_ids_vectors_feedback_and_graph_pr
     assert stored_chunk["original_chunk_id"] == fixture_ids["chunk_id"]
     assert stored_chunk["ref"] == fixture_ids["ref"]
     assert stored_embedding["chunk_id"] == fixture_ids["chunk_id"]
-    assert stored_embedding["text_hash"] == "hash-α"
+    assert stored_embedding["text_hash"] == "hash-alpha"
     assert stored_embedding["vector_rowid"] == 1
     assert len(stored_embedding["embedding"]) == 3
     assert stored_entity["original_entity_name"] == fixture_ids["entity_name"]
