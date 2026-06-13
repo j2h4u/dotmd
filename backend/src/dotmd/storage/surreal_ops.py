@@ -9,7 +9,7 @@ import socket
 import sqlite3
 import uuid
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -20,6 +20,13 @@ from surrealdb.errors import UnsupportedFeatureError
 
 ProbeKind = Literal["embedded", "writer", "control", "merged"]
 RecommendationValue = Literal["migrate", "defer", "reject"]
+RestoreStatusValue = Literal[
+    "blocked",
+    "restore_required",
+    "verified_with_cli",
+    "verified_with_fallback",
+    "not_verified",
+]
 
 
 class SurrealDecisionCategory(StrEnum):
@@ -80,6 +87,56 @@ class SurrealBackupReport:
     restore: SurrealRestoreReport
     verified: bool
     notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True, frozen=True)
+class SurrealRestoreManifest:
+    """Structured restore evidence for a migration target."""
+
+    source_target: str
+    backup_path: str
+    restore_path: str
+    method: str
+    cli_available: bool
+    cli_path: str | None
+    expected_counts: SurrealImportCounts
+    restored_counts: SurrealImportCounts
+    smoke_passed: bool
+    rehearsal_target: str | None
+    restore_status: RestoreStatusValue
+    verified: bool
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True, frozen=True)
+class SurrealMigrationEvidenceReport:
+    """Machine-readable migration evidence for operators and later phases."""
+
+    schema_version: str
+    mode: str
+    target_mode: str
+    overwrite_policy: str
+    target: dict[str, Any]
+    source_capture_manifest: dict[str, Any] | None
+    phase_checkpoints: list[dict[str, Any]]
+    expected_counts: dict[str, int]
+    actual_counts: dict[str, int]
+    cheap_invariants: list[str]
+    deep_sample_checks: list[str]
+    embedding_reuse_verified: bool
+    no_recompute_verified: bool
+    unsupported_categories: list[str]
+    redaction_policy: str
+    sample_limit: int
+    restore_manifest: SurrealRestoreManifest
+    rollback_evidence: str | None
+    partial_writes_present: bool
+    last_successful_phase: str | None
+    failed_phase: str | None
+    unresolved_blockers: list[str]
+    recommendation: str
+    report_status: str
+    report_samples: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -435,6 +492,283 @@ def force_release_surreal_writer_guard(
     released["released_at"] = datetime.now(UTC).isoformat()
     released["released_reason"] = "force_release"
     return released
+
+
+def build_surreal_restore_manifest(
+    *,
+    source_target: str,
+    backup_path: str,
+    restore_path: str,
+    method: str,
+    cli_path: str | None,
+    expected_counts: SurrealImportCounts,
+    restored_counts: SurrealImportCounts,
+    smoke_passed: bool,
+    rehearsal_target: str | None,
+    fallback_rehearsal_verified: bool = False,
+    notes: list[str] | None = None,
+) -> SurrealRestoreManifest:
+    """Build restore evidence without overstating success."""
+
+    cli_available = bool(cli_path and Path(cli_path).exists())
+    counts_verified = verify_surreal_restore_counts(expected_counts, restored_counts)
+    note_list = list(notes or [])
+    verified = False
+    restore_status: RestoreStatusValue = "not_verified"
+
+    if cli_available and counts_verified and smoke_passed:
+        verified = True
+        restore_status = "verified_with_cli"
+    elif not cli_available and fallback_rehearsal_verified and counts_verified and smoke_passed:
+        verified = True
+        restore_status = "verified_with_fallback"
+    elif counts_verified and not smoke_passed:
+        restore_status = "restore_required"
+        note_list.append("Restore counts matched, but smoke verification did not pass.")
+    elif not cli_available:
+        note_list.append(
+            "CLI unavailable; fallback rehearsal must restore into a target and pass counts plus smoke verification."
+        )
+    else:
+        restore_status = "restore_required"
+
+    if rehearsal_target is None:
+        note_list.append("No rehearsal target was recorded for restore verification.")
+
+    return SurrealRestoreManifest(
+        source_target=source_target,
+        backup_path=backup_path,
+        restore_path=restore_path,
+        method=method,
+        cli_available=cli_available,
+        cli_path=cli_path,
+        expected_counts=expected_counts,
+        restored_counts=restored_counts,
+        smoke_passed=smoke_passed,
+        rehearsal_target=rehearsal_target,
+        restore_status=restore_status,
+        verified=verified,
+        notes=note_list,
+    )
+
+
+def classify_surreal_migration_report(
+    migration_report: Any,
+    *,
+    restore_manifest: SurrealRestoreManifest,
+    no_recompute_verified: bool,
+    owner_id: str | None = None,
+) -> SurrealMigrationEvidenceReport:
+    """Convert a migration report into a safety-classified evidence payload."""
+
+    blockers: list[str] = []
+    phase_checkpoints: list[dict[str, Any]] = []
+    for checkpoint in getattr(migration_report, "phase_checkpoints", []):
+        phase_payload = {
+            "phase_name": getattr(getattr(checkpoint, "phase_name", None), "value", None)
+            or str(getattr(checkpoint, "phase_name", "")),
+            "planned_count": int(getattr(checkpoint, "planned_count", 0)),
+            "applied_count": int(getattr(checkpoint, "applied_count", 0)),
+            "verified_count": int(getattr(checkpoint, "verified_count", 0)),
+            "status": str(getattr(checkpoint, "status", "unknown")),
+            "error": getattr(checkpoint, "error", None),
+        }
+        phase_checkpoints.append(phase_payload)
+        if phase_payload["status"] not in {"applied", "verified"}:
+            blockers.append(
+                f"Phase checkpoint {phase_payload['phase_name']} is {phase_payload['status']}."
+            )
+
+    mode_value = getattr(getattr(migration_report, "mode", None), "value", str(migration_report.mode))
+    target_mode_value = getattr(
+        getattr(migration_report, "target_mode", None), "value", str(migration_report.target_mode)
+    )
+    overwrite_policy_value = getattr(
+        getattr(migration_report, "overwrite_policy", None),
+        "value",
+        str(migration_report.overwrite_policy),
+    )
+
+    partial_writes_present = bool(getattr(migration_report, "partial_writes_present", False))
+    embedding_reuse_verified = bool(
+        getattr(migration_report, "embedding_reuse_verified", False)
+    )
+    last_successful_phase = getattr(getattr(migration_report, "last_successful_phase", None), "value", None)
+    failed_phase = getattr(getattr(migration_report, "failed_phase", None), "value", None)
+
+    if mode_value == "apply" and not restore_manifest.verified:
+        blockers.append("Restore evidence is required after apply before success can be claimed.")
+    if partial_writes_present and not restore_manifest.verified:
+        blockers.append("Partial writes are present without verified restore or recovery evidence.")
+    if not embedding_reuse_verified:
+        blockers.append("Embedding reuse evidence is missing or unverified.")
+    if not no_recompute_verified:
+        blockers.append("No-recompute verification failed or was not recorded.")
+    if overwrite_policy_value == "refuse" and partial_writes_present:
+        blockers.append("Unsafe overwrite state remains after a partial apply.")
+    for error in getattr(migration_report, "errors", []):
+        blockers.append(str(error))
+
+    report_status = "verified" if not blockers else "blocked"
+    recommendation = (
+        "proceed_to_phase_42_evidence_review"
+        if report_status == "verified"
+        else "stop_and_restore"
+    )
+    source_capture_manifest = getattr(migration_report, "source_capture_manifest", None)
+    if source_capture_manifest is not None:
+        if hasattr(source_capture_manifest, "__dataclass_fields__"):
+            source_capture_manifest = asdict(source_capture_manifest)
+        elif not isinstance(source_capture_manifest, dict):
+            source_capture_manifest = dict(source_capture_manifest)
+    target = {
+        "url": getattr(migration_report, "target_url", ""),
+        "namespace": getattr(migration_report, "target_namespace", ""),
+        "database": getattr(migration_report, "target_database", ""),
+        "owner_id": owner_id or "unknown",
+    }
+
+    return SurrealMigrationEvidenceReport(
+        schema_version=str(getattr(migration_report, "schema_version", "")),
+        mode=mode_value,
+        target_mode=target_mode_value.replace("_", "-"),
+        overwrite_policy=overwrite_policy_value.replace("_", "-"),
+        target=target,
+        source_capture_manifest=source_capture_manifest,
+        phase_checkpoints=phase_checkpoints,
+        expected_counts=dict(getattr(migration_report, "expected_counts", {})),
+        actual_counts=dict(getattr(migration_report, "actual_counts", {})),
+        cheap_invariants=list(getattr(migration_report, "cheap_invariants", [])),
+        deep_sample_checks=list(getattr(migration_report, "deep_sample_checks", [])),
+        embedding_reuse_verified=embedding_reuse_verified,
+        no_recompute_verified=no_recompute_verified,
+        unsupported_categories=list(getattr(migration_report, "unsupported_categories", [])),
+        redaction_policy="plain",
+        sample_limit=0,
+        restore_manifest=restore_manifest,
+        rollback_evidence=getattr(migration_report, "rollback_evidence", None),
+        partial_writes_present=partial_writes_present,
+        last_successful_phase=last_successful_phase,
+        failed_phase=failed_phase,
+        unresolved_blockers=blockers,
+        recommendation=recommendation,
+        report_status=report_status,
+    )
+
+
+def write_surreal_migration_evidence_reports(
+    evidence: SurrealMigrationEvidenceReport,
+    *,
+    json_path: Path | str,
+    markdown_path: Path | str,
+    max_report_samples: int,
+    redact_report_samples: bool,
+) -> None:
+    """Write Phase 41 evidence as JSON plus operator-friendly Markdown."""
+
+    json_output = Path(json_path)
+    markdown_output = Path(markdown_path)
+    json_output.parent.mkdir(parents=True, exist_ok=True)
+    markdown_output.parent.mkdir(parents=True, exist_ok=True)
+
+    sample_limit = max(max_report_samples, 0)
+    redaction_policy = "redacted" if redact_report_samples else "plain"
+    report_samples: dict[str, list[str]] = {}
+    for category, samples in evidence.report_samples.items():
+        limited = list(samples[:sample_limit])
+        if redact_report_samples:
+            limited = ["[redacted]" for _ in limited]
+        report_samples[category] = limited
+
+    payload = asdict(evidence)
+    payload["sample_limit"] = sample_limit
+    payload["redaction_policy"] = redaction_policy
+    payload["report_samples"] = report_samples
+    json_output.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    lines = [
+        "# Surreal Migration Evidence Report",
+        "",
+        f"- report_status: {evidence.report_status}",
+        f"- schema_version: {evidence.schema_version}",
+        f"- mode: {evidence.mode}",
+        f"- target_mode: {evidence.target_mode}",
+        f"- overwrite_policy: {evidence.overwrite_policy}",
+        f"- target_url: {evidence.target.get('url', '')}",
+        f"- target_namespace: {evidence.target.get('namespace', '')}",
+        f"- target_database: {evidence.target.get('database', '')}",
+        f"- owner_id: {evidence.target.get('owner_id', '')}",
+        f"- redaction_policy: {redaction_policy}",
+        f"- sample_limit: {sample_limit}",
+        "",
+        "## Counts",
+        "",
+    ]
+    for key, expected in sorted(evidence.expected_counts.items()):
+        actual = evidence.actual_counts.get(key, 0)
+        lines.append(f"- `{key}`: expected `{expected}`, actual `{actual}`")
+
+    lines.extend(["", "## Phase Checkpoints", ""])
+    for checkpoint in evidence.phase_checkpoints:
+        lines.append(
+            "- `{phase_name}`: planned `{planned_count}`, applied `{applied_count}`, verified `{verified_count}`, status `{status}`".format(
+                **checkpoint
+            )
+        )
+
+    lines.extend(["", "## Verification Evidence", ""])
+    lines.append(f"- embedding_reuse_verified: {str(evidence.embedding_reuse_verified).lower()}")
+    lines.append(f"- no_recompute_verified: {str(evidence.no_recompute_verified).lower()}")
+    lines.append(f"- restore_status: {evidence.restore_manifest.restore_status}")
+    lines.append(f"- rollback_evidence: {evidence.rollback_evidence or 'not recorded'}")
+    if evidence.cheap_invariants:
+        lines.append("- cheap_invariants:")
+        lines.extend(f"  - {item}" for item in evidence.cheap_invariants)
+    if evidence.deep_sample_checks:
+        lines.append("- deep_sample_checks:")
+        lines.extend(f"  - {item}" for item in evidence.deep_sample_checks)
+
+    lines.extend(["", "## Unsupported Categories", ""])
+    if evidence.unsupported_categories:
+        lines.extend(f"- `{category}`" for category in evidence.unsupported_categories)
+    else:
+        lines.append("- None")
+
+    lines.extend(["", "## Report Samples", ""])
+    if report_samples:
+        for category, samples in sorted(report_samples.items()):
+            lines.append(f"- `{category}`:")
+            if samples:
+                lines.extend(f"  - {sample}" for sample in samples)
+            else:
+                lines.append("  - none")
+    else:
+        lines.append("- None")
+
+    lines.extend(["", "## Restore Manifest", ""])
+    lines.append(f"- source_target: {evidence.restore_manifest.source_target}")
+    lines.append(f"- backup_path: {evidence.restore_manifest.backup_path}")
+    lines.append(f"- restore_path: {evidence.restore_manifest.restore_path}")
+    lines.append(f"- rehearsal_target: {evidence.restore_manifest.rehearsal_target or 'not recorded'}")
+    lines.append(f"- restore_status: {evidence.restore_manifest.restore_status}")
+    lines.append(f"- verified: {str(evidence.restore_manifest.verified).lower()}")
+    if evidence.restore_manifest.notes:
+        lines.append("- notes:")
+        lines.extend(f"  - {note}" for note in evidence.restore_manifest.notes)
+
+    lines.extend(["", "## Decision", ""])
+    if evidence.unresolved_blockers:
+        lines.append(f"- recommendation: {evidence.recommendation}")
+        lines.append("- unresolved_blockers:")
+        lines.extend(f"  - {blocker}" for blocker in evidence.unresolved_blockers)
+    else:
+        lines.append(f"- recommendation: {evidence.recommendation}")
+        lines.append("- unresolved_blockers: none")
+
+    markdown_output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def acquire_surreal_writer_guard(
