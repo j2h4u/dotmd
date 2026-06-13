@@ -145,9 +145,7 @@ def load_sqlite_rows_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
         }
         provenance_rows = [
             dict(row)
-            for row in _fetch_all(
-                conn, "chunk_source_provenance_contextual_512_50", known_tables
-            )
+            for row in _fetch_all(conn, "chunk_source_provenance_contextual_512_50", known_tables)
         ]
         file_path_rows = [
             dict(row)
@@ -156,9 +154,7 @@ def load_sqlite_rows_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
         source_document_rows = [
             dict(row) for row in _fetch_all(conn, "source_documents", known_tables)
         ]
-        binding_rows = [
-            dict(row) for row in _fetch_all(conn, "resource_bindings", known_tables)
-        ]
+        binding_rows = [dict(row) for row in _fetch_all(conn, "resource_bindings", known_tables)]
         source_unit_rows = [
             dict(row) for row in _fetch_all(conn, "source_unit_fingerprints", known_tables)
         ]
@@ -281,39 +277,38 @@ def load_sqlite_rows_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
         for row in vec_component_rows
     ]
 
-    fingerprint_payloads: list[dict[str, Any]] = []
-    for row in chunk_fingerprint_rows:
-        fingerprint_payloads.append(
-            {
-                "fingerprint_id": f"chunk::{row['file_path']}",
-                "category": "chunk",
-                **row,
-            }
-        )
-    for row in embed_fingerprint_rows:
-        fingerprint_payloads.append(
-            {
-                "fingerprint_id": f"embed::{row['chunk_id']}",
-                "category": "embed",
-                **row,
-            }
-        )
-    for row in meta_fingerprint_rows:
-        fingerprint_payloads.append(
-            {
-                "fingerprint_id": f"meta::{row['file_path']}",
-                "category": "meta",
-                **row,
-            }
-        )
-    for row in source_unit_rows:
-        fingerprint_payloads.append(
-            {
-                "fingerprint_id": f"source_unit::{row['document_ref']}::{row['unit_ref']}",
-                "category": "source_unit",
-                **row,
-            }
-        )
+    fingerprint_payloads: list[dict[str, Any]] = [
+        {
+            "fingerprint_id": f"chunk::{row['file_path']}",
+            "category": "chunk",
+            **row,
+        }
+        for row in chunk_fingerprint_rows
+    ]
+    fingerprint_payloads.extend(
+        {
+            "fingerprint_id": f"embed::{row['chunk_id']}",
+            "category": "embed",
+            **row,
+        }
+        for row in embed_fingerprint_rows
+    )
+    fingerprint_payloads.extend(
+        {
+            "fingerprint_id": f"meta::{row['file_path']}",
+            "category": "meta",
+            **row,
+        }
+        for row in meta_fingerprint_rows
+    )
+    fingerprint_payloads.extend(
+        {
+            "fingerprint_id": f"source_unit::{row['document_ref']}::{row['unit_ref']}",
+            "category": "source_unit",
+            **row,
+        }
+        for row in source_unit_rows
+    )
 
     cursor_rows = [
         {
@@ -484,7 +479,7 @@ def run_surreal_import(
             graph_store.replace_entity_rows(graph_rows["entities"])
             graph_store.replace_relation_rows(graph_rows["relations"])
             feedback_store.replace_feedback_rows(feedback_rows)
-        except Exception as exc:
+        except (KeyError, RuntimeError, TypeError, ValueError) as exc:
             connection.clear_phase38_tables()
             report.status = "rolled_back"
             report.rolled_back = True

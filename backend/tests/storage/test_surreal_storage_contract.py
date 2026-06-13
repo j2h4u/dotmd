@@ -4,8 +4,6 @@ import os
 import sqlite3
 from pathlib import Path
 
-import pytest
-
 from dotmd.feedback import FeedbackStore
 from dotmd.storage.surreal_inventory import (
     build_surreal_migration_map,
@@ -230,7 +228,9 @@ def test_copy_sqlite_snapshot_copies_to_explicit_snapshot_dir_without_mutating_s
     source_stat_before = db_path.stat()
 
     with sqlite3.connect(db_path) as conn:
-        source_row_count = conn.execute("SELECT COUNT(*) FROM chunks_contextual_512_50").fetchone()[0]
+        source_row_count = conn.execute("SELECT COUNT(*) FROM chunks_contextual_512_50").fetchone()[
+            0
+        ]
 
     snapshot_dir = tmp_path / "snapshots"
     snapshot = copy_sqlite_snapshot(db_path, snapshot_dir, "inventory")
@@ -369,7 +369,9 @@ def test_build_surreal_migration_map_marks_known_categories_and_rejects_unknown(
     assert "unknown" in migration_map.categories["mystery_table"].reason.lower()
 
 
-def test_copy_sqlite_snapshot_leaves_source_row_counts_and_metadata_unchanged(tmp_path: Path) -> None:
+def test_copy_sqlite_snapshot_leaves_source_row_counts_and_metadata_unchanged(
+    tmp_path: Path,
+) -> None:
     db_path = tmp_path / "verify-source.db"
     _create_inventory_fixture(db_path)
     stat_before = db_path.stat()
@@ -404,7 +406,9 @@ def test_collect_sqlite_inventory_does_not_require_live_services(tmp_path: Path)
     assert os.environ.get("DOTMD_EMBEDDING_URL") is None or True
 
 
-def test_surreal_record_id_codec_round_trips_special_characters_without_leaking_raw_values() -> None:
+def test_surreal_record_id_codec_round_trips_special_characters_without_leaking_raw_values() -> (
+    None
+):
     from dotmd.storage.surreal import (  # type: ignore[import-not-found]
         SurrealRecordIdCodec,
         decode_surreal_record_id,

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 import json
 import sqlite3
 from dataclasses import asdict
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -19,12 +19,12 @@ from dotmd.storage.surreal_ops import (
     assert_embedded_safety_gate_passed,
     build_storage_recommendation,
     force_release_surreal_writer_guard,
-    rehearse_current_stack_rollback,
-    rehearse_surreal_backup_restore,
-    run_surreal_full_pipeline_smoke,
     probe_embedded_transaction_atomicity,
     probe_embedded_writer_safety,
+    rehearse_current_stack_rollback,
+    rehearse_surreal_backup_restore,
     release_stale_surreal_writer_guard,
+    run_surreal_full_pipeline_smoke,
     validate_surreal_cli_or_fallback_restore,
     verify_surreal_restore_counts,
     write_embedded_safety_gate_report,

@@ -449,7 +449,9 @@ def _write_gate_report(path: Path, *, go_no_go: str = "PASS") -> Path:
     return path
 
 
-def test_run_surreal_import_dry_run_counts_transformable_rows_without_writing(tmp_path: Path) -> None:
+def test_run_surreal_import_dry_run_counts_transformable_rows_without_writing(
+    tmp_path: Path,
+) -> None:
     from dotmd.ingestion.migrate_surreal import (  # type: ignore[import-not-found]
         SurrealImportMode,
         run_surreal_import,
@@ -536,9 +538,7 @@ def test_run_surreal_import_apply_preserves_ids_vectors_feedback_and_graph_prope
         stored_embedding = connection.select(codec.encode("embeddings", fixture_ids["chunk_id"]))
         stored_entity = connection.select(codec.encode("entities", fixture_ids["entity_name"]))
         stored_relation = connection.select(codec.encode("relations", fixture_ids["relation_id"]))
-        stored_feedback = connection.select(
-            codec.encode('feedback', 'feedback:/ one {"quoted"}')
-        )
+        stored_feedback = connection.select(codec.encode("feedback", 'feedback:/ one {"quoted"}'))
         stored_checkpoint = connection.select(codec.encode("checkpoints", "filesystem"))
         stored_cursor = connection.select(
             codec.encode("cursors", f"filesystem\x1f{fixture_ids['file_path']}")
@@ -626,10 +626,14 @@ def test_load_feedback_rows_for_surreal_uses_provider_and_never_opens_feedback_s
 
 
 def test_load_feedback_rows_for_surreal_fails_when_export_may_be_truncated() -> None:
-    from dotmd.ingestion.migrate_surreal import load_feedback_rows_for_surreal  # type: ignore[import-not-found]
+    from dotmd.ingestion.migrate_surreal import (
+        load_feedback_rows_for_surreal,  # type: ignore[import-not-found]
+    )
 
     class PageLimitProvider:
-        def list_all(self, limit: int = 50, include_closed: bool = False) -> list[dict[str, object]]:
+        def list_all(
+            self, limit: int = 50, include_closed: bool = False
+        ) -> list[dict[str, object]]:
             return [
                 {
                     "id": f"feedback-{index}",
@@ -646,7 +650,9 @@ def test_load_feedback_rows_for_surreal_fails_when_export_may_be_truncated() -> 
 def test_load_graph_rows_for_surreal_preserves_labels_weights_keys_and_typed_properties(
     tmp_path: Path,
 ) -> None:
-    from dotmd.ingestion.migrate_surreal import load_graph_rows_for_surreal  # type: ignore[import-not-found]
+    from dotmd.ingestion.migrate_surreal import (
+        load_graph_rows_for_surreal,  # type: ignore[import-not-found]
+    )
 
     fixture_ids = {
         "chunk_id": 'chunk:/ one {"quoted"} Привет',

@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from statistics import median
-from typing import Any
+from typing import Any, cast
 
 
 class RetrievalFailureCategory(StrEnum):
@@ -68,16 +68,15 @@ class RetrievalParityReport:
     def passed(self) -> bool:
         if any(result.blocking and not result.passed for result in self.results):
             return False
-        if self.scale_gate is not None and not bool(self.scale_gate.get("passed", False)):
-            return False
-        return True
+        return not (self.scale_gate is not None and not bool(self.scale_gate.get("passed", False)))
 
     @property
     def blocking_failure_categories(self) -> tuple[RetrievalFailureCategory, ...]:
-        categories: list[RetrievalFailureCategory] = []
-        for result in self.results:
-            if result.blocking and not result.passed and result.failure_category is not None:
-                categories.append(result.failure_category)
+        categories = [
+            result.failure_category
+            for result in self.results
+            if result.blocking and not result.passed and result.failure_category is not None
+        ]
         if self.scale_gate is not None:
             category = self.scale_gate.get("failure_category")
             if isinstance(category, RetrievalFailureCategory):
@@ -106,7 +105,7 @@ def _ids(results: Sequence[tuple[str, float]]) -> tuple[str, ...]:
 
 
 def _score_map(results: Sequence[tuple[str, float]]) -> dict[str, float]:
-    return {chunk_id: score for chunk_id, score in results}
+    return dict(results)
 
 
 def _rank_map(results: Sequence[tuple[str, float]]) -> dict[str, int]:
@@ -153,7 +152,7 @@ def _current_weighted_fields(
     if mapping is None or chunk_id is None:
         return set()
     raw = mapping.get(chunk_id, ())
-    return {field for field in raw}
+    return set(raw)
 
 
 def classify_fts_parity_failure(
@@ -288,6 +287,8 @@ def _normalize_surreal_relation_rows(
             continue
         if relation_type not in {"MENTIONS", "HAS_TAG", "TAGGED"}:
             continue
+        if not isinstance(weight, int | float):
+            continue
         normalized.append(
             (
                 source_id,
@@ -390,8 +391,7 @@ def compare_hybrid_results(
     candidate_engines = _matched_engine_map(surreal_engine_hits, candidate_ids)
     shared_ids = set(baseline_ids) & set(candidate_ids)
     matched_engines_match = all(
-        baseline_engines.get(chunk_id) == candidate_engines.get(chunk_id)
-        for chunk_id in shared_ids
+        baseline_engines.get(chunk_id) == candidate_engines.get(chunk_id) for chunk_id in shared_ids
     )
     passed = top_result_match and overlap == 1.0 and matched_engines_match
     rank_deltas, score_deltas = _shared_rank_and_score_deltas(baseline, candidate)
@@ -474,6 +474,10 @@ def evaluate_surreal_scale_gate(
             "query_latency_p95_ms": latency_p95,
         }
 
+    assert record_counts is not None
+    assert hnsw_build_seconds is not None
+    assert surrealkv_file_size_bytes is not None
+
     return {
         "passed": True,
         "failure_category": None,
@@ -508,11 +512,15 @@ class SurrealRetrievalParityHarness:
         if case.retrieval_kind == "vector":
             return compare_vector_results(case, current, surreal)  # type: ignore[arg-type]
         if case.retrieval_kind == "graph-direct":
-            return compare_graph_direct_results(  # type: ignore[arg-type]
+            seed_chunk_id = case.metadata.get("seed_chunk_id")
+            return compare_graph_direct_results(
                 case,
-                current,
-                surreal,
-                seed_chunk_id=case.metadata.get("seed_chunk_id"),  # type: ignore[arg-type]
+                cast(Sequence[tuple[str, str, float]], current),
+                cast(
+                    Sequence[Mapping[str, object]] | Sequence[tuple[str, str, float]],
+                    surreal,
+                ),
+                seed_chunk_id=seed_chunk_id if isinstance(seed_chunk_id, str) else None,
             )
         if case.retrieval_kind == "hybrid":
             baseline_fused, baseline_engine_hits = self._unpack_hybrid_payload(current)
@@ -582,13 +590,13 @@ class SurrealRetrievalParityHarness:
 __all__ = [
     "RetrievalFailureCategory",
     "RetrievalParityCase",
-    "RetrievalParityResult",
     "RetrievalParityReport",
+    "RetrievalParityResult",
     "SurrealRetrievalParityHarness",
     "classify_fts_parity_failure",
     "compare_fts_results",
-    "compare_vector_results",
     "compare_graph_direct_results",
     "compare_hybrid_results",
+    "compare_vector_results",
     "evaluate_surreal_scale_gate",
 ]

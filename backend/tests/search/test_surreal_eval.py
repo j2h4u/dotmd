@@ -71,23 +71,16 @@ def test_load_golden_queries_rejects_duplicate_ids_and_unknown_categories(
 ) -> None:
     corpus = tmp_path / "golden.jsonl"
     corpus.write_text(
-        "\n".join(
-            [
-                (
-                    '{"id":"sq-001","query":"one","category":"title-heavy",'
-                    '"primary_surface":"weighted_full_text","languages":["en"],'
-                    '"relevant":[{"ref":"filesystem:/mnt/a.md"}],'
-                    '"maybe":[],"expected_engines":["fts"],"broad_query":false,"notes":"ok"}'
-                ),
-                (
-                    '{"id":"sq-001","query":"two","category":"not-a-category",'
-                    '"primary_surface":"weighted_full_text","languages":["en"],'
-                    '"relevant":[{"ref":"filesystem:/mnt/b.md"}],'
-                    '"maybe":[],"expected_engines":["fts"],"broad_query":false,"notes":"bad"}'
-                ),
-            ]
-        )
-        + "\n",
+        (
+            '{"id":"sq-001","query":"one","category":"title-heavy",'
+            '"primary_surface":"weighted_full_text","languages":["en"],'
+            '"relevant":[{"ref":"filesystem:/mnt/a.md"}],'
+            '"maybe":[],"expected_engines":["fts"],"broad_query":false,"notes":"ok"}\n'
+            '{"id":"sq-001","query":"two","category":"not-a-category",'
+            '"primary_surface":"weighted_full_text","languages":["en"],'
+            '"relevant":[{"ref":"filesystem:/mnt/b.md"}],'
+            '"maybe":[],"expected_engines":["fts"],"broad_query":false,"notes":"bad"}\n'
+        ),
         encoding="utf-8",
     )
 

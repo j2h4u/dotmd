@@ -109,8 +109,7 @@ def _build_summary_markdown(summary: SurrealEvalSummary) -> str:
         ]
     )
     if summary.accepted_query_ids:
-        for query_id in summary.accepted_query_ids:
-            lines.append(f"- `{query_id}`")
+        lines.extend(f"- `{query_id}`" for query_id in summary.accepted_query_ids)
     else:
         lines.append("- None")
 
@@ -122,8 +121,7 @@ def _build_summary_markdown(summary: SurrealEvalSummary) -> str:
         ]
     )
     if summary.unresolved_blocking_query_ids:
-        for query_id in summary.unresolved_blocking_query_ids:
-            lines.append(f"- `{query_id}`")
+        lines.extend(f"- `{query_id}`" for query_id in summary.unresolved_blocking_query_ids)
     else:
         lines.append("- None")
 
@@ -135,8 +133,7 @@ def _build_summary_markdown(summary: SurrealEvalSummary) -> str:
         ]
     )
     if summary.unresolved_unclear_query_ids:
-        for query_id in summary.unresolved_unclear_query_ids:
-            lines.append(f"- `{query_id}`")
+        lines.extend(f"- `{query_id}`" for query_id in summary.unresolved_unclear_query_ids)
     else:
         lines.append("- None")
 

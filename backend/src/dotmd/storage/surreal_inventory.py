@@ -169,7 +169,9 @@ def _journal_mode(db_path: Path) -> str:
         return str(conn.execute("PRAGMA journal_mode").fetchone()[0])
 
 
-def copy_sqlite_snapshot(source_path: Path, snapshot_dir: Path, name: str) -> SQLiteSnapshotInventory:
+def copy_sqlite_snapshot(
+    source_path: Path, snapshot_dir: Path, name: str
+) -> SQLiteSnapshotInventory:
     """Create a consistent standalone SQLite snapshot via the backup API.
 
     The source path is caller-provided on purpose: the helper must remain
@@ -195,10 +197,12 @@ def copy_sqlite_snapshot(source_path: Path, snapshot_dir: Path, name: str) -> SQ
     shm_path = Path(f"{source_path}-shm")
     sidecars = [path.name for path in (wal_path, shm_path) if path.exists()]
 
-    with _sqlite_connect_read_only(source_path) as source_conn:
-        with sqlite3.connect(snapshot_path) as snapshot_conn:
-            source_conn.backup(snapshot_conn)
-            snapshot_conn.commit()
+    with (
+        _sqlite_connect_read_only(source_path) as source_conn,
+        sqlite3.connect(snapshot_path) as snapshot_conn,
+    ):
+        source_conn.backup(snapshot_conn)
+        snapshot_conn.commit()
 
     source_stat_after = source_path.stat()
     manifest = {
@@ -320,7 +324,7 @@ def collect_falkor_inventory(exporter: Any) -> FalkorSnapshotInventory:
 
     try:
         raw_inventory = exporter.export_inventory()
-    except Exception as exc:
+    except (KeyError, RuntimeError, TypeError, ValueError) as exc:
         return FalkorSnapshotInventory(
             node_counts={},
             edge_count=0,
@@ -344,7 +348,8 @@ def collect_falkor_inventory(exporter: Any) -> FalkorSnapshotInventory:
     ]
     return FalkorSnapshotInventory(
         node_counts={
-            str(key): int(value) for key, value in dict(raw_inventory.get("node_counts", {})).items()
+            str(key): int(value)
+            for key, value in dict(raw_inventory.get("node_counts", {})).items()
         },
         edge_count=int(raw_inventory.get("edge_count", 0)),
         relation_summaries=summaries,
@@ -361,7 +366,7 @@ def collect_feedback_inventory(provider: Any) -> FeedbackSnapshotInventory:
             raise RuntimeError(
                 "feedback provider returned the page limit; exhaustive feedback export is unavailable"
             )
-    except Exception as exc:
+    except (KeyError, RuntimeError, TypeError, ValueError) as exc:
         return FeedbackSnapshotInventory(
             total_feedback=0,
             status_counts={},
@@ -381,9 +386,7 @@ def collect_feedback_inventory(provider: Any) -> FeedbackSnapshotInventory:
     )
 
 
-def build_surreal_migration_map(
-    *, categories: dict[str, dict[str, Any]]
-) -> SurrealMigrationMap:
+def build_surreal_migration_map(*, categories: dict[str, dict[str, Any]]) -> SurrealMigrationMap:
     """Classify current data categories for transform-first migration."""
 
     missing = sorted(_REQUIRED_CATEGORIES - set(categories))
@@ -496,12 +499,14 @@ def write_inventory_reports(
         inventory_lines.append("")
         inventory_lines.append("### Relation Summaries")
         inventory_lines.append("")
-        for summary in falkor_inventory.relation_summaries:
-            inventory_lines.append(
+        inventory_lines.extend(
+            (
                 f"- `{summary.relation_label}`: count={summary.count}, "
                 f"weights={summary.weights}, keys={summary.metadata_keys}, "
                 f"types={summary.property_value_types}"
             )
+            for summary in falkor_inventory.relation_summaries
+        )
     else:
         inventory_lines.append(f"- Unavailable: {falkor_inventory.unavailable_reason}")
     inventory_lines.extend(["", "## Feedback Inventory", ""])

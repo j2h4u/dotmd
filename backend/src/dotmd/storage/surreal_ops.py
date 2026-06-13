@@ -8,11 +8,12 @@ import shutil
 import socket
 import sqlite3
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Iterable, Literal
+from typing import Any, Literal, cast
 
 from surrealdb import Surreal
 from surrealdb.errors import UnsupportedFeatureError
@@ -169,7 +170,9 @@ class SurrealWriterGuard:
         self.target_path = Path(target_path).resolve()
         self.owner_id = owner_id
         self.now = now
-        self.guard_path = self.target_path.with_name(f"{self.target_path.name}.surreal-writer-guard.json")
+        self.guard_path = self.target_path.with_name(
+            f"{self.target_path.name}.surreal-writer-guard.json"
+        )
         self._acquired = False
 
     def acquire(self) -> dict[str, str]:
@@ -216,7 +219,7 @@ def probe_embedded_transaction_atomicity(target_path: Path | str) -> SurrealEmbe
     target = Path(target_path).resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
     target_url = f"surrealkv://{target}"
-    db = Surreal(target_url)
+    db = cast(Any, Surreal(target_url))
     notes: list[str] = []
     blockers: list[str] = []
     evidence_paths = [str(target)]
@@ -255,7 +258,7 @@ def probe_embedded_transaction_atomicity(target_path: Path | str) -> SurrealEmbe
     finally:
         db.close()
 
-    check_db = Surreal(target_url)
+    check_db = cast(Any, Surreal(target_url))
     try:
         check_db.connect()
         check_db.use("dotmd", "phase38")
@@ -278,7 +281,7 @@ def probe_embedded_transaction_atomicity(target_path: Path | str) -> SurrealEmbe
     finally:
         check_db.close()
 
-    verify_db = Surreal(target_url)
+    verify_db = cast(Any, Surreal(target_url))
     try:
         verify_db.connect()
         verify_db.use("dotmd", "phase38")
@@ -420,7 +423,11 @@ def force_release_surreal_writer_guard(
     target = Path(target_path).resolve()
     guard_path = SurrealWriterGuard(target, owner_id="unused").guard_path
     current = _require_guard_metadata(guard_path)
-    expected = str(Path(expected_target_path).resolve()) if expected_target_path is not None else str(target)
+    expected = (
+        str(Path(expected_target_path).resolve())
+        if expected_target_path is not None
+        else str(target)
+    )
     if current.get("target_path") != expected:
         raise ValueError("target path mismatch for force-release")
     guard_path.unlink(missing_ok=True)
@@ -543,7 +550,13 @@ def rehearse_current_stack_rollback(
     falkor_restored = falkor_target.read_bytes() == falkor_source.read_bytes()
     sqlite_smoke = _sqlite_restore_smoke(sqlite_target)
     falkor_smoke = _json_restore_smoke(falkor_target)
-    smoke = bool(smoke_queries) and sqlite_restored and falkor_restored and sqlite_smoke and falkor_smoke
+    smoke = (
+        bool(smoke_queries)
+        and sqlite_restored
+        and falkor_restored
+        and sqlite_smoke
+        and falkor_smoke
+    )
     return CurrentStackRollbackReport(
         sqlite_source=str(sqlite_source),
         falkor_source=str(falkor_source),
@@ -681,7 +694,9 @@ def write_embedded_safety_gate_report(
         raise ValueError("at least one report is required")
 
     output = Path(output_path)
-    merged = _merge_reports(report_list, downstream_plan=downstream_plan, extra_evidence=evidence_paths or [])
+    merged = _merge_reports(
+        report_list, downstream_plan=downstream_plan, extra_evidence=evidence_paths or []
+    )
     lines = [
         "# Phase 38 Plan 05 Embedded Safety Gate",
         "",
@@ -692,8 +707,7 @@ def write_embedded_safety_gate_report(
         "",
         "## Evidence Paths",
     ]
-    for path in merged.evidence_paths:
-        lines.append(f"- `{path}`")
+    lines.extend(f"- `{path}`" for path in merged.evidence_paths)
 
     lines.extend(["", "## Embedded Probe Results"])
     for report in report_list:
@@ -701,11 +715,17 @@ def write_embedded_safety_gate_report(
         lines.append(f"- control_result: {'yes' if report.control_result else 'no'}")
         lines.append(f"- go_no_go: {'PASS' if report.go_no_go else 'BLOCKED'}")
         if report.transaction_committed is not None:
-            lines.append(f"- atomicity_commit_visible_after_reconnect: {report.transaction_committed}")
+            lines.append(
+                f"- atomicity_commit_visible_after_reconnect: {report.transaction_committed}"
+            )
         if report.transaction_rollback_clean is not None:
-            lines.append(f"- atomicity_rollback_clean_after_failure: {report.transaction_rollback_clean}")
+            lines.append(
+                f"- atomicity_rollback_clean_after_failure: {report.transaction_rollback_clean}"
+            )
         if report.writer_guard_blocked_second_writer is not None:
-            lines.append(f"- writer_guard_blocked_second_writer: {report.writer_guard_blocked_second_writer}")
+            lines.append(
+                f"- writer_guard_blocked_second_writer: {report.writer_guard_blocked_second_writer}"
+            )
         if report.stale_owner_recovered is not None:
             lines.append(f"- stale_owner_ttl_recovered: {report.stale_owner_recovered}")
         if report.force_release_recorded_previous_owner is not None:
@@ -713,9 +733,13 @@ def write_embedded_safety_gate_report(
                 f"- force-release_recorded_previous_owner: {report.force_release_recorded_previous_owner}"
             )
         if report.previous_owner_metadata is not None:
-            lines.append(f"- previous_owner_metadata: `{json.dumps(report.previous_owner_metadata, sort_keys=True)}`")
+            lines.append(
+                f"- previous_owner_metadata: `{json.dumps(report.previous_owner_metadata, sort_keys=True)}`"
+            )
         if report.stale_owner_metadata is not None:
-            lines.append(f"- stale_owner_metadata: `{json.dumps(report.stale_owner_metadata, sort_keys=True)}`")
+            lines.append(
+                f"- stale_owner_metadata: `{json.dumps(report.stale_owner_metadata, sort_keys=True)}`"
+            )
         if report.force_released_owner_metadata is not None:
             lines.append(
                 f"- force_released_owner_metadata: `{json.dumps(report.force_released_owner_metadata, sort_keys=True)}`"
@@ -754,11 +778,7 @@ def assert_embedded_safety_gate_passed(report: SurrealEmbeddedSafetyReport) -> N
 
 def _extract_statuses(response: dict[str, Any]) -> list[str]:
     results = response.get("result", [])
-    statuses: list[str] = []
-    for item in results:
-        if isinstance(item, dict):
-            statuses.append(str(item.get("status", "UNKNOWN")))
-    return statuses
+    return [str(item.get("status", "UNKNOWN")) for item in results if isinstance(item, dict)]
 
 
 def _read_guard_metadata(guard_path: Path) -> dict[str, str] | None:
@@ -851,9 +871,7 @@ def _read_surreal_counts_manifest(source_path: Path) -> SurrealImportCounts:
     if not isinstance(raw, dict):
         return SurrealImportCounts()
     allowed = set(SurrealImportCounts.__dataclass_fields__)
-    return SurrealImportCounts(
-        **{key: int(value) for key, value in raw.items() if key in allowed}
-    )
+    return SurrealImportCounts(**{key: int(value) for key, value in raw.items() if key in allowed})
 
 
 def _sqlite_restore_smoke(sqlite_path: Path) -> bool:

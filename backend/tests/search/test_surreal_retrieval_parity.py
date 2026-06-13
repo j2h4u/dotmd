@@ -130,7 +130,7 @@ class TestParityComparators:
         )
 
         current_results = [(f"chunk-{index:02d}", 1.0 - index * 0.01) for index in range(10)]
-        surreal_results = current_results[:8] + [("chunk-11", 0.81), ("chunk-12", 0.80)]
+        surreal_results = [*current_results[:8], ("chunk-11", 0.81), ("chunk-12", 0.80)]
 
         result = compare_vector_results(case, current_results, surreal_results)
 
@@ -356,5 +356,8 @@ class TestParityHarness:
         )
 
         assert scale_gate["passed"] is False
-        assert scale_gate["failure_category"] is RetrievalFailureCategory.FAIL_UNAVAILABLE_SCALE_EVIDENCE
+        assert (
+            scale_gate["failure_category"]
+            is RetrievalFailureCategory.FAIL_UNAVAILABLE_SCALE_EVIDENCE
+        )
         assert scale_gate["recommendation_gate"] == "fail"

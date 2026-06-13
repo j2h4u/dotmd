@@ -11,7 +11,7 @@ import base64
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from surrealdb import RecordID, Surreal
 
@@ -104,14 +104,14 @@ class SurrealConnection:
 
     def __init__(self, config: SurrealStoreConfig) -> None:
         self.config = config
-        self._db = Surreal(config.url)
+        self._db = cast(Any, Surreal(config.url))
         self._db.connect()
         self._db.use(config.namespace, config.database)
 
     def __enter__(self) -> SurrealConnection:
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
+    def __exit__(self, _exc_type, _exc, _tb) -> None:  # type: ignore[no-untyped-def]
         self.close()
 
     @property
@@ -146,7 +146,9 @@ class SurrealConnection:
 
     def scan_table(self, table_name: str) -> list[dict[str, Any]]:
         selected = self._db.select(table_name)
-        return selected if isinstance(selected, list) else []
+        if not isinstance(selected, list):
+            return []
+        return [dict(row) for row in selected if isinstance(row, dict)]
 
     def delete_all_from_table(self, table_name: str) -> int:
         deleted = 0
@@ -204,9 +206,7 @@ class SurrealMetadataStore:
                     chunk.provenance.document_ref if chunk.provenance is not None else None
                 ),
                 "source_unit_refs": (
-                    list(chunk.provenance.source_unit_refs)
-                    if chunk.provenance is not None
-                    else []
+                    list(chunk.provenance.source_unit_refs) if chunk.provenance is not None else []
                 ),
             }
             self._connection.upsert(self._codec.encode("chunks", chunk.chunk_id), payload)
@@ -361,7 +361,9 @@ class SurrealMetadataStore:
     def replace_binding_rows(self, rows: list[dict[str, Any]]) -> int:
         for row in rows:
             self._connection.upsert(
-                self._codec.encode("bindings", _composite_id(row["namespace"], row["resource_ref"])),
+                self._codec.encode(
+                    "bindings", _composite_id(row["namespace"], row["resource_ref"])
+                ),
                 dict(row),
             )
         return len(rows)
@@ -699,8 +701,10 @@ class SurrealGraphStore:
             ("entities", "Entity"),
             ("tags", "Tag"),
         ):
-            for row in self._connection.scan_table(table_name):
-                nodes.append({"id": str(row.get("id")), "label": label, "properties": dict(row)})
+            nodes.extend(
+                {"id": str(row.get("id")), "label": label, "properties": dict(row)}
+                for row in self._connection.scan_table(table_name)
+            )
         edges = [
             {
                 "source": str(row.get("source_id")),
