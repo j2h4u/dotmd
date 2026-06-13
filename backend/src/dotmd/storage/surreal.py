@@ -1,9 +1,4 @@
-"""Thin SurrealDB storage adapters for the Phase 38 prototype.
-
-This module is intentionally narrow: it mirrors the existing storage protocol
-method names and provides import-friendly helpers, but it does not wire Surreal
-into DotMDService, IndexingPipeline, CLI defaults, or production startup.
-"""
+"""SurrealDB storage adapters and schema wiring for migration work."""
 
 from __future__ import annotations
 
@@ -16,36 +11,17 @@ from typing import Any, cast
 from surrealdb import RecordID, Surreal
 
 from dotmd.core.models import Chunk, ChunkProvenance, IndexStats
-
-THIN_PROTOTYPE_NOTE = (
-    "Phase 38 keeps Surreal as a thin prototype adapter surface for evidence gathering only."
+from dotmd.storage.surreal_schema import (
+    build_dotmd_surreal_schema_plan,
+    define_dotmd_surreal_schema,
 )
-UNSUPPORTED_PRODUCTION_BEHAVIORS = [
-    "No DotMDService wiring in Phase 38.",
-    "No IndexingPipeline default backend switch in Phase 38.",
-    "No production startup, CLI default, or Docker compose integration in Phase 38.",
-]
 
-_SCHEMA_TABLES = {
-    "documents": "document envelopes from source_documents",
-    "source_units": "source-unit rows derived from source_unit_fingerprints",
-    "chunks": "content-addressed chunk payloads",
-    "provenance": "chunk provenance and holder rows",
-    "bindings": "resource binding lifecycle state",
-    "fingerprints": "chunk/embed/meta/source-unit fingerprint rows",
-    "embeddings": "stored vector rows imported from sqlite-vec payloads",
-    "vector_components": "stored dual-component vectors imported as data",
-    "entities": "entity nodes imported from graph exporter rows",
-    "files": "graph file nodes",
-    "sections": "graph section nodes",
-    "tags": "graph tag nodes",
-    "relations": "typed graph relation rows with property payloads",
-    "chunk_file_bindings": "Phase 16 chunk/file/path/index many-to-many bindings",
-    "feedback": "feedback rows imported through provider surface",
-    "cursors": "resource-ref keyed cursor/reference audit rows",
-    "checkpoints": "source checkpoint rows",
-    "stats": "prototype-only aggregate counts",
-}
+__all__ = (
+    "SurrealConnection",
+    "SurrealRecordIdCodec",
+    "SurrealStoreConfig",
+    "define_dotmd_surreal_schema",
+)
 
 
 def _urlsafe_encode(raw_identifier: str) -> str:
@@ -99,6 +75,46 @@ def _composite_id(*parts: object) -> str:
     return "\x1f".join(str(part) for part in parts)
 
 
+def _schema_table_names() -> tuple[str, ...]:
+    return tuple(table.name for table in build_dotmd_surreal_schema_plan().tables)
+
+
+def _extract_table_mode(info: Any) -> str | None:
+    if isinstance(info, dict):
+        result = info.get("result")
+        if isinstance(result, list) and result:
+            return _extract_table_mode(result[0])
+        if isinstance(result, dict):
+            return _extract_table_mode(result)
+        for key in ("schemafull", "kind"):
+            value = info.get(key)
+            if isinstance(value, bool):
+                return "SCHEMAFULL" if value else "SCHEMALESS"
+            if isinstance(value, str):
+                upper_value = value.upper()
+                if "RELATION" in upper_value:
+                    return "RELATION"
+                if upper_value in {"SCHEMAFULL", "SCHEMALESS"}:
+                    return upper_value
+        tables = info.get("tables")
+        if isinstance(tables, dict):
+            return _extract_table_mode(tables)
+    if isinstance(info, list):
+        for item in info:
+            mode = _extract_table_mode(item)
+            if mode is not None:
+                return mode
+    if isinstance(info, str):
+        upper_value = info.upper()
+        if "TYPE RELATION" in upper_value or "RELATION" in upper_value:
+            return "RELATION"
+        if "SCHEMAFULL" in upper_value:
+            return "SCHEMAFULL"
+        if "SCHEMALESS" in upper_value:
+            return "SCHEMALESS"
+    return None
+
+
 class SurrealConnection:
     """Small connection wrapper that normalizes select/query behavior."""
 
@@ -150,6 +166,28 @@ class SurrealConnection:
             return []
         return [dict(row) for row in selected if isinstance(row, dict)]
 
+    def inspect_schema(self) -> dict[str, Any]:
+        """Best-effort schema inspection for apply-status decisions."""
+
+        meta = self.select("schema_meta:dotmd_schema")
+        schema_version = None
+        if isinstance(meta, dict):
+            raw_version = meta.get("schema_version")
+            if isinstance(raw_version, str):
+                schema_version = raw_version
+
+        table_modes: dict[str, str] = {}
+        for table in build_dotmd_surreal_schema_plan().tables:
+            try:
+                info = self.query_raw(f"INFO FOR TABLE {table.name};")
+            except Exception:  # pragma: no cover - best-effort fallback for different backends
+                continue
+            mode = _extract_table_mode(info)
+            if mode is not None:
+                table_modes[table.name] = mode
+
+        return {"schema_version": schema_version, "table_modes": table_modes}
+
     def delete_all_from_table(self, table_name: str) -> int:
         deleted = 0
         for row in self.scan_table(table_name):
@@ -162,25 +200,9 @@ class SurrealConnection:
 
     def clear_phase38_tables(self) -> int:
         deleted = 0
-        for table_name in _SCHEMA_TABLES:
+        for table_name in _schema_table_names():
             deleted += self.delete_all_from_table(table_name)
         return deleted
-
-
-def define_dotmd_surreal_schema(connection: SurrealConnection | None = None) -> dict[str, Any]:
-    """Return the prototype schema plan and optionally define the tables."""
-
-    statements = [f"DEFINE TABLE {table_name} SCHEMALESS;" for table_name in _SCHEMA_TABLES]
-    if connection is not None:
-        for statement in statements:
-            connection.query(statement)
-    return {
-        "tables": list(_SCHEMA_TABLES),
-        "table_notes": dict(_SCHEMA_TABLES),
-        "statements": statements,
-        "notes": [THIN_PROTOTYPE_NOTE],
-        "unsupported_production_behaviors": list(UNSUPPORTED_PRODUCTION_BEHAVIORS),
-    }
 
 
 class SurrealMetadataStore:
