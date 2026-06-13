@@ -279,3 +279,75 @@ def test_main_requires_acceptance_metadata_for_accepted_rows(tmp_path: Path) -> 
                 str(summary),
             ]
         )
+
+
+def test_main_wraps_malformed_acceptance_json_with_line_number(tmp_path: Path) -> None:
+    corpus = tmp_path / "golden.jsonl"
+    baseline = tmp_path / "baseline.jsonl"
+    candidate = tmp_path / "candidate.jsonl"
+    acceptance = tmp_path / "acceptance.jsonl"
+    output = tmp_path / "diffs.jsonl"
+    summary = tmp_path / "summary.md"
+
+    _write_jsonl(
+        corpus,
+        [
+            {
+                "id": "sq-004",
+                "query": "query",
+                "category": "semantic",
+                "primary_surface": "vector",
+                "languages": ["en"],
+                "relevant": [{"ref": "filesystem:/mnt/relevant.md"}],
+                "maybe": [],
+                "expected_engines": ["semantic"],
+                "broad_query": False,
+                "notes": "fixture",
+            }
+        ],
+    )
+    _write_jsonl(
+        baseline,
+        [
+            {
+                "query_id": "sq-004",
+                "query": "query",
+                "category": "semantic",
+                "primary_surface": "vector",
+                "top_refs": ["filesystem:/mnt/relevant.md"],
+                "matched_engines": {"filesystem:/mnt/relevant.md": ["semantic"]},
+            }
+        ],
+    )
+    _write_jsonl(
+        candidate,
+        [
+            {
+                "query_id": "sq-004",
+                "query": "query",
+                "category": "semantic",
+                "primary_surface": "vector",
+                "top_refs": ["filesystem:/mnt/relevant.md"],
+                "matched_engines": {"filesystem:/mnt/relevant.md": ["semantic"]},
+            }
+        ],
+    )
+    acceptance.write_text('{"query_id": "sq-004",\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="acceptance.jsonl line 1: invalid JSON"):
+        main(
+            [
+                "--golden-queries",
+                str(corpus),
+                "--baseline-results",
+                str(baseline),
+                "--candidate-results",
+                str(candidate),
+                "--acceptance",
+                str(acceptance),
+                "--output-jsonl",
+                str(output),
+                "--summary-markdown",
+                str(summary),
+            ]
+        )

@@ -200,6 +200,39 @@ def _parse_difference(raw: object, *, path: Path, line_number: int) -> AcceptedD
         raise ValueError(f"{path} line {line_number}: unknown difference {raw!r}") from exc
 
 
+def _parse_str_list(raw: object, *, path: Path, line_number: int, field: str) -> tuple[str, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ValueError(f"{path} line {line_number}: {field} must be a list")
+    return tuple(str(item) for item in raw)
+
+
+def _parse_str_map(raw: object, *, path: Path, line_number: int, field: str) -> dict[str, str]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path} line {line_number}: {field} must be an object")
+    return {str(key): str(value) for key, value in raw.items()}
+
+
+def _parse_engine_map(
+    raw: object, *, path: Path, line_number: int
+) -> dict[str, tuple[str, ...]]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path} line {line_number}: matched_engines must be an object")
+    engines_by_ref: dict[str, tuple[str, ...]] = {}
+    for ref, engines in raw.items():
+        if not isinstance(engines, list):
+            raise ValueError(
+                f"{path} line {line_number}: matched_engines[{str(ref)!r}] must be a list"
+            )
+        engines_by_ref[str(ref)] = tuple(str(engine) for engine in engines)
+    return engines_by_ref
+
+
 def _parse_label_list(raw: object, *, path: Path, line_number: int) -> tuple[JsonObject, ...]:
     if raw is None:
         return ()
@@ -239,13 +272,21 @@ def load_golden_queries(path: Path) -> list[GoldenQuery]:
                     path=path,
                     line_number=line_number,
                 ),
-                languages=tuple(str(language) for language in payload.get("languages", [])),
+                languages=_parse_str_list(
+                    payload.get("languages"),
+                    path=path,
+                    line_number=line_number,
+                    field="languages",
+                ),
                 relevant=_parse_label_list(
                     payload.get("relevant"), path=path, line_number=line_number
                 ),
                 maybe=_parse_label_list(payload.get("maybe"), path=path, line_number=line_number),
-                expected_engines=tuple(
-                    str(engine) for engine in payload.get("expected_engines", [])
+                expected_engines=_parse_str_list(
+                    payload.get("expected_engines"),
+                    path=path,
+                    line_number=line_number,
+                    field="expected_engines",
                 ),
                 broad_query=bool(payload.get("broad_query", False)),
                 notes=str(payload.get("notes", "")),
@@ -278,13 +319,11 @@ def load_eval_results(path: Path) -> list[EvalResult]:
         top_refs = payload.get("top_refs")
         if not isinstance(top_refs, list):
             raise ValueError(f"{path} line {line_number}: top_refs must be a list")
-        matched_engines_raw = payload.get("matched_engines", {})
-        if not isinstance(matched_engines_raw, dict):
-            raise ValueError(f"{path} line {line_number}: matched_engines must be an object")
-        matched_engines = {
-            str(ref): tuple(str(engine) for engine in engines)
-            for ref, engines in matched_engines_raw.items()
-        }
+        matched_engines = _parse_engine_map(
+            payload.get("matched_engines"),
+            path=path,
+            line_number=line_number,
+        )
         rows.append(
             EvalResult(
                 query_id=query_id,
@@ -293,15 +332,26 @@ def load_eval_results(path: Path) -> list[EvalResult]:
                 primary_surface=primary_surface,
                 top_refs=tuple(str(ref) for ref in top_refs),
                 matched_engines=matched_engines,
-                snippets_by_ref={
-                    str(ref): str(text)
-                    for ref, text in dict(payload.get("snippets_by_ref", {})).items()
-                },
-                read_evidence_by_ref={
-                    str(ref): str(text)
-                    for ref, text in dict(payload.get("read_evidence_by_ref", {})).items()
-                },
-                unreadable_refs=frozenset(str(ref) for ref in payload.get("unreadable_refs", [])),
+                snippets_by_ref=_parse_str_map(
+                    payload.get("snippets_by_ref"),
+                    path=path,
+                    line_number=line_number,
+                    field="snippets_by_ref",
+                ),
+                read_evidence_by_ref=_parse_str_map(
+                    payload.get("read_evidence_by_ref"),
+                    path=path,
+                    line_number=line_number,
+                    field="read_evidence_by_ref",
+                ),
+                unreadable_refs=frozenset(
+                    _parse_str_list(
+                        payload.get("unreadable_refs"),
+                        path=path,
+                        line_number=line_number,
+                        field="unreadable_refs",
+                    )
+                ),
             )
         )
     return rows
@@ -402,6 +452,7 @@ def classify_difference(
 
     unreadable_approved = approved_refs & candidate.unreadable_refs
     lost_approved = tuple(sorted(baseline_matched - candidate_matched))
+    lost_relevant = tuple(sorted(baseline_relevant - candidate_relevant))
     gained_relevant = tuple(sorted(candidate_relevant - baseline_relevant))
 
     if unreadable_approved:
@@ -436,7 +487,7 @@ def classify_difference(
         category=query.category,
         baseline_refs=baseline.top_refs,
         candidate_refs=candidate.top_refs,
-        lost_relevant_refs=lost_approved,
+        lost_relevant_refs=lost_relevant,
         gained_relevant_refs=gained_relevant,
         rank_deltas=rank_deltas,
         matched_engines=_matched_engines(baseline, candidate),

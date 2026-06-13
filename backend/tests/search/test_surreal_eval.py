@@ -13,6 +13,7 @@ from dotmd.search.surreal_eval import (
     GoldenQuery,
     GoldenQueryCategory,
     classify_difference,
+    load_eval_results,
     load_golden_queries,
     summarize_diffs,
 )
@@ -94,6 +95,41 @@ def test_load_golden_queries_rejects_duplicate_ids_and_unknown_categories(
         load_golden_queries(corpus)
 
 
+def test_load_golden_queries_rejects_malformed_collection_fields(tmp_path: Path) -> None:
+    corpus = tmp_path / "golden.jsonl"
+    corpus.write_text(
+        (
+            '{"id":"sq-001","query":"one","category":"title-heavy",'
+            '"primary_surface":"weighted_full_text","languages":"en",'
+            '"relevant":[{"ref":"filesystem:/mnt/a.md"}],'
+            '"maybe":[],"expected_engines":["fts"],"broad_query":false,"notes":"bad"}\n'
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="line 1: languages must be a list"):
+        load_golden_queries(corpus)
+
+
+def test_load_eval_results_rejects_malformed_engine_maps(tmp_path: Path) -> None:
+    results = tmp_path / "results.jsonl"
+    results.write_text(
+        (
+            '{"query_id":"sq-001","query":"one","category":"title-heavy",'
+            '"primary_surface":"weighted_full_text",'
+            '"top_refs":["filesystem:/mnt/a.md"],'
+            '"matched_engines":{"filesystem:/mnt/a.md":"fts"}}\n'
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"line 1: matched_engines\['filesystem:/mnt/a.md'\] must be a list",
+    ):
+        load_eval_results(results)
+
+
 def test_approved_corpus_file_covers_required_categories() -> None:
     corpus = Path(__file__).resolve().parents[2] / "devtools" / "surreal_golden_queries.jsonl"
 
@@ -153,6 +189,21 @@ def test_classify_difference_marks_same_accepted_set_as_harmless_reorder() -> No
     assert diff.cutover_gate is CutoverGate.ALLOW
     assert diff.rank_deltas["filesystem:/mnt/relevant.md"] == 1
     assert diff.rank_deltas["filesystem:/mnt/maybe.md"] == -1
+
+
+def test_lost_maybe_ref_does_not_appear_as_lost_relevant_ref() -> None:
+    query = _query(
+        relevant=[{"ref": "filesystem:/mnt/relevant.md"}],
+        maybe=[{"ref": "filesystem:/mnt/maybe.md"}],
+    )
+    baseline = _result(top_refs=("filesystem:/mnt/relevant.md", "filesystem:/mnt/maybe.md"))
+    candidate = _result(top_refs=("filesystem:/mnt/relevant.md",))
+
+    diff = classify_difference(query=query, baseline=baseline, candidate=candidate)
+
+    assert diff.classification is AcceptedDifference.REGRESSION
+    assert diff.lost_relevant_refs == ()
+    assert "lost_approved_ref" in diff.rationale_codes
 
 
 def test_classify_difference_marks_lost_or_unreadable_relevant_refs_as_regression() -> None:

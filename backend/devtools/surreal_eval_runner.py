@@ -53,7 +53,10 @@ def _load_acceptances(path: Path | None) -> list[DiffAcceptance]:
             line = raw_line.strip()
             if not line:
                 continue
-            payload = json.loads(line)
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{path} line {line_number}: invalid JSON") from exc
             if not isinstance(payload, dict):
                 raise ValueError(f"{path} line {line_number}: expected JSON object")
             query_id = str(payload.get("query_id", "")).strip()
