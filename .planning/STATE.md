@@ -4,7 +4,7 @@ milestone: v1.8
 milestone_name: SurrealDB-Native Storage Cutover
 status: planning
 stopped_at: Completed 38-03-PLAN.md
-last_updated: "2026-06-13T09:52:51.636Z"
+last_updated: "2026-06-13T18:17:22.220Z"
 last_activity: 2026-06-13
 progress:
   total_phases: 14
@@ -301,13 +301,13 @@ retrieval parity failed on hybrid/RRF behavior.
 ## Current Position
 
 Phase: 41 (production-grade-surreal-schema-and-import) — NEXT
-Plan: Not started
-Status: Phase 40 complete — ready for Phase 41 planning
-Last activity: 2026-06-13 -- Phase 40 verified and completed
+Plan: 3 plans ready
+Status: Ready to execute
+Last activity: 2026-06-13 -- Phase 41 planned and review-converged
 
 ## Operator Next Steps
 
-- Plan Phase 41 with `/gsd-plan-phase 41`
+- Execute Phase 41 with `/gsd-execute-phase 41`
 
 ## Session
 
