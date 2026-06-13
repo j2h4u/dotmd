@@ -19,7 +19,7 @@ overrides_applied: 0
 
 | # | Truth | Status | Evidence |
 | --- | --- | --- | --- |
-| 1 | SURR-EVAL-01: maintainers have a golden query corpus covering title-heavy, tag-heavy, body-heavy, semantic, graph/entity, hybrid, source-ref, and mixed RU/EN scenarios. | ✓ VERIFIED | `backend/devtools/surreal_golden_queries.jsonl` has 16 rows, two per category, all using `filesystem:/mnt/...` refs; `graph-entity` rows are `sq-009` and `sq-010`; mixed RU/EN rows are `sq-015` and `sq-016`; `backend/tests/search/test_surreal_eval.py::test_approved_corpus_file_covers_required_categories` enforces the coverage. |
+| 1 | SURR-EVAL-01: maintainers have a golden query corpus covering title-heavy, tag-heavy, body-heavy, semantic, graph/entity, hybrid, source-ref, and mixed RU/EN scenarios. | ✓ VERIFIED | `backend/devtools/surreal_golden_queries.jsonl` has 16 rows, two per category, all using `filesystem:/mnt/...` refs; `graph-entity` rows are `sq-009` and `sq-010`; mixed RU/EN rows are `sq-015` and `sq-016`; `backend/tests/search/test_surreal_eval.py::test_approved_corpus_file_covers_required_categories` enforces checked-in corpus coverage, and `run_eval()` rejects incomplete supplied corpora at runtime before classification. |
 | 2 | SURR-EVAL-02: maintainers can produce machine-readable old-vs-Surreal diff rows classified as improvement, harmless_reorder, regression, or unclear. | ✓ VERIFIED | `backend/src/dotmd/search/surreal_eval.py` defines typed loaders, `classify_difference()`, and JSONL-ready `SurrealEvalDiffRow.to_jsonable()`; `backend/devtools/surreal_eval_runner.py` writes sorted UTF-8 JSONL; focused tests cover all four classifications plus `matched_engines`, `rank_deltas`, lost/gained refs, and malformed input handling. |
 | 3 | SURR-EVAL-03: unresolved regressions and unresolved unclear differences block the aggregate cutover gate unless explicitly accepted with `accepted_by` and `accepted_reason`, while raw classification and raw gate stay preserved. | ✓ VERIFIED | `summarize_diffs()` blocks unresolved `CutoverGate.BLOCK` and `CutoverGate.REQUIRES_ACCEPTANCE` rows, but `with_acceptance()` only adds acceptance metadata without mutating raw `classification` or `cutover_gate`; tests assert accepted regressions/unclear rows resolve aggregate blockers while preserving raw values. |
 | 4 | The old SQLite/sqlite-vec/FTS5 + FalkorDB stack is baseline/evaluator evidence only, not a compatibility target. | ✓ VERIFIED | `docs/surrealdb-native-retrieval-contract.md` and `docs/surrealdb-evaluation-harness.md` both state the old stack is baseline/evaluator only; the runner consumes operator-supplied captured JSONL instead of implementing dual-runtime compatibility behavior. |
@@ -31,12 +31,12 @@ overrides_applied: 0
 
 | Artifact | Expected | Status | Details |
 | --- | --- | --- | --- |
-| `backend/src/dotmd/search/surreal_eval.py` | Typed golden-query, diff-classification, acceptance, and aggregate-gate logic | ✓ VERIFIED | Exists, substantive (541 lines), imports Phase 39 policy enums, validates JSONL, classifies diffs, and summarizes gates. |
-| `backend/devtools/surreal_eval_runner.py` | CLI/devtool runner that compares captured old-stack and candidate result JSONL and writes JSONL plus Markdown reports | ✓ VERIFIED | Exists, substantive (219 lines), bootstraps imports for standalone execution, loads corpus/results/acceptances, writes deterministic outputs, returns exit codes. |
+| `backend/src/dotmd/search/surreal_eval.py` | Typed golden-query, diff-classification, acceptance, and aggregate-gate logic | ✓ VERIFIED | Exists, substantive (552 lines), imports Phase 39 policy enums, validates JSONL, classifies diffs, validates required category coverage, and summarizes gates. |
+| `backend/devtools/surreal_eval_runner.py` | CLI/devtool runner that compares captured old-stack and candidate result JSONL and writes JSONL plus Markdown reports | ✓ VERIFIED | Exists, substantive (223 lines), bootstraps imports for standalone execution, loads corpus/results/acceptances, enforces complete category coverage by default, writes deterministic outputs, returns exit codes. |
 | `backend/devtools/surreal_golden_queries.jsonl` | Golden corpus with at least two reviewed rows for each required category | ✓ VERIFIED | Exists with 16 rows and complete category coverage. |
 | `backend/devtools/surreal_golden_queries_review.md` | Human-readable corpus review ledger with category matrix and evidence ledger | ✓ VERIFIED | Exists and records category rationale plus ref/read evidence for every checked-in row. |
 | `backend/tests/search/test_surreal_eval.py` | RED/GREEN tests for evaluator types, classification rules, and aggregate gate semantics | ✓ VERIFIED | Exists with 12 focused tests covering loaders, coverage, classifications, contains semantics, and acceptance gating. |
-| `backend/tests/devtools/test_surreal_eval_runner.py` | RED/GREEN tests for JSONL loading, runner report writing, and CLI exit behavior | ✓ VERIFIED | Exists with 4 focused tests covering machine-readable output, unresolved blocker exit code, acceptance validation, and malformed acceptance JSON. |
+| `backend/tests/devtools/test_surreal_eval_runner.py` | RED/GREEN tests for JSONL loading, runner report writing, and CLI exit behavior | ✓ VERIFIED | Exists with 5 focused tests covering machine-readable output, unresolved blocker exit code, incomplete corpus rejection, acceptance validation, and malformed acceptance JSON. |
 | `docs/surrealdb-evaluation-harness.md` | Durable operator/developer documentation for Phase 40 harness usage and scope boundaries | ✓ VERIFIED | Exists and documents inputs, schema, classification, acceptance metadata, JSONL output, exit semantics, and non-goals. |
 
 ### Key Link Verification
@@ -44,7 +44,7 @@ overrides_applied: 0
 | From | To | Via | Status | Details |
 | --- | --- | --- | --- | --- |
 | `backend/src/dotmd/search/surreal_eval.py` | `backend/src/dotmd/search/surreal_contract.py` | imports `AcceptedDifference`, `CutoverGate`, `RetrievalSurface`, and `default_surreal_retrieval_contract` | ✓ WIRED | Manual check: multiline import at lines 11-16; `default_surreal_retrieval_contract().cutover_gate_for(...)` used at lines 483-495. The helper query missed this because its regex expected a single-line import. |
-| `backend/devtools/surreal_eval_runner.py` | `backend/src/dotmd/search/surreal_eval.py` | loads corpus/result rows, calls `classify_difference()` and `summarize_diffs()`, then writes reports | ✓ WIRED | Manual check: multiline import at lines 14-21; `run_eval()` calls `load_golden_queries()`, `load_eval_results()`, `classify_difference()`, and `summarize_diffs()` at lines 155-175. |
+| `backend/devtools/surreal_eval_runner.py` | `backend/src/dotmd/search/surreal_eval.py` | loads corpus/result rows, validates category coverage, calls `classify_difference()` and `summarize_diffs()`, then writes reports | ✓ WIRED | Manual check: `run_eval()` calls `load_golden_queries()`, `validate_required_category_coverage()`, `load_eval_results()`, `classify_difference()`, and `summarize_diffs()`. |
 | `backend/tests/search/test_surreal_eval.py` | `backend/src/dotmd/search/surreal_eval.py` | behavior-first TDD coverage for SURR-EVAL-01, SURR-EVAL-02, and SURR-EVAL-03 | ✓ WIRED | Imports evaluator symbols at lines 10-18 and exercises loaders, classifier, and summary logic across 12 tests. |
 | `backend/tests/devtools/test_surreal_eval_runner.py` | `backend/devtools/surreal_eval_runner.py` | tmp-path JSONL fixtures prove report shape without live old-stack or Surreal runtime wiring | ✓ WIRED | Imports `EvalRunnerConfig`, `main`, and `run_eval` at line 10 and exercises runner behavior across 4 tests. |
 
@@ -59,10 +59,10 @@ overrides_applied: 0
 
 | Behavior | Command | Result | Status |
 | --- | --- | --- | --- |
-| Focused Phase 40 evaluator/runner suite passes | `cd backend && uv run pytest tests/search/test_surreal_eval.py tests/devtools/test_surreal_eval_runner.py -q` | `16 passed in 0.49s` | ✓ PASS |
-| Focused Phase 40 suite passes through repo alias | `cd backend && just unit tests/search/test_surreal_eval.py tests/devtools/test_surreal_eval_runner.py` | `16 passed in 0.52s` | ✓ PASS |
+| Focused Phase 40 evaluator/runner suite passes | `cd backend && uv run pytest tests/search/test_surreal_eval.py tests/devtools/test_surreal_eval_runner.py -q` | `17 passed in 0.39s` | ✓ PASS |
+| Focused Phase 40 suite passes through repo alias | `cd backend && just unit tests/search/test_surreal_eval.py tests/devtools/test_surreal_eval_runner.py` | `17 passed in 0.30s` | ✓ PASS |
 | Prior Surreal regression suite still passes | `cd backend && uv run pytest tests/search/test_surreal_contract.py tests/search/test_surreal_retrieval_parity.py -q` | `15 passed in 0.28s` | ✓ PASS |
-| The focused suite actually contains the claimed 16 tests | `cd backend && uv run pytest tests/search/test_surreal_eval.py tests/devtools/test_surreal_eval_runner.py --collect-only -q` | `16 tests collected` | ✓ PASS |
+| The focused suite actually contains the claimed 17 tests | `cd backend && uv run pytest tests/search/test_surreal_eval.py tests/devtools/test_surreal_eval_runner.py --collect-only -q` | `17 tests collected` | ✓ PASS |
 | CLI entrypoint is runnable and exposes the documented interface | `cd backend && uv run python devtools/surreal_eval_runner.py --help` | Usage output includes `--golden-queries`, `--baseline-results`, `--candidate-results`, `--acceptance`, `--output-jsonl`, and `--summary-markdown` | ✓ PASS |
 
 ### Probe Execution
@@ -75,7 +75,7 @@ overrides_applied: 0
 
 | Requirement | Source Plan | Description | Status | Evidence |
 | --- | --- | --- | --- | --- |
-| `SURR-EVAL-01` | `40-01-PLAN.md` | Golden query set covers title-heavy, tag-heavy, body-heavy, semantic, graph/entity, hybrid, source-ref, and mixed RU/EN queries. | ✓ SATISFIED | 16-row corpus, two-per-category coverage test, `graph-entity` enum-backed rows, and review ledger evidence for each ref. |
+| `SURR-EVAL-01` | `40-01-PLAN.md` | Golden query set covers title-heavy, tag-heavy, body-heavy, semantic, graph/entity, hybrid, source-ref, and mixed RU/EN queries. | ✓ SATISFIED | 16-row corpus, two-per-category coverage test, runtime incomplete-corpus rejection, `graph-entity` enum-backed rows, and review ledger evidence for each ref. |
 | `SURR-EVAL-02` | `40-01-PLAN.md` | Old-vs-Surreal diff reports classify changed results as improvement, harmless reorder, regression, or unclear. | ✓ SATISFIED | `classify_difference()` uses Phase 39 enums; runner writes machine-readable JSONL rows with `matched_engines`, `rank_deltas`, lost/gained refs, and rationale codes; tests assert the exact classes. |
 | `SURR-EVAL-03` | `40-01-PLAN.md` | Regressions block cutover unless fixed or explicitly accepted as deliberate search semantics changes. | ✓ SATISFIED | `summarize_diffs()` blocks unresolved blockers/unclear rows, requires `accepted_by` and `accepted_reason`, and preserves raw classification/gate fields when accepted. |
 

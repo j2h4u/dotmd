@@ -8,7 +8,7 @@ requires:
     provides: "AcceptedDifference/CutoverGate policy vocabulary and cutover semantics"
 provides:
   - "Typed golden-query evaluator and aggregate gate logic"
-  - "File-driven JSONL diff runner with markdown summaries"
+  - "File-driven JSONL diff runner with markdown summaries and runtime corpus coverage checks"
   - "Reviewed 16-row golden corpus grounded in filesystem:/mnt refs"
 affects: [phase-41, phase-42, phase-43, surrealdb, search, migration]
 tech-stack:
@@ -54,7 +54,7 @@ status: complete
 
 ## Accomplishments
 
-- Added RED/GREEN coverage for golden corpus parsing, diff classification, acceptance semantics, JSONL report shape, strict JSONL validation, and runner exit behavior.
+- Added RED/GREEN coverage for golden corpus parsing, runtime category coverage enforcement, diff classification, acceptance semantics, JSONL report shape, strict JSONL validation, and runner exit behavior.
 - Implemented `surreal_eval.py` and `surreal_eval_runner.py` as dependency-light Phase 40 evaluation surfaces that reuse Phase 39 policy enums instead of duplicating literals.
 - Checked in a reviewed 16-row golden corpus plus durable operator docs, all grounded in actual `filesystem:/mnt/...` refs and captured read evidence.
 
@@ -67,6 +67,7 @@ Each task was committed atomically:
 3. **Task 3: Add golden corpus, review ledger, and durable harness docs** - `51f3f6e` (docs)
 4. **Code review fix: Harden input validation and diff reporting** - `8d53785` (fix)
 5. **Format fix: Format the new evaluator module** - `7731129` (style)
+6. **Security fix: Enforce runtime golden corpus category coverage** - `4691a7e` (fix)
 
 ## Files Created/Modified
 
@@ -75,7 +76,7 @@ Each task was committed atomically:
 - `backend/devtools/surreal_golden_queries.jsonl` - 16-row reviewed corpus covering all required Phase 40 categories
 - `backend/devtools/surreal_golden_queries_review.md` - category matrix and evidence ledger for every checked-in ref anchor
 - `backend/tests/search/test_surreal_eval.py` - evaluator RED/GREEN tests including corpus coverage and acceptance semantics
-- `backend/tests/devtools/test_surreal_eval_runner.py` - runner JSONL/markdown/exit-code tests
+- `backend/tests/devtools/test_surreal_eval_runner.py` - runner JSONL/markdown/exit-code and runtime coverage-enforcement tests
 - `docs/surrealdb-evaluation-harness.md` - durable operator documentation for inputs, outputs, schema, and scope boundaries
 
 ## Decisions Made
@@ -84,6 +85,7 @@ Each task was committed atomically:
 - Corpus `contains` strings are human/captured-evidence anchors only; the runner never reads arbitrary filesystem paths from label refs during report generation.
 - Acceptance metadata (`accepted_by`, `accepted_reason`) resolves aggregate blockers without rewriting the raw `AcceptedDifference` or `CutoverGate` on the affected row.
 - Malformed collection fields and acceptance JSON now fail with line-numbered `ValueError`; dropped `maybe` refs no longer appear in `lost_relevant_refs`.
+- The CLI runner rejects an incomplete golden corpus before baseline/candidate diff classification runs.
 
 ## Deviations from Plan
 
@@ -115,8 +117,8 @@ None - no external service configuration required.
 - Summary file exists on disk.
 - All claimed task artifacts exist on disk.
 - Task commits `e872d78`, `8604573`, `51f3f6e`, post-review fix `8d53785`, and format fix `7731129` are present in git history.
-- `cd backend && uv run pytest tests/search/test_surreal_eval.py tests/devtools/test_surreal_eval_runner.py -x` passed (`16 passed` after post-review hardening).
-- `cd backend && just unit tests/search/test_surreal_eval.py tests/devtools/test_surreal_eval_runner.py` passed (`16 passed` after post-review hardening).
+- `cd backend && uv run pytest tests/search/test_surreal_eval.py tests/devtools/test_surreal_eval_runner.py -q` passed (`17 passed` after security hardening).
+- `cd backend && just unit tests/search/test_surreal_eval.py tests/devtools/test_surreal_eval_runner.py` passed (`17 passed` after security hardening).
 - `cd backend && uv run pytest tests/search/test_surreal_contract.py tests/search/test_surreal_retrieval_parity.py -q` passed (`15 passed`) as the prior-phase Surreal regression gate.
 - Optional `cd backend && just verify` remains red only on unrelated pre-existing formatting debt outside this plan’s scope.
 
