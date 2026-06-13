@@ -198,9 +198,9 @@ tooling that preserves existing data where practical.
 
 Plans:
 
-- [ ] 41-01-PLAN.md - Production schema catalog and storage DDL contract.
-- [ ] 41-02-PLAN.md - Production migration runner, overwrite policy, checkpoints, and data preservation verification.
-- [ ] 41-03-PLAN.md - Migration evidence reports, restore manifests, devtool runner, and runbook.
+- [ ] 41-01-PLAN.md - Production schema catalog, category coverage, and storage DDL safety contract.
+- [ ] 41-02-PLAN.md - Production migration runner, source-capture manifests, overwrite policy, checkpoints, and partial-write semantics.
+- [ ] 41-03-PLAN.md - Migration evidence reports, verified restore rehearsal, devtool runner, and runbook.
 
 ### Phase 42: Surreal-native retrieval implementation
 
@@ -1634,4 +1634,4 @@ Success criteria:
 ---
 
 *Roadmap created: 2026-03-26*
-*Last updated: 2026-06-12*
+*Last updated: 2026-06-13*
