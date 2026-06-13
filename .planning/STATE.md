@@ -4,14 +4,14 @@ milestone: v1.8
 milestone_name: SurrealDB-Native Storage Cutover
 status: planning
 stopped_at: Completed 38-03-PLAN.md
-last_updated: "2026-06-13T09:09:54.013Z"
+last_updated: "2026-06-13T09:32:30.473Z"
 last_activity: 2026-06-13
 progress:
   total_phases: 14
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 7
-  completed_plans: 6
-  percent: 14
+  completed_plans: 7
+  percent: 21
 ---
 
 # GSD State
@@ -96,6 +96,7 @@ Items acknowledged and deferred at v1.7 milestone close:
 | Phase 38 P02 | 13 min | 2 tasks | 5 files |
 | Phase 38 P03 | 21 min | 3 tasks | 3 files |
 | 38 | 5 | - | - |
+| Phase 40 P01 | 15 min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -210,6 +211,9 @@ Recent decisions affecting current work:
 - [Phase 38]: [Plan 38-03]: Weighted-field FTS mismatch is a blocking defer signal and cannot be treated as migrate-ready parity. — Representative copied-snapshot FTS evidence showed top-k visibility drift caused by title/tags weighting versus text-only proxy behavior.
 - [Phase 38]: [Plan 38-03]: Retrieval parity must reuse copied snapshot rows and stored embeddings; no TEI calls or source indexing are allowed in the evidence path. — The parity harness used copied snapshot rows and fixed stored embeddings so the evidence measures storage behavior instead of recomputation.
 - [Phase 38]: [Plan 38-03]: Hybrid/RRF parity comparisons normalize ties by score then chunk_id for deterministic evidence. — Stable tie ordering removes flaky rank drift so hybrid parity failures reflect real attribution gaps instead of incidental sort order.
+- [Phase 40]: GoldenQueryCategory.GRAPH_ENTITY.value is the single serialized graph/entity category label.
+- [Phase 40]: contains anchors are checked only against supplied snippets/read evidence and never by dereferencing corpus refs.
+- [Phase 40]: Accepted regressions and unclear rows keep raw classification/gate while dropping out of unresolved aggregate counts once accepted.
 
 ### Pending Todos
 
@@ -297,7 +301,7 @@ retrieval parity failed on hybrid/RRF behavior.
 
 Phase: 40 (evaluation-harness-and-golden-queries) — EXECUTING
 Plan: 1 of 1
-Status: Executing Phase 40
+Status: Phase complete — ready for verification
 Last activity: 2026-06-13 -- Phase 40 execution started
 
 ## Operator Next Steps
@@ -306,6 +310,6 @@ Last activity: 2026-06-13 -- Phase 40 execution started
 
 ## Session
 
-**Last session:** 2026-06-12T15:33:05.156Z
+**Last session:** 2026-06-13T09:31:38.530Z
 **Stopped at:** Completed 38-03-PLAN.md
 **Resume file:** None

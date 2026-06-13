@@ -152,8 +152,10 @@ categories before implementation starts.
 
 - [x] Define the target search semantics for BM25 weighted fields, vector
   search, graph traversal, hybrid fusion, and reranker inputs.
+
 - [x] Treat the old stack as baseline evidence only, not as a compatibility
   target.
+
 - [x] Define accepted-difference categories: improvement, harmless reorder,
   regression, and unclear.
 
@@ -166,16 +168,18 @@ Plans:
 **Goal:** Build the quality evaluation surface that decides whether SurrealDB
 search is good enough to cut over.
 **Depends on:** Phase 39
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 - [ ] Build a golden query set covering title-heavy, tag-heavy, body-heavy,
   semantic, graph/entity, hybrid, source-ref, and mixed RU/EN scenarios.
+
 - [ ] Produce machine-readable diff reports for old-vs-Surreal runs.
 - [ ] Gate on user-visible quality and explainable differences, not exact rank
   parity.
 
 Plans:
-- [ ] 40-01-PLAN.md - Evaluation harness, golden corpus, diff classification, and cutover-gate reporting.
+
+- [x] 40-01-PLAN.md - Evaluation harness, golden corpus, diff classification, and cutover-gate reporting.
 
 ### Phase 41: Production-grade Surreal schema and import
 
@@ -187,6 +191,7 @@ tooling that preserves existing data where practical.
 - [ ] Harden the Phase 38 schema/import proof into production migration code.
 - [ ] Preserve existing chunks, embeddings, source refs, graph relations,
   feedback, cursors, checkpoints, and retained artifacts where practical.
+
 - [ ] Avoid default rechunking, reembedding, and entity re-extraction unless a
   phase explicitly proves there is no safe transform path.
 
@@ -212,6 +217,7 @@ and classify every material difference.
 - [ ] Run old stack and Surreal stack side by side on production-derived data.
 - [ ] Record search quality, latency, index build time, store size, and memory
   evidence.
+
 - [ ] Resolve every regression or explicitly accept the new semantics.
 
 ### Phase 44: Production cutover
@@ -234,6 +240,7 @@ after SurrealDB cutover is accepted.
 
 - [ ] Delete SQLite/sqlite-vec/FTS5, FalkorDB, and LadybugDB storage/retrieval
   code paths, configs, tests, docs, env vars, and deployment assumptions.
+
 - [ ] Remove temporary evaluator/baseline code that only exists for migration.
 - [ ] Verify there are no fallback backend switches, compat shims, or dead
   legacy imports left.
@@ -281,7 +288,7 @@ after SurrealDB cutover is accepted.
 | 37. Airweave connector compatibility spike | 4/4 | Complete    | 2026-05-13 |
 | 38. Embedded SurrealDB storage spike | 5/5 | Complete    | 2026-06-12 |
 | 39. SurrealDB-native retrieval contract | 1/1 | Complete | 2026-06-13 |
-| 40. Evaluation harness and golden queries | v1.8 | Planned | — |
+| 40. Evaluation harness and golden queries | 1/1 | Complete   | 2026-06-13 |
 | 41. Production-grade Surreal schema and import | v1.8 | Planned | — |
 | 42. Surreal-native retrieval implementation | v1.8 | Planned | — |
 | 43. Shadow run and quality gate | v1.8 | Planned | — |

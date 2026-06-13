@@ -19,13 +19,17 @@ existing data, production cutover, and complete removal of legacy storage code.
 
 - A SurrealDB-native retrieval contract covering weighted BM25/full-text,
   vector search, graph traversal, hybrid fusion, and reranker inputs.
+
 - A golden-query evaluation harness that classifies differences as improvement,
   harmless reorder, regression, or unclear.
+
 - Production-grade Surreal schema/import code that migrates existing stored
   chunks, embeddings, source refs, graph relations, feedback, cursors, and
   checkpoints where practical.
+
 - SurrealDB-native retrieval implementation using real full-text/vector/graph
   capabilities instead of Phase 38 proxy logic.
+
 - Shadow-run evidence on production-derived data before cutover.
 - Production cutover to SurrealDB as the single dotMD storage/retrieval backend.
 - Removal of SQLite/sqlite-vec/FTS5, FalkorDB, and LadybugDB code paths after
@@ -35,8 +39,10 @@ existing data, production cutover, and complete removal of legacy storage code.
 
 - Explainable search diff reports that make changed ranking semantics debuggable
   without requiring exact compatibility.
+
 - Index build time, store size, latency, and memory evidence for production-like
   data volume.
+
 - Migration tooling that avoids default rechunking, reembedding, and entity
   re-extraction unless a phase explicitly proves there is no safe transform
   path.
@@ -66,14 +72,14 @@ existing data, production cutover, and complete removal of legacy storage code.
 
 ### Evaluation
 
-- [ ] **SURR-EVAL-01**: A golden query set covers title-heavy, tag-heavy,
+- [x] **SURR-EVAL-01**: A golden query set covers title-heavy, tag-heavy,
   body-heavy, semantic, graph/entity, hybrid, source-ref, and mixed RU/EN
   queries.
 
-- [ ] **SURR-EVAL-02**: Old-vs-Surreal diff reports classify changed results as
+- [x] **SURR-EVAL-02**: Old-vs-Surreal diff reports classify changed results as
   improvement, harmless reorder, regression, or unclear.
 
-- [ ] **SURR-EVAL-03**: Regressions block cutover unless fixed or explicitly
+- [x] **SURR-EVAL-03**: Regressions block cutover unless fixed or explicitly
   accepted as a deliberate search semantics change.
 
 ### Migration
@@ -148,9 +154,9 @@ existing data, production cutover, and complete removal of legacy storage code.
 | SURR-RET-01 | Phase 39 | Complete |
 | SURR-RET-02 | Phase 39 | Complete |
 | SURR-RET-03 | Phase 39 | Complete |
-| SURR-EVAL-01 | Phase 40 | Pending |
-| SURR-EVAL-02 | Phase 40 | Pending |
-| SURR-EVAL-03 | Phase 40 / Phase 43 | Pending |
+| SURR-EVAL-01 | Phase 40 | Complete |
+| SURR-EVAL-02 | Phase 40 | Complete |
+| SURR-EVAL-03 | Phase 40 / Phase 43 | Complete |
 | SURR-MIG-01 | Phase 41 | Pending |
 | SURR-MIG-02 | Phase 39 / Phase 41 | Complete |
 | SURR-MIG-03 | Phase 41 / Phase 44 | Pending |
@@ -167,6 +173,7 @@ existing data, production cutover, and complete removal of legacy storage code.
 | SURR-DEL-04 | Phase 45 | Pending |
 
 **Coverage:**
+
 - v1.8 requirements: 20 total
 - Mapped to phases: 20
 - Unmapped: 0
