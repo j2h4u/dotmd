@@ -1,7 +1,7 @@
 ---
 phase: 41
 reviewers: [opencode, codex]
-reviewed_at: 2026-06-13T11:09:03.633847Z
+reviewed_at: 2026-06-13T18:09:27Z
 plans_reviewed:
   - .planning/phases/41-production-grade-surreal-schema-and-import/41-01-PLAN.md
   - .planning/phases/41-production-grade-surreal-schema-and-import/41-02-PLAN.md
@@ -240,7 +240,83 @@ Both reviewers agree that Phase 41 is well-scoped and correctly split into schem
 - OpenCode treated the relation table endpoint constraint as a HIGH import-failure risk; Codex rated relation shape as MEDIUM but agreed that premature graph schema constraints could be costly.
 - Codex accepted the overall schema plan but cautioned against over-specifying DDL and vector component storage before Phase 42 proves access patterns; OpenCode was more concerned with missing source categories and import phase coverage.
 
-### Current Convergence Counts
+### Cycle 1 Convergence Counts
 
 - Unresolved HIGH concerns: 6
 - Unresolved actionable MEDIUM/LOW concerns: 17
+
+---
+
+## Cycle 2 Review — after replan commit 1cb9797
+
+Reviewed at: 2026-06-13T18:09:27Z
+
+Plans reviewed:
+
+- `.planning/phases/41-production-grade-surreal-schema-and-import/41-01-PLAN.md`
+- `.planning/phases/41-production-grade-surreal-schema-and-import/41-02-PLAN.md`
+- `.planning/phases/41-production-grade-surreal-schema-and-import/41-03-PLAN.md`
+
+Review history reviewed:
+
+- `.planning/phases/41-production-grade-surreal-schema-and-import/41-REVIEWS.md`
+
+### OpenCode Review
+
+OpenCode was invoked with `/home/j2h4u/.opencode/bin/opencode run --dangerously-skip-permissions` against the Cycle 2 review prompt. The first invocation failed because `/tmp` prompt access was rejected by OpenCode's permission sandbox; the rerun started reading the prompt but did not return a completed markdown review within the review window and was terminated.
+
+Partial OpenCode tool log evidence before termination:
+
+```text
+> build · deepseek-v4-pro
+→ Read /tmp/gsd-review-prompt-41-cycle2.md [offset=762]
+• Read Phase 41 plans and reviews General Agent
+✓ Read Phase 41 plans and reviews General Agent
+```
+
+No OpenCode concerns are counted because the reviewer did not produce a completed review.
+
+### Codex Review
+
+## Summary
+
+The Cycle 2 plans have incorporated the prior HIGH findings in substance. `chunk_file_bindings`, partial-write semantics, source capture consistency, live snapshot/export preconditions, relation `ENFORCED` risk, and verified restore evidence are now all present in `must_haves`, tasks, acceptance criteria, threat models, and review feedback tables.
+
+I would treat Phase 41 as converged enough to execute, with one remaining actionable cleanup around target-mode wording.
+
+## Strengths
+
+- Prior HIGHs are explicitly mapped in `review_feedback`, not just implied.
+- Scope boundaries remain clean: no retrieval, no shadow run, no cutover, no fallback, no legacy deletion.
+- Data-preservation coverage is now strong: schema, import phases, checkpoints, reports, and restore evidence all include the critical categories.
+- Safety posture is much better: source manifests, overwrite policy, no-recompute guard, partial-write reporting, restore verification, and report redaction are planned.
+
+## Concerns
+
+- **MEDIUM:** `41-02` still has one wording conflict around APPLY safety. One bullet says `run_surreal_migration(mode=APPLY)` "requires a passed embedded safety gate," while later bullets correctly distinguish `embedded_local` from `remote_service`. The implementation task clarifies this, so it is not a HIGH, but the RED tests could accidentally encode the stricter blanket rule.
+
+No unresolved HIGH concerns found.
+
+## Suggestions
+
+- In `41-02`, change the blanket APPLY bullet to: "APPLY requires target-mode-specific safety checks: embedded_local requires the embedded safety gate; remote_service requires explicit remote target identity and overwrite policy."
+- Keep the current review feedback tables. They are useful convergence evidence and should help executors avoid reintroducing old gaps.
+
+## Risk Assessment
+
+**MEDIUM.** The phase is still inherently risky because it covers production migration semantics, partial writes, restore evidence, and source consistency. The plans now name those risks and require tests/reports for them. Residual risk is mostly implementation complexity, not planning omission.
+
+## Convergence Assessment
+
+- `current_high`: 0
+- `current_actionable`: 1
+
+The single actionable item is the APPLY safety wording conflict in `41-02`; all previously raised HIGHs are now incorporated or explicitly handled.
+
+### Cycle 2 Consensus Summary
+
+The completed Codex review found that all Cycle 1 HIGH concerns are now incorporated into the current PLAN files through `must_haves`, task behavior, acceptance criteria, threat models, and `review_feedback` dispositions. The attempted OpenCode review did not complete and therefore contributes no countable findings.
+
+Current unresolved HIGH concerns: 0.
+
+Current unresolved actionable non-HIGH concerns: 1.
