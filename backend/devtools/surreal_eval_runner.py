@@ -11,7 +11,7 @@ from pathlib import Path
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from dotmd.search.surreal_eval import (  # noqa: E402
+from dotmd.search.surreal_eval import (
     DiffAcceptance,
     SurrealEvalDiffRow,
     SurrealEvalSummary,
@@ -19,6 +19,7 @@ from dotmd.search.surreal_eval import (  # noqa: E402
     load_eval_results,
     load_golden_queries,
     summarize_diffs,
+    validate_required_category_coverage,
 )
 
 
@@ -32,6 +33,7 @@ class EvalRunnerConfig:
     output_jsonl: Path
     summary_markdown: Path
     acceptance: Path | None = None
+    require_complete_category_coverage: bool = True
 
 
 @dataclass(slots=True, frozen=True)
@@ -153,6 +155,8 @@ def run_eval(config: EvalRunnerConfig) -> EvalRunResult:
     """Compare baseline and candidate result captures against the golden corpus."""
 
     golden_queries = load_golden_queries(config.golden_queries)
+    if config.require_complete_category_coverage:
+        validate_required_category_coverage(golden_queries, path=config.golden_queries)
     baseline_results = {row.query_id: row for row in load_eval_results(config.baseline_results)}
     candidate_results = {row.query_id: row for row in load_eval_results(config.candidate_results)}
     acceptances = _load_acceptances(config.acceptance)

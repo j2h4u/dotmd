@@ -15,7 +15,6 @@ from dotmd.search.surreal_contract import (
     default_surreal_retrieval_contract,
 )
 
-
 JsonObject = dict[str, Any]
 
 
@@ -36,6 +35,22 @@ def required_golden_query_categories() -> frozenset[GoldenQueryCategory]:
     """Return the complete required category set for the checked-in corpus."""
 
     return frozenset(GoldenQueryCategory)
+
+
+def validate_required_category_coverage(
+    queries: list[GoldenQuery] | tuple[GoldenQuery, ...],
+    *,
+    path: Path | None = None,
+) -> None:
+    """Reject a golden corpus that cannot exercise every required category."""
+
+    present = {query.category for query in queries}
+    missing = required_golden_query_categories() - present
+    if not missing:
+        return
+    prefix = f"{path}: " if path is not None else ""
+    missing_names = ", ".join(sorted(category.value for category in missing))
+    raise ValueError(f"{prefix}golden query corpus missing required categories: {missing_names}")
 
 
 @dataclass(slots=True, frozen=True)
@@ -524,9 +539,7 @@ def summarize_diffs(
         if row.cutover_gate is CutoverGate.REQUIRES_ACCEPTANCE and not row.accepted
     )
     accepted_query_ids = tuple(row.query_id for row in resolved_rows if row.accepted)
-    classification_counts: dict[AcceptedDifference, int] = {
-        difference: 0 for difference in AcceptedDifference
-    }
+    classification_counts: dict[AcceptedDifference, int] = dict.fromkeys(AcceptedDifference, 0)
     for row in resolved_rows:
         classification_counts[row.classification] += 1
 

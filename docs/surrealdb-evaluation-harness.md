@@ -27,6 +27,10 @@ Every file is parsed line by line as UTF-8 JSONL. Duplicate query IDs, unknown
 categories, unknown retrieval surfaces, and malformed JSON objects fail fast
 with a line-numbered `ValueError`.
 
+The CLI runner also rejects a supplied golden corpus that does not cover every
+required `GoldenQueryCategory` before any baseline/candidate diff classification
+runs.
+
 ## Golden Query Schema
 
 Each golden row contains:

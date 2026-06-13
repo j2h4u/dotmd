@@ -6,8 +6,8 @@ import json
 from pathlib import Path
 
 import pytest
-
 from devtools.surreal_eval_runner import EvalRunnerConfig, main, run_eval
+
 from dotmd.search.surreal_contract import AcceptedDifference, CutoverGate
 from dotmd.search.surreal_eval import GoldenQueryCategory
 
@@ -17,6 +17,45 @@ def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
         "\n".join(json.dumps(row, ensure_ascii=False, sort_keys=True) for row in rows) + "\n",
         encoding="utf-8",
     )
+
+
+def _golden_row(query_id: str, category: GoldenQueryCategory) -> dict[str, object]:
+    return {
+        "id": query_id,
+        "query": f"{category.value} query",
+        "category": category.value,
+        "primary_surface": "vector",
+        "languages": ["en"],
+        "relevant": [{"ref": f"filesystem:/mnt/{query_id}.md"}],
+        "maybe": [],
+        "expected_engines": ["semantic"],
+        "broad_query": False,
+        "notes": "complete corpus fixture",
+    }
+
+
+def _result_row(query_id: str, category: GoldenQueryCategory) -> dict[str, object]:
+    return {
+        "query_id": query_id,
+        "query": f"{category.value} query",
+        "category": category.value,
+        "primary_surface": "vector",
+        "top_refs": [f"filesystem:/mnt/{query_id}.md"],
+        "matched_engines": {f"filesystem:/mnt/{query_id}.md": ["semantic"]},
+    }
+
+
+def _write_complete_passing_fixture(corpus: Path, baseline: Path, candidate: Path) -> None:
+    query_ids_by_category = {category: f"sq-{category.value}" for category in GoldenQueryCategory}
+    _write_jsonl(
+        corpus,
+        [_golden_row(query_id, category) for category, query_id in query_ids_by_category.items()],
+    )
+    result_rows = [
+        _result_row(query_id, category) for category, query_id in query_ids_by_category.items()
+    ]
+    _write_jsonl(baseline, result_rows)
+    _write_jsonl(candidate, result_rows)
 
 
 def test_run_eval_writes_machine_readable_rows_and_markdown_summary(tmp_path: Path) -> None:
@@ -106,6 +145,7 @@ def test_run_eval_writes_machine_readable_rows_and_markdown_summary(tmp_path: Pa
             acceptance=acceptance,
             output_jsonl=output,
             summary_markdown=summary,
+            require_complete_category_coverage=False,
         )
     )
 
@@ -197,6 +237,7 @@ def test_run_eval_keeps_raw_regression_gate_and_fails_on_unresolved_blocker(
             acceptance=None,
             output_jsonl=output,
             summary_markdown=summary,
+            require_complete_category_coverage=False,
         )
     )
 
@@ -209,6 +250,42 @@ def test_run_eval_keeps_raw_regression_gate_and_fails_on_unresolved_blocker(
     assert "Unresolved blockers" in summary.read_text(encoding="utf-8")
 
 
+def test_run_eval_rejects_incomplete_corpus_by_default(tmp_path: Path) -> None:
+    corpus = tmp_path / "golden.jsonl"
+    baseline = tmp_path / "baseline.jsonl"
+    candidate = tmp_path / "candidate.jsonl"
+    output = tmp_path / "diffs.jsonl"
+    summary = tmp_path / "summary.md"
+
+    _write_jsonl(
+        corpus,
+        [_golden_row("sq-semantic", GoldenQueryCategory.SEMANTIC)],
+    )
+    _write_jsonl(
+        baseline,
+        [_result_row("sq-semantic", GoldenQueryCategory.SEMANTIC)],
+    )
+    _write_jsonl(
+        candidate,
+        [_result_row("sq-semantic", GoldenQueryCategory.SEMANTIC)],
+    )
+
+    with pytest.raises(ValueError, match="golden query corpus missing required categories"):
+        run_eval(
+            EvalRunnerConfig(
+                golden_queries=corpus,
+                baseline_results=baseline,
+                candidate_results=candidate,
+                acceptance=None,
+                output_jsonl=output,
+                summary_markdown=summary,
+            )
+        )
+
+    assert not output.exists()
+    assert not summary.exists()
+
+
 def test_main_requires_acceptance_metadata_for_accepted_rows(tmp_path: Path) -> None:
     corpus = tmp_path / "golden.jsonl"
     baseline = tmp_path / "baseline.jsonl"
@@ -217,50 +294,11 @@ def test_main_requires_acceptance_metadata_for_accepted_rows(tmp_path: Path) -> 
     output = tmp_path / "diffs.jsonl"
     summary = tmp_path / "summary.md"
 
+    _write_complete_passing_fixture(corpus, baseline, candidate)
     _write_jsonl(
-        corpus,
-        [
-            {
-                "id": "sq-003",
-                "query": "query",
-                "category": "semantic",
-                "primary_surface": "vector",
-                "languages": ["en"],
-                "relevant": [{"ref": "filesystem:/mnt/relevant.md"}],
-                "maybe": [],
-                "expected_engines": ["semantic"],
-                "broad_query": True,
-                "notes": "broad query",
-            }
-        ],
+        acceptance,
+        [{"query_id": "sq-semantic", "accepted_by": "maintainer"}],
     )
-    _write_jsonl(
-        baseline,
-        [
-            {
-                "query_id": "sq-003",
-                "query": "query",
-                "category": "semantic",
-                "primary_surface": "vector",
-                "top_refs": ["filesystem:/mnt/noise-a.md"],
-                "matched_engines": {"filesystem:/mnt/noise-a.md": ["semantic"]},
-            }
-        ],
-    )
-    _write_jsonl(
-        candidate,
-        [
-            {
-                "query_id": "sq-003",
-                "query": "query",
-                "category": "semantic",
-                "primary_surface": "vector",
-                "top_refs": ["filesystem:/mnt/noise-b.md"],
-                "matched_engines": {"filesystem:/mnt/noise-b.md": ["semantic"]},
-            }
-        ],
-    )
-    _write_jsonl(acceptance, [{"query_id": "sq-003", "accepted_by": "maintainer"}])
 
     with pytest.raises(ValueError, match="accepted_reason"):
         main(
@@ -289,52 +327,10 @@ def test_main_wraps_malformed_acceptance_json_with_line_number(tmp_path: Path) -
     output = tmp_path / "diffs.jsonl"
     summary = tmp_path / "summary.md"
 
-    _write_jsonl(
-        corpus,
-        [
-            {
-                "id": "sq-004",
-                "query": "query",
-                "category": "semantic",
-                "primary_surface": "vector",
-                "languages": ["en"],
-                "relevant": [{"ref": "filesystem:/mnt/relevant.md"}],
-                "maybe": [],
-                "expected_engines": ["semantic"],
-                "broad_query": False,
-                "notes": "fixture",
-            }
-        ],
-    )
-    _write_jsonl(
-        baseline,
-        [
-            {
-                "query_id": "sq-004",
-                "query": "query",
-                "category": "semantic",
-                "primary_surface": "vector",
-                "top_refs": ["filesystem:/mnt/relevant.md"],
-                "matched_engines": {"filesystem:/mnt/relevant.md": ["semantic"]},
-            }
-        ],
-    )
-    _write_jsonl(
-        candidate,
-        [
-            {
-                "query_id": "sq-004",
-                "query": "query",
-                "category": "semantic",
-                "primary_surface": "vector",
-                "top_refs": ["filesystem:/mnt/relevant.md"],
-                "matched_engines": {"filesystem:/mnt/relevant.md": ["semantic"]},
-            }
-        ],
-    )
+    _write_complete_passing_fixture(corpus, baseline, candidate)
     acceptance.write_text('{"query_id": "sq-004",\n', encoding="utf-8")
 
-    with pytest.raises(ValueError, match="acceptance.jsonl line 1: invalid JSON"):
+    with pytest.raises(ValueError, match=r"acceptance\.jsonl line 1: invalid JSON"):
         main(
             [
                 "--golden-queries",

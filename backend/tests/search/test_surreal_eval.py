@@ -91,7 +91,7 @@ def test_load_golden_queries_rejects_duplicate_ids_and_unknown_categories(
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="line 2|duplicate|unknown"):
+    with pytest.raises(ValueError, match=r"line 2|duplicate|unknown"):
         load_golden_queries(corpus)
 
 
