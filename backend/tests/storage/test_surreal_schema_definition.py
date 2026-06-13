@@ -1,0 +1,237 @@
+from __future__ import annotations
+
+from dataclasses import replace
+from typing import Any
+
+import pytest
+
+from dotmd.storage.surreal_schema import (
+    SURREAL_SCHEMA_VERSION,
+    SurrealFieldDefinition,
+    SurrealSchemaApplyStatus,
+    SurrealSchemaPlan,
+    SurrealTableDefinition,
+    build_dotmd_surreal_schema_plan,
+    define_dotmd_surreal_schema,
+    required_migration_categories,
+    validate_dotmd_surreal_schema_plan,
+)
+
+
+class _FakeSchemaConnection:
+    def __init__(self, existing_schema: dict[str, Any] | None = None) -> None:
+        self._existing_schema = existing_schema
+        self.applied_statements: list[str] = []
+
+    def inspect_schema(self) -> dict[str, Any]:
+        return self._existing_schema or {}
+
+    def query(self, statement: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+        self.applied_statements.append(statement)
+        return {"statement": statement, "variables": variables}
+
+
+def _table_by_name(plan: SurrealSchemaPlan, table_name: str) -> SurrealTableDefinition:
+    return next(table for table in plan.tables if table.name == table_name)
+
+
+def _field_names(table: SurrealTableDefinition) -> set[str]:
+    return {field.name for field in table.fields}
+
+
+def _field_by_name(table: SurrealTableDefinition, field_name: str) -> SurrealFieldDefinition:
+    return next(field for field in table.fields if field.name == field_name)
+
+
+def test_build_dotmd_surreal_schema_plan_covers_required_categories_and_tokens() -> None:
+    plan = build_dotmd_surreal_schema_plan()
+
+    assert plan.schema_version == SURREAL_SCHEMA_VERSION
+    assert tuple(required_migration_categories()) == plan.required_categories
+    assert set(plan.required_categories) == {
+        "documents",
+        "source_units",
+        "chunks",
+        "provenance",
+        "chunk_file_bindings",
+        "bindings",
+        "fingerprints",
+        "embeddings",
+        "vector_components",
+        "files",
+        "sections",
+        "entities",
+        "tags",
+        "relations",
+        "feedback",
+        "cursors",
+        "checkpoints",
+    }
+    assert {
+        "stats",
+        "search_log",
+        "embedding_cache",
+        "embedding_cache_meta",
+        "extraction_cache",
+        "extraction_cache_meta",
+    }.issubset(set(plan.unsupported_categories))
+
+    assert [table.name for table in plan.tables][:5] == [
+        "documents",
+        "source_units",
+        "chunks",
+        "provenance",
+        "chunk_file_bindings",
+    ]
+    assert len(plan.statements) >= len(plan.tables)
+    assert any(
+        statement.startswith("DEFINE TABLE documents SCHEMAFULL") for statement in plan.statements
+    )
+    assert any(
+        statement.startswith("DEFINE TABLE relations TYPE RELATION") for statement in plan.statements
+    )
+    assert any("DEFINE FIELD metadata ON TABLE documents TYPE option<object>" in s for s in plan.statements)
+    assert any(
+        "DEFINE FIELD properties ON TABLE relations TYPE option<object>" in statement
+        for statement in plan.statements
+    )
+
+
+def test_schema_tables_preserve_required_fields_and_relation_metadata() -> None:
+    plan = build_dotmd_surreal_schema_plan()
+
+    chunks = _table_by_name(plan, "chunks")
+    embeddings = _table_by_name(plan, "embeddings")
+    bindings = _table_by_name(plan, "bindings")
+    chunk_file_bindings = _table_by_name(plan, "chunk_file_bindings")
+    relations = _table_by_name(plan, "relations")
+    cursors = _table_by_name(plan, "cursors")
+    checkpoints = _table_by_name(plan, "checkpoints")
+    vector_components = _table_by_name(plan, "vector_components")
+
+    assert chunks.schema_mode == "SCHEMAFULL"
+    assert embeddings.schema_mode == "SCHEMAFULL"
+    assert bindings.schema_mode == "SCHEMAFULL"
+    assert chunk_file_bindings.schema_mode == "SCHEMAFULL"
+    assert relations.schema_mode == "RELATION"
+    assert relations.relation_endpoints_enforced is False
+    assert relations.incoming_tables
+    assert relations.outgoing_tables
+    assert "ENFORCED" not in relations.statement
+
+    assert {
+        "schema_version",
+        "original_chunk_id",
+        "chunk_strategy",
+        "document_ref",
+        "ref",
+        "text",
+        "metadata",
+    }.issubset(_field_names(chunks))
+    assert {"embedding_model", "text_hash", "vector_rowid", "metadata"}.issubset(
+        _field_names(embeddings)
+    )
+    assert {
+        "namespace",
+        "document_ref",
+        "ref",
+        "active",
+        "bound_at",
+        "unbound_at",
+        "content_fingerprint",
+        "metadata_fingerprint",
+        "source_unit_refs",
+        "metadata",
+    }.issubset(_field_names(bindings))
+    assert {"chunk_id", "file_path", "chunk_index", "metadata"}.issubset(
+        _field_names(chunk_file_bindings)
+    )
+    assert {
+        "rel_type",
+        "weight",
+        "source_id",
+        "target_id",
+        "source_table",
+        "target_table",
+        "properties",
+        "metadata",
+    }.issubset(_field_names(relations))
+    assert {"namespace", "checkpoint_cursor", "metadata"}.issubset(_field_names(checkpoints))
+    assert {"ref", "document_ref", "metadata"}.issubset(_field_names(cursors))
+    assert vector_components.optional is True
+    assert vector_components.derived_from == ("embeddings",)
+
+    metadata_field = _field_by_name(chunks, "metadata")
+    properties_field = _field_by_name(relations, "properties")
+    assert metadata_field.flexible_json is True
+    assert properties_field.flexible_json is True
+
+
+def test_define_dotmd_surreal_schema_reports_apply_status_without_mutating_incompatible_targets() -> (
+    None
+):
+    planned = define_dotmd_surreal_schema()
+    assert planned["schema_version"] == SURREAL_SCHEMA_VERSION
+    assert isinstance(planned["apply_status"], SurrealSchemaApplyStatus)
+    assert planned["apply_status"].status == "not-applied"
+
+    same_version = _FakeSchemaConnection(
+        {
+            "schema_version": SURREAL_SCHEMA_VERSION,
+            "table_modes": {
+                "documents": "SCHEMAFULL",
+                "chunks": "SCHEMAFULL",
+                "relations": "RELATION",
+            },
+        }
+    )
+    same_version_schema = define_dotmd_surreal_schema(connection=same_version)
+    assert same_version_schema["apply_status"].status == "already-current"
+    assert same_version.applied_statements == []
+
+    newer_version = _FakeSchemaConnection(
+        {
+            "schema_version": "99-future-schema",
+            "table_modes": {"documents": "SCHEMAFULL", "relations": "RELATION"},
+        }
+    )
+    newer_schema = define_dotmd_surreal_schema(connection=newer_version)
+    assert newer_schema["apply_status"].status == "replace-required"
+    assert "newer" in newer_schema["apply_status"].reason.lower()
+    assert newer_version.applied_statements == []
+
+    phase38_target = _FakeSchemaConnection(
+        {
+            "schema_version": "phase38-prototype",
+            "table_modes": {"documents": "SCHEMALESS", "relations": "SCHEMALESS"},
+        }
+    )
+    phase38_schema = define_dotmd_surreal_schema(connection=phase38_target)
+    assert phase38_schema["apply_status"].status == "replace-required"
+    assert "SCHEMALESS" in phase38_schema["apply_status"].reason
+    assert phase38_target.applied_statements == []
+
+
+def test_validate_dotmd_surreal_schema_plan_fails_for_missing_categories_or_fields() -> None:
+    plan = build_dotmd_surreal_schema_plan()
+
+    without_bindings = replace(
+        plan,
+        tables=tuple(table for table in plan.tables if table.name != "chunk_file_bindings"),
+    )
+    with pytest.raises(ValueError, match="chunk_file_bindings"):
+        validate_dotmd_surreal_schema_plan(without_bindings)
+
+    relations = _table_by_name(plan, "relations")
+    invalid_relations = replace(
+        relations,
+        fields=tuple(field for field in relations.fields if field.name != "rel_type"),
+    )
+    invalid_plan = replace(
+        plan,
+        tables=tuple(
+            invalid_relations if table.name == "relations" else table for table in plan.tables
+        ),
+    )
+    with pytest.raises(ValueError, match="rel_type"):
+        validate_dotmd_surreal_schema_plan(invalid_plan)

@@ -438,12 +438,9 @@ def test_surreal_record_id_codec_round_trips_special_characters_without_leaking_
         assert all(fragment not in encoded_identifier for fragment in forbidden_fragments)
 
 
-def test_define_dotmd_surreal_schema_declares_required_record_shapes_and_thin_scope() -> None:
-    from dotmd.storage.surreal import (  # type: ignore[import-not-found]
-        THIN_PROTOTYPE_NOTE,
-        UNSUPPORTED_PRODUCTION_BEHAVIORS,
-        define_dotmd_surreal_schema,
-    )
+def test_define_dotmd_surreal_schema_declares_required_record_shapes_and_schema_contract() -> None:
+    from dotmd.storage.surreal import define_dotmd_surreal_schema  # type: ignore[import-not-found]
+    from dotmd.storage.surreal_schema import SURREAL_SCHEMA_VERSION
 
     schema = define_dotmd_surreal_schema()
 
@@ -451,17 +448,29 @@ def test_define_dotmd_surreal_schema_declares_required_record_shapes_and_thin_sc
         "documents",
         "source_units",
         "chunks",
+        "provenance",
+        "chunk_file_bindings",
+        "bindings",
+        "fingerprints",
         "embeddings",
         "vector_components",
+        "files",
+        "sections",
         "entities",
+        "tags",
         "relations",
         "feedback",
         "cursors",
         "checkpoints",
     }.issubset(set(schema["tables"]))
-    assert "thin prototype" in THIN_PROTOTYPE_NOTE.lower()
-    assert any("DotMDService" in item for item in UNSUPPORTED_PRODUCTION_BEHAVIORS)
-    assert any("IndexingPipeline" in item for item in UNSUPPORTED_PRODUCTION_BEHAVIORS)
+    assert schema["schema_version"] == SURREAL_SCHEMA_VERSION
+    assert schema["apply_status"].status == "not-applied"
+    assert "stats" in schema["unsupported_categories"]
+    assert "search_log" in schema["unsupported_categories"]
+    assert "chunk_file_bindings" in schema["required_categories"]
+    assert any("DEFINE TABLE documents SCHEMAFULL" in statement for statement in schema["statements"])
+    assert any("DEFINE TABLE relations TYPE RELATION" in statement for statement in schema["statements"])
+    assert not any("DEFINE TABLE documents SCHEMALESS" in statement for statement in schema["statements"])
 
 
 def test_surreal_stores_expose_existing_protocol_method_names(tmp_path: Path) -> None:
