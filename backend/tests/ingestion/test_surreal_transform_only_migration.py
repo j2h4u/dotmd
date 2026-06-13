@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import struct
 from pathlib import Path
@@ -449,55 +450,107 @@ def _write_gate_report(path: Path, *, go_no_go: str = "PASS") -> Path:
     return path
 
 
-def test_run_surreal_import_dry_run_counts_transformable_rows_without_writing(
+def _write_graph_export(path: Path, fixture_ids: dict[str, str]) -> Path:
+    exporter = _FakeGraphExporter(fixture_ids)
+    payload = {
+        "exported_at": "2026-06-12T00:12:00Z",
+        "inventory": exporter.export_inventory(),
+        "rows": exporter.export_rows(),
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    return path
+
+
+def _write_feedback_export(
+    path: Path,
+    provider: _FakeFeedbackProvider,
+    *,
+    rows: list[dict[str, object]] | None = None,
+    truncated: bool = False,
+) -> Path:
+    payload = {
+        "exported_at": "2026-06-12T00:13:00Z",
+        "truncated": truncated,
+        "rows": rows if rows is not None else provider.list_all(limit=10_000, include_closed=True),
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    return path
+
+
+def test_phase38_runner_surface_is_replaced_by_phase41_runner() -> None:
+    from dotmd.ingestion import migrate_surreal as migrate_module  # type: ignore[import-not-found]
+
+    assert hasattr(migrate_module, "run_surreal_migration")
+    assert hasattr(migrate_module, "SurrealMigrationMode")
+    assert not hasattr(migrate_module, "run_surreal_import")
+    assert not hasattr(migrate_module, "SurrealImportMode")
+
+
+def test_run_surreal_migration_dry_run_counts_transformable_rows_without_writing(
     tmp_path: Path,
 ) -> None:
     from dotmd.ingestion.migrate_surreal import (  # type: ignore[import-not-found]
-        SurrealImportMode,
-        run_surreal_import,
+        SurrealMigrationMode,
+        SurrealTargetMode,
+        build_surreal_migration_manifest,
+        run_surreal_migration,
     )
 
     db_path = tmp_path / "transform-only.db"
     fixture_ids = _create_transform_only_fixture(db_path)
-    graph_exporter = _FakeGraphExporter(fixture_ids)
     feedback_provider = _FakeFeedbackProvider()
-
-    report = run_surreal_import(
-        mode=SurrealImportMode.DRY_RUN,
-        sqlite_snapshot_path=db_path,
-        graph_exporter=graph_exporter,
-        feedback_provider=feedback_provider,
-        target_url=f"surrealkv://{tmp_path / 'dry-run.db'}",
+    graph_export_path = _write_graph_export(tmp_path / "graph-export.json", fixture_ids)
+    feedback_export_path = _write_feedback_export(
+        tmp_path / "feedback-export.json",
+        feedback_provider,
     )
 
-    assert report.mode is SurrealImportMode.DRY_RUN
+    manifest = build_surreal_migration_manifest(
+        sqlite_snapshot_path=db_path,
+        graph_export_path=graph_export_path,
+        feedback_export_path=feedback_export_path,
+        target_url=f"surrealkv://{tmp_path / 'dry-run.db'}",
+        target_mode=SurrealTargetMode.EMBEDDED_LOCAL,
+    )
+
+    report = run_surreal_migration(
+        mode=SurrealMigrationMode.DRY_RUN,
+        sqlite_snapshot_path=db_path,
+        graph_export_path=graph_export_path,
+        feedback_export_path=feedback_export_path,
+        target_url=f"surrealkv://{tmp_path / 'dry-run.db'}",
+        target_mode=SurrealTargetMode.EMBEDDED_LOCAL,
+    )
+
+    assert manifest.schema_version == report.schema_version
+    assert report.mode is SurrealMigrationMode.DRY_RUN
     assert report.status == "dry-run"
-    assert report.committed is False
-    assert report.rolled_back is False
-    assert report.applied_records == 0
-    assert report.counts.documents == 2
-    assert report.counts.source_units == 3
-    assert report.counts.chunks == 2
-    assert report.counts.embeddings == 2
-    assert report.counts.vector_components == 2
-    assert report.counts.entities == 1
-    assert report.counts.relations == 2
-    assert report.counts.feedback == 2
-    assert report.counts.cursors == 2
-    assert report.counts.checkpoints == 1
-    assert "search_log" in report.unsupported_categories
-    assert feedback_provider.calls == [(1001, True)]
-    assert graph_exporter.inventory_calls == 1
-    assert graph_exporter.row_calls == 1
+    assert report.committed_success is False
+    assert report.expected_counts["documents"] == 2
+    assert report.expected_counts["source_units"] == 3
+    assert report.expected_counts["chunks"] == 2
+    assert report.expected_counts["chunk_file_bindings"] == 2
+    assert report.expected_counts["embeddings"] == 2
+    assert report.expected_counts["vector_components"] == 2
+    assert report.expected_counts["graph_files"] == 0
+    assert report.expected_counts["graph_entities"] == 1
+    assert report.expected_counts["graph_relations"] == 2
+    assert report.expected_counts["feedback"] == 2
+    assert report.expected_counts["cursors"] == 2
+    assert report.expected_counts["checkpoints"] == 1
+    assert report.source_capture_manifest.skew_policy == "bounded_skew_accepted"
+    assert report.target_inspection_performed is False
     assert not (tmp_path / "dry-run.db").exists()
 
 
-def test_run_surreal_import_apply_preserves_ids_vectors_feedback_and_graph_properties(
+def test_run_surreal_migration_apply_preserves_ids_vectors_feedback_and_graph_properties(
     tmp_path: Path,
 ) -> None:
     from dotmd.ingestion.migrate_surreal import (  # type: ignore[import-not-found]
-        SurrealImportMode,
-        run_surreal_import,
+        SurrealMigrationMode,
+        SurrealOverwritePolicy,
+        SurrealTargetMode,
+        run_surreal_migration,
     )
     from dotmd.storage.surreal import (  # type: ignore[import-not-found]
         SurrealConnection,
@@ -507,31 +560,49 @@ def test_run_surreal_import_apply_preserves_ids_vectors_feedback_and_graph_prope
 
     db_path = tmp_path / "transform-only.db"
     fixture_ids = _create_transform_only_fixture(db_path)
-    graph_exporter = _FakeGraphExporter(fixture_ids)
     feedback_provider = _FakeFeedbackProvider()
+    graph_export_path = _write_graph_export(tmp_path / "graph-export.json", fixture_ids)
+    feedback_export_path = _write_feedback_export(
+        tmp_path / "feedback-export.json",
+        feedback_provider,
+    )
     gate_path = _write_gate_report(tmp_path / "38-05-EMBEDDED-SAFETY-GATE.md")
     target_path = tmp_path / "surreal-import.db"
 
-    report = run_surreal_import(
-        mode=SurrealImportMode.APPLY,
+    report = run_surreal_migration(
+        mode=SurrealMigrationMode.APPLY,
         sqlite_snapshot_path=db_path,
-        graph_exporter=graph_exporter,
-        feedback_provider=feedback_provider,
+        graph_export_path=graph_export_path,
+        feedback_export_path=feedback_export_path,
         target_url=f"surrealkv://{target_path}",
+        target_mode=SurrealTargetMode.EMBEDDED_LOCAL,
         gate_report_path=gate_path,
+        overwrite_policy=SurrealOverwritePolicy.REFUSE,
     )
 
-    assert report.status == "committed"
-    assert report.committed is True
-    assert report.rolled_back is False
+    assert report.status == "applied"
+    assert report.committed_success is True
     assert report.gate_status == "passed"
-    assert report.applied_records == report.counts.total_records()
+    assert report.embedding_reuse_verified is True
+    assert report.expected_vector_dimension == 3
+    assert {
+        checkpoint.phase_name.value for checkpoint in report.phase_checkpoints
+    } >= {
+        "schema",
+        "documents",
+        "chunks",
+        "chunk_file_bindings",
+        "embeddings",
+        "feedback",
+        "cursors",
+        "checkpoints",
+    }
 
     codec = SurrealRecordIdCodec()
     config = SurrealStoreConfig(
         url=f"surrealkv://{target_path}",
         namespace="dotmd",
-        database="phase38_import",
+        database="phase41_migration",
     )
     with SurrealConnection(config) as connection:
         stored_chunk = connection.select(codec.encode("chunks", fixture_ids["chunk_id"]))
@@ -540,9 +611,7 @@ def test_run_surreal_import_apply_preserves_ids_vectors_feedback_and_graph_prope
         stored_relation = connection.select(codec.encode("relations", fixture_ids["relation_id"]))
         stored_feedback = connection.select(codec.encode("feedback", 'feedback:/ one {"quoted"}'))
         stored_checkpoint = connection.select(codec.encode("checkpoints", "filesystem"))
-        stored_cursor = connection.select(
-            codec.encode("cursors", f"filesystem\x1f{fixture_ids['file_path']}")
-        )
+        stored_cursor = connection.select(codec.encode("cursors", fixture_ids["ref"]))
         file_bindings = connection.scan_table("chunk_file_bindings")
 
     assert stored_chunk["original_chunk_id"] == fixture_ids["chunk_id"]
@@ -552,13 +621,13 @@ def test_run_surreal_import_apply_preserves_ids_vectors_feedback_and_graph_prope
     assert stored_embedding["vector_rowid"] == 1
     assert len(stored_embedding["embedding"]) == 3
     assert stored_entity["original_entity_name"] == fixture_ids["entity_name"]
-    assert stored_relation["relation_type"] == "MENTIONS"
+    assert stored_relation["rel_type"] == "MENTIONS"
     assert stored_relation["weight"] == pytest.approx(0.75)
     assert stored_relation["properties"]["confirmed"] is True
     assert isinstance(stored_relation["properties"]["rank"], int)
     assert stored_feedback["original_feedback_id"] == 'feedback:/ one {"quoted"}'
     assert stored_checkpoint["checkpoint_cursor"] == "cursor:{one}/Привет"
-    assert stored_cursor["original_ref"] == fixture_ids["ref"]
+    assert stored_cursor["ref"] == fixture_ids["ref"]
     assert [
         (row["chunk_id"], row["file_path"], row["chunk_index"])
         for row in sorted(file_bindings, key=lambda item: item["chunk_index"])
@@ -568,145 +637,43 @@ def test_run_surreal_import_apply_preserves_ids_vectors_feedback_and_graph_prope
     ]
 
 
-@pytest.mark.parametrize(
-    ("gate_state", "expected_status"),
-    [("PASS", "passed"), ("BLOCKED", "gate_blocked")],
-)
-def test_run_surreal_import_apply_requires_embedded_safety_gate(
+def test_feedback_export_limit_is_configurable_and_reports_truncation(
     tmp_path: Path,
-    gate_state: str,
-    expected_status: str,
 ) -> None:
     from dotmd.ingestion.migrate_surreal import (  # type: ignore[import-not-found]
-        SurrealImportMode,
-        run_surreal_import,
+        SurrealMigrationMode,
+        SurrealTargetMode,
+        run_surreal_migration,
     )
 
     db_path = tmp_path / "transform-only.db"
     fixture_ids = _create_transform_only_fixture(db_path)
-    graph_exporter = _FakeGraphExporter(fixture_ids)
-    feedback_provider = _FakeFeedbackProvider()
-    gate_path = _write_gate_report(tmp_path / "gate.md", go_no_go=gate_state)
-
-    report = run_surreal_import(
-        mode=SurrealImportMode.APPLY,
-        sqlite_snapshot_path=db_path,
-        graph_exporter=graph_exporter,
-        feedback_provider=feedback_provider,
-        target_url=f"surrealkv://{tmp_path / 'gate-test.db'}",
-        gate_report_path=gate_path,
-    )
-
-    assert report.gate_status == expected_status
-    if gate_state == "PASS":
-        assert report.committed is True
-    else:
-        assert report.committed is False
-        assert report.applied_records == 0
-        assert report.errors
-
-
-def test_load_feedback_rows_for_surreal_uses_provider_and_never_opens_feedback_sqlite(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from dotmd.ingestion import migrate_surreal as migrate_module  # type: ignore[import-not-found]
-
     provider = _FakeFeedbackProvider()
-
-    def _forbid_feedback_connect(*args, **kwargs):  # type: ignore[no-untyped-def]
-        raise AssertionError("feedback.db direct access is forbidden in 38-02")
-
-    monkeypatch.setattr(migrate_module.sqlite3, "connect", _forbid_feedback_connect)
-
-    rows = migrate_module.load_feedback_rows_for_surreal(provider)
-
-    assert len(rows) == 2
-    assert provider.calls == [(1001, True)]
-
-
-def test_load_feedback_rows_for_surreal_fails_when_export_may_be_truncated() -> None:
-    from dotmd.ingestion.migrate_surreal import (
-        load_feedback_rows_for_surreal,  # type: ignore[import-not-found]
+    graph_export_path = _write_graph_export(tmp_path / "graph-export.json", fixture_ids)
+    feedback_rows = provider.list_all(limit=1, include_closed=True)
+    feedback_export_path = _write_feedback_export(
+        tmp_path / "feedback-export.json",
+        provider,
+        rows=feedback_rows,
+        truncated=True,
     )
 
-    class PageLimitProvider:
-        def list_all(
-            self, limit: int = 50, include_closed: bool = False
-        ) -> list[dict[str, object]]:
-            return [
-                {
-                    "id": f"feedback-{index}",
-                    "submitted_at": index,
-                    "message": "x",
-                }
-                for index in range(limit)
-            ]
-
-    with pytest.raises(RuntimeError, match="exhaustive feedback export"):
-        load_feedback_rows_for_surreal(PageLimitProvider())
-
-
-def test_load_graph_rows_for_surreal_preserves_labels_weights_keys_and_typed_properties(
-    tmp_path: Path,
-) -> None:
-    from dotmd.ingestion.migrate_surreal import (
-        load_graph_rows_for_surreal,  # type: ignore[import-not-found]
-    )
-
-    fixture_ids = {
-        "chunk_id": 'chunk:/ one {"quoted"} Привет',
-        "entity_name": 'entity:/ two {"named"} Привет',
-        "relation_id": 'rel:/ one {"typed"}',
-        "file_path": "/tmp/Doc One.md",
-        "ref": "filesystem:/tmp/Doc One.md",
-    }
-    graph_exporter = _FakeGraphExporter(fixture_ids)
-
-    graph_rows = load_graph_rows_for_surreal(graph_exporter)
-
-    assert len(graph_rows["entities"]) == 1
-    assert len(graph_rows["relations"]) == 2
-    mentions = graph_rows["relations"][0]
-    assert mentions["relation_type"] == "MENTIONS"
-    assert mentions["weight"] == pytest.approx(0.75)
-    assert mentions["properties"]["confirmed"] is True
-    assert isinstance(mentions["properties"]["rank"], int)
-    assert graph_exporter.inventory_calls == 1
-    assert graph_exporter.row_calls == 1
-
-
-def test_run_surreal_import_never_reaches_embedding_or_extraction_recomputation(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from dotmd.ingestion import migrate_surreal as migrate_module  # type: ignore[import-not-found]
-
-    db_path = tmp_path / "transform-only.db"
-    fixture_ids = _create_transform_only_fixture(db_path)
-    graph_exporter = _FakeGraphExporter(fixture_ids)
-    feedback_provider = _FakeFeedbackProvider()
-
-    def _explode(*args, **kwargs):  # type: ignore[no-untyped-def]
-        raise AssertionError("transform-only import must not recompute embeddings or entities")
-
-    monkeypatch.setattr(migrate_module, "encode_batch", _explode, raising=False)
-    monkeypatch.setattr(migrate_module, "_embed_chunks", _explode, raising=False)
-    monkeypatch.setattr(migrate_module, "from_pretrained", _explode, raising=False)
-    monkeypatch.setattr(migrate_module, "index_single_file", _explode, raising=False)
-
-    report = migrate_module.run_surreal_import(
-        mode=migrate_module.SurrealImportMode.DRY_RUN,
+    report = run_surreal_migration(
+        mode=SurrealMigrationMode.PLAN,
         sqlite_snapshot_path=db_path,
-        graph_exporter=graph_exporter,
-        feedback_provider=feedback_provider,
-        target_url=f"surrealkv://{tmp_path / 'recompute-guard.db'}",
+        graph_export_path=graph_export_path,
+        feedback_export_path=feedback_export_path,
+        target_url=f"surrealkv://{tmp_path / 'truncated.db'}",
+        target_mode=SurrealTargetMode.EMBEDDED_LOCAL,
     )
 
-    assert report.status == "dry-run"
+    assert report.status == "source_capture_incomplete"
+    assert report.committed_success is False
+    assert report.errors
+    assert any("truncated" in error.lower() for error in report.errors)
 
 
-def test_run_surreal_import_rolls_back_written_records_on_apply_error(
+def test_run_surreal_migration_failed_apply_reports_partial_writes_without_rollback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -715,46 +682,47 @@ def test_run_surreal_import_rolls_back_written_records_on_apply_error(
 
     db_path = tmp_path / "transform-only.db"
     fixture_ids = _create_transform_only_fixture(db_path)
-    graph_exporter = _FakeGraphExporter(fixture_ids)
     feedback_provider = _FakeFeedbackProvider()
+    graph_export_path = _write_graph_export(tmp_path / "graph-export.json", fixture_ids)
+    feedback_export_path = _write_feedback_export(
+        tmp_path / "feedback-export.json",
+        feedback_provider,
+    )
     gate_path = _write_gate_report(tmp_path / "gate.md")
     target_path = tmp_path / "rollback.db"
-
-    original_method = surreal_module.SurrealFeedbackStore.replace_feedback_rows
 
     def _boom(self, rows):  # type: ignore[no-untyped-def]
         raise RuntimeError("forced feedback import failure")
 
     monkeypatch.setattr(surreal_module.SurrealFeedbackStore, "replace_feedback_rows", _boom)
 
-    report = migrate_module.run_surreal_import(
-        mode=migrate_module.SurrealImportMode.APPLY,
+    report = migrate_module.run_surreal_migration(
+        mode=migrate_module.SurrealMigrationMode.APPLY,
         sqlite_snapshot_path=db_path,
-        graph_exporter=graph_exporter,
-        feedback_provider=feedback_provider,
+        graph_export_path=graph_export_path,
+        feedback_export_path=feedback_export_path,
         target_url=f"surrealkv://{target_path}",
+        target_mode=migrate_module.SurrealTargetMode.EMBEDDED_LOCAL,
         gate_report_path=gate_path,
     )
 
-    assert report.status == "rolled_back"
-    assert report.committed is False
-    assert report.rolled_back is True
+    assert report.status == "failed"
+    assert report.committed_success is False
+    assert report.partial_writes_present is True
+    assert report.restore_required is True
+    assert report.cleanup_attempted is False
+    assert report.last_successful_phase is not None
+    assert report.failed_phase is not None
     assert report.errors
-
-    monkeypatch.setattr(
-        surreal_module.SurrealFeedbackStore,
-        "replace_feedback_rows",
-        original_method,
-    )
 
     config = surreal_module.SurrealStoreConfig(
         url=f"surrealkv://{target_path}",
         namespace="dotmd",
-        database="phase38_import",
+        database="phase41_migration",
     )
     with surreal_module.SurrealConnection(config) as connection:
-        documents = connection.select("documents")
-        chunks = connection.select("chunks")
+        documents = connection.scan_table("documents")
+        chunks = connection.scan_table("chunks")
 
-    assert documents == []
-    assert chunks == []
+    assert documents
+    assert chunks
