@@ -83,11 +83,11 @@ overrides_applied: 0
 
 | File | Line | Pattern | Severity | Impact |
 | --- | --- | --- | --- | --- |
-| `backend/src/dotmd/search/surreal_eval.py` | n/a | `ruff format --check` would reformat this phase file | ℹ️ Info | The phase goal is still achieved, but the 40-01 summary claim that repo-wide `just verify` fails only on unrelated pre-existing files is not confirmed by the current checkout. |
+| None | n/a | No Phase 40 blocking anti-patterns remain | ✓ Clean | `7731129` formatted `backend/src/dotmd/search/surreal_eval.py`; the current `just verify` failure is limited to pre-existing Surreal formatting debt outside Phase 40. |
 
 ### Gaps Summary
 
-No goal-blocking gaps found. Phase 40's evaluation harness, corpus, diff classification, acceptance gating, focused tests, prior regression compatibility, and durable docs are all present and working in the codebase. The only discrepancy found is documentary: `40-01-SUMMARY.md` says repo-wide `just verify` is red only for unrelated files, but the current formatter check also flags `src/dotmd/search/surreal_eval.py`.
+No goal-blocking gaps found. Phase 40's evaluation harness, corpus, diff classification, acceptance gating, focused tests, prior regression compatibility, and durable docs are all present and working in the codebase. The temporary formatting discrepancy in `src/dotmd/search/surreal_eval.py` was fixed in `7731129`; repo-wide `just verify` is now red only on older Surreal formatting debt outside Phase 40.
 
 ---
 

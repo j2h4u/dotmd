@@ -66,6 +66,7 @@ Each task was committed atomically:
 2. **Task 2: Implement typed diff classification and report runner** - `8604573` (feat)
 3. **Task 3: Add golden corpus, review ledger, and durable harness docs** - `51f3f6e` (docs)
 4. **Code review fix: Harden input validation and diff reporting** - `8d53785` (fix)
+5. **Format fix: Format the new evaluator module** - `7731129` (style)
 
 ## Files Created/Modified
 
@@ -97,7 +98,7 @@ None - plan executed exactly as written.
 
 - Live baseline search probes emitted Gmail federated 400 warnings from an expired/invalid OAuth refresh flow, but the local `filesystem:/mnt/...` evidence needed for Phase 40 remained available and was used for the checked-in corpus.
 - Phase code review initially found three loader/diff-reporting issues. They were fixed in `8d53785`, and `40-REVIEW.md` was refreshed to `status: clean` in `c47dad1`.
-- Optional `just verify` is still red because unrelated pre-existing files outside this plan fail repo-wide `ruff format --check`. The remaining failures are in `src/dotmd/ingestion/migrate_surreal.py`, `src/dotmd/search/surreal_parity.py`, `src/dotmd/storage/surreal.py`, `src/dotmd/storage/surreal_inventory.py`, `src/dotmd/storage/surreal_ops.py`, `tests/ingestion/test_surreal_transform_only_migration.py`, `tests/search/test_surreal_retrieval_parity.py`, and `tests/storage/test_surreal_storage_contract.py`.
+- `just verify` initially flagged the new `surreal_eval.py` for formatting; `7731129` fixed that. Optional `just verify` is still red only because unrelated pre-existing files outside this plan fail repo-wide `ruff format --check`. The remaining failures are in `src/dotmd/ingestion/migrate_surreal.py`, `src/dotmd/search/surreal_parity.py`, `src/dotmd/storage/surreal.py`, `src/dotmd/storage/surreal_inventory.py`, `src/dotmd/storage/surreal_ops.py`, `tests/ingestion/test_surreal_transform_only_migration.py`, `tests/search/test_surreal_retrieval_parity.py`, and `tests/storage/test_surreal_storage_contract.py`.
 
 ## User Setup Required
 
@@ -113,7 +114,7 @@ None - no external service configuration required.
 
 - Summary file exists on disk.
 - All claimed task artifacts exist on disk.
-- Task commits `e872d78`, `8604573`, `51f3f6e`, and post-review fix `8d53785` are present in git history.
+- Task commits `e872d78`, `8604573`, `51f3f6e`, post-review fix `8d53785`, and format fix `7731129` are present in git history.
 - `cd backend && uv run pytest tests/search/test_surreal_eval.py tests/devtools/test_surreal_eval_runner.py -x` passed (`16 passed` after post-review hardening).
 - `cd backend && just unit tests/search/test_surreal_eval.py tests/devtools/test_surreal_eval_runner.py` passed (`16 passed` after post-review hardening).
 - `cd backend && uv run pytest tests/search/test_surreal_contract.py tests/search/test_surreal_retrieval_parity.py -q` passed (`15 passed`) as the prior-phase Surreal regression gate.
