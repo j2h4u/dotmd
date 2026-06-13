@@ -216,9 +216,7 @@ def _parse_str_map(raw: object, *, path: Path, line_number: int, field: str) -> 
     return {str(key): str(value) for key, value in raw.items()}
 
 
-def _parse_engine_map(
-    raw: object, *, path: Path, line_number: int
-) -> dict[str, tuple[str, ...]]:
+def _parse_engine_map(raw: object, *, path: Path, line_number: int) -> dict[str, tuple[str, ...]]:
     if raw is None:
         return {}
     if not isinstance(raw, dict):
