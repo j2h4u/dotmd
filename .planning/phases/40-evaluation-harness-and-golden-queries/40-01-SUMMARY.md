@@ -49,12 +49,12 @@ status: complete
 - **Duration:** 15 min
 - **Started:** 2026-06-13T09:15:45Z
 - **Completed:** 2026-06-13T09:30:25Z
-- **Tasks:** 3
+- **Tasks:** 3 + post-review hardening fix
 - **Files modified:** 7
 
 ## Accomplishments
 
-- Added RED/GREEN coverage for golden corpus parsing, diff classification, acceptance semantics, JSONL report shape, and runner exit behavior.
+- Added RED/GREEN coverage for golden corpus parsing, diff classification, acceptance semantics, JSONL report shape, strict JSONL validation, and runner exit behavior.
 - Implemented `surreal_eval.py` and `surreal_eval_runner.py` as dependency-light Phase 40 evaluation surfaces that reuse Phase 39 policy enums instead of duplicating literals.
 - Checked in a reviewed 16-row golden corpus plus durable operator docs, all grounded in actual `filesystem:/mnt/...` refs and captured read evidence.
 
@@ -65,6 +65,7 @@ Each task was committed atomically:
 1. **Task 1: Write RED evaluator and runner tests for SURR-EVAL-01 through SURR-EVAL-03** - `e872d78` (test)
 2. **Task 2: Implement typed diff classification and report runner** - `8604573` (feat)
 3. **Task 3: Add golden corpus, review ledger, and durable harness docs** - `51f3f6e` (docs)
+4. **Code review fix: Harden input validation and diff reporting** - `8d53785` (fix)
 
 ## Files Created/Modified
 
@@ -81,6 +82,7 @@ Each task was committed atomically:
 - `graph-entity` is serialized only through `GoldenQueryCategory.GRAPH_ENTITY.value`, keeping code/tests/corpus on one source of truth.
 - Corpus `contains` strings are human/captured-evidence anchors only; the runner never reads arbitrary filesystem paths from label refs during report generation.
 - Acceptance metadata (`accepted_by`, `accepted_reason`) resolves aggregate blockers without rewriting the raw `AcceptedDifference` or `CutoverGate` on the affected row.
+- Malformed collection fields and acceptance JSON now fail with line-numbered `ValueError`; dropped `maybe` refs no longer appear in `lost_relevant_refs`.
 
 ## Deviations from Plan
 
@@ -94,6 +96,7 @@ None - plan executed exactly as written.
 ## Issues Encountered
 
 - Live baseline search probes emitted Gmail federated 400 warnings from an expired/invalid OAuth refresh flow, but the local `filesystem:/mnt/...` evidence needed for Phase 40 remained available and was used for the checked-in corpus.
+- Phase code review initially found three loader/diff-reporting issues. They were fixed in `8d53785`, and `40-REVIEW.md` was refreshed to `status: clean` in `c47dad1`.
 - Optional `just verify` is still red because unrelated pre-existing files outside this plan fail repo-wide `ruff format --check`. The remaining failures are in `src/dotmd/ingestion/migrate_surreal.py`, `src/dotmd/search/surreal_parity.py`, `src/dotmd/storage/surreal.py`, `src/dotmd/storage/surreal_inventory.py`, `src/dotmd/storage/surreal_ops.py`, `tests/ingestion/test_surreal_transform_only_migration.py`, `tests/search/test_surreal_retrieval_parity.py`, and `tests/storage/test_surreal_storage_contract.py`.
 
 ## User Setup Required
@@ -110,9 +113,10 @@ None - no external service configuration required.
 
 - Summary file exists on disk.
 - All claimed task artifacts exist on disk.
-- Task commits `e872d78`, `8604573`, and `51f3f6e` are present in git history.
-- `cd backend && uv run pytest tests/search/test_surreal_eval.py tests/devtools/test_surreal_eval_runner.py -x` passed.
-- `cd backend && just unit tests/search/test_surreal_eval.py tests/devtools/test_surreal_eval_runner.py` passed.
+- Task commits `e872d78`, `8604573`, `51f3f6e`, and post-review fix `8d53785` are present in git history.
+- `cd backend && uv run pytest tests/search/test_surreal_eval.py tests/devtools/test_surreal_eval_runner.py -x` passed (`16 passed` after post-review hardening).
+- `cd backend && just unit tests/search/test_surreal_eval.py tests/devtools/test_surreal_eval_runner.py` passed (`16 passed` after post-review hardening).
+- `cd backend && uv run pytest tests/search/test_surreal_contract.py tests/search/test_surreal_retrieval_parity.py -q` passed (`15 passed`) as the prior-phase Surreal regression gate.
 - Optional `cd backend && just verify` remains red only on unrelated pre-existing formatting debt outside this plan’s scope.
 
 ---
