@@ -4,13 +4,13 @@ milestone: v1.8
 milestone_name: SurrealDB-Native Storage Cutover
 status: planning
 stopped_at: Completed 38-03-PLAN.md
-last_updated: "2026-06-12T22:03:33.577Z"
-last_activity: 2026-06-12
+last_updated: "2026-06-13T09:09:54.013Z"
+last_activity: 2026-06-13
 progress:
-  total_phases: 7
-  completed_phases: 1
-  total_plans: 1
-  completed_plans: 1
+  total_phases: 14
+  completed_phases: 2
+  total_plans: 7
+  completed_plans: 6
   percent: 14
 ---
 
@@ -21,7 +21,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** v1.8 SurrealDB-native storage cutover planning
+**Current focus:** Phase 40 — evaluation-harness-and-golden-queries
 
 ## Current Milestone
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 Phase: 40 next
 Status: Phase 39 verified; ready for Phase 40 planning
-Last activity: 2026-06-12
+Last activity: 2026-06-13
 
 Progress: [█---------] 14% (1/7 phases complete; 1/1 plans complete)
 
@@ -295,10 +295,10 @@ retrieval parity failed on hybrid/RRF behavior.
 
 ## Current Position
 
-Phase: Milestone v1.7 complete
-Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-06-12 — Milestone v1.7 completed and archived
+Phase: 40 (evaluation-harness-and-golden-queries) — EXECUTING
+Plan: 1 of 1
+Status: Executing Phase 40
+Last activity: 2026-06-13 -- Phase 40 execution started
 
 ## Operator Next Steps
 
