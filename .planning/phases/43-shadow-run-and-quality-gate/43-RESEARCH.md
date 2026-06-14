@@ -57,7 +57,7 @@ The planning target is therefore a reproducible shadow-run pipeline that ties to
 | `.planning/phases/43-shadow-run-and-quality-gate/artifacts/source-capture.json` | Frozen provenance for the evidence window. [VERIFIED: docs/surrealdb-production-migration.md] | Prefer reuse of Phase 41 manifest schema over a new shape. [VERIFIED: backend/devtools/surreal_migration_runner.py] |
 | `.planning/phases/43-shadow-run-and-quality-gate/artifacts/baseline-results.jsonl` | Old-stack captured results for the approved corpus. [VERIFIED: docs/surrealdb-evaluation-harness.md] | Must match Phase 40 `EvalResult` schema. [VERIFIED: backend/src/dotmd/search/surreal_eval.py] |
 | `.planning/phases/43-shadow-run-and-quality-gate/artifacts/candidate-results.jsonl` | Surreal-stack captured results for the same corpus and source window. [VERIFIED: docs/surrealdb-evaluation-harness.md] | Must include `matched_engines` and any supplied snippet/read evidence. [VERIFIED: backend/src/dotmd/search/surreal_eval.py] |
-| `.planning/phases/43-shadow-run-and-quality-gate/artifacts/accepted-diffs.jsonl` | Explicit semantic-change acceptance ledger. [VERIFIED: docs/surrealdb-evaluation-harness.md] | Keep reviewer metadata separate from raw diff rows. [VERIFIED: backend/src/dotmd/search/surreal_eval.py] |
+| `.planning/phases/43-shadow-run-and-quality-gate/artifacts/accepted-diffs.jsonl` | Explicit semantic-change acceptance ledger plus a Phase 43 metadata sentinel row. [VERIFIED: docs/surrealdb-evaluation-harness.md] | Keep reviewer metadata separate from raw diff rows; the Phase 43 runner must strip the sentinel before delegating real acceptance rows to Phase 40 acceptance semantics. [VERIFIED: backend/src/dotmd/search/surreal_eval.py][VERIFIED: backend/devtools/surreal_eval_runner.py] |
 | `.planning/phases/43-shadow-run-and-quality-gate/artifacts/shadow-diffs.jsonl` | Machine-readable per-query diff output. [VERIFIED: backend/devtools/surreal_eval_runner.py] | Phase 40 already writes deterministic JSONL. [VERIFIED: backend/devtools/surreal_eval_runner.py] |
 | `.planning/phases/43-shadow-run-and-quality-gate/artifacts/shadow-summary.md` | Human-readable quality gate summary. [VERIFIED: backend/devtools/surreal_eval_runner.py] | Should remain short and operator-facing. [VERIFIED: docs/surrealdb-evaluation-harness.md] |
 | `.planning/phases/43-shadow-run-and-quality-gate/artifacts/scale-metrics.json` | Build-time, file-size, latency, and representative-corpus completeness. [VERIFIED: backend/src/dotmd/search/surreal_parity.py] | Reuse `evaluate_surreal_scale_gate()` fields instead of inventing new names. [VERIFIED: backend/src/dotmd/search/surreal_parity.py] |
@@ -318,24 +318,24 @@ SELECT id FROM test WHERE embedding <|10,40|> $qvec;
 | # | Claim | Section | Risk if Wrong |
 |---|-------|---------|---------------|
 | A1 | Phase 43 will likely need one new repo-local orchestrator such as `backend/devtools/surreal_shadow_runner.py` because the repo has the comparison pieces but no single end-to-end runner yet. [ASSUMED] | Likely Artifacts | Plan could over-split or under-split the implementation work. |
-| A2 | The cleanest Phase 43 plan is to keep baseline capture as an evidence artifact rather than clone the full old stack into a second isolated runtime. [ASSUMED] | Summary / Open Questions | If the user wants a fully isolated old-stack twin, task scope and ops complexity increase. |
+| A2 | Baseline capture must run read-only from an isolated copied snapshot/rehearsal path, not by mutating the live old-stack runtime. [VERIFIED: revision decision] | Summary / Resolved Planning Questions | If copied snapshot inputs are unavailable, execution must stop and report the missing input instead of falling back to live mutation or recomputation. |
 
-## Open Questions
+## Resolved Planning Questions
 
 1. **How should the old-stack side be executed?**
    - What we know: Phase 40 expects captured baseline JSONL, and Phase 41 already defines copied-source evidence for the candidate side. [VERIFIED: docs/surrealdb-evaluation-harness.md][VERIFIED: docs/surrealdb-production-migration.md]
-   - What's unclear: Whether the user wants baseline capture from the live read-only runtime, from a copied old-stack rehearsal, or from a previously captured window. [ASSUMED]
-   - Recommendation: Lock this before planning. It materially changes the ops tasks and the live-risk model. [ASSUMED]
+   - Resolved decision: Capture the old-stack baseline read-only from an isolated copied snapshot/rehearsal path. Do not mutate the live runtime, do not narrow production `DOTMD_DATA_DIR`, do not run `dotmd index --force`, and do not use the old stack as a compatibility backend. [VERIFIED: revision decision][VERIFIED: AGENTS.md]
+   - Planning impact: Plan 43-02 must document and test baseline capture as a copied-snapshot/rehearsal operation, and Plan 43-03 must stop if the copied old-stack rehearsal input is missing instead of recomputing source content or touching live storage. [VERIFIED: revision decision]
 
 2. **Is the checked-in 16-query golden corpus the only quality set, or is there also a larger production-derived replay set?**
    - What we know: The approved corpus has 16 rows and covers the required categories. [VERIFIED: .planning/phases/40-evaluation-harness-and-golden-queries/40-01-SUMMARY.md]
-   - What's unclear: Whether Phase 43 should add an unlabeled replay/query sample for latency and stability evidence beyond the labeled corpus. [ASSUMED]
-   - Recommendation: Keep the golden corpus as the quality gate, and add a separate replay set only for perf/memory if the user has one readily available. [ASSUMED]
+   - Resolved decision: Use both sets. The 16-query golden corpus is the semantic quality gate; a larger production-derived replay/metrics window supplies performance, latency, memory, build-time, and store-size evidence. [VERIFIED: revision decision]
+   - Planning impact: Plan 43-02 must expose an explicit metrics replay input or window descriptor, and Plan 43-03 must record replay-window metadata in `scale-metrics.json`, `memory-metrics.json`, and the acceptance-ledger sentinel without changing raw quality classifications. [VERIFIED: revision decision]
 
 3. **What acceptance rule should apply to memory evidence?**
    - What we know: Python and OS metrics can be split into wall-clock, CPU time, traced heap, and RSS. [CITED: https://docs.python.org/3/library/time.html][CITED: https://docs.python.org/3/library/resource.html][CITED: https://docs.python.org/3/library/tracemalloc.html]
-   - What's unclear: Whether Phase 43 wants absolute thresholds, relative regression thresholds, or evidence-only reporting for memory. [ASSUMED]
-   - Recommendation: Plan for evidence-first reporting plus reviewer interpretation unless the user already has a hard budget. [ASSUMED]
+   - Resolved decision: Memory is not evidence-only. Phase 43 must emit memory evidence plus explicit guardrail thresholds in the acceptance ledger sentinel. The exact thresholds are planned as code constants/config in the Phase 43 evidence contract, not informal notes. [VERIFIED: revision decision]
+   - Planning impact: Plan 43-01 must define the guardrail constants in `surreal_shadow_metrics.py`; Plan 43-02 must write/read those constants through the ledger metadata row; Plan 43-03 must fail verification when the memory report or ledger omits the configured thresholds. [VERIFIED: revision decision]
 
 ## Environment Availability
 

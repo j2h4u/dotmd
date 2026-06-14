@@ -16,7 +16,7 @@
 | `.planning/phases/43-shadow-run-and-quality-gate/artifacts/source-capture.json` | config | file-I/O | Phase 41 `source_capture_manifest` JSON emitted by `backend/devtools/surreal_migration_runner.py` | exact |
 | `.planning/phases/43-shadow-run-and-quality-gate/artifacts/baseline-results.jsonl` | config | file-I/O | Phase 40 `EvalResult` JSONL loaded by `backend/src/dotmd/search/surreal_eval.py` | exact |
 | `.planning/phases/43-shadow-run-and-quality-gate/artifacts/candidate-results.jsonl` | config | file-I/O | Phase 40 `EvalResult` JSONL loaded by `backend/src/dotmd/search/surreal_eval.py` | exact |
-| `.planning/phases/43-shadow-run-and-quality-gate/artifacts/accepted-diffs.jsonl` | config | file-I/O | acceptance JSONL loaded by `backend/devtools/surreal_eval_runner.py` | exact |
+| `.planning/phases/43-shadow-run-and-quality-gate/artifacts/accepted-diffs.jsonl` | config | file-I/O | acceptance JSONL loaded by `backend/devtools/surreal_eval_runner.py`, plus Phase 43 runner metadata sentinel filtering | close |
 | `.planning/phases/43-shadow-run-and-quality-gate/artifacts/scale-metrics.json` | config | file-I/O | `evaluate_surreal_scale_gate()` output in `backend/src/dotmd/search/surreal_parity.py` | exact |
 
 ## Pattern Assignments
@@ -300,6 +300,12 @@ Keep both baseline and candidate result files in this exact schema so Phase 40 t
 ### `.planning/phases/43-shadow-run-and-quality-gate/artifacts/accepted-diffs.jsonl` (config, file-I/O)
 
 **Analog:** `_load_acceptances()` in [backend/devtools/surreal_eval_runner.py](/home/j2h4u/repos/j2h4u/dotmd/backend/devtools/surreal_eval_runner.py:48)
+
+**Phase 43 sentinel row pattern:**
+```json
+{"record_type":"phase43_ledger_metadata","quality_corpus":"backend/devtools/surreal_golden_queries.jsonl","metrics_replay_window":"production-derived","memory_guardrails":{"candidate_heap_growth_max_ratio":1.25,"candidate_heap_growth_slack_bytes":134217728,"candidate_rss_growth_max_ratio":1.25,"candidate_rss_growth_slack_bytes":268435456}}
+```
+The Phase 43 runner must ignore `record_type="phase43_ledger_metadata"` rows before passing real acceptance rows to the Phase 40 loader. This keeps `accepted-diffs.jsonl` non-empty for `test -s` even when there are no semantic acceptances, while preserving strict Phase 40 acceptance semantics for actual query rows.
 
 **Acceptance row pattern:**
 ```json
