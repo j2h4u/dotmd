@@ -107,7 +107,7 @@ existing data, production cutover, and complete removal of legacy storage code.
   records and preserves relation labels, weights, and metadata needed by dotMD
   search.
 
-- [ ] **SURR-SEARCH-04**: Hybrid fusion runs over Surreal result sets and
+- [x] **SURR-SEARCH-04**: Hybrid fusion runs over Surreal result sets and
   produces explainable engine attribution for returned candidates.
 
 ### Cutover
@@ -163,7 +163,7 @@ existing data, production cutover, and complete removal of legacy storage code.
 | SURR-SEARCH-01 | Phase 42 | Complete |
 | SURR-SEARCH-02 | Phase 42 / Phase 43 | Complete |
 | SURR-SEARCH-03 | Phase 42 | Complete |
-| SURR-SEARCH-04 | Phase 42 | Pending |
+| SURR-SEARCH-04 | Phase 42 | Complete |
 | SURR-CUT-01 | Phase 43 | Pending |
 | SURR-CUT-02 | Phase 44 | Pending |
 | SURR-CUT-03 | Phase 44 | Pending |

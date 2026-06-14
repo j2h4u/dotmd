@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: SurrealDB-Native Storage Cutover
-status: executing
-stopped_at: Completed 42-03-PLAN.md
-last_updated: "2026-06-14T08:03:16Z"
+status: ready_for_verification
+stopped_at: Completed 42-04-PLAN.md
+last_updated: "2026-06-14T08:13:33.039Z"
 last_activity: 2026-06-14
 progress:
   total_phases: 14
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 14
-  completed_plans: 13
-  percent: 93
+  completed_plans: 14
+  percent: 36
 ---
 
 # GSD State
@@ -21,17 +21,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 42 — surreal-native-retrieval-implementation
+**Current focus:** Phase 43 planning — shadow-run-and-quality-gate
 
 ## Current Milestone
 
 **v1.8 — SurrealDB-Native Storage Cutover**
 
 Phase: 42
-Status: Phase 42 executing; 42-03 complete
+Status: Phase 42 complete; Phase 43 planning is next
 Last activity: 2026-06-14
 
-Progress: [██████----] 57% (4/7 phases complete; Phase 42 executing; phases 43-45 remain to be planned)
+Progress: [██████----] 57% (4/7 phases complete; Phase 43 is next; phases 44-45 remain to be planned)
 
 ## Deferred Items
 
@@ -52,7 +52,7 @@ Items acknowledged and deferred at v1.7 milestone close:
 
 **Velocity:**
 
-- Total plans completed: 71 (across all milestones)
+- Total plans completed: 72 (across all milestones)
 - Average duration: ~3 min
 - Total execution time: —
 
@@ -101,6 +101,7 @@ Items acknowledged and deferred at v1.7 milestone close:
 | 40 | 1 | - | - |
 | Phase 42 P02 | 4min | 2 tasks | 4 files |
 | Phase 42 P03 | 6min | 2 tasks | 6 files |
+| Phase 42 P04 | 3 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -222,6 +223,9 @@ Recent decisions affecting current work:
 - [Phase 42]: [Plan 42-02]: The embedded Surreal runtime requires validated literal HNSW top-k/ef values inside <|k,ef|>, while query vectors and embedding models stay bound as variables.
 - [Phase 42]: [Plan 42-03]: Surreal graph retrieval keeps GraphDirectEngine matching but uses one bounded relations query filtered by target_id and rel_type.
 - [Phase 42]: [Plan 42-03]: Embedded graph assertions must create relation rows with RELATE so TYPE RELATION records expose valid in/out endpoints alongside flat relation metadata.
+- [Phase 42]: [Plan 42-04]: Surreal-native hybrid retrieval stays behind an explicit engine override seam and does not change DotMDService startup defaults.
+- [Phase 42]: [Plan 42-04]: Graph enrichment remains the existing post-fusion path unless an explicit graph override is supplied for evaluation or tests.
+- [Phase 42]: [Plan 42-04]: Capability-probe artifacts stay out of service startup, CLI, MCP, and settings wiring until later cutover phases.
 
 ### Pending Todos
 
@@ -307,17 +311,17 @@ retrieval parity failed on hybrid/RRF behavior.
 
 ## Current Position
 
-Phase: 42 (surreal-native-retrieval-implementation) — EXECUTING
+Phase: 42 (surreal-native-retrieval-implementation) — COMPLETE
 Plan: 4 of 4
-Status: Ready to execute 42-04-PLAN.md
-Last activity: 2026-06-14 -- Completed 42-03-PLAN.md
+Status: Completed 42-04-PLAN.md; Phase 43 planning next
+Last activity: 2026-06-14 -- Completed 42-04-PLAN.md
 
 ## Operator Next Steps
 
-- Execute `42-04-PLAN.md` for Phase 42.
+- Plan Phase 43 shadow run and quality gate.
 
 ## Session
 
-**Last session:** 2026-06-14T08:03:16Z
-**Stopped at:** Completed 42-03-PLAN.md
+**Last session:** 2026-06-14T08:13:33.018Z
+**Stopped at:** Completed 42-04-PLAN.md
 **Resume file:** None
