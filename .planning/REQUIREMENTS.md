@@ -97,10 +97,10 @@ existing data, production cutover, and complete removal of legacy storage code.
 
 ### Surreal Retrieval
 
-- [ ] **SURR-SEARCH-01**: SurrealDB full-text search uses real BM25/full-text
+- [x] **SURR-SEARCH-01**: SurrealDB full-text search uses real BM25/full-text
   indexes with weighted title, tags, and body/text contributions.
 
-- [ ] **SURR-SEARCH-02**: SurrealDB vector search uses the selected HNSW or
+- [x] **SURR-SEARCH-02**: SurrealDB vector search uses the selected HNSW or
   DISKANN strategy with production-like build-time and latency evidence.
 
 - [ ] **SURR-SEARCH-03**: Graph/entity retrieval runs through Surreal relation
@@ -160,8 +160,8 @@ existing data, production cutover, and complete removal of legacy storage code.
 | SURR-MIG-01 | Phase 41 | Pending |
 | SURR-MIG-02 | Phase 39 / Phase 41 | Complete |
 | SURR-MIG-03 | Phase 41 / Phase 44 | Pending |
-| SURR-SEARCH-01 | Phase 42 | Pending |
-| SURR-SEARCH-02 | Phase 42 / Phase 43 | Pending |
+| SURR-SEARCH-01 | Phase 42 | Complete |
+| SURR-SEARCH-02 | Phase 42 / Phase 43 | Complete |
 | SURR-SEARCH-03 | Phase 42 | Pending |
 | SURR-SEARCH-04 | Phase 42 | Pending |
 | SURR-CUT-01 | Phase 43 | Pending |

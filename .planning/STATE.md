@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: SurrealDB-Native Storage Cutover
-status: Phase 42 executing; 42-01 complete
-stopped_at: Completed 42-01-PLAN.md
-last_updated: "2026-06-14T07:35:37Z"
+status: executing
+stopped_at: Completed 42-02-PLAN.md
+last_updated: "2026-06-14T07:52:16.941Z"
 last_activity: 2026-06-14
 progress:
   total_phases: 14
   completed_phases: 4
   total_plans: 14
-  completed_plans: 11
+  completed_plans: 12
   percent: 29
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 **v1.8 — SurrealDB-Native Storage Cutover**
 
 Phase: 42
-Status: Phase 42 executing; 42-01 complete
+Status: Phase 42 executing; 42-02 complete
 Last activity: 2026-06-14
 
 Progress: [██████----] 57% (4/7 phases complete; Phase 42 executing; phases 43-45 remain to be planned)
@@ -99,6 +99,7 @@ Items acknowledged and deferred at v1.7 milestone close:
 | Phase 40 P01 | 15 min | 3 tasks | 7 files |
 | Phase 42 P01 | 6 min | 2 tasks | 5 files |
 | 40 | 1 | - | - |
+| Phase 42 P02 | 4min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -216,6 +217,8 @@ Recent decisions affecting current work:
 - [Phase 40]: GoldenQueryCategory.GRAPH_ENTITY.value is the single serialized graph/entity category label.
 - [Phase 40]: contains anchors are checked only against supplied snippets/read evidence and never by dereferencing corpus refs.
 - [Phase 40]: Accepted regressions and unclear rows keep raw classification/gate while dropping out of unresolved aggregate counts once accepted.
+- [Phase 42]: [Plan 42-02]: Surreal full-text scores are negated in-query so dotMD keeps descending higher-is-better tuple ordering.
+- [Phase 42]: [Plan 42-02]: The embedded Surreal runtime requires validated literal HNSW top-k/ef values inside <|k,ef|>, while query vectors and embedding models stay bound as variables.
 
 ### Pending Todos
 
@@ -302,16 +305,16 @@ retrieval parity failed on hybrid/RRF behavior.
 ## Current Position
 
 Phase: 42 (surreal-native-retrieval-implementation) — EXECUTING
-Plan: 2 of 4
-Status: Ready to execute 42-02-PLAN.md
-Last activity: 2026-06-14 -- Completed 42-01-PLAN.md
+Plan: 3 of 4
+Status: Ready to execute 42-03-PLAN.md
+Last activity: 2026-06-14 -- Completed 42-02-PLAN.md
 
 ## Operator Next Steps
 
-- Execute `42-02-PLAN.md` for Phase 42.
+- Execute `42-03-PLAN.md` for Phase 42.
 
 ## Session
 
-**Last session:** 2026-06-14T07:35:37Z
-**Stopped at:** Completed 42-01-PLAN.md
+**Last session:** 2026-06-14T07:52:16.916Z
+**Stopped at:** Completed 42-02-PLAN.md
 **Resume file:** None
