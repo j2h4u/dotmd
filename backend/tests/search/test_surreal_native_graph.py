@@ -107,7 +107,7 @@ def test_search_matches_entities_like_graph_direct_and_returns_empty_without_mat
     results = engine.search("meeting with Николай Сенин about surreal", top_k=3)
 
     assert results == []
-    assert len(connection.calls) == 3
+    assert len(connection.calls) == 2
     relation_statement, relation_variables = connection.calls[-1]
     assert "FROM relations" in relation_statement
     assert relation_variables == {
