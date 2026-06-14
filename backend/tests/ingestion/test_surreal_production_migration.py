@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 from pathlib import Path
 from typing import TypedDict
 
@@ -11,6 +13,10 @@ from tests.ingestion.test_surreal_transform_only_migration import (
     _write_feedback_export,
     _write_gate_report,
     _write_graph_export,
+)
+from tests.fixtures.surreal_native import (
+    apply_surreal_native_retrieval_schema,
+    isolated_surreal_connection,
 )
 
 
@@ -24,6 +30,21 @@ class _MigrationInputs(TypedDict):
 def _build_inputs(tmp_path: Path) -> _MigrationInputs:
     db_path = tmp_path / "production-source.db"
     fixture_ids = _create_transform_only_fixture(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE source_documents SET metadata_json = ? WHERE document_ref = ?",
+            (
+                json.dumps({"lang": "ru", "tags": ["surreal", "retrieval"]}),
+                fixture_ids["file_path"],
+            ),
+        )
+        conn.execute(
+            "UPDATE source_documents SET metadata_json = ? WHERE document_ref = ?",
+            (
+                json.dumps({"lang": "en", "tags": "beta"}),
+                "/tmp/Doc Two.md",
+            ),
+        )
     feedback_provider = _FakeFeedbackProvider()
     graph_export_path = _write_graph_export(tmp_path / "graph-export.json", fixture_ids)
     feedback_export_path = _write_feedback_export(
@@ -84,6 +105,41 @@ def test_build_manifest_records_source_capture_schema_counts_and_no_recompute_de
     assert manifest.source_capture_manifest.feedback_export["exported_at"] == "2026-06-12T00:13:00Z"
     assert manifest.source_capture_manifest.skew_policy == "bounded_skew_accepted"
     assert not (tmp_path / "manifest.db").exists()
+
+
+def test_load_sqlite_rows_for_surreal_materializes_title_and_tags_text_from_source_documents(
+    tmp_path: Path,
+) -> None:
+    from dotmd.ingestion.migrate_surreal import load_sqlite_rows_for_surreal  # type: ignore[import-not-found]
+
+    inputs = _build_inputs(tmp_path)
+
+    rows = load_sqlite_rows_for_surreal(inputs["sqlite_snapshot_path"])
+    chunk_payloads = {row["chunk_id"]: row for row in rows["chunks"]}
+
+    tagged_chunk = chunk_payloads[inputs["fixture_ids"]["chunk_id"]]
+    plain_chunk = chunk_payloads["chunk:plain"]
+
+    assert tagged_chunk["title"] == "Doc One"
+    assert tagged_chunk["tags_text"] == "surreal retrieval"
+    assert plain_chunk["title"] == "Doc Two"
+    assert plain_chunk["tags_text"] == "beta"
+    assert tagged_chunk["text"] == "Alpha body"
+    assert tagged_chunk["document_ref"] == inputs["fixture_ids"]["file_path"]
+    assert tagged_chunk["ref"] == inputs["fixture_ids"]["ref"]
+
+
+def test_phase42_fixture_applies_retrieval_schema_for_real_embedded_targets(tmp_path: Path) -> None:
+    with isolated_surreal_connection(tmp_path) as connection:
+        retrieval_plan = apply_surreal_native_retrieval_schema(
+            connection,
+            embedding_dimension=3,
+            hnsw_ef=40,
+        )
+        schema_info = connection.query_raw("INFO FOR TABLE embeddings;")
+
+    assert retrieval_plan.embedding_dimension == 3
+    assert "embedding" in str(schema_info)
 
 
 @pytest.mark.parametrize("mode_name", ["PLAN", "DRY_RUN"])

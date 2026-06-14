@@ -16,6 +16,10 @@ from dotmd.storage.surreal_schema import (
     required_migration_categories,
     validate_dotmd_surreal_schema_plan,
 )
+from tests.fixtures.surreal_native import (
+    apply_surreal_native_retrieval_schema,
+    isolated_surreal_connection,
+)
 
 
 class _FakeSchemaConnection:
@@ -238,3 +242,207 @@ def test_validate_dotmd_surreal_schema_plan_fails_for_missing_categories_or_fiel
     )
     with pytest.raises(ValueError, match="rel_type"):
         validate_dotmd_surreal_schema_plan(invalid_plan)
+
+
+def test_chunks_schema_adds_weighted_lexical_fields_without_removing_existing_identity_fields() -> (
+    None
+):
+    plan = build_dotmd_surreal_schema_plan()
+    chunks = _table_by_name(plan, "chunks")
+
+    title_field = _field_by_name(chunks, "title")
+    tags_text_field = _field_by_name(chunks, "tags_text")
+
+    assert title_field.field_type == "string"
+    assert title_field.required is False
+    assert tags_text_field.field_type == "string"
+    assert tags_text_field.required is False
+    assert {"text", "ref", "document_ref"}.issubset(_field_names(chunks))
+
+
+def test_retrieval_index_plan_exposes_runtime_compatible_bm25_hnsw_and_relation_indexes() -> None:
+    from dotmd.storage.surreal_schema import (  # type: ignore[import-not-found]
+        build_surreal_native_retrieval_index_plan,
+    )
+
+    retrieval_plan = build_surreal_native_retrieval_index_plan(
+        embedding_dimension=3,
+        hnsw_ef=40,
+    )
+
+    assert retrieval_plan.embedding_dimension == 3
+    assert retrieval_plan.hnsw_ef == 40
+    assert retrieval_plan.analyzer_statement == (
+        "DEFINE ANALYZER chunks_bm25_analyzer TOKENIZERS blank,class FILTERS lowercase,snowball(english);"
+    )
+    assert retrieval_plan.bm25_index_statements == (
+        "DEFINE INDEX chunks_title_bm25_idx ON TABLE chunks COLUMNS title SEARCH ANALYZER chunks_bm25_analyzer BM25;",
+        "DEFINE INDEX chunks_tags_text_bm25_idx ON TABLE chunks COLUMNS tags_text SEARCH ANALYZER chunks_bm25_analyzer BM25;",
+        "DEFINE INDEX chunks_text_bm25_idx ON TABLE chunks COLUMNS text SEARCH ANALYZER chunks_bm25_analyzer BM25;",
+    )
+    assert retrieval_plan.hnsw_index_statement == (
+        "DEFINE INDEX embeddings_hnsw_idx ON TABLE embeddings COLUMNS embedding HNSW DIMENSION 3 DIST COSINE EFC 40;"
+    )
+    assert retrieval_plan.relation_index_statements == (
+        "DEFINE INDEX relations_rel_type_idx ON TABLE relations COLUMNS rel_type;",
+        "DEFINE INDEX relations_target_id_idx ON TABLE relations COLUMNS target_id;",
+        "DEFINE INDEX relations_source_target_idx ON TABLE relations COLUMNS source_id, target_id;",
+    )
+    assert retrieval_plan.statements == (
+        retrieval_plan.analyzer_statement,
+        *retrieval_plan.bm25_index_statements,
+        retrieval_plan.hnsw_index_statement,
+        *retrieval_plan.relation_index_statements,
+    )
+
+
+def test_retrieval_index_plan_stays_on_locally_verified_surreal_2_runtime_surface() -> None:
+    from dotmd.storage.surreal_schema import (  # type: ignore[import-not-found]
+        build_surreal_native_retrieval_index_plan,
+    )
+
+    retrieval_plan = build_surreal_native_retrieval_index_plan(
+        embedding_dimension=3,
+        hnsw_ef=40,
+    )
+    serialized = "\n".join(retrieval_plan.statements)
+
+    assert "SEARCH ANALYZER" in serialized
+    assert "FULLTEXT" not in serialized
+    assert "DISKANN" not in serialized
+    assert "search::rrf" not in serialized
+    assert "search::linear" not in serialized
+
+
+def test_retrieval_contract_validation_rejects_bad_dimensions_models_vectors_and_query_bounds() -> (
+    None
+):
+    from dotmd.storage.surreal_schema import (  # type: ignore[import-not-found]
+        validate_surreal_native_retrieval_contract,
+    )
+
+    valid_rows = [
+        {
+            "embedding_model": "multilingual-e5-large",
+            "embedding": [0.11, 0.22, 0.33],
+        }
+    ]
+
+    validate_surreal_native_retrieval_contract(
+        embedding_dimension=3,
+        embedding_rows=valid_rows,
+        top_k=10,
+        hnsw_ef=40,
+    )
+
+    with pytest.raises(ValueError, match="embedding_dimension"):
+        validate_surreal_native_retrieval_contract(
+            embedding_dimension=0,
+            embedding_rows=valid_rows,
+            top_k=10,
+            hnsw_ef=40,
+        )
+    with pytest.raises(ValueError, match="single active embedding_model"):
+        validate_surreal_native_retrieval_contract(
+            embedding_dimension=3,
+            embedding_rows=[
+                {"embedding_model": "model-a", "embedding": [0.11, 0.22, 0.33]},
+                {"embedding_model": "model-b", "embedding": [0.44, 0.55, 0.66]},
+            ],
+            top_k=10,
+            hnsw_ef=40,
+        )
+    with pytest.raises(ValueError, match="embedding_dimension"):
+        validate_surreal_native_retrieval_contract(
+            embedding_dimension=3,
+            embedding_rows=[
+                {
+                    "embedding_model": "multilingual-e5-large",
+                    "embedding": [0.11, 0.22],
+                }
+            ],
+            top_k=10,
+            hnsw_ef=40,
+        )
+    with pytest.raises(ValueError, match="top_k"):
+        validate_surreal_native_retrieval_contract(
+            embedding_dimension=3,
+            embedding_rows=valid_rows,
+            top_k=0,
+            hnsw_ef=40,
+        )
+    with pytest.raises(ValueError, match="top_k"):
+        validate_surreal_native_retrieval_contract(
+            embedding_dimension=3,
+            embedding_rows=valid_rows,
+            top_k=101,
+            hnsw_ef=40,
+        )
+    with pytest.raises(ValueError, match="hnsw_ef"):
+        validate_surreal_native_retrieval_contract(
+            embedding_dimension=3,
+            embedding_rows=valid_rows,
+            top_k=10,
+            hnsw_ef=9,
+        )
+    with pytest.raises(ValueError, match="hnsw_ef"):
+        validate_surreal_native_retrieval_contract(
+            embedding_dimension=3,
+            embedding_rows=valid_rows,
+            top_k=10,
+            hnsw_ef=401,
+        )
+    with pytest.raises(ValueError, match="hnsw_ef"):
+        validate_surreal_native_retrieval_contract(
+            embedding_dimension=3,
+            embedding_rows=valid_rows,
+            top_k=41,
+            hnsw_ef=40,
+        )
+
+
+def test_probe_surreal_native_retrieval_capabilities_reports_required_and_observed_features(
+    tmp_path: Path,
+) -> None:
+    from dotmd.storage.surreal_schema import (  # type: ignore[import-not-found]
+        SurrealRetrievalCapabilityReport,
+        probe_surreal_native_retrieval_capabilities,
+    )
+
+    with isolated_surreal_connection(tmp_path) as connection:
+        report = probe_surreal_native_retrieval_capabilities(
+            connection,
+            embedding_dimension=3,
+            hnsw_ef=40,
+        )
+
+    assert isinstance(report, SurrealRetrievalCapabilityReport)
+    assert report.overall_passed is True
+    required = {check.name: check for check in report.required_checks}
+    observations = {check.name: check for check in report.optional_observations}
+
+    assert required["bm25_analyzer"].passed is True
+    assert required["bm25_title_index"].passed is True
+    assert required["bm25_tags_text_index"].passed is True
+    assert required["bm25_text_index"].passed is True
+    assert required["hnsw_vector_index"].passed is True
+    assert required["relation_table"].passed is True
+    assert required["relations_target_id_idx"].passed is True
+    assert observations["fulltext_analyzer_v3"].required is False
+    assert observations["diskann_v3"].required is False
+    assert observations["built_in_hybrid_helpers"].required is False
+
+
+def test_shared_phase42_fixture_applies_base_schema_and_retrieval_plan(tmp_path: Path) -> None:
+    with isolated_surreal_connection(tmp_path) as connection:
+        retrieval_plan = apply_surreal_native_retrieval_schema(
+            connection,
+            embedding_dimension=3,
+            hnsw_ef=40,
+        )
+
+        chunk_info = connection.query_raw("INFO FOR TABLE chunks;")
+
+    assert retrieval_plan.embedding_dimension == 3
+    assert "title" in str(chunk_info)
+    assert "tags_text" in str(chunk_info)
