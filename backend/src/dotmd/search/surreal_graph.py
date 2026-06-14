@@ -50,12 +50,13 @@ class SurrealGraphDirectEngine:
     @staticmethod
     def _build_relation_statement() -> str:
         return """
-SELECT source_id, target_id, rel_type, weight, properties, metadata, `in`, out
+SELECT source_id, math::sum(weight) AS total_weight
 FROM relations
 WHERE source_table = 'sections'
   AND target_id IN $entity_names
   AND rel_type IN $allowed_rel_types
-ORDER BY weight DESC, source_id ASC, target_id ASC
+GROUP BY source_id
+ORDER BY total_weight DESC, source_id ASC
 LIMIT $limit;
 """.strip()
 
@@ -122,8 +123,10 @@ LIMIT $limit;
         for row in rows:
             chunk_id = row.get("source_id")
             rel_type = row.get("rel_type")
-            weight = row.get("weight")
-            if chunk_id in (None, "") or rel_type not in self._allowed_rel_types or weight is None:
+            weight = row.get("total_weight", row.get("weight"))
+            if chunk_id in (None, "") or weight is None:
+                continue
+            if rel_type is not None and rel_type not in self._allowed_rel_types:
                 continue
             try:
                 numeric_weight = float(weight)

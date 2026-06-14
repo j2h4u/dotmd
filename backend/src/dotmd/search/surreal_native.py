@@ -28,6 +28,7 @@ def build_surreal_native_engine_overrides(
         "semantic": SurrealVectorSearchEngine(
             connection,
             model_name=settings.embedding_model,
+            chunk_strategy=settings.chunk_strategy,
             embedding_dimension=embedding_dimension,
             score_floor=settings.semantic_score_floor,
             embedding_url=settings.embedding_url,
@@ -36,6 +37,9 @@ def build_surreal_native_engine_overrides(
             query_instruction=settings.query_instruction,
             hnsw_ef=hnsw_ef,
         ),
-        "keyword": SurrealFTSSearchEngine(connection),
+        "keyword": SurrealFTSSearchEngine(
+            connection,
+            chunk_strategy=settings.chunk_strategy,
+        ),
         "graph_direct": SurrealGraphDirectEngine(connection),
     }

@@ -149,15 +149,13 @@ def test_search_uses_indexed_target_id_relation_query_with_bound_variables() -> 
     assert len(connection.calls) == 2
 
     statement, variables = connection.calls[-1]
-    assert (
-        "SELECT source_id, target_id, rel_type, weight, properties, metadata, `in`, out"
-        in statement
-    )
+    assert "SELECT source_id, math::sum(weight) AS total_weight" in statement
     assert "FROM relations" in statement
     assert "target_id IN $entity_names" in statement
     assert "rel_type IN $allowed_rel_types" in statement
     assert "source_table = 'sections'" in statement
-    assert "ORDER BY weight DESC, source_id ASC, target_id ASC" in statement
+    assert "GROUP BY source_id" in statement
+    assert "ORDER BY total_weight DESC, source_id ASC" in statement
     assert "LIMIT $limit" in statement
     assert variables == {
         "entity_names": ["Surreal", "retrieval"],
@@ -225,6 +223,44 @@ def test_search_uses_relation_weights_normalizes_scores_and_breaks_ties_by_chunk
         ("chunk-beta", 1.0 / 3.0),
         ("chunk-gamma", 1.0 / 3.0),
     ]
+
+
+def test_search_limits_after_chunk_aggregation_not_raw_relation_rows() -> None:
+    connection = _FakeGraphConnection(
+        entity_rows=[
+            {"name": "Surreal"},
+            {"name": "retrieval"},
+        ],
+        relation_rows=[
+            {
+                "source_id": "chunk-alpha",
+                "target_id": "Surreal",
+                "rel_type": "MENTIONS",
+                "weight": 2.0,
+            },
+            {
+                "source_id": "chunk-alpha",
+                "target_id": "retrieval",
+                "rel_type": "HAS_TAG",
+                "weight": 1.0,
+            },
+            {
+                "source_id": "chunk-beta",
+                "target_id": "Surreal",
+                "rel_type": "MENTIONS",
+                "weight": 4.0,
+            },
+        ],
+    )
+    engine = _engine_class()(connection)
+
+    assert engine.search("surreal retrieval", top_k=1) == [("chunk-beta", 1.0)]
+
+    statement, variables = connection.calls[-1]
+    assert "GROUP BY source_id" in statement
+    assert "LIMIT $limit" in statement
+    assert variables is not None
+    assert variables["limit"] == 1
 
 
 def test_search_uses_flat_relation_fields_even_when_surreal_endpoints_are_present() -> None:

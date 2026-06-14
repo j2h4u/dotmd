@@ -19,9 +19,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+_ACTIVE_CHUNK_IDS_STATEMENT = """
+SELECT VALUE chunk_id
+FROM chunks
+WHERE chunk_strategy = $chunk_strategy;
+""".strip()
 _PRECONDITION_STATEMENT = """
 SELECT embedding_model, array::len(embedding) AS embedding_dimension
-FROM embeddings;
+FROM embeddings
+WHERE $active_chunk_ids CONTAINS chunk_id
+  AND embedding_model = $embedding_model;
 """.strip()
 
 
@@ -30,7 +37,7 @@ class _SurrealQueryConnection(Protocol):
         self,
         statement: str,
         variables: dict[str, Any] | None = None,
-    ) -> list[dict[str, Any]]: ...
+    ) -> list[Any]: ...
 
 
 class _UnusedVectorStore:
@@ -72,6 +79,7 @@ class SurrealVectorSearchEngine(SemanticSearchEngine):
         connection: _SurrealQueryConnection,
         *,
         model_name: str = _DEFAULT_MODEL,
+        chunk_strategy: str = "contextual_512_50",
         embedding_dimension: int,
         score_floor: float = 0.0,
         embedding_url: str | None = None,
@@ -90,9 +98,11 @@ class SurrealVectorSearchEngine(SemanticSearchEngine):
             query_instruction=query_instruction,
         )
         self._connection = connection
+        self._chunk_strategy = chunk_strategy
         self._embedding_dimension = embedding_dimension
         self._hnsw_ef = hnsw_ef
         self._preconditions_valid: bool | None = None
+        self._active_chunk_ids: list[str] | None = None
 
     def _placeholder_validation_rows(self) -> list[dict[str, object]]:
         return [
@@ -110,8 +120,32 @@ class SurrealVectorSearchEngine(SemanticSearchEngine):
             hnsw_ef=self._hnsw_ef,
         )
 
+    def _load_active_chunk_ids(self) -> list[str]:
+        if self._active_chunk_ids is not None:
+            return self._active_chunk_ids
+        rows = self._connection.query(
+            _ACTIVE_CHUNK_IDS_STATEMENT,
+            {"chunk_strategy": self._chunk_strategy},
+        )
+        chunk_ids: list[str] = []
+        for row in rows:
+            raw_chunk_id = row.get("chunk_id", row.get("value")) if isinstance(row, dict) else row
+            if raw_chunk_id not in (None, ""):
+                chunk_ids.append(str(raw_chunk_id))
+        self._active_chunk_ids = chunk_ids
+        return chunk_ids
+
     def _load_precondition_rows(self) -> list[dict[str, object]]:
-        rows = self._connection.query(_PRECONDITION_STATEMENT)
+        active_chunk_ids = self._load_active_chunk_ids()
+        if not active_chunk_ids:
+            return []
+        rows = self._connection.query(
+            _PRECONDITION_STATEMENT,
+            {
+                "active_chunk_ids": active_chunk_ids,
+                "embedding_model": self._model_name,
+            },
+        )
         validation_rows: list[dict[str, object]] = []
         for row in rows:
             embedding_model = row.get("embedding_model")
@@ -173,6 +207,7 @@ SELECT chunk_id,
     vector::similarity::cosine(embedding, $qvec) AS score
 FROM embeddings
 WHERE embedding_model = $embedding_model
+  AND $active_chunk_ids CONTAINS chunk_id
   AND embedding <|{top_k},{self._hnsw_ef}|> $qvec
 ORDER BY score DESC, chunk_id ASC
 LIMIT $limit;
@@ -199,6 +234,9 @@ LIMIT $limit;
         self._validate_request_bounds(top_k)
         if not self._ensure_retrieval_preconditions():
             return []
+        active_chunk_ids = self._load_active_chunk_ids()
+        if not active_chunk_ids:
+            return []
 
         encoded_query = self._normalize_query_text(query)
         query_embedding = self.encode(encoded_query)
@@ -208,6 +246,7 @@ LIMIT $limit;
                 self._build_search_statement(top_k),
                 {
                     "embedding_model": self._model_name,
+                    "active_chunk_ids": active_chunk_ids,
                     "qvec": query_embedding,
                     "limit": top_k,
                 },

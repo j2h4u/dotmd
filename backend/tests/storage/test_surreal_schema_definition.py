@@ -423,6 +423,7 @@ def test_probe_surreal_native_retrieval_capabilities_reports_required_and_observ
             connection,
             embedding_dimension=3,
             hnsw_ef=40,
+            allow_target_mutation=True,
         )
 
     assert isinstance(report, SurrealRetrievalCapabilityReport)
@@ -440,6 +441,24 @@ def test_probe_surreal_native_retrieval_capabilities_reports_required_and_observ
     assert observations["fulltext_analyzer_v3"].required is False
     assert observations["diskann_v3"].required is False
     assert observations["built_in_hybrid_helpers"].required is False
+
+
+def test_probe_surreal_native_retrieval_capabilities_requires_explicit_mutation_opt_in(
+    tmp_path: Path,
+) -> None:
+    from dotmd.storage.surreal_schema import (  # type: ignore[import-not-found]
+        probe_surreal_native_retrieval_capabilities,
+    )
+
+    with (
+        isolated_surreal_connection(tmp_path) as connection,
+        pytest.raises(ValueError, match="explicit scratch target"),
+    ):
+        probe_surreal_native_retrieval_capabilities(
+            connection,
+            embedding_dimension=3,
+            hnsw_ef=40,
+        )
 
 
 def test_shared_phase42_fixture_applies_base_schema_and_retrieval_plan(tmp_path: Path) -> None:

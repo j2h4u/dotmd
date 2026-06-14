@@ -67,6 +67,7 @@ def test_search_uses_fixed_weighted_surrealql_with_bound_query_variables() -> No
     statement, variables = connection.calls[0]
     assert "SELECT chunk_id" in statement
     assert "FROM chunks" in statement
+    assert "chunk_strategy = $chunk_strategy" in statement
     assert "title @1@ $query" in statement
     assert "tags_text @2@ $query" in statement
     assert "text @3@ $query" in statement
@@ -74,8 +75,23 @@ def test_search_uses_fixed_weighted_surrealql_with_bound_query_variables() -> No
     assert "3 * search::score(2)" in statement
     assert "1 * search::score(3)" in statement
     assert "ORDER BY score DESC, chunk_id ASC" in statement
-    assert variables == {"query": "surreal retrieval quoted", "limit": 7}
+    assert variables == {
+        "query": "surreal retrieval quoted",
+        "chunk_strategy": "contextual_512_50",
+        "limit": 7,
+    }
     assert "surreal: retrieval!!!" not in statement
+
+
+def test_search_filters_to_configured_chunk_strategy() -> None:
+    connection = _FakeFTSConnection(rows=[{"chunk_id": "chunk-active", "score": 1.0}])
+    engine = _engine_class()(connection, chunk_strategy="heading_512_50")
+
+    assert engine.search("surreal retrieval", top_k=3) == [("chunk-active", 1.0)]
+
+    _statement, variables = connection.calls[0]
+    assert variables is not None
+    assert variables["chunk_strategy"] == "heading_512_50"
 
 
 def test_search_logs_and_returns_empty_on_surreal_errors(caplog: pytest.LogCaptureFixture) -> None:

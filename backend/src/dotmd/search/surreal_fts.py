@@ -32,11 +32,13 @@ class SurrealFTSSearchEngine:
         self,
         connection: _SurrealQueryConnection,
         *,
+        chunk_strategy: str = "contextual_512_50",
         title_weight: float = 5.0,
         tags_weight: float = 3.0,
         text_weight: float = 1.0,
     ) -> None:
         self._connection = connection
+        self._chunk_strategy = chunk_strategy
         self._statement = self._build_statement(
             title_weight=title_weight,
             tags_weight=tags_weight,
@@ -58,9 +60,12 @@ SELECT chunk_id,
         ({text_weight:g} * search::score(3))
     ) AS score
 FROM chunks
-WHERE title @1@ $query
-   OR tags_text @2@ $query
-   OR text @3@ $query
+WHERE chunk_strategy = $chunk_strategy
+  AND (
+      title @1@ $query
+      OR tags_text @2@ $query
+      OR text @3@ $query
+  )
 ORDER BY score DESC, chunk_id ASC
 LIMIT $limit;
 """.strip()
@@ -73,7 +78,11 @@ LIMIT $limit;
         try:
             rows = self._connection.query(
                 self._statement,
-                {"query": sanitized, "limit": top_k},
+                {
+                    "query": sanitized,
+                    "chunk_strategy": self._chunk_strategy,
+                    "limit": top_k,
+                },
             )
         except (RuntimeError, SurrealError) as exc:
             logger.warning(
