@@ -191,3 +191,114 @@ CYCLE_SUMMARY: current_high=1 current_actionable=5
 - 42-01: pin the exact metadata key used to materialize `tags_text` and test a known tagged document with non-empty output.
 - 42-01 / 42-02: specify concrete bounds for `hnsw_ef` / top-k validation so tests and implementation share one contract.
 - 42-01: either wire the capability probe into the first runtime consumer or explicitly defer runtime consumption to Phase 43/44.
+
+---
+
+# Cross-AI Plan Review - Phase 42 Cycle 2
+
+## Tooling
+
+Requested intent: `$gsd-plan-review-convergence 42 --opencode --claude`, cycle 2.
+
+Cycle 2 reviewed the current Phase 42 plans after replan commit `af6e770 docs(42): address cycle 1 plan review feedback`. The prior review commit was `7a5d23f docs: review phase 42 plans`, with Cycle 1 unresolved counts `current_high=1 current_actionable=5`.
+
+- OpenCode reviewer invoked with `/home/j2h4u/.opencode/bin/opencode run --dangerously-skip-permissions`.
+- Claude reviewer invoked with `/home/j2h4u/.local/bin/claude --print --permission-mode bypassPermissions`.
+- Both reviewers received the same workspace-local prompt and were instructed to review whether Cycle 1 concerns are now incorporated into executable PLAN.md content.
+- The orchestrator is Codex and was not used as a reviewer.
+
+Branch note: this checkout is on `milestone/v1.8-surrealdb-cutover`, not `main`. The Phase 42 review and replan commits are present on this branch and are not ancestors of `main`, so Cycle 2 was run against the branch that contains the requested Phase 42 artifacts.
+
+## OpenCode Review
+
+### Summary
+
+OpenCode found that all six Cycle 1 concerns are now incorporated into PLAN.md files in executable form. It found no remaining HIGH concerns and no remaining actionable MEDIUM/LOW concerns.
+
+### Strengths
+
+- Complete concern-to-task traceability across review feedback, tests, actions, threat models, and success criteria.
+- `relations_target_id_idx` is added in 42-01 and consumed by 42-03 through `target_id IN $entity_names` plus `rel_type IN $allowed_rel_types`.
+- HNSW bounds and model/dimension preconditions are pinned as shared contracts.
+- Mandatory embedded retrieval assertions prevent fake-only FTS, vector, or graph engines from passing.
+- Capability probe consumption remains explicitly deferred to Phase 43 or Phase 44, keeping Phase 42 scoped to explicit engine overrides.
+
+### Concerns
+
+None counted.
+
+### Source Grounding Notes
+
+OpenCode verified the existing symbols and files used by the plans, including `SearchEngineProtocol`, `FTS5SearchEngine`, `SemanticSearchEngine`, `GraphDirectEngine`, `SurrealConnection`, `fuse_results`, `build_candidates`, `DotMDService._collect_candidate_pool`, `build_dotmd_surreal_schema_plan`, and `load_sqlite_rows_for_surreal`. It also confirmed Phase 42-created modules are correctly absent before execution.
+
+### Risk Assessment
+
+OpenCode rated the current plans LOW risk. The remaining runtime-docs skew risk is covered by old-style BM25/HNSW/relation-table planning and capability probes.
+
+## Claude Review
+
+### Summary
+
+Claude found that replan commit `af6e770` converted all Cycle 1 concerns into executable plan content rather than prose-only acknowledgements. It found no remaining HIGH concerns and no remaining actionable MEDIUM/LOW concerns.
+
+### Strengths
+
+- The prior HIGH relation-index concern is closed across both producer and consumer plans: 42-01 adds/tests `relations_target_id_idx`; 42-03 asserts use of the indexed `target_id` lookup shape.
+- Fake-only testing risk is structurally eliminated by a 42-01-owned embedded `surrealkv://` fixture and mandatory 42-02/42-03 real retrieval assertions.
+- HNSW constants, single-model/dimension precondition, `tags_text` source key, and capability-probe deferral are concrete enough for execution.
+- Phase 42 scope remains contained: no shadow run, cutover, fallback backend, restart behavior, or legacy deletion.
+
+### Concerns
+
+None counted.
+
+Claude noted two low, non-counted implementation details that are visible to execution rather than hidden plan gaps:
+
+- FTS predicate numbering must match the local Surreal runtime, but the mandatory embedded BM25 assertion would fail if numbering is wrong.
+- HNSW operator parameterization may require validated literal integers rather than bound variables, but 42-02 permits validated data values and includes a real HNSW assertion.
+
+### Source Grounding Notes
+
+Claude reported that existing symbols remain grounded and that new Phase 42 artifacts are correctly marked as to-be-created. It also noted an informational field-name divergence in the older prototype path (`relation_type`) versus the Phase 41 schema and Phase 42 plans (`rel_type`); the plans correctly target the schema field.
+
+### Risk Assessment
+
+Claude rated the current plans LOW risk. The replan closes the prior "appears green while missing native retrieval" risk by requiring real embedded tests and explicit validation constants.
+
+## Verification Coverage
+
+Source-grounding pass used `rg` over the current checkout. Verdicts:
+
+| Symbol / File / Concern | Verdict | Evidence |
+|---|---|---|
+| `SearchEngineProtocol` | VERIFIED | `backend/src/dotmd/search/base.py:14` |
+| `FTS5SearchEngine`, `SemanticSearchEngine`, `GraphDirectEngine` | VERIFIED | `backend/src/dotmd/search/fts5.py:74`, `backend/src/dotmd/search/semantic.py:26`, `backend/src/dotmd/search/graph_direct.py:20` |
+| `SurrealConnection.query` and `SurrealConnection.scan_table` | VERIFIED | `backend/src/dotmd/storage/surreal.py:140`, `backend/src/dotmd/storage/surreal.py:163` |
+| `fuse_results` and `build_candidates` | VERIFIED | `backend/src/dotmd/search/fusion.py:189`, `backend/src/dotmd/search/fusion.py:275` |
+| `DotMDService._collect_candidate_pool` | VERIFIED | `backend/src/dotmd/api/service.py:1325` |
+| `build_dotmd_surreal_schema_plan` | VERIFIED | `backend/src/dotmd/storage/surreal_schema.py:259` |
+| `load_sqlite_rows_for_surreal` | VERIFIED | `backend/src/dotmd/ingestion/migrate_surreal.py:275` |
+| Cycle 1 HIGH: indexed relation target lookup | COVERED IN PLAN | `42-01-PLAN.md` adds/tests `relations_target_id_idx`; `42-03-PLAN.md` asserts `target_id IN $entity_names` and `rel_type IN $allowed_rel_types` |
+| Cycle 1 actionable: HNSW model/dimension contract | COVERED IN PLAN | `42-01-PLAN.md` defines single-active-model/dimension-uniformity validation and shared bounds; `42-02-PLAN.md` enforces before HNSW query |
+| Cycle 1 actionable: real embedded retrieval tests | COVERED IN PLAN | `42-01-PLAN.md` owns `isolated_surreal_connection` and `apply_surreal_native_retrieval_schema`; `42-02-PLAN.md` and `42-03-PLAN.md` require mandatory embedded assertions |
+| Cycle 1 actionable: `tags_text` source key | COVERED IN PLAN | `42-01-PLAN.md` pins `source_documents.metadata_json["tags"]` and requires a known tagged document assertion |
+| Cycle 1 actionable: concrete `hnsw_ef` / top-k bounds | COVERED IN PLAN | `42-01-PLAN.md` pins `MIN_TOP_K=1`, `MAX_TOP_K=100`, `MIN_HNSW_EF=10`, `MAX_HNSW_EF=400`, `DEFAULT_HNSW_EF=40`, and `hnsw_ef >= top_k` |
+| Cycle 1 actionable: capability probe consumer decision | COVERED IN PLAN | `42-01-PLAN.md` and `42-04-PLAN.md` explicitly defer runtime consumption to Phase 43/44 and test that Phase 42 adds no consumer |
+| Phase 42 new modules | VERIFIED ABSENT | `surreal_fts.py`, `surreal_vector.py`, `surreal_graph.py`, `surreal_native.py`, and `tests/fixtures/surreal_native.py` are planned artifacts, not existing symbols |
+| Future helper signatures | UNCHECKABLE | New Phase 42 artifacts cannot be signature-checked before implementation |
+
+## Consensus Summary
+
+Both reviewers agreed that Cycle 1 feedback is now incorporated into executable PLAN.md content. The prior HIGH and all five actionable non-HIGH concerns are present as plan tasks, test assertions, actions, threat mitigations, source-audit rows, or explicit deferrals. No reviewer found new unresolved HIGH concerns or actionable non-HIGH concerns requiring another replan.
+
+## Cycle Summary
+
+CYCLE_SUMMARY: current_high=0 current_actionable=0
+
+## Current HIGH Concerns
+
+None.
+
+## Current Actionable Non-HIGH Concerns
+
+None.
