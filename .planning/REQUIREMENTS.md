@@ -103,7 +103,7 @@ existing data, production cutover, and complete removal of legacy storage code.
 - [x] **SURR-SEARCH-02**: SurrealDB vector search uses the selected HNSW or
   DISKANN strategy with production-like build-time and latency evidence.
 
-- [ ] **SURR-SEARCH-03**: Graph/entity retrieval runs through Surreal relation
+- [x] **SURR-SEARCH-03**: Graph/entity retrieval runs through Surreal relation
   records and preserves relation labels, weights, and metadata needed by dotMD
   search.
 
@@ -162,7 +162,7 @@ existing data, production cutover, and complete removal of legacy storage code.
 | SURR-MIG-03 | Phase 41 / Phase 44 | Pending |
 | SURR-SEARCH-01 | Phase 42 | Complete |
 | SURR-SEARCH-02 | Phase 42 / Phase 43 | Complete |
-| SURR-SEARCH-03 | Phase 42 | Pending |
+| SURR-SEARCH-03 | Phase 42 | Complete |
 | SURR-SEARCH-04 | Phase 42 | Pending |
 | SURR-CUT-01 | Phase 43 | Pending |
 | SURR-CUT-02 | Phase 44 | Pending |

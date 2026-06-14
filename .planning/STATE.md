@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: SurrealDB-Native Storage Cutover
 status: executing
-stopped_at: Completed 42-02-PLAN.md
-last_updated: "2026-06-14T07:52:16.941Z"
+stopped_at: Completed 42-03-PLAN.md
+last_updated: "2026-06-14T08:03:16Z"
 last_activity: 2026-06-14
 progress:
   total_phases: 14
   completed_phases: 4
   total_plans: 14
-  completed_plans: 12
-  percent: 29
+  completed_plans: 13
+  percent: 93
 ---
 
 # GSD State
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 **v1.8 — SurrealDB-Native Storage Cutover**
 
 Phase: 42
-Status: Phase 42 executing; 42-02 complete
+Status: Phase 42 executing; 42-03 complete
 Last activity: 2026-06-14
 
 Progress: [██████----] 57% (4/7 phases complete; Phase 42 executing; phases 43-45 remain to be planned)
@@ -52,7 +52,7 @@ Items acknowledged and deferred at v1.7 milestone close:
 
 **Velocity:**
 
-- Total plans completed: 70 (across all milestones)
+- Total plans completed: 71 (across all milestones)
 - Average duration: ~3 min
 - Total execution time: —
 
@@ -100,6 +100,7 @@ Items acknowledged and deferred at v1.7 milestone close:
 | Phase 42 P01 | 6 min | 2 tasks | 5 files |
 | 40 | 1 | - | - |
 | Phase 42 P02 | 4min | 2 tasks | 4 files |
+| Phase 42 P03 | 6min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -219,6 +220,8 @@ Recent decisions affecting current work:
 - [Phase 40]: Accepted regressions and unclear rows keep raw classification/gate while dropping out of unresolved aggregate counts once accepted.
 - [Phase 42]: [Plan 42-02]: Surreal full-text scores are negated in-query so dotMD keeps descending higher-is-better tuple ordering.
 - [Phase 42]: [Plan 42-02]: The embedded Surreal runtime requires validated literal HNSW top-k/ef values inside <|k,ef|>, while query vectors and embedding models stay bound as variables.
+- [Phase 42]: [Plan 42-03]: Surreal graph retrieval keeps GraphDirectEngine matching but uses one bounded relations query filtered by target_id and rel_type.
+- [Phase 42]: [Plan 42-03]: Embedded graph assertions must create relation rows with RELATE so TYPE RELATION records expose valid in/out endpoints alongside flat relation metadata.
 
 ### Pending Todos
 
@@ -305,16 +308,16 @@ retrieval parity failed on hybrid/RRF behavior.
 ## Current Position
 
 Phase: 42 (surreal-native-retrieval-implementation) — EXECUTING
-Plan: 3 of 4
-Status: Ready to execute 42-03-PLAN.md
-Last activity: 2026-06-14 -- Completed 42-02-PLAN.md
+Plan: 4 of 4
+Status: Ready to execute 42-04-PLAN.md
+Last activity: 2026-06-14 -- Completed 42-03-PLAN.md
 
 ## Operator Next Steps
 
-- Execute `42-03-PLAN.md` for Phase 42.
+- Execute `42-04-PLAN.md` for Phase 42.
 
 ## Session
 
-**Last session:** 2026-06-14T07:52:16.916Z
-**Stopped at:** Completed 42-02-PLAN.md
+**Last session:** 2026-06-14T08:03:16Z
+**Stopped at:** Completed 42-03-PLAN.md
 **Resume file:** None
