@@ -290,6 +290,31 @@ class _SearchMetadataStore:
         }
 
 
+class _RecordingSearchEngine:
+    def __init__(self, results: list[tuple[str, float]]) -> None:
+        self._results = list(results)
+        self.calls: list[tuple[str, int]] = []
+
+    def search(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
+        self.calls.append((query, top_k))
+        return list(self._results)
+
+
+class _RecordingGraphExpansionEngine:
+    def __init__(self, results: list[tuple[str, float]]) -> None:
+        self._results = list(results)
+        self.calls: list[tuple[str, int, list[str]]] = []
+
+    def search(
+        self,
+        query: str,
+        top_k: int = 10,
+        seed_chunk_ids: list[str] | None = None,
+    ) -> list[tuple[str, float]]:
+        self.calls.append((query, top_k, list(seed_chunk_ids or [])))
+        return list(self._results)
+
+
 class TestActiveSearchFiltering:
     """Public search hides inactive retained candidates before rerank/hydration."""
 
@@ -1254,6 +1279,130 @@ class TestCompareRerankers:
         service._graph_direct_engine.search.assert_called_once()
         service._graph_engine.search.assert_called_once()
         assert [run["returned_count"] for run in comparison["rerankers"]] == [1, 1, 1]
+
+
+class TestSurrealHybridOverrides:
+    def test_collect_candidate_pool_uses_engine_overrides_and_existing_fusion(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from dotmd.core.models import SearchMode
+
+        service = _get_service(tmp_path)
+        semantic = _RecordingSearchEngine([("shared", 0.91), ("semantic-only", 0.83)])
+        keyword = _RecordingSearchEngine([("shared", 0.72), ("keyword-only", 0.64)])
+        graph_direct = _RecordingSearchEngine([("graph-only", 1.0)])
+        service._graph_engine.search = MagicMock(return_value=[])
+
+        expected_engine_results = {
+            "semantic": [("shared", 0.91), ("semantic-only", 0.83)],
+            "keyword": [("shared", 0.72), ("keyword-only", 0.64)],
+            "graph_direct": [("graph-only", 1.0)],
+        }
+        fused_results = [("shared", 0.4), ("graph-only", 0.3), ("keyword-only", 0.2)]
+
+        with patch("dotmd.api.service.fuse_results", return_value=fused_results) as fuse_results_mock:
+            pool = service._collect_candidate_pool(
+                search_query="expanded query",
+                original_query="raw query",
+                mode=SearchMode.HYBRID,
+                pool_size=4,
+                engine_overrides={
+                    "semantic": semantic,
+                    "keyword": keyword,
+                    "graph_direct": graph_direct,
+                },
+            )
+
+        assert semantic.calls == [("expanded query", 4)]
+        assert keyword.calls == [("expanded query", 4)]
+        assert graph_direct.calls == [("raw query", 4)]
+        fuse_results_mock.assert_called_once_with(expected_engine_results, k=service._settings.fusion_k)
+        service._graph_engine.search.assert_called_once_with(
+            "expanded query",
+            top_k=4,
+            seed_chunk_ids=["shared", "graph-only", "keyword-only"],
+        )
+        assert pool["engine_results"] == expected_engine_results
+        assert pool["fused"] == fused_results
+
+    def test_collect_candidate_pool_uses_graph_override_when_supplied(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from dotmd.core.models import SearchMode
+
+        service = _get_service(tmp_path)
+        semantic = _RecordingSearchEngine([("shared", 0.91)])
+        graph_override = _RecordingGraphExpansionEngine([("graph-added", 0.8)])
+        service._keyword_engine.search = MagicMock(return_value=[])
+        service._graph_direct_engine.search = MagicMock(return_value=[])
+        service._graph_engine.search = MagicMock(return_value=[("should-not-run", 1.0)])
+
+        pool = service._collect_candidate_pool(
+            search_query="expanded query",
+            original_query="raw query",
+            mode=SearchMode.HYBRID,
+            pool_size=3,
+            engine_overrides={
+                "semantic": semantic,
+                "graph": graph_override,
+            },
+        )
+
+        service._graph_engine.search.assert_not_called()
+        assert graph_override.calls == [("expanded query", 3, ["shared"])]
+        assert pool["engine_results"]["graph"] == [("graph-added", 0.8)]
+        assert [chunk_id for chunk_id, _score in pool["fused"]] == ["shared", "graph-added"]
+        assert pool["fused"][1][1] == pytest.approx(pool["fused"][0][1] * 0.5)
+
+    def test_execute_search_preserves_engine_attribution_for_overlapping_hits(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = _get_service(tmp_path)
+        metadata = _SearchMetadataStore(["shared"], {"shared"})
+        service._pipeline._metadata_store = cast(SQLiteMetadataStore, metadata)
+        service._pipeline.log_search = MagicMock()
+        service._collect_active_candidate_pool = MagicMock(
+            return_value=(
+                {
+                    "search_query": "expanded",
+                    "original_query": "raw",
+                    "fused": [("shared", 0.9)],
+                    "engine_results": {
+                        "semantic": [("shared", 0.8)],
+                        "keyword": [("shared", 0.7)],
+                        "graph_direct": [("shared", 0.6)],
+                    },
+                    "semantic_hits": [("shared", 0.8)],
+                    "keyword_hits": [("shared", 0.7)],
+                    "graph_direct_hits": [("shared", 0.6)],
+                    "pool_size": 1,
+                },
+                [("shared", 0.9)],
+                {"shared": _chunk_provenance("shared")},
+                0,
+            )
+        )
+
+        results = service._execute_search(
+            search_query="expanded",
+            original_query="raw",
+            top_k=1,
+            mode="hybrid",
+            rerank=False,
+            reranker_name=None,
+            pool_size=1,
+        )
+
+        assert len(results) == 1
+        assert results[0].matched_engines == ("graph_direct", "keyword", "semantic")
+        assert results[0].engine_scores == {
+            "semantic": 0.8,
+            "keyword": 0.7,
+            "graph_direct": 0.6,
+        }
 
     def test_compare_overlap_uses_first_successful_reranker(self, tmp_path: Path) -> None:
         service = _get_service(tmp_path)
