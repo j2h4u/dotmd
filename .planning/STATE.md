@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: SurrealDB-Native Storage Cutover
-status: ready_for_verification
+status: planning
 stopped_at: Completed 42-04-PLAN.md
-last_updated: "2026-06-14T08:13:33.039Z"
+last_updated: "2026-06-14T08:31:19.485Z"
 last_activity: 2026-06-14
 progress:
   total_phases: 14
@@ -27,11 +27,11 @@ See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **v1.8 — SurrealDB-Native Storage Cutover**
 
-Phase: 42
+Phase: 43
 Status: Phase 42 complete; Phase 43 planning is next
 Last activity: 2026-06-14
 
-Progress: [██████----] 57% (4/7 phases complete; Phase 43 is next; phases 44-45 remain to be planned)
+Progress: [███████---] 71% (5/7 phases complete; Phase 43 is next; phases 44-45 remain to be planned)
 
 ## Deferred Items
 
@@ -52,7 +52,7 @@ Items acknowledged and deferred at v1.7 milestone close:
 
 **Velocity:**
 
-- Total plans completed: 72 (across all milestones)
+- Total plans completed: 76 (across all milestones)
 - Average duration: ~3 min
 - Total execution time: —
 
@@ -311,10 +311,10 @@ retrieval parity failed on hybrid/RRF behavior.
 
 ## Current Position
 
-Phase: 42 (surreal-native-retrieval-implementation) — COMPLETE
-Plan: 4 of 4
-Status: Completed 42-04-PLAN.md; Phase 43 planning next
-Last activity: 2026-06-14 -- Completed 42-04-PLAN.md
+Phase: 43 (shadow-run-and-quality-gate) — READY FOR PLANNING
+Plan: Not started
+Status: Phase 42 complete; Phase 43 planning next
+Last activity: 2026-06-14 -- Phase 42 verified and completed
 
 ## Operator Next Steps
 

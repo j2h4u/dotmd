@@ -304,7 +304,7 @@ after SurrealDB cutover is accepted.
 | 39. SurrealDB-native retrieval contract | 1/1 | Complete | 2026-06-13 |
 | 40. Evaluation harness and golden queries | 1/1 | Complete    | 2026-06-13 |
 | 41. Production-grade Surreal schema and import | v1.8 | Complete | 2026-06-14 |
-| 42. Surreal-native retrieval implementation | 4/4 | Complete   | 2026-06-14 |
+| 42. Surreal-native retrieval implementation | 4/4 | Complete    | 2026-06-14 |
 | 43. Shadow run and quality gate | v1.8 | Planned | — |
 | 44. Production cutover | v1.8 | Planned | — |
 | 45. Legacy stack removal | v1.8 | Planned | — |
