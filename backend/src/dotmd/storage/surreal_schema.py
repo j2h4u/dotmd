@@ -5,7 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-SURREAL_SCHEMA_VERSION = "41.1.0"
+SURREAL_SCHEMA_VERSION = "42.1.0"
+MIN_TOP_K = 1
+MAX_TOP_K = 100
+MIN_HNSW_EF = 10
+MAX_HNSW_EF = 400
+DEFAULT_HNSW_EF = 40
 
 _REQUIRED_MIGRATION_CATEGORIES = (
     "documents",
@@ -45,6 +50,8 @@ _REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "chunk_strategy",
         "document_ref",
         "ref",
+        "title",
+        "tags_text",
         "text",
         "metadata",
     ),
@@ -118,11 +125,13 @@ _REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "checkpoints": ("schema_version", "namespace", "checkpoint_cursor", "metadata"),
 }
 
-_KNOWN_COMPATIBLE_PREVIOUS_VERSIONS = {"41.0.0"}
+_KNOWN_COMPATIBLE_PREVIOUS_VERSIONS = {"41.0.0", "41.1.0"}
 
 
 class _SchemaConnectionProtocol(Protocol):
     def query(self, statement: str, variables: dict[str, Any] | None = None) -> Any: ...
+
+    def query_raw(self, statement: str, variables: dict[str, Any] | None = None) -> Any: ...
 
     def inspect_schema(self) -> dict[str, Any]: ...
 
@@ -177,6 +186,45 @@ class SurrealSchemaApplyStatus:
     reason: str = ""
     existing_version: str | None = None
     statements_applied: int = 0
+
+
+@dataclass(slots=True, frozen=True)
+class SurrealRetrievalIndexPlan:
+    embedding_dimension: int
+    hnsw_ef: int
+    analyzer_statement: str
+    bm25_index_statements: tuple[str, ...]
+    hnsw_index_statement: str
+    relation_index_statements: tuple[str, ...]
+
+    @property
+    def statements(self) -> tuple[str, ...]:
+        return (
+            self.analyzer_statement,
+            *self.bm25_index_statements,
+            self.hnsw_index_statement,
+            *self.relation_index_statements,
+        )
+
+
+@dataclass(slots=True, frozen=True)
+class SurrealRetrievalCapabilityCheck:
+    name: str
+    required: bool
+    passed: bool
+    detail: str
+    statement: str
+
+
+@dataclass(slots=True, frozen=True)
+class SurrealRetrievalCapabilityReport:
+    runtime_version: str | None
+    required_checks: tuple[SurrealRetrievalCapabilityCheck, ...]
+    optional_observations: tuple[SurrealRetrievalCapabilityCheck, ...]
+
+    @property
+    def overall_passed(self) -> bool:
+        return all(check.passed for check in self.required_checks)
 
 
 def _field(
@@ -256,6 +304,76 @@ def required_migration_categories() -> tuple[str, ...]:
     return _REQUIRED_MIGRATION_CATEGORIES
 
 
+def build_surreal_native_retrieval_index_plan(
+    *,
+    embedding_dimension: int,
+    hnsw_ef: int = DEFAULT_HNSW_EF,
+) -> SurrealRetrievalIndexPlan:
+    if embedding_dimension <= 0:
+        raise ValueError("embedding_dimension must be a positive integer")
+    if hnsw_ef < MIN_HNSW_EF or hnsw_ef > MAX_HNSW_EF:
+        raise ValueError(
+            f"hnsw_ef must be between {MIN_HNSW_EF} and {MAX_HNSW_EF}, inclusive"
+        )
+
+    return SurrealRetrievalIndexPlan(
+        embedding_dimension=embedding_dimension,
+        hnsw_ef=hnsw_ef,
+        analyzer_statement=(
+            "DEFINE ANALYZER chunks_bm25_analyzer TOKENIZERS blank,class FILTERS lowercase,snowball(english);"
+        ),
+        bm25_index_statements=(
+            "DEFINE INDEX chunks_title_bm25_idx ON TABLE chunks COLUMNS title SEARCH ANALYZER chunks_bm25_analyzer BM25;",
+            "DEFINE INDEX chunks_tags_text_bm25_idx ON TABLE chunks COLUMNS tags_text SEARCH ANALYZER chunks_bm25_analyzer BM25;",
+            "DEFINE INDEX chunks_text_bm25_idx ON TABLE chunks COLUMNS text SEARCH ANALYZER chunks_bm25_analyzer BM25;",
+        ),
+        hnsw_index_statement=(
+            f"DEFINE INDEX embeddings_hnsw_idx ON TABLE embeddings COLUMNS embedding HNSW DIMENSION {embedding_dimension} DIST COSINE EFC {hnsw_ef};"
+        ),
+        relation_index_statements=(
+            "DEFINE INDEX relations_rel_type_idx ON TABLE relations COLUMNS rel_type;",
+            "DEFINE INDEX relations_target_id_idx ON TABLE relations COLUMNS target_id;",
+            "DEFINE INDEX relations_source_target_idx ON TABLE relations COLUMNS source_id, target_id;",
+        ),
+    )
+
+
+def validate_surreal_native_retrieval_contract(
+    *,
+    embedding_dimension: int,
+    embedding_rows: list[dict[str, Any]],
+    top_k: int,
+    hnsw_ef: int,
+) -> None:
+    if embedding_dimension <= 0:
+        raise ValueError("embedding_dimension must be a positive integer")
+    if top_k < MIN_TOP_K or top_k > MAX_TOP_K:
+        raise ValueError(f"top_k must be between {MIN_TOP_K} and {MAX_TOP_K}, inclusive")
+    if hnsw_ef < MIN_HNSW_EF or hnsw_ef > MAX_HNSW_EF:
+        raise ValueError(
+            f"hnsw_ef must be between {MIN_HNSW_EF} and {MAX_HNSW_EF}, inclusive"
+        )
+    if hnsw_ef < top_k:
+        raise ValueError("hnsw_ef must be greater than or equal to top_k")
+
+    active_models = {
+        str(row["embedding_model"])
+        for row in embedding_rows
+        if row.get("embedding_model") not in (None, "")
+    }
+    if len(active_models) != 1:
+        raise ValueError("target must contain a single active embedding_model")
+
+    for row in embedding_rows:
+        vector = row.get("embedding")
+        if not isinstance(vector, list) or not vector:
+            continue
+        if len(vector) != embedding_dimension:
+            raise ValueError(
+                f"embedding_dimension mismatch: expected {embedding_dimension}, got {len(vector)}"
+            )
+
+
 def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
     tables = (
         _table(
@@ -306,6 +424,8 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
                 _field("chunk_strategy", "string"),
                 _field("document_ref", "string"),
                 _field("ref", "string"),
+                _field("title", "string", required=False),
+                _field("tags_text", "string", required=False),
                 _field("text", "string"),
                 _field("metadata", "object", required=False, flexible_json=True),
             ),
@@ -473,6 +593,7 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
             ),
             indexes=(
                 _index("relations_rel_type_idx", "rel_type"),
+                _index("relations_target_id_idx", "target_id"),
                 _index("relations_source_target_idx", "source_id", "target_id"),
             ),
             schema_mode="RELATION",
@@ -565,6 +686,8 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
             "documents.ref",
             "chunks.chunk_id",
             "chunks.ref",
+            "chunks.title",
+            "chunks.tags_text",
             "embeddings.vector_rowid",
             "relations.rel_type",
             "relations.source_id",
@@ -692,6 +815,156 @@ def _serialize_table(table: SurrealTableDefinition) -> dict[str, Any]:
             for index_def in table.indexes
         ],
     }
+
+
+def _runtime_version(connection: _SchemaConnectionProtocol) -> str | None:
+    try:
+        result = connection.query_raw("RETURN version();")
+    except Exception:  # pragma: no cover - best-effort metadata only
+        return None
+
+    if isinstance(result, dict):
+        rows = result.get("result")
+        if isinstance(rows, list) and rows:
+            first = rows[0]
+            if isinstance(first, dict):
+                value = first.get("result")
+                if isinstance(value, str):
+                    return value
+                if isinstance(value, list) and value and isinstance(value[0], str):
+                    return value[0]
+    return None
+
+
+def _normalize_probe_error(exc: Exception) -> str:
+    return str(exc).strip() or exc.__class__.__name__
+
+
+def _statement_already_exists(message: str) -> bool:
+    lowered = message.lower()
+    return "already exists" in lowered or "already defined" in lowered
+
+
+def _run_probe_statement(
+    connection: _SchemaConnectionProtocol,
+    *,
+    name: str,
+    required: bool,
+    statement: str,
+) -> SurrealRetrievalCapabilityCheck:
+    try:
+        connection.query_raw(statement)
+    except Exception as exc:
+        detail = _normalize_probe_error(exc)
+        if _statement_already_exists(detail):
+            return SurrealRetrievalCapabilityCheck(
+                name=name,
+                required=required,
+                passed=True,
+                detail="statement already existed on the isolated target",
+                statement=statement,
+            )
+        return SurrealRetrievalCapabilityCheck(
+            name=name,
+            required=required,
+            passed=False,
+            detail=detail,
+            statement=statement,
+        )
+    return SurrealRetrievalCapabilityCheck(
+        name=name,
+        required=required,
+        passed=True,
+        detail="statement accepted by current runtime",
+        statement=statement,
+    )
+
+
+def probe_surreal_native_retrieval_capabilities(
+    connection: _SchemaConnectionProtocol,
+    *,
+    embedding_dimension: int,
+    hnsw_ef: int = DEFAULT_HNSW_EF,
+) -> SurrealRetrievalCapabilityReport:
+    define_dotmd_surreal_schema(connection)
+    retrieval_plan = build_surreal_native_retrieval_index_plan(
+        embedding_dimension=embedding_dimension,
+        hnsw_ef=hnsw_ef,
+    )
+
+    required_checks = (
+        _run_probe_statement(
+            connection,
+            name="bm25_analyzer",
+            required=True,
+            statement=retrieval_plan.analyzer_statement,
+        ),
+        _run_probe_statement(
+            connection,
+            name="bm25_title_index",
+            required=True,
+            statement=retrieval_plan.bm25_index_statements[0],
+        ),
+        _run_probe_statement(
+            connection,
+            name="bm25_tags_text_index",
+            required=True,
+            statement=retrieval_plan.bm25_index_statements[1],
+        ),
+        _run_probe_statement(
+            connection,
+            name="bm25_text_index",
+            required=True,
+            statement=retrieval_plan.bm25_index_statements[2],
+        ),
+        _run_probe_statement(
+            connection,
+            name="hnsw_vector_index",
+            required=True,
+            statement=retrieval_plan.hnsw_index_statement,
+        ),
+        _run_probe_statement(
+            connection,
+            name="relation_table",
+            required=True,
+            statement="INFO FOR TABLE relations;",
+        ),
+        _run_probe_statement(
+            connection,
+            name="relations_target_id_idx",
+            required=True,
+            statement=retrieval_plan.relation_index_statements[1],
+        ),
+    )
+    optional_observations = (
+        _run_probe_statement(
+            connection,
+            name="fulltext_analyzer_v3",
+            required=False,
+            statement=(
+                "DEFINE INDEX chunks_title_fulltext_probe_idx ON TABLE chunks COLUMNS title FULLTEXT ANALYZER chunks_bm25_analyzer BM25;"
+            ),
+        ),
+        _run_probe_statement(
+            connection,
+            name="diskann_v3",
+            required=False,
+            statement=(
+                "DEFINE INDEX embeddings_diskann_probe_idx ON TABLE embeddings COLUMNS embedding DISKANN DIMENSION 3 DIST COSINE;"
+            ),
+        ),
+        _run_probe_statement(
+            connection,
+            name="built_in_hybrid_helpers",
+            required=False,
+            statement="RETURN search::rrf([], 10, 60);",
+        ),
+    )
+    return SurrealRetrievalCapabilityReport(
+        runtime_version=_runtime_version(connection),
+        required_checks=required_checks,
+        optional_observations=optional_observations,
+    )
 
 
 def define_dotmd_surreal_schema(

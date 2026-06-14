@@ -220,6 +220,14 @@ def _loads_json_object(value: Any) -> dict[str, Any]:
     return dict(loaded)
 
 
+def _normalize_tags_text(value: Any) -> str:
+    if isinstance(value, list):
+        return " ".join(str(item).strip() for item in value if str(item).strip())
+    if value in (None, ""):
+        return ""
+    return str(value).strip()
+
+
 def _composite_id(*parts: object) -> str:
     return "\x1f".join(str(part) for part in parts)
 
@@ -381,6 +389,11 @@ def load_sqlite_rows_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
         provenance_by_chunk.setdefault(chunk_id, []).append(payload)
         provenance_payloads.append(payload)
 
+    documents_by_identity = {
+        (str(row["namespace"]), str(row["document_ref"])): dict(row)
+        for row in source_document_rows
+    }
+
     document_payloads = [
         {
             "schema_version": SURREAL_SCHEMA_VERSION,
@@ -430,6 +443,14 @@ def load_sqlite_rows_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
         first_provenance = provenance_for_chunk[0] if provenance_for_chunk else {}
         namespace = first_provenance.get("namespace")
         document_ref = first_provenance.get("document_ref")
+        source_document = (
+            documents_by_identity.get((str(namespace), str(document_ref)))
+            if namespace is not None and document_ref is not None
+            else None
+        )
+        source_metadata = (
+            _loads_json_object(source_document["metadata_json"]) if source_document is not None else {}
+        )
         chunk_payloads.append(
             {
                 "schema_version": SURREAL_SCHEMA_VERSION,
@@ -438,11 +459,21 @@ def load_sqlite_rows_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
                 "chunk_strategy": first_provenance.get("chunk_strategy", "contextual_512_50"),
                 "heading_hierarchy": _loads_json_list(row["heading_hierarchy"]),
                 "level": int(row["level"]),
+                "title": (
+                    str(source_document["title"])
+                    if source_document is not None and source_document.get("title") is not None
+                    else ""
+                ),
+                "tags_text": _normalize_tags_text(source_metadata.get("tags")),
                 "text": str(row["text"]),
                 "file_paths": list(file_paths_by_chunk.get(chunk_id, [])),
                 "file_bindings": list(file_bindings_by_chunk.get(chunk_id, [])),
                 "document_ref": document_ref,
-                "ref": f"{namespace}:{document_ref}" if namespace and document_ref else None,
+                "ref": (
+                    str(source_document["ref"])
+                    if source_document is not None and source_document.get("ref") is not None
+                    else (f"{namespace}:{document_ref}" if namespace and document_ref else None)
+                ),
                 "source_unit_refs": first_provenance.get("source_unit_refs", []),
                 "metadata": {},
             }

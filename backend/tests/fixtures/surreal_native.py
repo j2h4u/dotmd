@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
 from dotmd.storage.surreal import SurrealConnection, SurrealStoreConfig, define_dotmd_surreal_schema
 
@@ -36,5 +36,10 @@ def apply_surreal_native_retrieval_schema(
         hnsw_ef=hnsw_ef,
     )
     for statement in retrieval_plan.statements:
-        connection.query(statement)
+        try:
+            connection.query(statement)
+        except Exception as exc:
+            detail = str(exc).lower()
+            if "already exists" not in detail and "already defined" not in detail:
+                raise
     return retrieval_plan

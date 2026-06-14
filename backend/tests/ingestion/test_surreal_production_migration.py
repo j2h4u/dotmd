@@ -7,16 +7,17 @@ from typing import TypedDict
 
 import pytest
 
+from dotmd.storage.surreal_schema import SURREAL_SCHEMA_VERSION
+from tests.fixtures.surreal_native import (
+    apply_surreal_native_retrieval_schema,
+    isolated_surreal_connection,
+)
 from tests.ingestion.test_surreal_transform_only_migration import (
     _create_transform_only_fixture,
     _FakeFeedbackProvider,
     _write_feedback_export,
     _write_gate_report,
     _write_graph_export,
-)
-from tests.fixtures.surreal_native import (
-    apply_surreal_native_retrieval_schema,
-    isolated_surreal_connection,
 )
 
 
@@ -78,7 +79,7 @@ def test_build_manifest_records_source_capture_schema_counts_and_no_recompute_de
         skew_policy="bounded_skew_accepted",
     )
 
-    assert manifest.schema_version.startswith("41.")
+    assert manifest.schema_version == SURREAL_SCHEMA_VERSION
     assert manifest.target_mode is SurrealTargetMode.EMBEDDED_LOCAL
     assert manifest.recompute_forbidden is True
     assert manifest.target_url.endswith("manifest.db")
@@ -110,7 +111,9 @@ def test_build_manifest_records_source_capture_schema_counts_and_no_recompute_de
 def test_load_sqlite_rows_for_surreal_materializes_title_and_tags_text_from_source_documents(
     tmp_path: Path,
 ) -> None:
-    from dotmd.ingestion.migrate_surreal import load_sqlite_rows_for_surreal  # type: ignore[import-not-found]
+    from dotmd.ingestion.migrate_surreal import (  # type: ignore[import-not-found]
+        load_sqlite_rows_for_surreal,
+    )
 
     inputs = _build_inputs(tmp_path)
 
