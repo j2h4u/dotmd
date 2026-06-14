@@ -226,13 +226,19 @@ Plans:
 **Goal:** Compare the old stack and SurrealDB stack on production-derived data
 and classify every material difference.
 **Depends on:** Phase 40, Phase 41, and Phase 42
-**Plans:** TBD
+**Plans:** 3 plans
 
 - [ ] Run old stack and Surreal stack side by side on production-derived data.
 - [ ] Record search quality, latency, index build time, store size, and memory
   evidence.
 
 - [ ] Resolve every regression or explicitly accept the new semantics.
+
+Plans:
+
+- [ ] 43-01-PLAN.md - Shadow metric contract, memory evidence, and scale-gate validation.
+- [ ] 43-02-PLAN.md - Manifest-bound shadow-run runner, explicit Surreal override capture, and operator runbook.
+- [ ] 43-03-PLAN.md - Bounded production-derived evidence bundle and semantic-difference acceptance ledger.
 
 ### Phase 44: Production cutover
 
