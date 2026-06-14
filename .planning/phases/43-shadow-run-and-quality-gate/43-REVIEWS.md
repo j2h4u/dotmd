@@ -1,154 +1,299 @@
 ---
 phase: 43
+cycle: 2
 reviewers: [codex, opencode]
-reviewed_at: 2026-06-14T18:26:36Z
+reviewed_at: 2026-06-14T18:05:00Z
 plans_reviewed: [43-01-PLAN.md, 43-02-PLAN.md, 43-03-PLAN.md]
+prior_cycle_commit: 1d1cb22
 ---
 
-# Cross-AI Plan Review — Phase 43
+# Cross-AI Plan Review — Phase 43 (Cycle 2)
+
+This is the **second** review cycle. The plans were revised in commit `1d1cb22` to
+address the cycle-1 findings (3 HIGH + 4 actionable non-HIGH). This cycle re-reviews
+the **current** state of the plans. Concerns that cycle 1 raised and the plans now
+incorporate via explicit `D43-xx` decisions are recorded as RESOLVED and are **not**
+re-counted as open. The previous cycle-1 review content has been superseded by this file.
 
 ## Codex Review
 
 **Summary**
 
-The plans are directionally strong: they keep Phase 43 as an evidence/shadow-run phase, reuse Phase 40/41/42 seams, separate quality from scale/memory, and avoid premature cutover. The main risk is that 43-02 is trying to define a full capture runner, validation framework, CLI, docs, sentinel-ledger semantics, metrics replay, and scope guards all at once. The architecture is sound, but the runner plan needs a tighter executable boundary around what is fixture-only, what is real capture, and what exact inputs already exist before 43-03 starts.
+The cycle-2 revisions substantially improve the plans. The biggest cycle-1 gaps now have
+explicit decisions, tests, and verification hooks: paired memory metrics, sentinel
+stripping, baseline path isolation, reduced flag surface, replay descriptor typing, and
+candidate-target preflight. The plans are close to executable. The main remaining issue is
+new (or newly visible): `Settings.model_copy(update={"index_dir": ...})` binds
+SQLite/FTS/sqlite-vec to the rehearsal copy, but it does **not** bind the FalkorDB graph
+backend to the same evidence window. Since dotMD's old stack includes graph retrieval,
+baseline evidence may still read a live or unrelated graph while SQLite comes from the
+rehearsal snapshot.
 
-**Strengths**
+**Cycle-1 Concern Disposition**
 
-- Clear phase boundary: no production cutover, no runtime default flip, no fallback backend, no legacy deletion.
-- Good dependency order: 43-01 metric contract, 43-02 runner, 43-03 actual evidence.
-- Correct reuse of Phase 40 diff semantics and explicit acceptance rows.
-- Good recognition that memory evidence needs guardrails, not just passive reporting.
-- Strong fail-closed posture around missing metrics, malformed JSON/JSONL, incomplete ledgers, and unsafe production access.
-- Good privacy awareness for production-derived refs/snippets/non-ASCII content.
+| Concern | Disposition | Notes |
+|---|---|---|
+| Sentinel rows could reach Phase 40 acceptance loader | RESOLVED | D43-02-F adds explicit stripping plus four named tests (sentinel-only, sentinel+acceptance, acceptance-only, malformed). |
+| Baseline capture mechanics underspecified | PARTIALLY RESOLVED | D43-02-A makes the SQLite binding concrete with `Settings.model_copy(index_dir=...)` and a fresh `DotMDService`. Still incomplete for FalkorDB graph state. |
+| Rehearsal-path isolation was aspirational | PARTIALLY RESOLVED | D43-02-B/C add production-dir overlap refusal, symlink rejection, read-only `PRAGMA integrity_check`. Still SQLite-only; does not prove graph snapshot alignment. |
+| Phase 41 Surreal target prerequisite unvalidated | RESOLVED (with caveat) | D43-03-A adds an automated preflight before capture. It should also bind the target to the expected manifest/import identity (see remaining concerns). |
+| Memory guardrail comparison baseline undefined | RESOLVED | D43-01-A requires paired baseline+candidate memory payloads and defines ratio plus slack evaluation. |
+| Guardrail constants arbitrary | RESOLVED | D43-01-B documents the `1.25` ratios and slack rationale as first-cutover tolerances. |
+| `capture_shadow_memory_metrics` placement / silent zero heap | RESOLVED | D43-01-C marks it optional and requires `tracemalloc.start()`/`stop()` with a nonzero test. |
+| 43-02 scope / flag creep | RESOLVED ENOUGH | D43-02-D folds tuning knobs into `--candidate-config-json`. Runner remains large but scope is now testable. |
+| `--metrics-replay-queries` ambiguous | RESOLVED | D43-02-E pins it to a `Path` JSONL descriptor with strict validation. |
+| `test -s` validity checks too weak | RESOLVED | D43-03-B adds JSON parsing, `load_eval_results()`, query-id matching, and rehearsal isolation checks. |
+| Critical acceptance rules buried in prose | RESOLVED | D43-03-C promotes acceptance reason and no raw diff editing to verification/success criteria. |
+| Artifact privacy / redaction policy | PARTIALLY RESOLVED | 43-02 docs mention production-derived refs/snippets and intentional path/redaction choices, but no concrete export/commit policy is specified. |
 
-**Concerns**
+**Remaining / New Concerns**
 
-- **HIGH:** `accepted-diffs.jsonl` sentinel is useful for Phase 43 metadata, but the existing Phase 40 acceptance loader requires `query_id`, `accepted_by`, and `accepted_reason`. 43-02 says to strip sentinel rows before `run_eval()`, which is correct, but this is brittle enough to deserve explicit tests for "sentinel-only ledger passes shadow validation and does not reach Phase 40 acceptance loading."
-- **HIGH:** 43-02's real capture behavior is underspecified. "Baseline capture uses old-stack service path against `--baseline-rehearsal-path`" needs to say exactly how that path is bound into `DotMDService` settings without mutating live config or accidentally indexing. Same for candidate capture: the plan names `target-url`, namespace, database, and overrides, but not the concrete connection lifecycle or whether it requires an already migrated target.
-- **MEDIUM:** 43-02 is probably too large for one plan (orchestration, CLI, capture adapters, eval conversion, artifact validation, sentinel handling, docs, scope-guard tests). Increases the chance of shallow tests or a partially real runner.
-- **MEDIUM:** Memory guardrail semantics are not fully defined. The constants are ratios/slack, but 43-01 does not define the comparison baseline for "candidate RSS growth ratio" or "heap growth ratio." If only one memory payload exists, growth ratios cannot be evaluated meaningfully.
-- **MEDIUM:** 43-01 says `ShadowMetricBundle` requires Phase 38 scale fields, but `evaluate_surreal_scale_gate()` does not return the raw `representative` flag or raw latency list. If the bundle needs replay-window metadata and representative-corpus proof, that must be added outside the scale gate rather than assumed present.
-- **MEDIUM:** 43-03 is `autonomous: false` (right for semantic acceptance), but Tasks 1 and 2 are still `auto`. The plan should make required external inputs explicit before execution: baseline rehearsal path, Surreal target, source-capture manifest, metrics replay descriptor, operator identity.
-- **LOW:** Scope-guard tests asserting "no package installs" / "no `dotmd index --force`" / "no legacy deletion" can become brittle if implemented as raw source substring checks; should not replace behavioral tests.
-- **LOW:** The docs plan should include a redaction/export policy for artifacts, not only a warning, to avoid committing production-derived snippets into `.planning`.
+- **HIGH — Baseline graph state is not bound to the rehearsal window.** D43-02-A correctly
+  redirects `Settings.index_dir`, which covers `index.db`, FTS5, and sqlite-vec. But
+  `DotMDService` also constructs graph engines from the configured graph backend. In
+  production that is FalkorDB, controlled by `falkordb_url` / graph config, not `index_dir`.
+  The plan's claim that the "entire old stack" is pointed at the copied snapshot is therefore
+  incomplete. Hybrid/graph baseline results could read live FalkorDB state while semantic/FTS
+  reads the rehearsal SQLite copy.
+
+- **MEDIUM — Candidate preflight can pass against the wrong or stale Surreal target.** D43-03-A
+  checks reachability and nonzero imported records, which closes the original "target missing"
+  blocker. It does not require the candidate target to match the source-capture manifest, chunk
+  strategy, embedding model, import id, or expected record counts. A stale namespace/database
+  with records could pass.
+
+- **MEDIUM — WAL/snapshot completeness is under-validated.** D43-02-C defines a valid rehearsal
+  path as a regular `index.db` that passes `PRAGMA integrity_check`. That proves the SQLite file
+  is readable, not necessarily that the copy includes the intended WAL/checkpoint state or is
+  recent enough for the source-capture window. The runner does not appear to record or validate
+  backup method, timestamp, expected counts, or WAL handling.
+
+- **LOW — `candidate-config.json` schema needs explicit fail-closed validation.** D43-02-D names
+  the fields but the plan should require positive-integer/type validation and reject
+  unknown/missing fields to prevent quietly running with malformed target-derived tuning.
+
+- **LOW — Privacy policy is still warning-level, not operational.** Add a concrete policy: where
+  artifacts may live, whether they are committed, and whether snippets are redacted or
+  manifest-marked before export.
 
 **Suggestions**
 
-- Add a small preflight contract to 43-02: validate source manifest, baseline rehearsal path, candidate Surreal target, golden corpus, replay descriptor, artifacts dir before any capture.
-- Split 43-02 (43-02a verify-only+sentinel filtering; 43-02b capture adapters + runbook).
-- In 43-01, define memory comparison explicitly: require both baseline and candidate memory payloads with ratios comparing candidate to baseline, OR remove ratio guardrails from validation until paired evidence exists.
-- Make `accepted-diffs.jsonl` schema explicit (sentinel record_type; real rows satisfy Phase 40 loader; runner writes filtered file or calls lower-level eval APIs).
-- Add an artifact manifest/checksums in the sentinel to prove the eight files share one evidence window.
-- For 43-03, add a "stop condition" artifact for missing prerequisites.
+1. Add a `D43-02-G` baseline graph contract: either require a copied/isolated FalkorDB graph
+   target matching the rehearsal manifest, or explicitly disable graph engines for the quality
+   comparison and state that Phase 43 is semantic+FTS only. The first option is more faithful to
+   the phase goal.
+2. Extend source/candidate manifest validation: compare chunk strategy, embedding model,
+   source-capture id, imported chunk/entity counts, and target namespace/database against expected
+   metadata.
+3. Add rehearsal snapshot metadata to `source-capture.json`: backup method, captured_at, expected
+   `index.db` size, optional WAL/checkpoint status, record counts, and graph target identity if
+   graph is included.
+4. Make `load_candidate_config()` strict: required keys, positive integer ranges, no unknown keys.
+5. Add a short artifact-handling section ("local only unless redacted", or "do not commit raw
+   snippets").
 
-**Risk Assessment:** MEDIUM. Plans achieve the goal conceptually and preserve architectural boundaries. Main risks: execution complexity in 43-02 and ambiguity around real capture inputs, memory guardrail evaluation, and sentinel handling. None require redesign, but should be tightened before implementation.
+**Risk Assessment:** MEDIUM-HIGH until the baseline graph contract is fixed; MEDIUM after that.
+The revised plans resolve the original review's main control-flow and validation issues, and the
+dependency order is sound. The remaining graph-state issue is material because the phase goal is
+old-stack vs Surreal-stack quality on production-derived data, and the old stack is not just
+SQLite/FTS/sqlite-vec.
 
 ---
 
 ## OpenCode Review
 
-## Summary
+## 1. Summary
 
-The three plans form a coherent dependency chain: 43-01 defines metric contracts, 43-02 builds the orchestration runner, 43-03 executes the evidence window. Architecture correctly reuses Phase 40/41/42 seams and avoids cutover leak, recompute creep, and ad-hoc taxonomy. Main risk: the runner plan (43-02) is under-specified on rehearsal-path isolation and service initialization mechanics despite its 27-flag surface.
+The revised plans are substantially improved. The cycle-1 consensus HIGHs (rehearsal-path binding
+and isolation) are now addressed with concrete mechanisms: `Settings.model_copy` clone + fresh
+`DotMDService` (D43-02-A), production-dir refusal + symlink rejection + `PRAGMA integrity_check`
+(D43-02-B/C). Sentinel stripping is pinned by four named tests (D43-02-F). Memory guardrails now
+require paired baseline+candidate payloads with ratio-and-slack semantics (D43-01-A). The Phase 41
+target pre-flight automates what was a manual gate (D43-03-A). Flag surface is reduced by folding
+four tuning knobs into `--candidate-config-json` (D43-02-D). One significant gap remains
+unaddressed: the graph-store isolation problem.
 
-### Plan 43-01 — Strengths
-Correct RED→GREEN TDD; embeds Phase 38 scale-gate field names; memory kept as separate nested object; `slots=True, frozen=True` matches convention; deterministic JSON writing; fail-closed `validate_shadow_metric_bundle()`; zero production dependencies.
+## 2. Cycle-1 Concern Disposition
 
-### Plan 43-01 — Concerns
-- **MEDIUM — Arbitrary guardrail constants.** `1.25` ratios and slack bytes have no documented derivation/rationale; recommend documenting in the dataclass docstring.
-- **MEDIUM — `capture_shadow_memory_metrics` conflates "capture" with "definition."** Measurement (`perf_counter`, `getrusage`, `tracemalloc`) belongs in the runner (43-02), not the contract module. Clarify it is an optional helper, or move measurement to the runner.
-- **LOW — `tracemalloc` requires explicit `tracemalloc.start()`** before `get_traced_memory()` returns useful values; a silent zero-valued heap report would satisfy presence checks but fail to provide evidence.
-- **LOW — parent-directory creation** in the writer is consistent with `surreal_eval_runner.py` but ideally is the runner's responsibility.
+| # | Concern | Severity | Disposition | Plan Decision |
+|---|---------|----------|-------------|---------------|
+| 1 | Sentinel stripping needs explicit tests | HIGH | RESOLVED | D43-02-F: four named tests, sentinel never reaches Phase 40 loader |
+| 2 | Baseline capture mechanics underspecified | HIGH | RESOLVED (SQLite) | D43-02-A: `Settings.model_copy(update={"index_dir": ...})` → fresh `DotMDService` |
+| 3 | Rehearsal path isolation underspecified | HIGH | RESOLVED (SQLite) | D43-02-B/C: production-dir overlap refusal, symlink rejection, `PRAGMA integrity_check` |
+| 4 | `DotMDService` instantiation for baseline unexplored | HIGH | RESOLVED | D43-02-A + `test_build_baseline_service_uses_model_copy_index_dir_clone` |
+| 5 | 43-02 too large | MEDIUM | RESOLVED as designed | D43-02-D: flag reduction over plan split |
+| 6 | Memory guardrail comparison baseline undefined | MEDIUM | RESOLVED | D43-01-A: paired payloads; ratio-and-slack rule |
+| 7 | `ShadowMetricBundle` & scale-gate raw fields mismatch | MEDIUM | RESOLVED | 43-01 task lists exact return fields from `evaluate_surreal_scale_gate()` |
+| 8 | 43-03 Tasks 1-2 `auto` but `autonomous: false` | MEDIUM | PARTIALLY RESOLVED | Input descriptors + pre-flight listed; tasks remain `auto` (arguably correct for automated capture) |
+| 9 | Arbitrary guardrail constants undocumented | MEDIUM | RESOLVED | D43-01-B: rationale in `ShadowMemoryGuardrails` docstring |
+| 10 | `capture_shadow_memory_metrics` conflates capture/definition | MEDIUM | RESOLVED | D43-01-C: helper optional; runner authoritative |
+| 11 | `tracemalloc` needs `tracemalloc.start()` | LOW | RESOLVED | D43-01-C + `test_capture_starts_tracemalloc_so_heap_is_nonzero` |
+| 12 | Parent-directory creation in writer | LOW | RESOLVED | 43-01 Task 2: `write_shadow_metric_json` creates parent dirs |
+| 13 | 27 CLI flags scope creep | MEDIUM | RESOLVED | D43-02-D: four flags folded into `--candidate-config-json` |
+| 14 | `capture_eval_results_from_candidates` may reimplement logic | MEDIUM | RESOLVED | Task 2: pure field mapping, no new searches |
+| 15 | Sentinel filtering test cases needed | MEDIUM | RESOLVED | D43-02-F (same as #1) |
+| 16 | `--metrics-replay-queries` ambiguous type | MEDIUM | RESOLVED | D43-02-E: `type=Path` JSONL |
+| 17 | `ShadowArtifactPaths` omitted from exports | LOW | RESOLVED | Now present in 43-02 exports list |
+| 18 | Negative-space scope-guard tests brittle | LOW | RESOLVED | Task 1: behavioral side-effect assertions preferred |
+| 19 | Phase 41 Surreal target prerequisite unvalidated | HIGH | RESOLVED | D43-03-A: automated `--preflight-candidate-target` smoke |
 
-### Plan 43-01 — Risk: LOW
+## 3. Remaining / New Concerns
 
-### Plan 43-02 — Strengths
-Reuses `run_eval(EvalRunnerConfig(...))`; sentinel-row design keeps `accepted-diffs.jsonl` non-empty while preserving Phase 40 strict semantics; `--verify-only`; baseline requires `--baseline-rehearsal-path` and fails hard; candidate uses overrides without changing `DotMDService.__init__`; separates quality corpus from replay window; service init once per capture process; threat model covers tampering/disclosure.
+**NEW — HIGH: Graph store not covered by rehearsal path contract.**
+`_create_graph_store()` in `pipeline.py:161` creates a `FalkorDBGraphStore` pointed at
+`settings.falkordb_url` — a live Redis container. The rehearsal-path contract (D43-02-C) requires
+only an `index.db` copy, but graph data lives externally in FalkorDB. When `build_baseline_service`
+constructs a `DotMDService` from cloned settings, the graph engines still connect to the **live**
+FalkorDB container (or crash if rehearsal settings lack a FalkorDB URL). This breaks the "isolated
+snapshot" guarantee for graph-category golden queries (graph/entity, hybrid). Either (a) the
+rehearsal contract must include a FalkorDB dump/restore, (b) baseline capture must explicitly
+disable graph engines, or (c) a plan decision must acknowledge that graph data is assumed read-only
+for the bounded window and the isolation gap is accepted.
 
-### Plan 43-02 — Concerns
-- **HIGH — Rehearsal path isolation is underspecified.** Plan asserts "read-only from an isolated copied snapshot/rehearsal path" but does not specify how the runner *verifies* isolation. Needs at minimum: (a) refuse to run if `--baseline-rehearsal-path` matches production `DOTMD_INDEX_DIR`, and (b) `PRAGMA integrity_check` on rehearsal SQLite before use. Without these the "read-only" guarantee is aspirational.
-- **HIGH — `DotMDService` instantiation for baseline capture is unexplored.** Plan says "may call private `DotMDService` comparison seams" but does not specify how the baseline service is constructed (Settings, MetadataStore, engines) pointed at the rehearsal index. Compare `surreal_migration_runner.py`'s explicit config. Highest-risk gap.
-- **MEDIUM — 27 CLI flags is scope creep.** `--hnsw-ef`, `--embedding-dimension`, `--top-k`, `--pool-size` may be properties of the live target rather than runner flags; consider reading from the Surreal instance or a `--candidate-config-json`.
-- **MEDIUM — `capture_eval_results_from_candidates` may reimplement existing logic.** Clarify whether it is pure field mapping (rename to `search_candidates_to_eval_results`) or does read-evidence/snippet work.
-- **MEDIUM — sentinel filtering in `load_shadow_acceptance_ledger` needs explicit test cases:** sentinel-only, sentinel+acceptance, acceptance-only, malformed sentinel.
-- **MEDIUM — `--metrics-replay-queries` is ambiguous** (path? size? descriptor?). Scale/memory metrics depend on it being well-defined; pin to `type=Path` JSONL.
-- **LOW — `ShadowArtifactPaths` omitted from frontmatter `exports`** despite being in the dataclass list.
-- **LOW — negative-space scope-guard tests** are hard to assert; prefer testing that importing the module triggers no side effects.
+**NEW — MEDIUM: `--candidate-config-json` shape underspecified.**
+D43-02-D folds four fields into one JSON descriptor, but the exact field names, types, and
+required-vs-optional status are not specified. `build_surreal_native_engine_overrides()` at
+`surreal_native.py:18` accepts only `embedding_dimension` (int) and `hnsw_ef` (int) — it does
+**not** accept `top_k` or `pool_size`. Those two go to the capture loop, not engine construction.
+The plan conflates them. Need an explicit field list distinguishing which fields feed
+`build_surreal_native_engine_overrides()` and which feed the capture search loop.
 
-### Plan 43-02 — Risk: MEDIUM-HIGH (rehearsal-path isolation + service init are implementation blockers).
+**NEW — MEDIUM: `DotMDService` constructor side effect (`TrickleIndexer` created, not started).**
+`DotMDService.__init__` at `service.py:295` unconditionally creates `TrickleIndexer(...)`. The
+constructor is lightweight (no lock, no writes), but the plan should explicitly verify the cloned
+service does not trigger side effects (opening connections, migration checks, directory creation).
+A behavioral test or explicit comment in the runner would close this.
 
-### Plan 43-03 — Strengths
-Task 1 stop-on-unsafe-input clause; Task 3 blocking checkpoint with `resume-signal`; baseline/candidate `query_id` matching check; scope boundaries restated per task; ledger sentinel keeps file non-empty.
+**NEW — LOW: Division by zero in memory guardrail ratios.**
+D43-01-A computes `candidate.max_rss_bytes / baseline.max_rss_bytes`. If `baseline.max_rss_bytes`
+is 0 (malformed, empty run, or test fixture), this raises `ZeroDivisionError` and bypasses the
+ratio-and-slack rule. The plan should specify a guard (treat zero baseline as slack-pass or raise a
+descriptive `ValueError` naming the zero field).
 
-### Plan 43-03 — Concerns
-- **HIGH — Phase 41 Surreal target prerequisite is unvalidated.** "Prepare one transform-first Surreal candidate target from Phase 41 evidence" — if Phase 41 hasn't produced a valid accessible target, the plan stalls at Task 1. Add an automated pre-flight verifying the target exists and passes a basic retrieval smoke before capture.
-- **MEDIUM — No explicit checklist that the rehearsal path is a proper copy** (not a symlink to production; recent enough; expected file count).
-- **MEDIUM — `test -s` only checks non-empty, not validity.** Corrupted JSON passes; add JSONL schema validation as a secondary check.
-- **LOW — manual JSONL acceptance editing** is error-prone; consider an `--accept query_id ... --reason ...` helper.
-- **LOW — critical rules** ("no regression accepted without reason"; "do not edit raw classifications") are buried in Task 3 action; pull into verification/success criteria.
+**NEW — LOW: No explicit stop-condition artifact path for D43-03-A failures.**
+D43-03-A says "STOP and record the exact missing input in a stop-condition note" but does not
+specify a file path. A concrete path (e.g., `artifacts/preflight-failure.md`) would make the stop
+condition discoverable and verifiable in 43-03's `verify` step.
 
-### Plan 43-03 — Risk: MEDIUM
+**REMAINING — LOW: `resource.getrusage` platform note.**
+`resource.getrusage` raises `ValueError` on some platforms for unsupported `who`. Linux-only in
+practice, but worth a docstring note.
 
-### Cross-Cutting
-- Dependency ordering 43-01→43-02→43-03 is correct; no cycles.
-- **Key gap: Rehearsal Path Contract** — all three plans mention "copied snapshot/rehearsal path" but none define what constitutes a valid copy (`cp -r`? SQLite backup? FS snapshot?). Single most important missing spec; affects baseline capture correctness for 43-02 and 43-03.
-- `DEFAULT_SHADOW_MEMORY_GUARDRAILS` rationale must be traceable.
-- No over-engineering detected; YAGNI discipline well-applied.
+## 4. Suggestions
 
-### Final Risk: MEDIUM. Implementation-ready after addressing the rehearsal-path contract specification.
+- **Graph isolation:** Add `D43-02-G` acknowledging the rehearsal `index.db` does not snapshot
+  graph data in FalkorDB; either require a `--baseline-graph-dump` flag for FalkorDB
+  export/restore, or explicitly disable `graph_direct`/`graph` engines during baseline capture and
+  exclude graph-category golden queries with a documented warning.
+- **candidate-config-json:** Specify the schema, e.g.
+  `{"embedding_dimension": int, "hnsw_ef": int, "top_k": int, "pool_size": int}` with
+  `embedding_dimension` required and `hnsw_ef` defaulting to `DEFAULT_HNSW_EF`. Document that
+  `top_k`/`pool_size` go to the search capture loop, not `build_surreal_native_engine_overrides()`.
+- **Zero-division:** Add a guard in D43-01-A for a zero baseline field.
+- **Stop-condition path:** Pin pre-flight failure output to `artifacts/preflight-failure.md` and
+  add it to 43-03's verification commands.
+- **Runner construction side effects:** State in Task 2 that `DotMDService(settings=cloned)` must
+  not acquire locks, open network connections (besides the graph URL), or trigger migrations,
+  verified by a `test_build_baseline_service_has_no_side_effects`.
+
+## 5. Risk Assessment
+
+**MEDIUM.** The cycle-1 consensus HIGHs are well-addressed. The dominant remaining gap is the
+graph-store isolation problem — the rehearsal-path contract treats `index.db` as the full baseline
+snapshot, but graph data lives in FalkorDB and is not snapshot-captured. For a production
+deployment running FalkorDB (the stated default), baseline capture will either read live graph
+results (breaking isolation) or fail to access graph data (breaking query completeness). All other
+concerns are MEDIUM or LOW and resolvable in-plan.
 
 ---
 
 ## Consensus Summary
 
-Both reviewers agree the phase is architecturally sound, correctly scoped to evidence-only (no cutover/fallback/legacy deletion), correctly ordered (43-01→43-02→43-03), and correctly reuses Phase 40/41/42 seams. Overall risk: **MEDIUM** from both. No redesign required. The convergent blocker is the **rehearsal-path / baseline-capture contract** in 43-02.
+Both reviewers agree the cycle-2 revisions **resolve all three cycle-1 HIGHs** (sentinel stripping
+→ D43-02-F; baseline-capture mechanics / rehearsal isolation → D43-02-A/B/C; Phase 41 target
+preflight → D43-03-A) and all four actionable cycle-1 non-HIGH items (memory guardrail baseline →
+D43-01-A/B; flag creep → D43-02-D; replay-descriptor typing → D43-02-E; validity-vs-non-emptiness →
+D43-03-B; buried acceptance rules → D43-03-C; tracemalloc start → D43-01-C). No redesign required.
+
+Both reviewers then **independently raise the same single new HIGH**: the baseline rehearsal
+contract isolates only the SQLite side (`index.db` via `index_dir`) and leaves the FalkorDB graph
+backend bound to the live container, because graph configuration flows through `falkordb_url`, not
+`index_dir`. This is source-confirmed: `pipeline.py:161 _create_graph_store()` →
+`FalkorDBGraphStore(url=settings.falkordb_url)`. Baseline graph/hybrid golden queries would either
+read live graph state (breaking the "isolated snapshot" guarantee) or fail if the clone lacks a
+graph URL.
 
 ### Agreed Strengths
-- Clean phase boundary: no production cutover, runtime default switch, fallback backend, or legacy deletion (both).
-- Correct dependency ordering, contract-first then runner then execution (both).
-- Reuse of Phase 40 `run_eval`/acceptance semantics rather than forking quality vocabulary (both).
-- Fail-closed posture on missing/malformed metrics and ledgers (both).
-- Production-derived data privacy awareness (both).
+- Cycle-1 HIGHs fully closed with concrete, testable decisions (both).
+- Correct dependency ordering 43-01 → 43-02 → 43-03; no cycles (both).
+- Reuse of real Phase 40/42 seams confirmed against source (both).
+- Fail-closed validation, paired memory guardrails, sentinel stripping all pinned by named tests (both).
 
 ### Agreed Concerns (highest priority)
-- **HIGH — Baseline capture mechanics underspecified (43-02).** Both reviewers independently flag that *how* `DotMDService`/old-stack baseline is bound to `--baseline-rehearsal-path` (without mutating live config or accidentally indexing) is not specified. OpenCode additionally requires enforced isolation (refuse if path == production `DOTMD_INDEX_DIR`; `PRAGMA integrity_check`). This is the dominant shared HIGH.
-- **MEDIUM — Memory guardrail comparison baseline undefined (43-01).** Both note the `1.25` ratio/slack constants lack a defined comparison baseline (candidate-vs-baseline) and lack documented rationale; ratios are currently serializable but unevaluable.
-- **MEDIUM — 43-02 scope/size.** Both note the runner plan is large (Codex: too many concerns in one plan; OpenCode: 27-flag surface), suggesting flag reduction or a split.
-- **MEDIUM — Sentinel-row filtering needs explicit tests (43-02).** Both call for explicit RED cases covering sentinel-only / sentinel+acceptance / acceptance-only / malformed.
+- **HIGH — Baseline graph state not bound to the rehearsal window (43-02).** Both reviewers,
+  independently, source-grounded in `pipeline.py:161` + `config.py:208 falkordb_url`. The dominant
+  shared new HIGH. Remedy: add a `D43-02-G` decision that either (a) snapshots/isolates the FalkorDB
+  graph for the same window, or (b) explicitly disables graph engines for baseline capture and
+  documents Phase 43 as semantic+FTS-only with graph-category queries excluded.
 
-### Divergent Views
-- **Memory-helper placement:** OpenCode wants `capture_shadow_memory_metrics` measurement logic moved out of the 43-01 contract module into the runner; Codex does not object to its location and instead focuses on defining the comparison baseline. Worth a deliberate decision rather than silent default.
-- **Phase 41 target pre-flight:** OpenCode raises Surreal-target availability as a distinct HIGH for 43-03; Codex folds the same idea into a general "stop-condition artifact for missing prerequisites" (MEDIUM). Same remedy (automate a pre-flight), different severity.
-- **Splitting 43-02:** Codex proposes a concrete 43-02a/43-02b split; OpenCode prefers flag reduction within one plan.
+### Divergent / Single-Reviewer Concerns
+- **MEDIUM — Candidate preflight identity binding (Codex only):** preflight checks reachability +
+  nonzero records but not manifest/chunk-strategy/embedding-model/import-id match. A stale target
+  could pass.
+- **MEDIUM — `--candidate-config-json` schema underspecified (OpenCode only, source-confirmed):**
+  `build_surreal_native_engine_overrides()` accepts only `embedding_dimension`/`hnsw_ef`;
+  `top_k`/`pool_size` are capture-loop inputs. D43-02-D conflates the two routes and gives no field
+  schema or fail-closed validation.
+- **MEDIUM — WAL/snapshot completeness under-validated (Codex only):** integrity_check proves
+  readability, not that the copy captured the intended WAL/checkpoint state or is recent enough.
+- **LOW — Zero-division guard in memory ratios (OpenCode only).**
+- **LOW — Stop-condition artifact path for preflight failures unspecified (OpenCode only).**
+- **LOW — Operational (not warning-level) artifact privacy/redaction policy (Codex only).**
 
 ---
 
 ## Verification coverage
 
-Source-grounding pass: every non-produced symbol/file the plans cite was checked against project source. Artifacts the plans declare they produce (the new metric module, the runner, the runbook, and the eight `artifacts/*` files) are excluded from MISSING verdicts.
+Source-grounding pass over every non-produced symbol/file the revised plans cite. Artifacts the
+plans declare under "Artifacts This Phase Produces" (the new metric module, the runner, the runbook,
+and the eight `artifacts/*` files plus the two operator-supplied input descriptors) are excluded
+from MISSING verdicts. New cycle-2 citations introduced by the revised decisions
+(`Settings.model_copy`, `index_dir`, `index_db_path`, `RUNTIME_INDEX_DIR`, `validate_for_runtime`,
+`load_settings`, `chunk_strategy`, `DotMDService(settings=...)`, `falkordb_url`) were checked in
+addition to the cycle-1 set.
 
 | Cited symbol / file | Plan ref | Verdict | Evidence |
 |---|---|---|---|
 | `evaluate_surreal_scale_gate()` | 43-01 key_links | VERIFIED | `backend/src/dotmd/search/surreal_parity.py:435` |
-| Scale-gate fields `failure_category`,`recommendation_gate`,`record_counts`,`hnsw_build_seconds`,`surrealkv_file_size_bytes`,`query_latency_p50_ms`,`query_latency_p95_ms` | 43-01 behavior | VERIFIED | `surreal_parity.py:437-490` (all field names present) |
-| Representative-corpus flag in scale gate | 43-01 / Codex concern | VERIFIED | `surreal_parity.py:441,461-462` — `representative: bool`; emits "representative corpus flag" when absent |
-| `passed` / `missing` scale fields | 43-01 behavior | VERIFIED | present in `surreal_parity.py` ScaleGate result mapping |
+| Scale-gate fields `failure_category`,`recommendation_gate`,`record_counts`,`hnsw_build_seconds`,`surrealkv_file_size_bytes`,`query_latency_p50_ms`,`query_latency_p95_ms`,`representative`,`passed`,`missing` | 43-01 behavior | VERIFIED | `surreal_parity.py:437-490` (all present; `representative` at 441/461-462) |
 | `run_eval` + `EvalRunnerConfig` + `EvalRunResult` | 43-02 key_links | VERIFIED | `backend/devtools/surreal_eval_runner.py:27,40,151` |
-| `build_surreal_native_engine_overrides()` | 43-02 key_links | VERIFIED | `backend/src/dotmd/search/surreal_native.py:18` |
-| `EvalResult` dataclass + `top_refs`,`matched_engines` | 43-02/43-03 | VERIFIED | `backend/src/dotmd/search/surreal_eval.py:73,80,81` |
-| Acceptance fields `query_id`,`accepted_by`,`accepted_reason` | 43-02/43-03 | VERIFIED | `surreal_eval.py:91-93,112-113` |
-| `load_eval_results()` | 43-03 verify cmd | VERIFIED | `surreal_eval.py:311` |
-| `backend/devtools/surreal_eval_runner.py` | 43-02 context/read_first | VERIFIED | file present |
-| `backend/devtools/surreal_migration_runner.py` | 43-02 read_first | VERIFIED | file present |
-| `backend/devtools/surreal_golden_queries.jsonl` (16 queries) | 43-02/43-03 | VERIFIED | file present, `wc -l` = 16 (matches "16-query" claim) |
-| `backend/src/dotmd/api/service.py` (`DotMDService`) | 43-02 context | VERIFIED | file present |
-| `docs/surrealdb-evaluation-harness.md` | 43-02/43-03 read_first | VERIFIED | present in `docs/` |
-| `docs/surrealdb-production-migration.md` | 43-02/43-03 read_first | VERIFIED | present in `docs/` |
+| `build_surreal_native_engine_overrides()` | 43-02/43-03 key_links | VERIFIED | `backend/src/dotmd/search/surreal_native.py:18` (signature accepts only `embedding_dimension`,`hnsw_ef` — basis for the MEDIUM concern that D43-02-D over-claims four engine params) |
+| `EvalResult` + `top_refs`,`matched_engines`,`query_id` | 43-02/43-03 | VERIFIED | `backend/src/dotmd/search/surreal_eval.py:73,80,81,76` |
+| Acceptance fields `query_id`,`accepted_by`,`accepted_reason` + `DiffAcceptance` handling | 43-02/43-03 | VERIFIED | `surreal_eval.py:91-93,112-113,516-530` |
+| `load_eval_results()` | 43-02/43-03 verify | VERIFIED | `surreal_eval.py:311` |
+| `Settings` class + `index_dir` + `index_db_path` | 43-02 D43-02-A | VERIFIED | `core/config.py:55,72,406-408` (`index_db_path = index_dir / "index.db"`) |
+| `Settings.model_copy(update=...)` | 43-02 D43-02-A | VERIFIED | `Settings(BaseSettings)` (Pydantic v2) — `model_copy` is a BaseModel method |
+| `RUNTIME_INDEX_DIR` (`/dotmd-index`) | 43-02 D43-02-B | VERIFIED | `core/config.py:40` |
+| `Settings.validate_for_runtime()` (not called on clone) | 43-02 D43-02-A | VERIFIED | `core/config.py:333` (rejects non-`/dotmd-index` index_dir at 342-343) |
+| `load_settings()` | 43-02 D43-02-A | VERIFIED | `core/config.py:415` |
+| `chunk_strategy` (preflight smoke target) | 43-02/43-03 D43-03-A | VERIFIED | `core/config.py:102` |
+| `DotMDService(settings=...)` constructor | 43-02 D43-02-A | VERIFIED | `api/service.py:247,260` (`__init__(self, settings: Settings | None = None)`) |
+| `_collect_candidate_pool` (baseline search path) | 43-02 D43-02-A | VERIFIED | `api/service.py:1339` |
+| `SearchCandidate` (capture conversion input) | 43-02 Task 2 | VERIFIED | `core/models.py:399` |
+| `falkordb_url` graph config (basis of the HIGH concern) | not cited; concern source | VERIFIED | `core/config.py:208`; `_create_graph_store()` at `ingestion/pipeline.py:161` builds `FalkorDBGraphStore(url=settings.falkordb_url)` — graph backend is independent of `index_dir`, confirming the consensus HIGH |
+| `backend/devtools/surreal_eval_runner.py` / `surreal_migration_runner.py` | 43-02 read_first | VERIFIED | both present |
+| `backend/devtools/surreal_golden_queries.jsonl` (16 queries) | 43-02/43-03 | VERIFIED | present, 16 lines |
+| `docs/surrealdb-evaluation-harness.md`, `docs/surrealdb-production-migration.md` | 43-02/43-03 read_first | VERIFIED | present in `docs/` |
 | Test files `test_surreal_eval_runner.py`,`test_surreal_migration_runner.py`,`test_surreal_retrieval_parity.py` | 43-01/43-02 read_first | VERIFIED | present under `backend/tests/` |
-| Phase summaries 40-01, 41-03, 42-04; 42-VERIFICATION | 43-0x context | VERIFIED | all present under `.planning/phases/` |
+| Phase summaries 40-01, 41-03, 42-04; 42-VERIFICATION | 43-0x context | VERIFIED | present under `.planning/phases/` |
+| "builds config exactly like `surreal_migration_runner.py`" analogy | 43-02 D43-02-A prose | AMBIGUOUS | The migration runner operates on manifests/exports and does NOT construct a `DotMDService` via `load_settings()`/`model_copy`; the analogy is loose, but the concrete mechanism the decision specifies is independently grounded in real symbols (above), so this is a wording imprecision, not a missing symbol. |
 | `surreal_shadow_metrics.py` + its symbols | produced by 43-01 | EXCLUDED (produced) | declared artifact |
 | `surreal_shadow_runner.py` + symbols/flags, `docs/surrealdb-shadow-run-quality-gate.md` | produced by 43-02 | EXCLUDED (produced) | declared artifact |
-| `artifacts/*.json(l)/.md` (8 files) | produced by 43-03 | EXCLUDED (produced) | declared artifacts |
+| `artifacts/*.json(l)/.md` (8 outputs + `candidate-config.json`, `metrics-replay-queries.jsonl`) | produced by 43-03 | EXCLUDED (produced) | declared artifacts |
 
-**Coverage result:** 17 VERIFIED, 0 MISSING, 0 AMBIGUOUS, 0 UNCHECKABLE (3 produced-artifact groups correctly excluded). No plan cites a non-existent upstream symbol; all reuse seams resolve to real source. This corroborates both reviewers' "correct reuse of existing seams" assessment.
+**Coverage result:** 24 VERIFIED, 0 MISSING, 1 AMBIGUOUS (a loose analogy in D43-02-A prose, not a
+missing symbol), 0 UNCHECKABLE (3 produced-artifact groups correctly excluded). No plan cites a
+non-existent upstream symbol; all reuse seams resolve to real source. The source-grounding pass also
+**corroborates the consensus HIGH**: `index_dir` does not bind the FalkorDB graph backend
+(`pipeline.py:161` + `config.py:208`), so D43-02-A's "entire old stack" claim is incomplete for the
+graph dimension.
