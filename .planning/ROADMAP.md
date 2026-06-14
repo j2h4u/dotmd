@@ -207,7 +207,7 @@ Plans:
 **Goal:** Implement full-text, vector, graph, and hybrid retrieval on real
 SurrealDB capabilities instead of Phase 38 proxy logic.
 **Depends on:** Phase 39 and Phase 41
-**Plans:** 4 plans
+**Plans:** 1/4 plans complete
 
 - [ ] Implement real SurrealDB BM25/full-text indexes with weighted fields.
 - [ ] Implement Surreal vector search using the chosen HNSW/DISKANN strategy.
@@ -216,7 +216,7 @@ SurrealDB capabilities instead of Phase 38 proxy logic.
 
 Plans:
 
-- [ ] 42-01-PLAN.md - Retrieval schema indexes, lexical field materialization, and runtime capability probes.
+- [x] 42-01-PLAN.md - Retrieval schema indexes, lexical field materialization, and runtime capability probes.
 - [ ] 42-02-PLAN.md - Surreal BM25 full-text and HNSW vector search engines.
 - [ ] 42-03-PLAN.md - Relation-backed Surreal graph direct retrieval.
 - [ ] 42-04-PLAN.md - Surreal hybrid fusion through the service candidate-pool seam.

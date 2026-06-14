@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: SurrealDB-Native Storage Cutover
-status: planning
-stopped_at: Completed 38-03-PLAN.md
-last_updated: "2026-06-14T07:17:31.010Z"
+status: Phase 42 executing; 42-01 complete
+stopped_at: Completed 42-01-PLAN.md
+last_updated: "2026-06-14T07:35:37Z"
 last_activity: 2026-06-14
 progress:
   total_phases: 14
   completed_phases: 4
-  total_plans: 10
-  completed_plans: 10
+  total_plans: 14
+  completed_plans: 11
   percent: 29
 ---
 
@@ -21,17 +21,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 42 — Surreal-native retrieval implementation
+**Current focus:** Phase 42 — surreal-native-retrieval-implementation
 
 ## Current Milestone
 
 **v1.8 — SurrealDB-Native Storage Cutover**
 
 Phase: 42
-Status: Phase 42 planned; ready for execution
+Status: Phase 42 executing; 42-01 complete
 Last activity: 2026-06-14
 
-Progress: [██████----] 57% (4/7 phases complete; Phase 42 planned; phases 43-45 remain to be planned)
+Progress: [██████----] 57% (4/7 phases complete; Phase 42 executing; phases 43-45 remain to be planned)
 
 ## Deferred Items
 
@@ -97,6 +97,7 @@ Items acknowledged and deferred at v1.7 milestone close:
 | Phase 38 P03 | 21 min | 3 tasks | 3 files |
 | 38 | 5 | - | - |
 | Phase 40 P01 | 15 min | 3 tasks | 7 files |
+| Phase 42 P01 | 6 min | 2 tasks | 5 files |
 | 40 | 1 | - | - |
 
 ## Accumulated Context
@@ -300,17 +301,17 @@ retrieval parity failed on hybrid/RRF behavior.
 
 ## Current Position
 
-Phase: 42 — PLANNED
-Plan: 4 of 4
-Status: Ready to execute
-Last activity: 2026-06-14 -- Phase 42 plan-review converged
+Phase: 42 (surreal-native-retrieval-implementation) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute 42-02-PLAN.md
+Last activity: 2026-06-14 -- Completed 42-01-PLAN.md
 
 ## Operator Next Steps
 
-- Execute Phase 42 with `/gsd-execute-phase 42`.
+- Execute `42-02-PLAN.md` for Phase 42.
 
 ## Session
 
-**Last session:** 2026-06-13T09:31:38.530Z
-**Stopped at:** Completed 38-03-PLAN.md
+**Last session:** 2026-06-14T07:35:37Z
+**Stopped at:** Completed 42-01-PLAN.md
 **Resume file:** None
