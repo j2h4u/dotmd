@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 
 import pytest
-
 from tests.fixtures.surreal_native import (
     apply_surreal_native_retrieval_schema,
     isolated_surreal_connection,

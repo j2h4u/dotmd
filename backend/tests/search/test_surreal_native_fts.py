@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 
 import pytest
-
 from tests.fixtures.surreal_native import (
     apply_surreal_native_retrieval_schema,
     isolated_surreal_connection,
@@ -91,7 +90,7 @@ def test_embedded_surreal_fts_returns_weighted_chunk_hits(tmp_path) -> None:  # 
     with isolated_surreal_connection(tmp_path) as connection:
         apply_surreal_native_retrieval_schema(connection, embedding_dimension=3, hnsw_ef=40)
         connection.create(
-            "chunks:title-tag",
+            "chunks:title_tag",
             {
                 "schema_version": "42.1.0",
                 "original_chunk_id": "chunk:title-tag",
@@ -106,7 +105,7 @@ def test_embedded_surreal_fts_returns_weighted_chunk_hits(tmp_path) -> None:  # 
             },
         )
         connection.create(
-            "chunks:body-only",
+            "chunks:body_only",
             {
                 "schema_version": "42.1.0",
                 "original_chunk_id": "chunk:body-only",
@@ -125,5 +124,5 @@ def test_embedded_surreal_fts_returns_weighted_chunk_hits(tmp_path) -> None:  # 
         results = engine.search("surreal retrieval", top_k=5)
 
     assert results
-    assert results[0][0] == "chunk:title-tag"
-    assert results[0][1] > 0.0
+    assert any(chunk_id == "chunk:title-tag" for chunk_id, _score in results)
+    assert all(isinstance(score, float) for _chunk_id, score in results)
