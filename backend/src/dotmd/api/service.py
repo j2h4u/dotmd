@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, NotRequired, TypedDict, cast
+from typing import Any, NotRequired, Protocol, TypedDict, cast
 
 from dotmd.core.config import Settings, load_settings
 from dotmd.core.models import (
@@ -36,6 +36,7 @@ from dotmd.ingestion.telegram_provider import (
     is_low_signal_telegram_text as _is_low_signal_telegram_text,
 )
 from dotmd.ingestion.trickle import TrickleIndexer
+from dotmd.search.base import SearchEngineProtocol
 from dotmd.search.fusion import build_candidates, fuse_results
 from dotmd.search.graph_direct import GraphDirectEngine
 from dotmd.search.graph_search import GraphSearchEngine
@@ -133,6 +134,19 @@ class RerankerComparison(TypedDict):
     rerankers: list[RerankerRunComparison]
     overlap_reference: str | None
     overlap: dict[str, int]
+
+
+class GraphEnrichmentEngineProtocol(Protocol):
+    """Protocol for seed-based graph enrichment engines."""
+
+    def search(
+        self,
+        query: str,
+        top_k: int = 10,
+        seed_chunk_ids: list[str] | None = None,
+    ) -> list[tuple[str, float]]:
+        """Search graph neighbors for the supplied seed chunk ids."""
+        ...
 
 
 def _parse_telegram_message_ref(ref: str) -> tuple[str, str]:
@@ -1329,22 +1343,42 @@ class DotMDService:
         original_query: str,
         mode: SearchMode | str,
         pool_size: int,
+        engine_overrides: dict[str, SearchEngineProtocol | GraphEnrichmentEngineProtocol]
+        | None = None,
     ) -> RerankCandidatePool:
         """Collect fused candidates after graph enrichment for reuse by rerankers."""
+        overrides = engine_overrides or {}
+        semantic_engine = cast(
+            SearchEngineProtocol,
+            overrides.get("semantic", self._semantic_engine),
+        )
+        keyword_engine = cast(
+            SearchEngineProtocol,
+            overrides.get("keyword", self._keyword_engine),
+        )
+        graph_direct_engine = cast(
+            SearchEngineProtocol,
+            overrides.get("graph_direct", self._graph_direct_engine),
+        )
+        graph_engine = cast(
+            GraphEnrichmentEngineProtocol,
+            overrides.get("graph", self._graph_engine),
+        )
+
         # -- Stage 1: Primary retrieval ----------------------------------------
         semantic_hits: list[tuple[str, float]] = []
         keyword_hits: list[tuple[str, float]] = []
         graph_direct_hits: list[tuple[str, float]] = []
 
         if mode in (SearchMode.SEMANTIC, SearchMode.HYBRID, SearchMode.GRAPH):
-            semantic_hits = self._semantic_engine.search(search_query, top_k=pool_size)
+            semantic_hits = semantic_engine.search(search_query, top_k=pool_size)
 
         if mode in (SearchMode.KEYWORD, SearchMode.HYBRID, SearchMode.GRAPH):
-            keyword_hits = self._keyword_engine.search(search_query, top_k=pool_size)
+            keyword_hits = keyword_engine.search(search_query, top_k=pool_size)
 
         # Graph-direct: entity matching (pre-fusion peer, not seed-based)
         if mode in (SearchMode.GRAPH, SearchMode.HYBRID):
-            graph_direct_hits = self._graph_direct_engine.search(
+            graph_direct_hits = graph_direct_engine.search(
                 original_query,
                 top_k=pool_size,
             )
@@ -1379,7 +1413,7 @@ class DotMDService:
         if mode in (SearchMode.GRAPH, SearchMode.HYBRID) and fused:
             seed_ids = [cid for cid, _ in fused[:pool_size]]
             try:
-                graph_hits = self._graph_engine.search(
+                graph_hits = graph_engine.search(
                     search_query,
                     top_k=pool_size,
                     seed_chunk_ids=seed_ids,
