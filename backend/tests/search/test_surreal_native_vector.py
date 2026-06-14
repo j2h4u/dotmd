@@ -9,6 +9,11 @@ from tests.fixtures.surreal_native import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _propagate_dotmd_logs(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(logging.getLogger("dotmd"), "propagate", True)
+
+
 def _engine_class():
     from dotmd.search.surreal_vector import SurrealVectorSearchEngine
 

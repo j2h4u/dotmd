@@ -4,14 +4,21 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING
+from typing import Any, Protocol
 
-if TYPE_CHECKING:
-    from dotmd.storage.surreal import SurrealConnection
+from surrealdb import SurrealError
 
 logger = logging.getLogger(__name__)
 
 _WORD_RE = re.compile(r"\w+", flags=re.UNICODE)
+
+
+class _SurrealQueryConnection(Protocol):
+    def query(
+        self,
+        statement: str,
+        variables: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]: ...
 
 
 def _sanitize_surreal_fts_query(query: str) -> str:
@@ -23,7 +30,7 @@ class SurrealFTSSearchEngine:
 
     def __init__(
         self,
-        connection: SurrealConnection,
+        connection: _SurrealQueryConnection,
         *,
         title_weight: float = 5.0,
         tags_weight: float = 3.0,
@@ -68,7 +75,7 @@ LIMIT $limit;
                 self._statement,
                 {"query": sanitized, "limit": top_k},
             )
-        except Exception as exc:
+        except (RuntimeError, SurrealError) as exc:
             logger.warning(
                 "Surreal FTS search failed: query_len=%d error_type=%s",
                 len(query),

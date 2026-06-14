@@ -1301,7 +1301,9 @@ class TestSurrealHybridOverrides:
         }
         fused_results = [("shared", 0.4), ("graph-only", 0.3), ("keyword-only", 0.2)]
 
-        with patch("dotmd.api.service.fuse_results", return_value=fused_results) as fuse_results_mock:
+        with patch(
+            "dotmd.api.service.fuse_results", return_value=fused_results
+        ) as fuse_results_mock:
             pool = service._collect_candidate_pool(
                 search_query="expanded query",
                 original_query="raw query",
@@ -1317,7 +1319,9 @@ class TestSurrealHybridOverrides:
         assert semantic.calls == [("expanded query", 4)]
         assert keyword.calls == [("expanded query", 4)]
         assert graph_direct.calls == [("raw query", 4)]
-        fuse_results_mock.assert_called_once_with(expected_engine_results, k=service._settings.fusion_k)
+        fuse_results_mock.assert_called_once_with(
+            expected_engine_results, k=service._settings.fusion_k
+        )
         service._graph_engine.search.assert_called_once_with(
             "expanded query",
             top_k=4,

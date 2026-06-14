@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from surrealdb import SurrealError
+
 SURREAL_SCHEMA_VERSION = "42.1.0"
 MIN_TOP_K = 1
 MAX_TOP_K = 100
@@ -312,9 +314,7 @@ def build_surreal_native_retrieval_index_plan(
     if embedding_dimension <= 0:
         raise ValueError("embedding_dimension must be a positive integer")
     if hnsw_ef < MIN_HNSW_EF or hnsw_ef > MAX_HNSW_EF:
-        raise ValueError(
-            f"hnsw_ef must be between {MIN_HNSW_EF} and {MAX_HNSW_EF}, inclusive"
-        )
+        raise ValueError(f"hnsw_ef must be between {MIN_HNSW_EF} and {MAX_HNSW_EF}, inclusive")
 
     return SurrealRetrievalIndexPlan(
         embedding_dimension=embedding_dimension,
@@ -350,9 +350,7 @@ def validate_surreal_native_retrieval_contract(
     if top_k < MIN_TOP_K or top_k > MAX_TOP_K:
         raise ValueError(f"top_k must be between {MIN_TOP_K} and {MAX_TOP_K}, inclusive")
     if hnsw_ef < MIN_HNSW_EF or hnsw_ef > MAX_HNSW_EF:
-        raise ValueError(
-            f"hnsw_ef must be between {MIN_HNSW_EF} and {MAX_HNSW_EF}, inclusive"
-        )
+        raise ValueError(f"hnsw_ef must be between {MIN_HNSW_EF} and {MAX_HNSW_EF}, inclusive")
     if hnsw_ef < top_k:
         raise ValueError("hnsw_ef must be greater than or equal to top_k")
 
@@ -820,7 +818,7 @@ def _serialize_table(table: SurrealTableDefinition) -> dict[str, Any]:
 def _runtime_version(connection: _SchemaConnectionProtocol) -> str | None:
     try:
         result = connection.query_raw("RETURN version();")
-    except Exception:  # pragma: no cover - best-effort metadata only
+    except (RuntimeError, SurrealError):  # pragma: no cover - best-effort metadata only
         return None
 
     if isinstance(result, dict):
@@ -854,7 +852,7 @@ def _run_probe_statement(
 ) -> SurrealRetrievalCapabilityCheck:
     try:
         connection.query_raw(statement)
-    except Exception as exc:
+    except (RuntimeError, SurrealError) as exc:
         detail = _normalize_probe_error(exc)
         if _statement_already_exists(detail):
             return SurrealRetrievalCapabilityCheck(

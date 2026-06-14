@@ -9,6 +9,11 @@ from tests.fixtures.surreal_native import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _propagate_dotmd_logs(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(logging.getLogger("dotmd"), "propagate", True)
+
+
 def _engine_class():
     from dotmd.search.surreal_graph import SurrealGraphDirectEngine
 
@@ -75,7 +80,9 @@ def test_load_catalog_lowercases_entity_names_logs_count_and_reuses_loaded_state
     assert engine.search("no matching entity here", top_k=3) == []
     assert engine.search("still no match", top_k=3) == []
     assert sum(1 for statement, _variables in connection.calls if "FROM entities" in statement) == 1
-    assert sum(1 for statement, _variables in connection.calls if "FROM relations" in statement) == 0
+    assert (
+        sum(1 for statement, _variables in connection.calls if "FROM relations" in statement) == 0
+    )
 
 
 def test_load_catalog_fail_softs_to_empty_catalog_on_runtime_errors(
@@ -142,7 +149,10 @@ def test_search_uses_indexed_target_id_relation_query_with_bound_variables() -> 
     assert len(connection.calls) == 2
 
     statement, variables = connection.calls[-1]
-    assert "SELECT source_id, target_id, rel_type, weight, properties, metadata, `in`, out" in statement
+    assert (
+        "SELECT source_id, target_id, rel_type, weight, properties, metadata, `in`, out"
+        in statement
+    )
     assert "FROM relations" in statement
     assert "target_id IN $entity_names" in statement
     assert "rel_type IN $allowed_rel_types" in statement

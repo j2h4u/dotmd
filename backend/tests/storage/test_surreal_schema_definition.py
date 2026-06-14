@@ -35,6 +35,14 @@ class _FakeSchemaConnection:
         self.applied_statements.append(statement)
         return {"statement": statement, "variables": variables}
 
+    def query_raw(
+        self,
+        statement: str,
+        variables: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self.applied_statements.append(statement)
+        return {"result": [{"statement": statement, "variables": variables}]}
+
 
 def _table_by_name(plan: SurrealSchemaPlan, table_name: str) -> SurrealTableDefinition:
     return next(table for table in plan.tables if table.name == table_name)

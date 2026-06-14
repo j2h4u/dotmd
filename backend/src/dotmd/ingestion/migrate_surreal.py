@@ -390,8 +390,7 @@ def load_sqlite_rows_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
         provenance_payloads.append(payload)
 
     documents_by_identity = {
-        (str(row["namespace"]), str(row["document_ref"])): dict(row)
-        for row in source_document_rows
+        (str(row["namespace"]), str(row["document_ref"])): dict(row) for row in source_document_rows
     }
 
     document_payloads = [
@@ -449,7 +448,9 @@ def load_sqlite_rows_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
             else None
         )
         source_metadata = (
-            _loads_json_object(source_document["metadata_json"]) if source_document is not None else {}
+            _loads_json_object(source_document["metadata_json"])
+            if source_document is not None
+            else {}
         )
         chunk_payloads.append(
             {

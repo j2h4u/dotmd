@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
+
+from surrealdb import SurrealError
 
 from dotmd.search.semantic import SemanticSearchEngine
 from dotmd.storage.surreal_schema import (
@@ -13,7 +15,6 @@ from dotmd.storage.surreal_schema import (
 
 if TYPE_CHECKING:
     from dotmd.core.models import Chunk
-    from dotmd.storage.surreal import SurrealConnection
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,14 @@ _PRECONDITION_STATEMENT = """
 SELECT embedding_model, array::len(embedding) AS embedding_dimension
 FROM embeddings;
 """.strip()
+
+
+class _SurrealQueryConnection(Protocol):
+    def query(
+        self,
+        statement: str,
+        variables: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]: ...
 
 
 class _UnusedVectorStore:
@@ -48,6 +57,9 @@ class _UnusedVectorStore:
     def delete_vectors_by_chunk_ids(self, chunk_ids: list[str]) -> int:
         raise NotImplementedError
 
+    def lookup_embeddings_by_text_hash(self, text_hashes: list[str]) -> dict[str, list[float]]:
+        raise NotImplementedError
+
     def count(self) -> int:
         raise NotImplementedError
 
@@ -57,7 +69,7 @@ class SurrealVectorSearchEngine(SemanticSearchEngine):
 
     def __init__(
         self,
-        connection: SurrealConnection,
+        connection: _SurrealQueryConnection,
         *,
         model_name: str = _DEFAULT_MODEL,
         embedding_dimension: int,
@@ -137,7 +149,7 @@ class SurrealVectorSearchEngine(SemanticSearchEngine):
             )
             self._preconditions_valid = False
             return False
-        except Exception as exc:
+        except (RuntimeError, SurrealError) as exc:
             logger.warning(
                 "Surreal vector retrieval precondition query failed: error_type=%s",
                 type(exc).__name__,
@@ -200,7 +212,7 @@ LIMIT $limit;
                     "limit": top_k,
                 },
             )
-        except Exception as exc:
+        except (RuntimeError, SurrealError) as exc:
             logger.warning(
                 "Surreal vector search failed: query_len=%d error_type=%s",
                 len(query),

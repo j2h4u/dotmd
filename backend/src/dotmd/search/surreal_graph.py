@@ -5,10 +5,9 @@ from __future__ import annotations
 import logging
 import math
 import re
-from typing import TYPE_CHECKING
+from typing import Any, Protocol
 
-if TYPE_CHECKING:
-    from dotmd.storage.surreal import SurrealConnection
+from surrealdb import SurrealError
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +22,20 @@ _DEFAULT_ALLOWED_REL_TYPES = ("MENTIONS", "HAS_TAG")
 _DEFAULT_CATALOG_LIMIT = 100_000
 
 
+class _SurrealQueryConnection(Protocol):
+    def query(
+        self,
+        statement: str,
+        variables: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]: ...
+
+
 class SurrealGraphDirectEngine:
     """Entity-direct graph retrieval backed by Surreal relation records."""
 
     def __init__(
         self,
-        connection: SurrealConnection,
+        connection: _SurrealQueryConnection,
         *,
         allowed_rel_types: tuple[str, ...] = _DEFAULT_ALLOWED_REL_TYPES,
         catalog_limit: int = _DEFAULT_CATALOG_LIMIT,
@@ -58,7 +65,7 @@ LIMIT $limit;
                 _ENTITY_CATALOG_STATEMENT,
                 {"limit": self._catalog_limit},
             )
-        except Exception as exc:
+        except (RuntimeError, SurrealError) as exc:
             logger.warning(
                 "Surreal graph entity catalog load failed: error_type=%s",
                 type(exc).__name__,
@@ -102,7 +109,7 @@ LIMIT $limit;
                     "limit": top_k,
                 },
             )
-        except Exception as exc:
+        except (RuntimeError, SurrealError) as exc:
             logger.warning(
                 "Surreal graph search failed: query_len=%d matched_entities=%d error_type=%s",
                 len(query),

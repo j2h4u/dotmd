@@ -4,7 +4,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from surrealdb import SurrealError
+
 from dotmd.storage.surreal import SurrealConnection, SurrealStoreConfig, define_dotmd_surreal_schema
+from dotmd.storage.surreal_schema import SurrealRetrievalIndexPlan
 
 
 @contextmanager
@@ -26,7 +29,7 @@ def apply_surreal_native_retrieval_schema(
     *,
     embedding_dimension: int = 3,
     hnsw_ef: int = 40,
-) -> object:
+) -> SurrealRetrievalIndexPlan:
     define_dotmd_surreal_schema(connection)
 
     from dotmd.storage import surreal_schema as schema_module
@@ -38,7 +41,7 @@ def apply_surreal_native_retrieval_schema(
     for statement in retrieval_plan.statements:
         try:
             connection.query(statement)
-        except Exception as exc:
+        except (RuntimeError, SurrealError) as exc:
             detail = str(exc).lower()
             if "already exists" not in detail and "already defined" not in detail:
                 raise
