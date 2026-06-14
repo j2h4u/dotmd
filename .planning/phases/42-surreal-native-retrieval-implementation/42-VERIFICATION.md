@@ -1,17 +1,23 @@
 ---
 phase: 42-surreal-native-retrieval-implementation
-verified: 2026-06-14T08:28:32Z
+verified: 2026-06-14T09:04:46Z
 status: passed
 score: 5/5 must-haves verified
 overrides_applied: 0
+re_verification:
+  previous_status: passed
+  previous_score: 5/5
+  gaps_closed: []
+  gaps_remaining: []
+  regressions: []
 ---
 
 # Phase 42: Surreal-native retrieval implementation Verification Report
 
 **Phase Goal:** Implement full-text, vector, graph, and hybrid retrieval on real SurrealDB capabilities instead of Phase 38 proxy logic.
-**Verified:** 2026-06-14T08:28:32Z
+**Verified:** 2026-06-14T09:04:46Z
 **Status:** passed
-**Re-verification:** No — initial verification
+**Re-verification:** Yes — post-review regression check after [42-REVIEW.md](/home/j2h4u/repos/j2h4u/dotmd/.planning/phases/42-surreal-native-retrieval-implementation/42-REVIEW.md:22) reported `status: clean`
 
 ## Goal Achievement
 
@@ -19,11 +25,11 @@ overrides_applied: 0
 
 | # | Truth | Status | Evidence |
 | --- | --- | --- | --- |
-| 1 | `SURR-SEARCH-01`: real Surreal BM25/full-text path with weighted title/tags/text fields exists | ✓ VERIFIED | [backend/src/dotmd/storage/surreal_schema.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/storage/surreal_schema.py:309) defines analyzer plus separate BM25 indexes for `title`, `tags_text`, and `text`; [backend/src/dotmd/search/surreal_fts.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_fts.py:53) queries those three fields with weighted `search::score(1..3)` composition; [backend/src/dotmd/ingestion/migrate_surreal.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/ingestion/migrate_surreal.py:455) materializes `title` and `tags_text` into chunk payloads. Embedded BM25 spot-check passed. |
-| 2 | `SURR-SEARCH-02`: Surreal HNSW vector path enforces single-model/dimension and bounded `top_k`/`hnsw_ef` preconditions | ✓ VERIFIED | [backend/src/dotmd/storage/surreal_schema.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/storage/surreal_schema.py:341) validates `top_k`, `hnsw_ef`, single active `embedding_model`, and uniform `embedding_dimension`; [backend/src/dotmd/search/surreal_vector.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_vector.py:105) applies those bounds before query execution and uses native HNSW lookup at [line 170](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_vector.py:170). Embedded HNSW spot-check passed. |
-| 3 | `SURR-SEARCH-03`: graph/entity retrieval runs through Surreal relation records with `target_id` and `rel_type` filtering, not Python full relation scans | ✓ VERIFIED | [backend/src/dotmd/storage/surreal_schema.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/storage/surreal_schema.py:333) includes `relations_target_id_idx`; [backend/src/dotmd/search/surreal_graph.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_graph.py:51) issues a bounded `FROM relations` query with `target_id IN $entity_names` and `rel_type IN $allowed_rel_types`; no `scan_table("relations")` call exists in the engine. Embedded relation-query spot-check passed. |
-| 4 | `SURR-SEARCH-04`: hybrid fusion runs over Surreal result sets through explicit engine overrides and preserves engine attribution | ✓ VERIFIED | [backend/src/dotmd/search/surreal_native.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_native.py:18) builds explicit Surreal `semantic`/`keyword`/`graph_direct` overrides; [backend/src/dotmd/api/service.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/api/service.py:1339) accepts `engine_overrides`, feeds their result sets into `fuse_results`, and keeps graph enrichment separate; [backend/tests/api/test_service_search.py](/home/j2h4u/repos/j2h4u/dotmd/backend/tests/api/test_service_search.py:1363) verifies preserved `matched_engines` and `engine_scores`. |
-| 5 | Phase 42 did not add production cutover, shadow-run execution, runtime fallback backend, capability-probe startup consumption, or legacy stack deletion | ✓ VERIFIED | [backend/src/dotmd/api/service.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/api/service.py:267) still initializes legacy default engines (`SemanticSearchEngine`, pipeline keyword engine, `GraphDirectEngine`) at service startup; [backend/tests/search/test_surreal_native_hybrid.py](/home/j2h4u/repos/j2h4u/dotmd/backend/tests/search/test_surreal_native_hybrid.py:75) asserts no `search::rrf`, no built-in hybrid helper use, and no `SurrealRetrievalCapabilityReport` wiring into runtime entrypoints. Global grep found no Phase 42 production cutover/fallback wiring additions. |
+| 1 | `SURR-SEARCH-01`: Surreal FTS uses real weighted BM25 fields and is scoped by the configured `chunk_strategy` | ✓ VERIFIED | [surreal_fts.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_fts.py:55) filters `FROM chunks WHERE chunk_strategy = $chunk_strategy` and weights `title`/`tags_text`/`text`; [test_surreal_native_fts.py](/home/j2h4u/repos/j2h4u/dotmd/backend/tests/search/test_surreal_native_fts.py:86) asserts the configured strategy is passed through. Review summary explicitly calls this fix out at [42-REVIEW.md](/home/j2h4u/repos/j2h4u/dotmd/.planning/phases/42-surreal-native-retrieval-implementation/42-REVIEW.md:34). |
+| 2 | `SURR-SEARCH-02`: vector retrieval scopes active chunks by `chunk_strategy`, scopes precondition/search by selected `embedding_model`, and does not fail closed for valid multi-model strategy slices | ✓ VERIFIED | [surreal_vector.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_vector.py:22) derives active chunk IDs from `chunks` with `chunk_strategy = $chunk_strategy`; [surreal_vector.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_vector.py:27) scopes preconditions to `embedding_model = $embedding_model`; [surreal_vector.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_vector.py:204) scopes the HNSW search to the same selected model. [test_surreal_native_vector.py](/home/j2h4u/repos/j2h4u/dotmd/backend/tests/search/test_surreal_native_vector.py:138) verifies strategy scoping, and [test_surreal_native_vector.py](/home/j2h4u/repos/j2h4u/dotmd/backend/tests/search/test_surreal_native_vector.py:201) proves a valid selected-model slice still searches successfully. |
+| 3 | `SURR-SEARCH-03`: graph retrieval aggregates by `source_id` before `LIMIT` and uses indexed `target_id`/`rel_type` filtering instead of Python scans | ✓ VERIFIED | [surreal_graph.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_graph.py:52) issues `SELECT source_id, math::sum(weight) ... GROUP BY source_id ... LIMIT $limit`; [test_surreal_native_graph.py](/home/j2h4u/repos/j2h4u/dotmd/backend/tests/search/test_surreal_native_graph.py:127) asserts the query shape, and [test_surreal_native_graph.py](/home/j2h4u/repos/j2h4u/dotmd/backend/tests/search/test_surreal_native_graph.py:228) proves limit is applied after chunk aggregation, not on raw relation rows. |
+| 4 | Capability probing requires explicit mutation opt-in and remains a non-runtime artifact in Phase 42 | ✓ VERIFIED | [surreal_schema.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/storage/surreal_schema.py:881) rejects probe execution unless `allow_target_mutation=True`; [test_surreal_schema_definition.py](/home/j2h4u/repos/j2h4u/dotmd/backend/tests/storage/test_surreal_schema_definition.py:446) covers the guard directly. [test_surreal_native_hybrid.py](/home/j2h4u/repos/j2h4u/dotmd/backend/tests/search/test_surreal_native_hybrid.py:87) verifies `SurrealRetrievalCapabilityReport` is still absent from runtime entrypoints. |
+| 5 | Phase 42 still does not introduce production cutover, shadow-run execution, runtime fallback/backend switching, or legacy deletion | ✓ VERIFIED | [service.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/api/service.py:260) still initializes the default runtime engines (`SemanticSearchEngine`, pipeline keyword engine, `GraphDirectEngine`) at service startup; [surreal_native.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_native.py:18) only builds explicit opt-in overrides; [test_surreal_native_hybrid.py](/home/j2h4u/repos/j2h4u/dotmd/backend/tests/search/test_surreal_native_hybrid.py:77) checks no built-in hybrid helper or runtime cutover wiring was added. Repo-wide grep found no Phase 42 runtime consumer for the capability report and no new fallback/cutover wiring in the implementation files under review. |
 
 **Score:** 5/5 truths verified
 
@@ -31,44 +37,40 @@ overrides_applied: 0
 
 | Artifact | Expected | Status | Details |
 | --- | --- | --- | --- |
-| `backend/src/dotmd/storage/surreal_schema.py` | Retrieval index plan, HNSW contract, relation index, capability probe | ✓ VERIFIED | Substantive implementation at lines 309-338, 341-367, and 881-965; used by tests and by Surreal-native engines. |
-| `backend/src/dotmd/ingestion/migrate_surreal.py` | Transform-only lexical field materialization | ✓ VERIFIED | Chunk payload builder at lines 439-480 fills `title` and `tags_text` from copied SQLite `source_documents` rows. |
-| `backend/tests/fixtures/surreal_native.py` | Shared isolated embedded-Surreal fixture | ✓ VERIFIED | Exports `isolated_surreal_connection()` and `apply_surreal_native_retrieval_schema()`; imported by embedded FTS/vector/graph tests. |
-| `backend/src/dotmd/search/surreal_fts.py` | Weighted Surreal BM25 engine | ✓ VERIFIED | Uses fixed SurrealQL over `title`, `tags_text`, `text`; fail-soft on operational errors. |
-| `backend/src/dotmd/search/surreal_vector.py` | HNSW Surreal vector engine | ✓ VERIFIED | Preserves semantic query normalization, checks bounds/preconditions, queries HNSW directly. |
-| `backend/src/dotmd/search/surreal_graph.py` | Relation-backed graph direct engine | ✓ VERIFIED | Loads entity catalog once; hot path uses bounded relation query and normalized weighted ranking. |
-| `backend/src/dotmd/search/surreal_native.py` | Explicit Surreal override builder | ✓ VERIFIED | Builds `semantic`, `keyword`, and `graph_direct` overrides without changing runtime defaults. |
-| `backend/src/dotmd/api/service.py` | Candidate-pool seam for explicit engine overrides | ✓ VERIFIED | `_collect_candidate_pool()` accepts overrides and still uses existing `fuse_results()`/candidate attribution path. |
+| `backend/src/dotmd/search/surreal_fts.py` | Weighted Surreal BM25 engine with strategy scoping | ✓ VERIFIED | Substantive query implementation at [surreal_fts.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_fts.py:55); wired by direct test coverage and hybrid override builder. |
+| `backend/src/dotmd/search/surreal_vector.py` | HNSW engine with strategy/model scoping and precondition checks | ✓ VERIFIED | Active chunk discovery, selected-model preconditions, and HNSW query path are implemented at [surreal_vector.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_vector.py:123), [surreal_vector.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_vector.py:138), and [surreal_vector.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_vector.py:204). |
+| `backend/src/dotmd/search/surreal_graph.py` | Relation-backed graph direct engine with aggregation before limit | ✓ VERIFIED | Query and normalization logic are substantive at [surreal_graph.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_graph.py:52) and [surreal_graph.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_graph.py:122). |
+| `backend/src/dotmd/storage/surreal_schema.py` | Capability probe and retrieval contract guardrails | ✓ VERIFIED | Typed capability report plus explicit mutation opt-in guard at [surreal_schema.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/storage/surreal_schema.py:221) and [surreal_schema.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/storage/surreal_schema.py:881). |
+| `backend/src/dotmd/search/surreal_native.py` | Explicit Surreal override builder only | ✓ VERIFIED | Override builder exists and stays outside startup/runtime defaults at [surreal_native.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_native.py:18). |
+| `backend/src/dotmd/api/service.py` | Existing fusion seam accepts optional overrides without changing defaults | ✓ VERIFIED | `_collect_candidate_pool()` accepts overrides while default startup engines remain unchanged at [service.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/api/service.py:1339). |
 
 ### Key Link Verification
 
 | From | To | Via | Status | Details |
 | --- | --- | --- | --- | --- |
-| `migrate_surreal.py` | `surreal_schema.py` | lexical chunk payload fields match retrieval schema fields | ✓ WIRED | Manual verification: payload builder writes `title`/`tags_text` at [migrate_surreal.py:463](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/ingestion/migrate_surreal.py:463), and schema declares those fields at [surreal_schema.py:425](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/storage/surreal_schema.py:425). `verify.key-links` false-negative was a multiline regex miss, not missing wiring. |
-| `surreal_schema.py` | `surreal_schema.py` | capability probe validates same analyzer/HNSW/relation statements exposed by schema helpers | ✓ WIRED | `probe_surreal_native_retrieval_capabilities()` consumes `build_surreal_native_retrieval_index_plan()` statements directly at lines 888-935. |
-| `surreal_fts.py` | `surreal_schema.py` | FTS engine uses the Phase 42 title/tags/text field contract | ✓ WIRED | FTS statement references `title`, `tags_text`, and `text` at [surreal_fts.py:61](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_fts.py:61); schema/index plan defines the same fields and BM25 indexes at [surreal_schema.py:326](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/storage/surreal_schema.py:326). `verify.key-links` false-negative was another multiline regex miss. |
-| `surreal_vector.py` | `semantic.py` | preserves TEI/local query encoding behavior before Surreal lookup | ✓ WIRED | `_normalize_query_text()` at [surreal_vector.py:163](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_vector.py:163) matches the existing semantic-engine normalization contract. |
-| `surreal_graph.py` | `surreal_schema.py` | graph engine queries relation fields/index path added in 42-01 | ✓ WIRED | Query selects `source_id`, `target_id`, `rel_type`, `weight`, `properties`, `metadata` and filters `target_id IN $entity_names` at [surreal_graph.py:52](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_graph.py:52). |
-| `surreal_native.py` | `surreal_fts.py` / `surreal_vector.py` / `surreal_graph.py` | explicit Surreal override builder | ✓ WIRED | Builder instantiates all three engines at lines 27-40. |
-| `api/service.py` | `search/fusion.py` | existing Python RRF stays the hybrid fusion implementation | ✓ WIRED | `_collect_candidate_pool()` still calls `fuse_results()` at [service.py:1407](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/api/service.py:1407). |
+| `surreal_fts.py` | `chunks` retrieval schema | `chunk_strategy` + weighted `title` / `tags_text` / `text` predicates | ✓ WIRED | Query statement in [surreal_fts.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_fts.py:55) matches the retrieval-field contract and is asserted in [test_surreal_native_fts.py](/home/j2h4u/repos/j2h4u/dotmd/backend/tests/search/test_surreal_native_fts.py:53). |
+| `surreal_vector.py` | `chunks` and `embeddings` retrieval slices | active chunk set comes from strategy-filtered chunks, then precondition/search narrow to selected model | ✓ WIRED | [surreal_vector.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_vector.py:123), [surreal_vector.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_vector.py:138), and [surreal_vector.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_vector.py:204) form the full slice; tests assert the variables at [test_surreal_native_vector.py](/home/j2h4u/repos/j2h4u/dotmd/backend/tests/search/test_surreal_native_vector.py:129). |
+| `surreal_graph.py` | `relations` retrieval path | indexed `target_id` / `rel_type` lookup aggregates by `source_id` before limiting | ✓ WIRED | [surreal_graph.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_graph.py:52) uses `GROUP BY source_id` before `LIMIT`; [test_surreal_native_graph.py](/home/j2h4u/repos/j2h4u/dotmd/backend/tests/search/test_surreal_native_graph.py:151) and [test_surreal_native_graph.py](/home/j2h4u/repos/j2h4u/dotmd/backend/tests/search/test_surreal_native_graph.py:228) cover both query shape and post-aggregation limit behavior. |
+| `surreal_schema.py` | capability probe execution | mutation guard sits ahead of any probe statement execution | ✓ WIRED | [surreal_schema.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/storage/surreal_schema.py:888) raises before schema/probe work unless explicitly opted in; [test_surreal_schema_definition.py](/home/j2h4u/repos/j2h4u/dotmd/backend/tests/storage/test_surreal_schema_definition.py:446) verifies the guard. |
+| `surreal_native.py` | `api/service.py` | explicit override builder feeds existing candidate-pool seam only | ✓ WIRED | [surreal_native.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_native.py:27) builds `semantic`/`keyword`/`graph_direct` overrides; [service.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/api/service.py:1350) consumes them while leaving defaults intact. |
+| `api/service.py` | `search/fusion.py` | existing Python RRF remains the hybrid fusion implementation | ✓ WIRED | [service.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/api/service.py:1398) still funnels engine result sets through `fuse_results()`, and [test_service_search.py](/home/j2h4u/repos/j2h4u/dotmd/backend/tests/api/test_service_search.py:1363) verifies preserved engine attribution. |
 
 ### Data-Flow Trace (Level 4)
 
 | Artifact | Data Variable | Source | Produces Real Data | Status |
 | --- | --- | --- | --- | --- |
-| `surreal_fts.py` | `rows -> (chunk_id, score)` | Surreal `chunks` table queried via BM25 predicates on `title`, `tags_text`, `text` | Yes — embedded test inserts real `chunks` rows and search returns hits | ✓ FLOWING |
-| `surreal_vector.py` | `rows -> (chunk_id, score)` | Surreal `embeddings` table queried with HNSW operator and cosine projection | Yes — embedded test inserts real embedding rows and returns nearest-neighbor hits | ✓ FLOWING |
-| `surreal_graph.py` | `rows -> chunk_scores` | Surreal `relations` table filtered by `target_id`/`rel_type` | Yes — embedded test inserts real `RELATE` rows and returns only allowed matches | ✓ FLOWING |
-| `api/service.py` | `engine_results -> fused -> candidate attribution` | Explicit override engine result sets passed into `fuse_results()` and candidate hydration | Yes — service tests prove override outputs become fused candidates with preserved `matched_engines`/`engine_scores` | ✓ FLOWING |
+| `surreal_fts.py` | `rows -> (chunk_id, score)` | `chunks` rows filtered by `chunk_strategy` and BM25 predicates | Yes — embedded/runtime tests and scoped suite passed | ✓ FLOWING |
+| `surreal_vector.py` | `active_chunk_ids`, `precondition_rows`, `rows -> (chunk_id, score)` | strategy-filtered `chunks` slice, then selected-model `embeddings` slice | Yes — selected-model slice and embedded HNSW tests passed, including valid multi-model slice coverage | ✓ FLOWING |
+| `surreal_graph.py` | `rows -> chunk_scores` | aggregated `relations` rows grouped by `source_id` | Yes — graph tests prove weighted aggregation and limit-after-grouping behavior | ✓ FLOWING |
+| `api/service.py` | `engine_results -> fused -> candidate attribution` | explicit override engine results passed into existing Python fusion | Yes — attribution test at [test_service_search.py](/home/j2h4u/repos/j2h4u/dotmd/backend/tests/api/test_service_search.py:1363) proves overlap metadata survives candidate hydration | ✓ FLOWING |
 
 ### Behavioral Spot-Checks
 
 | Behavior | Command | Result | Status |
 | --- | --- | --- | --- |
-| Embedded BM25 retrieval returns real Surreal hits | `cd backend && uv run pytest tests/search/test_surreal_native_fts.py -q -k embedded_surreal_fts_returns_weighted_chunk_hits` | `1 passed, 3 deselected in 0.80s` | ✓ PASS |
-| Embedded HNSW retrieval returns nearest neighbor without scan fallback | `cd backend && uv run pytest tests/search/test_surreal_native_vector.py -q -k embedded_surreal_hnsw_returns_nearest_neighbor_without_scan_table` | `1 passed, 14 deselected in 0.82s` | ✓ PASS |
-| Embedded relation-backed graph retrieval returns only allowed matches | `cd backend && uv run pytest tests/search/test_surreal_native_graph.py -q -k embedded_surreal_graph_returns_only_allowed_relation_matches` | `1 passed, 7 deselected in 0.87s` | ✓ PASS |
-| Hybrid override seam and capability-probe non-consumption hold | `cd backend && uv run pytest tests/search/test_surreal_native_hybrid.py tests/api/test_service_search.py -q -k 'phase42_keeps_capability_probe_out_of_runtime_entrypoints or collect_candidate_pool_uses_engine_overrides_and_existing_fusion'` | `2 passed` | ✓ PASS |
+| Full backend verification gate | `cd backend && just verify` | `661 passed, 36 deselected, 1 warning` | ✓ PASS |
+| Scoped post-review Phase 42 suite | `cd backend && uv run pytest tests/search/test_surreal_native_vector.py tests/storage/test_surreal_schema_definition.py tests/search/test_surreal_native_fts.py tests/search/test_surreal_native_graph.py tests/search/test_surreal_native_hybrid.py -q` | `45 passed in 1.50s` | ✓ PASS |
+| Direct review-fix spot-checks | `cd backend && uv run pytest tests/search/test_surreal_native_fts.py tests/search/test_surreal_native_vector.py tests/search/test_surreal_native_graph.py tests/storage/test_surreal_schema_definition.py -q -k 'test_search_filters_to_configured_chunk_strategy or test_search_allows_other_models_in_active_strategy_when_selected_model_is_valid or test_search_limits_after_chunk_aggregation_not_raw_relation_rows or test_probe_surreal_native_retrieval_capabilities_requires_explicit_mutation_opt_in'` | `4 passed, 37 deselected in 0.79s` | ✓ PASS |
 
 ### Probe Execution
 
@@ -80,10 +82,10 @@ overrides_applied: 0
 
 | Requirement | Source Plan | Description | Status | Evidence |
 | --- | --- | --- | --- | --- |
-| `SURR-SEARCH-01` | 42-01, 42-02 | SurrealDB full-text search uses real BM25/full-text indexes with weighted title, tags, and body/text contributions | ✓ SATISFIED | Schema/index plan at `surreal_schema.py:309-338`, lexical materialization at `migrate_surreal.py:455-480`, weighted engine query at `surreal_fts.py:53-77`, embedded BM25 spot-check passed. |
-| `SURR-SEARCH-02` | 42-01, 42-02 | SurrealDB vector search uses HNSW/DISKANN strategy with implementation guardrails | ✓ SATISFIED | Phase 42 concretely implements the HNSW path and preconditions at `surreal_schema.py:341-367` and `surreal_vector.py:105-214`; embedded HNSW spot-check passed. Roadmap Phase 43 still owns broader production-derived latency/build-time evidence for the milestone. |
-| `SURR-SEARCH-03` | 42-01, 42-03 | Graph/entity retrieval runs through Surreal relation records and preserves relation metadata | ✓ SATISFIED | Relation schema/index path at `surreal_schema.py:333-336`, query/ranking path at `surreal_graph.py:52-145`, embedded relation-query spot-check passed. |
-| `SURR-SEARCH-04` | 42-04 | Hybrid fusion runs over Surreal result sets and preserves engine attribution | ✓ SATISFIED | Override builder at `surreal_native.py:18-40`, fusion seam at `service.py:1339-1410`, attribution tests at `test_service_search.py:1363-1409`, hybrid/service spot-check passed. |
+| `SURR-SEARCH-01` | 42-01, 42-02 | SurrealDB full-text search uses real BM25/full-text indexes with weighted title, tags, and body/text contributions | ✓ SATISFIED | Weighted BM25 query over `title` / `tags_text` / `text` plus `chunk_strategy` filtering at [surreal_fts.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_fts.py:55); scoped FTS test at [test_surreal_native_fts.py](/home/j2h4u/repos/j2h4u/dotmd/backend/tests/search/test_surreal_native_fts.py:86). |
+| `SURR-SEARCH-02` | 42-01, 42-02 | SurrealDB vector search uses HNSW/DISKANN strategy with implementation guardrails | ✓ SATISFIED | Phase 42 implements the HNSW path and scopes retrieval correctly by strategy/model at [surreal_vector.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_vector.py:123), [surreal_vector.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_vector.py:138), and [surreal_vector.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_vector.py:204); valid multi-model slice behavior is covered at [test_surreal_native_vector.py](/home/j2h4u/repos/j2h4u/dotmd/backend/tests/search/test_surreal_native_vector.py:201). |
+| `SURR-SEARCH-03` | 42-01, 42-03 | Graph/entity retrieval runs through Surreal relation records and preserves relation metadata | ✓ SATISFIED | Relation query aggregates by `source_id` before `LIMIT` in [surreal_graph.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_graph.py:52), with explicit limit-after-aggregation test coverage at [test_surreal_native_graph.py](/home/j2h4u/repos/j2h4u/dotmd/backend/tests/search/test_surreal_native_graph.py:228). |
+| `SURR-SEARCH-04` | 42-04 | Hybrid fusion runs over Surreal result sets and preserves engine attribution | ✓ SATISFIED | Override builder at [surreal_native.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/search/surreal_native.py:18), fusion seam at [service.py](/home/j2h4u/repos/j2h4u/dotmd/backend/src/dotmd/api/service.py:1339), and attribution verification at [test_service_search.py](/home/j2h4u/repos/j2h4u/dotmd/backend/tests/api/test_service_search.py:1363). |
 
 No orphaned Phase 42 requirements were found in `.planning/REQUIREMENTS.md`.
 
@@ -91,17 +93,17 @@ No orphaned Phase 42 requirements were found in `.planning/REQUIREMENTS.md`.
 
 | File | Line | Pattern | Severity | Impact |
 | --- | --- | --- | --- | --- |
-| — | — | None in scanned phase-owned source/test files | ℹ️ Info | No `TBD`/`FIXME`/`XXX` debt markers, placeholder text, or console-log-only implementations found. |
+| — | — | None in reviewed Phase 42 implementation/test files | ℹ️ Info | No `TBD` / `FIXME` / `XXX` markers, placeholder code, or console-log-only implementations were found. |
 
 ### Human Verification Required
 
-None. The phase deliverables are backend retrieval/search seams with code-level and embedded-runtime evidence; no visual or human-only acceptance surface remains for Phase 42 itself.
+None.
 
 ### Gaps Summary
 
-No blocker gaps found. Phase 42 achieves the implementation-only goal: real Surreal-native BM25, HNSW vector, relation-backed graph retrieval, and explicit hybrid fusion wiring exist in code, are exercised by embedded-runtime tests, and did not spill into Phase 43/44/45 cutover or deletion scope.
+No blocker gaps found. The post-review fixes are present in code, covered by focused tests, the latest code review is clean, and fresh execution evidence passed both the scoped Phase 42 suite (`45 passed`) and the full backend verification gate (`661 passed, 36 deselected, 1 warning`). Phase 42 still achieves its implementation-only goal without leaking Phase 43/44/45 runtime cutover scope.
 
 ---
 
-_Verified: 2026-06-14T08:28:32Z_
+_Verified: 2026-06-14T09:04:46Z_
 _Verifier: the agent (gsd-verifier)_
