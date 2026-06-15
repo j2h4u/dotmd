@@ -1,369 +1,268 @@
 ---
 phase: 43
-cycle: 3
+cycle: 4
 reviewers: [codex, opencode]
-reviewed_at: 2026-06-14T19:10:50Z
+reviewed_at: 2026-06-15T13:08:05+05:00
 plans_reviewed: [43-01-PLAN.md, 43-02-PLAN.md, 43-03-PLAN.md]
-prior_cycle_commit: 3122a59
+prior_cycle_commit: 6fcd63b
+note: "Cycle 4 is an operator-authorized extension past the 3-cycle cap. Resolved concerns from cycles 1-3 are incorporated into the current PLAN.md decisions (D43-*) and are NOT re-counted here. The executing reviewer runs inside Claude Code, so the `claude` CLI is skipped for independence; codex and opencode are the external reviewers."
 ---
 
-# Cross-AI Plan Review — Phase 43 (Cycle 3, Final)
+# Cross-AI Plan Review — Phase 43 (Cycle 4)
 
-This is the **third and final** review cycle. The plans were revised in commit `3122a59`
-to address the single cycle-2 consensus HIGH (baseline FalkorDB graph not bound to the
-rehearsal window) plus two actionable cycle-2 MEDIUMs (candidate-config-json schema;
-candidate-preflight identity binding) and the cycle-2 LOWs. This cycle re-reviews the
-**current** state of the plans. Concerns that prior cycles raised and the plans now
-incorporate via explicit `D43-xx` decisions are recorded as RESOLVED and are **not**
-re-counted as open. The cycle-2 review file content has been superseded by this file.
-
-The two reviewers DISAGREE on whether the cycle-2 HIGH is now resolved. The orchestrator
-ran an independent source-grounding adjudication (recorded in "Orchestrator adjudication"
-and "Verification coverage" below) and sides with Codex: the cycle-2 HIGH is **PARTIALLY
-RESOLVED** at the comparison-policy level but **UNRESOLVED at the service-construction
-boundary**, and therefore remains counted as 1 open HIGH.
+The plans were revised in commit `6fcd63b` to address all cycle-3 findings (the cycle-3 consensus
+HIGH: baseline `DotMDService` construction eagerly opening + mutating live FalkorDB before any
+`SearchMode` gate, plus four cycle-3 MEDIUM/LOW items). This cycle re-reviews the CURRENT state of the
+plans, re-verifies the cycle-3 HIGH fix against source, and surfaces only genuinely new, unresolved
+concerns.
 
 ## Codex Review
 
-**Summary**
+**Summary.** Cycle 4 is much stronger than earlier versions: the plans now explicitly separate
+immutable expected input from produced evidence, bind rehearsal/candidate identity fail-closed, and
+address the cycle-3 live-FalkorDB boundary directly. Two NEW blocking gaps remain around making the
+"semantic+FTS-only" scope actually executable and fair, plus one medium read-only issue in the
+proposed baseline engine construction.
 
-Cycle 3 is much stronger than cycle 2: the plans now explicitly acknowledge the FalkorDB
-isolation problem, scope the comparison to semantic+FTS, exclude graph-category golden
-queries, harden candidate config validation, bind candidate preflight to manifest identity,
-and carry graph exclusion into final evidence. However, the cycle-2 HIGH is only
-**partially resolved**. The query-level graph leak is addressed, but the proposed
-`DotMDService(settings=cloned_settings)` baseline construction still initializes the
-production graph store before any search mode is used.
+**Cycle-3 HIGH fix verdict — HOLDS (for the FalkorDB boundary).**
+In live source, `DotMDService.__init__` eagerly constructs `IndexingPipeline` (`service.py:260`),
+which eagerly calls `_create_graph_store()` (`pipeline.py:246` → `:161`), which constructs
+`FalkorDBGraphStore` whose `__init__` connects and issues `CREATE INDEX` during construction
+(`falkordb_graph.py:47-63`). `SemanticSearchEngine` and `FTS5SearchEngine` can be constructed without
+constructing `DotMDService`/`IndexingPipeline`/`FalkorDBGraphStore`: their constructors take a vector
+store / SQLite connection directly (`semantic.py:51`, `fts5.py:93`). So the graph-free construction
+fix is sound for the live-FalkorDB boundary.
 
-**Cycle-2 HIGH Disposition — PARTIALLY RESOLVED.**
+**Strengths.**
+- The cycle-3 HIGH is addressed by construction, not by a late `SearchMode` gate.
+- `source-capture-expected.json` vs produced `source-capture.json` is cleanly separated.
+- Rehearsal identity checks are fail-closed before baseline capture.
+- Candidate target preflight now checks identity, not just reachability.
+- `--verify-only` regenerating and comparing raw diffs is the right tamper-detection model.
+- The graph exclusion is visible in artifacts instead of being silently hidden.
 
-D43-02-G/D43-03-E correctly identify the root cause and choose a coherent scope:
-semantic+FTS-only shadow evidence, graph-category query exclusion, and explicit exclusion
-markers in `source-capture.json`, the ledger sentinel, and `shadow-summary.md`.
+**Concerns.**
+- **HIGH / NEW — Candidate capture is not guaranteed graph-free, so the semantic+FTS-only comparison
+  can be unfair.** `build_surreal_native_engine_overrides()` returns `graph_direct` as well as semantic
+  and keyword engines (`surreal_native.py:18`), and `DotMDService` hybrid collection uses `graph_direct`
+  for `HYBRID` mode (`service.py:1379`). Filtering graph-category queries does not prevent the retained
+  queries from receiving candidate-side graph hits. The plans claim "semantic+FTS-only" evidence but do
+  not explicitly strip the candidate `graph_direct` engine or fuse only Surreal semantic+keyword pools.
+- **HIGH / NEW — The non-graph golden subset conflicts with the existing Phase 40 evaluator unless the
+  runner explicitly bypasses complete category coverage.** `run_eval()` defaults
+  `require_complete_category_coverage=True` and validates all required categories
+  (`surreal_eval_runner.py:151,155`; `surreal_eval.py:34-53`). Excluding `sq-009`/`sq-010` removes
+  `graph-entity`; excluding `sq-015`/`sq-016` removes the only `mixed-ru-en` rows in the checked-in
+  corpus. If the full corpus is passed, `run_eval()` will require missing graph results; if a filtered
+  file is passed, category-coverage validation fails unless explicitly disabled. The 43-03 verify-only
+  commands still point at the full golden file.
+- **MEDIUM / NEW — Baseline capture is described as read-only, but the planned
+  `FTS5SearchEngine(conn, table_name=...)` path is not read-only in current source.** Its constructor
+  calls `_ensure_fts5_schema()`, which can `DROP`/`CREATE` the FTS table and `commit()` (`fts5.py:98`).
+  `SQLiteVecVectorStore` can also create/alter tables on first `_get_conn()` use (`sqlite_vec.py:67`).
+  This does not touch live production if the rehearsal copy is isolated, but it mutates the evidence
+  snapshot and contradicts the "read-only baseline" invariant (and is incompatible with a `mode=ro`
+  connection).
 
-The remaining problem is implementation-level: `DotMDService.__init__` constructs
-`IndexingPipeline`, and `IndexingPipeline` creates `FalkorDBGraphStore(url=settings.falkordb_url)`.
-`FalkorDBGraphStore.__init__` establishes the FalkorDB client and creates indexes. So even
-if `_collect_candidate_pool()` never runs graph search, baseline service construction still
-crosses the live FalkorDB boundary. Also, the plan refers to a semantic+keyword-only
-`SearchMode`, but the current enum has only `SEMANTIC`, `KEYWORD`, `GRAPH`, and `HYBRID`;
-the combined modes include graph behavior.
+**Suggestions.**
+- Add a runner helper for candidate capture that mirrors baseline capture: build Surreal vector + FTS
+  engines, discard/avoid `graph_direct`, and call `fuse_results({"semantic": ..., "keyword": ...})`
+  directly. Add a test asserting retained candidate rows have no `graph_direct` matched engine.
+- Make the evaluator path explicit: write a filtered temporary golden-query JSONL and call
+  `EvalRunnerConfig(..., require_complete_category_coverage=False)`, or add a shadow-run wrapper that
+  does this internally. Update verify-only commands accordingly.
+- Add a baseline immutability test: record `index.db` hash/mtime before
+  `build_baseline_semantic_keyword_engines()` plus a search, then assert unchanged. To pass it, use
+  read-only/search-only construction that skips FTS/schema/vector-table ensure logic and fails closed
+  if required tables are absent or outdated.
+- Replace "16-query quality evidence" wording with "16-query source corpus, 11-query non-graph
+  comparison subset, 5 graph queries explicitly excluded" wherever it appears as a must-have.
 
-**Strengths**
-
-- D43-02-G is explicit about why `index_dir` cannot isolate FalkorDB.
-- Graph-query exclusion is carried through 43-02 and 43-03 instead of being hidden in prose.
-- D43-02-H fixes the candidate config ambiguity with a fail-closed schema and correct
-  engine-vs-loop routing.
-- D43-03-D materially improves candidate preflight by binding to chunk strategy, embedding
-  model, import id, and counts.
-- The acceptance ledger sentinel now carries guardrails, replay metadata, and
-  graph-exclusion evidence.
-- Privacy/artifact handling is now operational enough for execution.
-
-**Concerns**
-
-- **HIGH, REMAINING:** Baseline graph isolation is not fully resolved because
-  `DotMDService(settings=...)` still initializes live FalkorDB through `IndexingPipeline`
-  before graph-free search modes matter. This can read/write graph indexes or fail due to
-  FalkorDB reachability even though graph evidence is excluded.
-- **HIGH, NEW:** The planned "semantic+keyword-only `SearchMode`" does not exist. `SEMANTIC`
-  and `KEYWORD` are separate; `HYBRID` and `GRAPH` invoke graph-direct. The plan needs an
-  explicit graph-free fusion mechanism, not just a `SearchMode` restriction.
-- **MEDIUM, REMAINING:** WAL/snapshot completeness is still only made visible, not
-  fail-closed. Recording `index.db` size and mtime helps auditability, but it does not prove
-  the rehearsal SQLite copy matches the same source-capture/import identity used for the
-  candidate target.
-- **MEDIUM, NEW:** `source-capture.json` is both an operator-supplied preflight input and a
-  runner-produced/augmented output. That blurs immutable expected identity versus generated
-  evidence. A bad implementation could validate against an artifact it later rewrites.
-- **LOW, NEW:** The 43-03 preflight verification command shows `--target-url` but omits
-  `--target-namespace` and `--target-database`, despite the plan requiring explicit target
-  binding. If defaults exist, they should be stated; otherwise include the flags.
-
-**Suggestions**
-
-1. Change D43-02-G implementation to avoid constructing live FalkorDB at all. Options: inject
-   a no-op graph store before `DotMDService`/`IndexingPipeline` construction, add a
-   baseline-only service factory that builds only SQLite/FTS/vector engines, or bypass
-   `DotMDService` and call semantic + FTS engines directly for this runner.
-2. Define a real graph-free fusion path: e.g. `collect_semantic_keyword_pool()` that calls
-   semantic and keyword engines and fuses with existing `fuse_results()`. Do not rely on a
-   non-existent combined `SearchMode`.
-3. Split immutable input from produced evidence: `source-capture-expected.json` or
-   `candidate-source-manifest.json` for preflight identity, then generated `source-capture.json`
-   can echo it with a hash plus graph-exclusion fields.
-4. Make rehearsal snapshot identity fail-closed where possible: record and compare chunk
-   counts, embedding row counts, chunk strategy, embedding model, and source manifest hash
-   against the expected manifest before baseline capture.
-5. If semantic+FTS-only is the chosen Phase 43 scope, update the phase goal/risk language to
-   say graph retrieval is explicitly deferred from shadow quality gating, not merely excluded
-   from a few queries.
-
-**Risk Assessment — MEDIUM-HIGH** until the baseline construction path is corrected. The
-plans are otherwise close to executable, and most cycle-2 issues are incorporated with good
-tests and artifact checks. The remaining risk is concentrated: graph isolation is solved at
-the comparison-policy level, but not yet at the actual service-construction boundary. Once
-the runner can build/capture semantic+FTS evidence without initializing FalkorDB, risk drops
-to MEDIUM or LOW-MEDIUM.
+**Risk Assessment — HIGH until the two semantic+FTS execution gaps are fixed.** The FalkorDB cycle-3
+fix itself is sound, but the current plan can still either fail during evaluation because of category
+coverage, or produce an unfair candidate comparison if Surreal `graph_direct` participates while
+baseline graph is excluded. After those are pinned with tests and the read-only SQLite construction
+issue is handled, risk drops to MEDIUM/LOW for a bounded evidence phase.
 
 ---
 
 ## OpenCode Review
 
-**Reviewed:** 43-01-PLAN.md, 43-02-PLAN.md, 43-03-PLAN.md — review commit 3122a59
-(post-cycle-2 revision)
+**Summary.** After three review cycles, the Phase 43 plans are in a mature state. The cycle-3 HIGH fix
+(D43-02-I) holds against source: `SemanticSearchEngine` + `FTS5SearchEngine` can be constructed directly
+over a rehearsal `index.db` without touching `DotMDService`, `IndexingPipeline`, or `FalkorDBGraphStore`,
+and therefore without opening a FalkorDB connection or issuing `CREATE INDEX` writes. The filter criterion
+for graph-excluded golden queries (`sq-004/009/010/015/016`) is deterministic and verifiable. The
+remaining concerns are minor implementation-level gaps.
 
-### 1. Summary
+**Cycle-3 HIGH fix verdict — HOLDS.** Source-grounded trace confirmed:
+`DotMDService.__init__ → IndexingPipeline → _create_graph_store() → FalkorDBGraphStore` connects +
+issues `CREATE INDEX` for 5 labels; `SemanticSearchEngine` needs only `VectorStoreProtocol` + config;
+`FTS5SearchEngine` needs only a `sqlite3.Connection` + table_name; `SQLiteVecVectorStore` accepts a
+shared `conn`; `_model_to_table_suffix` is importable from `pipeline.py` (already done by `migration.py`);
+`fuse_results` is a pure function; `Settings.model_copy(update={"index_dir": ...})` redirects
+`index_db_path` while carrying `falkordb_url` through unchanged; `SearchMode` enum has no combined value.
+Invariant holds by construction.
 
-The cycle-3 revisions address the cycle-2 consensus HIGH (graph isolation) and all
-actionable MEDIUM/LOW items with concrete, source-grounded decisions. The plans are now
-executable. The graph isolation fix (D43-02-G/D43-03-E) is honest — it acknowledges the
-hardcoded `graph_name="dotmd"` constraint in `_create_graph_store()` (pipeline.py:161) and
-scopes Phase 43 to semantic+FTS-only evidence, excluding graph-category queries with explicit
-documentation of the exclusion. The candidate-config schema (D43-02-H) resolves the
-engine-vs-loop parameter confusion, preflight identity binding (D43-03-D) closes the
-stale-target gap, and the zero-division guard (D43-01-A) is explicit. Remaining concerns are
-all LOW — implementation-level precision issues resolvable during coding.
+**Strengths.**
+- Defense in depth on rehearsal isolation (production-dir overlap refusal, symlink rejection,
+  `PRAGMA integrity_check`) plus fail-closed identity comparison (D43-02-B/C/J).
+- Input/output artifact split (D43-02-K) closes the "validate against an artifact you later rewrite" gap.
+- Sentinel-stripping with four named test cases (D43-02-F).
+- Candidate-config schema is fail-closed with engine-vs-loop field routing (D43-02-H).
+- Memory guardrails with slack fallback and zero-baseline rejection (D43-01-A/B).
+- `--verify-only` regeneration catches hand-edited classifications (D43-03-C).
 
-### 2. Cycle-2 HIGH Disposition: RESOLVED
+**Concerns.**
+- **MEDIUM / NEW — Fused-pool-to-EvalResult conversion pathway for baseline capture is implied but not
+  specified.** `collect_semantic_keyword_pool` returns `fuse_results` output (ref, score tuples), and
+  `capture_eval_results_from_candidates` converts `SearchCandidate` objects. The intermediate step —
+  converting fused chunk IDs into `SearchCandidate` objects (requiring metadata lookup via
+  `SQLiteMetadataStore` or direct SQL on the rehearsal `index.db`) — is not an exported function or
+  explicit step. `SQLiteMetadataStore(conn=.., table_name=.., fts_table_name=..)` (`pipeline.py:227-231`)
+  is importable and constructable independently, but the plan's exports list doesn't include it. An
+  implementer would need to figure it out.
+- **LOW / NEW — `--verify-only` regeneration sensitivity to eval-code changes.** Re-running `run_eval()`
+  to regenerate `shadow-diffs.jsonl` and comparing against disk will also flag legitimate re-evaluation
+  differences if the eval/rrf/reranker code changed between capture and verify. A code change is
+  indistinguishable from tampering. Worth documenting in the runbook.
+- **LOW / NEW — TEI availability for baseline capture is not explicitly pre-flighted.** Baseline capture
+  runs `SemanticSearchEngine.search()` which triggers lazy TEI initialization. If TEI is down, the runner
+  fails at search time rather than failing fast. The runbook could note this as a requirement.
 
-The cycle-2 consensus HIGH was: *Baseline graph state is not bound to the rehearsal window —
-`Settings.model_copy(update={"index_dir": ...})` covers SQLite/FTS/sqlite-vec but not
-FalkorDB, which is bound by `falkordb_url` (config.py:208), independent of `index_dir`.*
+**RESIDUAL — none.** All prior-cycle concerns are incorporated into explicit decisions/tasks/criteria
+(cycle-3 HIGH FalkorDB boundary → D43-02-I; cycle-2 HIGH graph binding → D43-02-G/D43-03-E; candidate-
+config schema → D43-02-H; preflight identity → D43-03-D; source-capture in/out split → D43-02-K;
+rehearsal identity fail-closed → D43-02-J; verify-only regeneration → D43-03-C; privacy policy → runbook
+"Artifact Handling"; division by zero → D43-01-A; getrusage platform note → D43-01-C docstring).
 
-**Disposition: RESOLVED via D43-02-G + D43-03-E.**
+**Suggestions.**
+1. Add metadata-store construction to 43-02 exports, or document the fused-pool→candidate pathway
+   (`SQLiteMetadataStore(conn=conn, table_name=chunks_table, fts_table_name=fts_table)`).
+2. Document `--verify-only` eval-code sensitivity in the runbook (capture and verify should use the same
+   commit).
+3. Add "TEI must be running" to the rehearsal-path contract in the runbook.
+4. (Optional) Store a SHA-256 of `shadow-diffs.jsonl` at capture time in `source-capture.json` and have
+   verify-only compare the hash, avoiding eval-code-change sensitivity.
 
-Source-verified the root cause: `_create_graph_store()` at pipeline.py:161 hardcodes
-`graph_name="dotmd"` and uses `settings.falkordb_url` — independent of `index_dir`. The
-resolution (option b: disable graph engines, exclude graph-category queries) is the correct
-pragmatic choice. The chosen mechanism is sound: `_collect_candidate_pool` gates graph
-engines behind `SearchMode.GRAPH`/`SearchMode.HYBRID`; running baseline capture with
-`SEMANTIC`/`KEYWORD` only ensures graph engines are never invoked, and `DotMDService.search()`
-accepts `mode: SearchMode | str`, the exact seam the runner needs.
-
-**One precision note** (Concern #2): D43-02-G states "no FalkorDB connection is opened during
-baseline capture." The `DotMDService` constructor creates `IndexingPipeline` which calls
-`_create_graph_store()` → `FalkorDBGraphStore(url=...)` — this connection is established at
-construction time, before any search call. OpenCode rated the connection "harmless (no graph
-data is read for results)" and classified the wording as a documentation precision issue, not
-a functional gap.
-
-### 3. Strengths
-
-- All three cycle-1 HIGHs resolved in prior cycles and held stable (sentinel stripping;
-  baseline binding via `Settings.model_copy` clone; Phase 41 preflight).
-- Cycle-2 HIGH resolved with honest scope documentation — `graph_engines_disabled: true` +
-  excluded query ids/count recorded; nothing silently missed.
-- Candidate-config schema fully fail-closed (D43-02-H), pinned by five named tests.
-- Preflight identity binding closes the stale-target gap (D43-03-D).
-- Zero-division guard explicit (D43-01-A), pinned by `test_guardrails_reject_zero_baseline_field`.
-- Source-grounding thorough; correct dependency order 43-01 → 43-02 → 43-03, no cycles.
-- Artifact privacy policy now operational.
-
-### 4. Concerns
-
-**MEDIUM**
-
-1. **NEW — "Graph-category" query definition for `filter_non_graph_golden_queries()` is
-   underspecified.** The golden query JSONL has a `category` field
-   (`title-heavy`, `tag-heavy`, `body-heavy`, `semantic`, `graph-entity`, `hybrid`,
-   `source-ref`, `mixed-ru-en`) but no boolean `is_graph` marker. The plan says D43-02-G
-   "excludes graph-category golden queries" without specifying the criterion. The natural
-   implementation filters on `expected_engines` containing `"graph_direct"`. Without a clear
-   criterion, the filter could include/exclude the wrong queries, breaking the D43-02-G test
-   invariant.
-
-**LOW**
-
-2. **NEW — D43-02-G wording overstates graph connection isolation.** `DotMDService.__init__`
-   constructs `IndexingPipeline` → `_create_graph_store()` → `FalkorDBGraphStore(url=...)` at
-   construction time, before any SearchMode-gated call. Wording should distinguish "no graph
-   engine is invoked" from "no connection is opened." The cloned settings' `falkordb_url` is
-   not overridden in `model_copy`, so the constructor will attempt the connection.
-3. **NEW — `--verify-only` tamper-detection for `shadow-diffs.jsonl` is implicit.** D43-03-C
-   says raw classifications must "match runner-generated output (never hand-edited)," but the
-   plan doesn't explicitly state `--verify-only` regenerates `shadow-diffs.jsonl` and compares
-   it against the on-disk file. Without this, verification can't detect hand edits.
-4. **NEW — `--metrics-replay-queries` JSONL row schema is not specified.** D43-02-E pins the
-   flag to `type=Path` JSONL but doesn't define required per-row fields. The runner loads it
-   with "strict line-numbered validation" but the schema is undefined.
-
-### 5. Suggestions
-
-1. Define the "graph-category" criterion in D43-02-G (e.g., exclude any golden query whose
-   `expected_engines` contains `'graph_direct'` OR whose `primary_surface` is `'graph_entity'`).
-2. Refine D43-02-G wording: "no graph engine is invoked during baseline capture; the FalkorDB
-   connection established at service construction is not used for baseline results." Clarify in
-   D43-02-A whether `falkordb_url` should be nullified in the `model_copy` clone or left as-is.
-3. Make `--verify-only` tamper-detection explicit (regenerate `shadow-diffs.jsonl` and compare
-   against disk; mismatch is a hard failure).
-4. Document `--metrics-replay-queries` row schema in the runbook (min `query_id` + `query`).
-
-### 6. Risk Assessment — LOW
-
-The plans are ready for execution. The cycle-2 consensus HIGH is resolved with a documented,
-honest scope reduction. All cycle-1 HIGHs remain resolved. Remaining concerns are
-implementation-level precision issues resolvable during coding without architectural impact.
-
----
-
-## Orchestrator adjudication (source-grounded)
-
-The two reviewers disagree on the cycle-2 HIGH disposition. Both agree the **comparison
-policy** (disable graph, exclude graph-category queries) is sound. They split on whether the
-**construction-time FalkorDB connection** matters. I verified the live source to adjudicate:
-
-1. **`DotMDService.__init__` (`backend/src/dotmd/api/service.py:260`) eagerly builds the graph
-   store at construction.** Line 264 constructs `IndexingPipeline(self._settings)`;
-   `IndexingPipeline.__init__` (`backend/src/dotmd/ingestion/pipeline.py:246`) calls
-   `_create_graph_store(settings)` (`pipeline.py:161`), returning
-   `FalkorDBGraphStore(url=settings.falkordb_url, graph_name="dotmd")`. There is no lazy seam.
-
-2. **`FalkorDBGraphStore.__init__` (`backend/src/dotmd/storage/falkordb_graph.py:37-63`)
-   connects AND writes.** It calls `FalkorDB(host, port)` + `select_graph(graph_name)` (raising
-   `ConnectionError` if FalkorDB is unreachable, `falkordb_graph.py:47-53`), then issues
-   `CREATE INDEX FOR (n:{label}) ON (n.id)` for five labels (`File`, `Section`, `Entity`,
-   `Tag`, `Node`) against the live `dotmd` graph (`falkordb_graph.py:60-63`). These are
-   idempotent but they are **writes against live FalkorDB**, executed at baseline-service
-   construction time, before any `SearchMode` is chosen.
-
-3. **The cloned settings do not override `falkordb_url`.** D43-02-A clones only `index_dir`
-   via `Settings.model_copy(update={"index_dir": ...})`; `falkordb_url` (`config.py:208`)
-   carries through unchanged, so the connection targets the live container.
-
-**Consequence:** D43-02-G's truth claim "no FalkorDB connection is opened during baseline
-capture," the threat-model row T-43-04c ("no live FalkorDB read occurs"), and the cycle-2
-LOW disposition test premise `test_build_baseline_service_has_no_side_effects` ("opens no
-network connection ... graph URL excluded since graph engines are disabled") are all **false
-against the real constructor**. Building the baseline service connects to live FalkorDB and
-mutates it (CREATE INDEX), which also violates the phase's read-only / no-live-mutation scope
-(T-43-09, "Use read-only capture paths"). This is not merely a wording issue; an executor
-following the plan literally would (a) write the false-premise side-effects test, which cannot
-pass against the real constructor, and (b) perform a live-graph mutation the plan forbids. So
-the cycle-2 HIGH is **PARTIALLY RESOLVED** and is counted as **1 open HIGH**.
-
-**On Codex's "NEW HIGH — semantic+keyword-only SearchMode does not exist":** downgraded, not
-counted as a separate HIGH. The plan text says "semantic+keyword(FTS) modes only" (plural
-separate modes), not one combined enum value. `_collect_candidate_pool` (`service.py:1373,
-1376, 1380`) fires graph-direct only for `SearchMode.GRAPH`/`SearchMode.HYBRID`; issuing
-`SEMANTIC` and `KEYWORD` separately and fusing their pools is a real graph-free path using
-existing enum members. The plan should still pin the explicit two-mode-fuse mechanism (it
-currently leans on imprecise "semantic+keyword-only SearchMode" phrasing), but this is an
-actionable precision fix folded into the HIGH remediation, not an independent blocker.
-
-The remaining items both reviewers raise (graph-category filter criterion; immutable-input vs
-produced-output split for `source-capture.json`; `--verify-only` tamper-detection;
-`--metrics-replay-queries` row schema; preflight namespace/database flags; WAL/snapshot
-identity fail-closed) are genuine actionable non-HIGH gaps not yet incorporated into the
-PLAN.md task/acceptance text.
+**Risk Assessment — LOW.** The cycle-3 HIGH fix is source-confirmed sound. All prior-cycle concerns are
+genuinely resolved with test coverage. The new concerns are implementation-level gaps that do not
+threaten the phase goal or introduce cutover risk. "The plans are ready for execution."
 
 ---
 
 ## Consensus Summary
 
-Both reviewers agree the cycle-3 revisions **fully resolve** every prior-cycle concern at the
-policy/decision level: all three cycle-1 HIGHs remain closed; the cycle-2 candidate-config
-schema gap is closed by D43-02-H (five named tests); the cycle-2 preflight identity-binding
-gap is closed by D43-03-D; the cycle-2 LOWs (zero-division guard D43-01-A, preflight-failure
-stop path D43-03-A, artifact-handling policy) are incorporated. Dependency order
-(43-01 → 43-02 → 43-03) is correct with no cycles, and the reuse seams resolve to real source.
-
-Both reviewers **independently flag the same residual issue**: the `DotMDService` constructor
-establishes the FalkorDB graph store before any `SearchMode` gate. They differ only on
-severity — Codex calls it a remaining HIGH (baseline construction crosses the live FalkorDB
-boundary); OpenCode calls it a LOW wording imprecision (the connection is "harmless"). The
-orchestrator's source-grounding (above) shows the constructor not only connects but issues
-`CREATE INDEX` **writes** to live FalkorDB, contradicting the plan's explicit isolation
-invariant and the phase's read-only scope, and falsifies the `*_has_no_side_effects` test
-premise. The issue is therefore counted as **1 open HIGH**.
-
 ### Agreed Strengths
-- All cycle-1 HIGHs closed and stable; cycle-2 schema/preflight/LOW gaps incorporated with
-  named tests (both).
-- Honest, documented scope reduction to semantic+FTS with recorded graph exclusion (both).
-- Candidate-config fail-closed schema with correct engine-vs-loop routing (both).
-- Correct dependency ordering, no cycles; reuse seams source-confirmed (both).
+- The cycle-3 HIGH (baseline `DotMDService` construction crossing the live FalkorDB boundary) is
+  resolved **by construction** via D43-02-I, not by a late `SearchMode` gate. Both reviewers
+  independently traced the source and confirmed `SemanticSearchEngine` + `FTS5SearchEngine` can be
+  built and run without ever constructing `DotMDService`/`IndexingPipeline`/`FalkorDBGraphStore`.
+- Input/output manifest split (D43-02-K), fail-closed rehearsal identity (D43-02-J), preflight
+  identity binding (D43-03-D), sentinel-stripping (D43-02-F), and `--verify-only` regenerate-and-compare
+  tamper detection (D43-03-C) are all sound.
 
-### Agreed Concerns (highest priority)
-- **HIGH — Baseline service construction crosses the live FalkorDB boundary.** Both reviewers,
-  independently, ground this in `service.py:260` → `pipeline.py:161` →
-  `FalkorDBGraphStore.__init__`. The construction-time connect + `CREATE INDEX` write breaks
-  the D43-02-G "no connection opened" / T-43-04c "no live FalkorDB read" invariant and the
-  read-only scope. Remedy: build the baseline pool without constructing the FalkorDB-backed
-  graph store (no-op/null graph store injection, a semantic+FTS-only baseline factory, or
-  calling the semantic and keyword engines directly and fusing), and correct the false-premise
-  side-effects test and the threat-model row. Also pin the explicit two-mode
-  (`SEMANTIC`+`KEYWORD`) fuse path rather than a non-existent combined "semantic+keyword
-  SearchMode."
+### Agreed Concerns
+- Both reviewers agree there is no unresolved residual from cycles 1-3 — every prior-cycle concern is
+  incorporated into an explicit PLAN.md decision/task/criteria.
+- Both reviewers note the same underlying theme from different angles: the "semantic+FTS-only"
+  comparison is asserted but the **mechanics of making it executable and symmetric are under-specified**
+  (OpenCode flags the missing fused-pool→EvalResult hydration step; Codex flags that the candidate side
+  still includes `graph_direct` and that the Phase 40 evaluator's category-coverage gate rejects the
+  filtered corpus).
 
-### Divergent / Single-Reviewer Concerns
-- **MEDIUM — "graph-category" filter criterion underspecified (OpenCode, source-confirmed):**
-  golden queries carry `category`, `expected_engines`, and `primary_surface`; the plan does
-  not state which field defines "graph-category," so `filter_non_graph_golden_queries()` is
-  ambiguous (notably `category: "hybrid"` rows that include `graph_direct` in
-  `expected_engines`).
-- **MEDIUM — `source-capture.json` is both immutable preflight input and produced output
-  (Codex):** the plan should split expected-identity input from generated evidence so
-  validation cannot pass against an artifact the runner later rewrites.
-- **MEDIUM — WAL/snapshot identity only visible, not fail-closed (Codex, remaining):** size +
-  mtime are recorded but not compared against the expected import identity before baseline
-  capture.
-- **LOW — `--verify-only` does not explicitly regenerate-and-compare `shadow-diffs.jsonl`
-  (OpenCode):** tamper-detection for D43-03-C is implicit.
-- **LOW — `--metrics-replay-queries` per-row JSONL schema undefined (OpenCode).**
-- **LOW — 43-03 preflight verify command omits `--target-namespace`/`--target-database`
-  (Codex).**
+### Divergent Views
+- **Severity of the candidate-side `graph_direct` / category-coverage issues.** Codex rates these
+  HIGH and rates overall risk HIGH until fixed; OpenCode does not surface them at all (its candidate-
+  side analysis stopped at the baseline boundary) and rates overall risk LOW. The source check in this
+  review (see Verification coverage) confirms **Codex is correct on both points**:
+  `build_surreal_native_engine_overrides()` returns a `graph_direct` engine
+  (`surreal_native.py:44-45`), and `run_eval()` defaults to `require_complete_category_coverage=True`
+  with `required_golden_query_categories() == frozenset(GoldenQueryCategory)` (all 8 categories,
+  `surreal_eval.py:34-53`), so the 11-query filtered subset — which drops the entire `graph-entity` AND
+  `mixed-ru-en` categories — would fail coverage validation unless the runner explicitly disables it.
+  These two are therefore counted as the cycle-4 unresolved HIGHs.
 
 ---
 
-## Verification coverage
+## Verification coverage (source-grounding pass)
 
-Source-grounding pass over every non-produced symbol/file the revised (cycle-3) plans cite.
-Artifacts the plans declare under "Artifacts This Phase Produces" (the metric module, the
-runner, the runbook, and the eight `artifacts/*` files plus the operator-supplied input
-descriptors) are EXCLUDED from MISSING verdicts. The new cycle-3 citations introduced by the
-revised decisions (`SearchMode` enum members, `_collect_candidate_pool` graph gating,
-`FalkorDBGraphStore.__init__` connect/index behavior, `DEFAULT_HNSW_EF`,
-`build_surreal_native_engine_overrides` signature, `DotMDService.search` mode seam) were
-checked in addition to the verified cycle-2 set.
+Every concrete symbol the plans cite was checked against the live dotMD source. Artifacts the plans
+declare under "Artifacts This Phase Produces" (e.g. `surreal_shadow_metrics.py`, `surreal_shadow_runner.py`,
+`source-capture-expected.json`, `source-capture.json`) are excluded from MISSING verdicts — they are
+outputs of this phase, not pre-existing dependencies.
 
-| Cited symbol / file | Plan ref | Verdict | Evidence |
-|---|---|---|---|
-| `evaluate_surreal_scale_gate()` + scale-gate field names | 43-01 | VERIFIED | `backend/src/dotmd/search/surreal_parity.py:435` (cycle-2 confirmed) |
-| `SearchMode` enum (`SEMANTIC`,`KEYWORD`,`GRAPH`,`HYBRID`) | 43-02 D43-02-G | VERIFIED | `backend/src/dotmd/core/models.py:20-26` — only these four members; no combined "semantic+keyword" member (basis for the precision fix folded into the HIGH) |
-| `_collect_candidate_pool` graph gating by mode | 43-02 D43-02-G | VERIFIED | `backend/src/dotmd/api/service.py:1373,1376,1380` — graph_direct fires only for `GRAPH`/`HYBRID`; `SEMANTIC`/`KEYWORD` issued separately are graph-free |
-| `DotMDService.search(mode=...)` seam | 43-02 D43-02-G | VERIFIED | `api/service.py:472-476` (`mode: SearchMode | str = SearchMode.HYBRID`) |
-| `DotMDService.__init__` builds graph store at construction | 43-02 D43-02-A/G | VERIFIED (CONTRADICTS plan claim) | `api/service.py:260,264` → `IndexingPipeline(settings)`; `_create_graph_store` at `ingestion/pipeline.py:161,246`; graph store built eagerly — falsifies "no FalkorDB connection opened" |
-| `FalkorDBGraphStore.__init__` connects + writes indexes | concern source | VERIFIED | `storage/falkordb_graph.py:47-53` connects (raises `ConnectionError` if down), `:60-63` issues `CREATE INDEX` for `File/Section/Entity/Tag/Node` — confirms the open HIGH |
-| `_create_graph_store` hardcodes `graph_name="dotmd"`, uses `settings.falkordb_url` | 43-02 D43-02-G | VERIFIED | `ingestion/pipeline.py:161-168`; `falkordb_url` at `core/config.py:208` |
-| `build_surreal_native_engine_overrides(embedding_dimension, hnsw_ef=DEFAULT_HNSW_EF)` | 43-02 D43-02-H | VERIFIED | `search/surreal_native.py:18` — accepts only `embedding_dimension`,`hnsw_ef` (confirms engine-vs-loop routing) |
-| `DEFAULT_HNSW_EF` | 43-02 D43-02-H | VERIFIED | `storage/surreal_schema.py` (`DEFAULT_HNSW_EF = 40`), imported by `surreal_native.py` |
-| `run_eval` + `EvalRunnerConfig` + `EvalRunResult` | 43-02 key_links | VERIFIED | `devtools/surreal_eval_runner.py:27,40,151` |
-| `EvalResult` + `query_id`,`top_refs`,`matched_engines` | 43-02/43-03 | VERIFIED | `search/surreal_eval.py:73,76,80,81` |
-| Acceptance fields `query_id`,`accepted_by`,`accepted_reason` | 43-02/43-03 | VERIFIED | `surreal_eval.py:91-93` |
-| `load_eval_results()` | 43-02/43-03 verify | VERIFIED | `surreal_eval.py` (`def load_eval_results` present) |
-| `Settings` + `index_dir` + `index_db_path` (= `index_dir/"index.db"`) | 43-02 D43-02-A | VERIFIED | `core/config.py:406` |
-| `Settings.model_copy(update=...)` | 43-02 D43-02-A | VERIFIED | Pydantic v2 BaseModel method on `Settings(BaseSettings)` |
-| `RUNTIME_INDEX_DIR` (`/dotmd-index`) | 43-02 D43-02-B | VERIFIED | `core/config.py:40` |
-| `Settings.validate_for_runtime()` (NOT called on clone) | 43-02 D43-02-A | VERIFIED | `core/config.py:333` |
-| `load_settings()` | 43-02 D43-02-A | VERIFIED | `core/config.py:415` |
-| Golden-query schema fields (`category`,`expected_engines`,`primary_surface`) | 43-02 D43-02-G filter | VERIFIED | `devtools/surreal_golden_queries.jsonl` — 16 rows; categories include `graph-entity`,`hybrid`; some `expected_engines` include `graph_direct`; criterion not pinned by the plan (basis for the MEDIUM) |
-| `surreal_eval_runner.py` / `surreal_migration_runner.py` | 43-02 read_first | VERIFIED | both present |
-| `docs/surrealdb-evaluation-harness.md`, `docs/surrealdb-production-migration.md` | 43-02/43-03 | VERIFIED | present in `docs/` |
-| Test files `test_surreal_eval_runner.py`,`test_surreal_migration_runner.py`,`test_surreal_retrieval_parity.py` | read_first | VERIFIED | present under `backend/tests/` |
-| Phase summaries 40-01, 41-03, 42-04; 42-VERIFICATION | 43-0x context | VERIFIED | present under `.planning/phases/` |
-| `surreal_shadow_metrics.py` + symbols | produced by 43-01 | EXCLUDED (produced) | declared artifact |
-| `surreal_shadow_runner.py` + symbols/flags, `docs/surrealdb-shadow-run-quality-gate.md` | produced by 43-02 | EXCLUDED (produced) | declared artifact |
-| `artifacts/*` (8 outputs + `candidate-config.json`, `metrics-replay-queries.jsonl`, `preflight-failure.md`) | produced by 43-03 | EXCLUDED (produced) | declared artifacts |
+| Symbol / claim cited by plan | Location verified | Verdict |
+|------------------------------|-------------------|---------|
+| `DotMDService.__init__` constructs `IndexingPipeline` first | `api/service.py:261-264` | VERIFIED |
+| `IndexingPipeline.__init__` calls `_create_graph_store(settings)` | `ingestion/pipeline.py:246` | VERIFIED |
+| `_create_graph_store` constructs `FalkorDBGraphStore(url=falkordb_url, graph_name="dotmd")` | `ingestion/pipeline.py:161` | VERIFIED |
+| `FalkorDBGraphStore.__init__` connects + issues `CREATE INDEX` for File/Section/Entity/Tag/Node at construction | `storage/falkordb_graph.py:47-63` | VERIFIED |
+| `SemanticSearchEngine.__init__(vector_store, model_name, score_floor, embedding_url, tei_batch_size, use_prefix, query_instruction)`, no graph dep | `search/semantic.py:51-70` | VERIFIED |
+| `FTS5SearchEngine.__init__(conn, table_name)`, no graph dep | `search/fts5.py:93-96` | VERIFIED |
+| `SQLiteVecVectorStore.__init__` accepts shared `conn=` and `table_name=` | `storage/sqlite_vec.py:45` | VERIFIED |
+| `fuse_results(ranked_lists, k=60, engine_weights=None)` pure function | `search/fusion.py:189` | VERIFIED |
+| `_collect_candidate_pool` fuses `{"semantic","keyword","graph_direct"}` via `fuse_results(engine_results, k=fusion_k)` | `api/service.py:~1373-1407` | VERIFIED |
+| `SearchMode` enum = SEMANTIC/KEYWORD/GRAPH/HYBRID (no combined value) | `core/models.py:20-26` | VERIFIED |
+| `_model_to_table_suffix`, `chunks_fts_{strategy}`, `vec_chunks_{strategy}{suffix}` derivation | `ingestion/pipeline.py:139,221,222` | VERIFIED (suffix fn is module-level importable; the `chunks_fts_`/`vec_chunks_` string assembly lives inside `IndexingPipeline.__init__`, not a standalone reusable function — executor must replicate ~2 lines) |
+| `build_surreal_native_engine_overrides(connection, settings, *, embedding_dimension, hnsw_ef=DEFAULT_HNSW_EF)` accepts ONLY those two tuning params | `search/surreal_native.py:18-23` | VERIFIED (supports D43-02-H field routing) |
+| ...but it RETURNS `{"semantic","keyword","graph_direct"}` — candidate side includes a graph engine | `search/surreal_native.py:27-45` | VERIFIED — contradicts the plan's "semantic+FTS-only" symmetry claim for the candidate side (basis of Codex HIGH #1) |
+| `DEFAULT_HNSW_EF` import source | `search/surreal_native.py:11` (`storage/surreal_schema`) | VERIFIED |
+| `evaluate_surreal_scale_gate` field names (`passed`, `failure_category`, `recommendation_gate`, ...) | `search/surreal_parity.py:41,50,68,91` | VERIFIED |
+| `run_eval(EvalRunnerConfig)` exists | `devtools/surreal_eval_runner.py:151` + `:27` | VERIFIED |
+| `EvalRunnerConfig.require_complete_category_coverage: bool = True`, enforced in run_eval | `devtools/surreal_eval_runner.py:36,155` | VERIFIED — basis of Codex HIGH #2 |
+| `required_golden_query_categories() == frozenset(GoldenQueryCategory)` (all 8 categories); coverage validator raises on missing | `search/surreal_eval.py:34-53` | VERIFIED |
+| `GoldenQueryCategory` includes GRAPH_ENTITY and MIXED_RU_EN | `search/surreal_eval.py:21-31` | VERIFIED |
+| Excluding `sq-004/009/010/015/016` by (`expected_engines` has `graph_direct` OR `primary_surface==graph_entity`) yields exactly those 5, retains 11 incl. `sq-011/012` | `devtools/surreal_golden_queries.jsonl` (empirical) | VERIFIED — but ALSO drops the entire `graph-entity` AND `mixed-ru-en` categories (both `mixed-ru-en` rows are `sq-015/016`); the plan does not acknowledge the `mixed-ru-en` collateral loss |
+| Golden-query rows are keyed by field `id` (`sq-001`..`sq-016`), NOT `query_id` | `devtools/surreal_golden_queries.jsonl` | AMBIGUOUS — deciding fields the filter uses (`expected_engines`, `primary_surface`) are correct & present; the plan repeatedly says "golden query `query_id`" but the golden file's identifier field is `id` (the `query_id` name is the `EvalResult`/ledger field; the existing runner maps golden→EvalResult). Cosmetic naming nuance, not a logic error |
+| `load_eval_results(path)` exists (used for validity check, not just non-empty) | `search/surreal_eval.py:311` | VERIFIED |
+| `EvalResult`/`DiffAcceptance` use `query_id`/`accepted_by`/`accepted_reason` | `search/surreal_eval.py:73-103` | VERIFIED |
+| `FTS5SearchEngine.__init__ → _ensure_fts5_schema()` runs `DROP TABLE`/`CREATE`+`commit()` at construction | `search/fts5.py:98-...` | VERIFIED — basis of Codex MEDIUM (read-only invariant broken; incompatible with `mode=ro` connection) |
+| `SQLiteVecVectorStore._get_conn → _ensure_tables()` runs `CREATE TABLE IF NOT EXISTS` on first use | `storage/sqlite_vec.py:67-...` | VERIFIED — reinforces the read-only-invariant concern |
+| `SQLiteMetadataStore(conn, table_name, fts_table_name)` constructable independently (fused-id→candidate hydration) | `storage/metadata.py:317`, `ingestion/pipeline.py:227-231` | VERIFIED — but NOT in the 43-02 exports list / not an explicit step (basis of OpenCode MEDIUM) |
+| `RUNTIME_INDEX_DIR = Path("/dotmd-index")` | `core/config.py:40` | VERIFIED |
+| `falkordb_url` setting | `core/config.py:208` | VERIFIED |
+| `validate_for_runtime()` rejects non-`/dotmd-index` index_dir (so runner must NOT call it on clone) | `core/config.py:333-343` | VERIFIED |
+| `Settings.index_db_path == index_dir / "index.db"` | `core/config.py:406-408` | VERIFIED |
+| `Settings(BaseSettings)` → `model_copy(update=...)` available (pydantic-settings) | `core/config.py:7,55` | VERIFIED |
+| `needs_embedding_prefix`, `query_instruction`, `semantic_score_floor`, `fusion_k`, `chunk_strategy`, `embedding_model` settings | `core/config.py:381,390,190,188,102` | VERIFIED |
+| `sqlite_vec.load(conn)` encapsulated in `SQLiteVecVectorStore` | `storage/sqlite_vec.py:75-77` | VERIFIED |
+| read_first test/devtool fixtures exist (`test_surreal_eval_runner.py`, `test_surreal_migration_runner.py`, `surreal_migration_runner.py`) | `backend/tests/devtools/`, `backend/devtools/` | VERIFIED |
 
-**Coverage result:** 24 VERIFIED, 0 MISSING, 0 AMBIGUOUS, 0 UNCHECKABLE (3 produced-artifact
-groups correctly excluded). No plan cites a non-existent upstream symbol; every reuse seam
-resolves to real source. Crucially, the source-grounding pass **contradicts one plan truth
-claim**: `DotMDService.__init__` (`service.py:260`) eagerly builds `FalkorDBGraphStore`
-(`pipeline.py:161` → `falkordb_graph.py:47-63`), which connects to AND writes `CREATE INDEX`
-into the live `dotmd` graph at baseline-service construction — so D43-02-G's "no FalkorDB
-connection is opened during baseline capture" and T-43-04c's "no live FalkorDB read occurs"
-are false, confirming the open HIGH. It also confirms OpenCode's MEDIUM: the golden-query
-"graph-category" exclusion criterion is not pinned by the plan despite the schema offering
-three plausible fields.
+**Coverage result:** No MISSING symbols. One AMBIGUOUS naming nuance (`id` vs `query_id` on golden rows;
+cosmetic). The cycle-3 HIGH fix (graph-free baseline construction) is VERIFIED sound. Three new
+source-confirmed gaps were surfaced: two HIGH (candidate-side `graph_direct` asymmetry; Phase 40
+category-coverage gate vs filtered subset) and supporting MEDIUMs (read-only invariant broken by FTS5/vec
+construction; missing fused-pool→candidate hydration step).
+
+---
+
+## Cycle-4 disposition (counts for the convergence loop)
+
+- **Unresolved HIGH (current_high = 2):**
+  1. Candidate capture is not graph-free — `build_surreal_native_engine_overrides()` returns a
+     `graph_direct` engine, so retained queries get candidate-side graph hits while the baseline is
+     graph-free, making the "semantic+FTS-only" comparison asymmetric/unfair. No PLAN.md decision strips
+     the candidate `graph_direct` engine. (Source-confirmed: `surreal_native.py:27-45`.)
+  2. The non-graph filtered golden subset (11 queries) collides with the Phase 40 evaluator's
+     `require_complete_category_coverage=True` default, which requires all 8 categories; the filtered
+     subset is missing `graph-entity` AND `mixed-ru-en`, so `run_eval()` raises unless the runner sets
+     `require_complete_category_coverage=False` (or writes a filtered temp corpus + disables coverage).
+     No PLAN.md decision reconciles this; 43-03 verify-only commands still point at the full corpus.
+     (Source-confirmed: `surreal_eval_runner.py:36,155`; `surreal_eval.py:34-53`.)
+
+- **Unresolved actionable non-HIGH (current_actionable = 2):**
+  1. MEDIUM — Read-only baseline invariant is broken by the chosen construction path:
+     `FTS5SearchEngine.__init__ → _ensure_fts5_schema()` writes (`DROP`/`CREATE`+`commit`) and
+     `SQLiteVecVectorStore` ensures tables on first use, so the rehearsal snapshot is mutated and a
+     `mode=ro` connection is impossible. PLAN.md (D43-02-I and `test_build_baseline_engines_has_no_falkordb_side_effects`)
+     must add a read-only/search-only construction path (or drop the "writes no file"/read-only wording)
+     and pin a baseline-immutability test.
+  2. MEDIUM — The fused-pool→`EvalResult` hydration step is unspecified: `collect_semantic_keyword_pool`
+     returns ref/score tuples but `capture_eval_results_from_candidates` consumes `SearchCandidate`
+     objects. PLAN.md 43-02 should export/document the hydration step
+     (`SQLiteMetadataStore(conn, table_name, fts_table_name)`) so the executor does not have to infer it.
+
+  (LOW items — verify-only eval-code sensitivity, TEI pre-flight, `mixed-ru-en` collateral-loss wording,
+  golden `id` vs `query_id` naming — are non-blocking suggestions for the runbook/wording; not counted
+  as actionable blockers.)
