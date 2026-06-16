@@ -133,13 +133,13 @@ def test_guardrails_pass_via_slack_when_ratio_exceeded() -> None:
     result = module.evaluate_shadow_memory_guardrails(
         _make_memory_metrics(
             label="baseline",
-            max_rss_bytes=10_000_000_000,
-            peak_python_heap_bytes=5_000_000_000,
+            max_rss_bytes=1_000,
+            peak_python_heap_bytes=1_000,
         ),
         _make_memory_metrics(
             label="candidate",
-            max_rss_bytes=10_100_000_000,
-            peak_python_heap_bytes=5_050_000_000,
+            max_rss_bytes=2_000,
+            peak_python_heap_bytes=2_000,
         ),
         _make_guardrails(),
     )
