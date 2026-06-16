@@ -1131,7 +1131,7 @@ def test_rehearsal_isolation_refuses_production_index_dir(tmp_path: Path, monkey
         enforce_rehearsal_path_isolation(production_root, production_root)
 
     with pytest.raises(ValueError, match=str(RUNTIME_INDEX_DIR)):
-        enforce_rehearsal_path_isolation(tmp_path / "runtime-child", RUNTIME_INDEX_DIR)
+        enforce_rehearsal_path_isolation(RUNTIME_INDEX_DIR, tmp_path / "production")
 
 
 def test_rehearsal_isolation_runs_integrity_check(tmp_path: Path) -> None:
@@ -1193,6 +1193,7 @@ def test_verify_only_fails_when_required_artifact_is_missing(tmp_path: Path) -> 
     from devtools.surreal_shadow_runner import ShadowArtifactPaths, verify_shadow_artifacts
 
     artifacts = ShadowArtifactPaths(**_artifact_payloads(tmp_path))
+    _write_json(artifacts.source_capture, {"ok": True})
 
     with pytest.raises(ValueError, match="baseline-results"):
         verify_shadow_artifacts(artifacts)
@@ -1231,8 +1232,14 @@ def test_verify_only_regenerates_shadow_diffs_by_query_id_keyed_comparison(
     monkeypatch.setattr(
         "devtools.surreal_shadow_runner._regenerate_shadow_diffs",
         lambda *_args, **_kwargs: (
-            {"sq-002": {"classification": "improvement", "cutover_gate": "allow"}},
-            {"sq-001": {"classification": "harmless_reorder", "cutover_gate": "allow"}},
+            {
+                "sq-002": {"classification": "improvement", "cutover_gate": "allow"},
+                "sq-001": {"classification": "harmless_reorder", "cutover_gate": "allow"},
+            },
+            {
+                "sq-001": {"classification": "harmless_reorder", "cutover_gate": "allow"},
+                "sq-002": {"classification": "improvement", "cutover_gate": "allow"},
+            },
         ),
     )
 
@@ -1242,6 +1249,7 @@ def test_verify_only_regenerates_shadow_diffs_by_query_id_keyed_comparison(
         "devtools.surreal_shadow_runner._regenerate_shadow_diffs",
         lambda *_args, **_kwargs: (
             {"sq-001": {"classification": "regression", "cutover_gate": "block"}},
+            {"sq-001": {"classification": "harmless_reorder", "cutover_gate": "allow"}},
         ),
     )
 
