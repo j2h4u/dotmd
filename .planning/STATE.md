@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: SurrealDB-Native Storage Cutover
 status: planning
-stopped_at: Completed 42-04-PLAN.md
-last_updated: "2026-06-15T09:29:11.963Z"
+stopped_at: Completed 43-01-PLAN.md
+last_updated: "2026-06-16T06:57:27.063Z"
 last_activity: 2026-06-15
 progress:
   total_phases: 14
   completed_phases: 5
-  total_plans: 14
-  completed_plans: 14
+  total_plans: 17
+  completed_plans: 15
   percent: 36
 ---
 
@@ -21,7 +21,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 43 planning — shadow-run-and-quality-gate
+**Current focus:** Phase 43 execution — 43-01 complete; 43-02 next
 
 ## Current Milestone
 
@@ -102,6 +102,7 @@ Items acknowledged and deferred at v1.7 milestone close:
 | Phase 42 P02 | 4min | 2 tasks | 4 files |
 | Phase 42 P03 | 6min | 2 tasks | 6 files |
 | Phase 42 P04 | 3 min | 2 tasks | 5 files |
+| Phase 43 P01 | 3 min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -226,6 +227,9 @@ Recent decisions affecting current work:
 - [Phase 42]: [Plan 42-04]: Surreal-native hybrid retrieval stays behind an explicit engine override seam and does not change DotMDService startup defaults.
 - [Phase 42]: [Plan 42-04]: Graph enrichment remains the existing post-fusion path unless an explicit graph override is supplied for evaluation or tests.
 - [Phase 42]: [Plan 42-04]: Capability-probe artifacts stay out of service startup, CLI, MCP, and settings wiring until later cutover phases.
+- [Phase 43]: Phase 43 metric JSON keeps Phase 38 scale-gate field names unchanged and nests memory evidence separately.
+- [Phase 43]: Memory guardrails require paired baseline and candidate payloads and reject zero or negative baseline divisors before ratio evaluation.
+- [Phase 43]: capture_shadow_memory_metrics starts and stops tracemalloc so peak heap evidence cannot silently remain zero.
 
 ### Pending Todos
 
@@ -312,7 +316,7 @@ retrieval parity failed on hybrid/RRF behavior.
 ## Current Position
 
 Phase: 43 (shadow-run-and-quality-gate) — READY FOR PLANNING
-Plan: Not started
+Plan: 1 of 3 complete
 Status: Ready to execute
 Last activity: 2026-06-14 -- Phase 42 verified and completed
 
@@ -322,6 +326,6 @@ Last activity: 2026-06-14 -- Phase 42 verified and completed
 
 ## Session
 
-**Last session:** 2026-06-14T08:13:33.018Z
-**Stopped at:** Completed 42-04-PLAN.md
+**Last session:** 2026-06-16T06:57:27.038Z
+**Stopped at:** Completed 43-01-PLAN.md
 **Resume file:** None

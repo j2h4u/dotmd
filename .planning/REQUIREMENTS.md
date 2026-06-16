@@ -112,7 +112,7 @@ existing data, production cutover, and complete removal of legacy storage code.
 
 ### Cutover
 
-- [ ] **SURR-CUT-01**: A shadow run compares old stack and Surreal stack on
+- [x] **SURR-CUT-01**: A shadow run compares old stack and Surreal stack on
   production-derived data and records quality, latency, build-time, store-size,
   and memory evidence.
 
@@ -164,7 +164,7 @@ existing data, production cutover, and complete removal of legacy storage code.
 | SURR-SEARCH-02 | Phase 42 / Phase 43 | Complete |
 | SURR-SEARCH-03 | Phase 42 | Complete |
 | SURR-SEARCH-04 | Phase 42 | Complete |
-| SURR-CUT-01 | Phase 43 | Pending |
+| SURR-CUT-01 | Phase 43 | Complete |
 | SURR-CUT-02 | Phase 44 | Pending |
 | SURR-CUT-03 | Phase 44 | Pending |
 | SURR-DEL-01 | Phase 45 | Pending |
