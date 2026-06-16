@@ -1876,7 +1876,6 @@ def _relax_embedding_schema_for_bulk_load(connection: SurrealConnection) -> None
 
 
 def _rebuild_retrieval_indexes(connection: SurrealConnection) -> int:
-    connection.query("ALTER TABLE embeddings SCHEMAFULL;")
     applied = 0
     for _index_name, statement in _DEFERRED_EMBEDDING_INDEX_DEFINITIONS:
         connection.query(statement)
@@ -2152,6 +2151,7 @@ def run_surreal_migration(
     if (
         "SCHEMALESS" in schema_info.get("table_modes", "")
         and overwrite_policy is not SurrealOverwritePolicy.EXPLICIT_REPLACE
+        and not resume_phase_names
     ):
         report.status = "schema_mismatch"
         report.errors.append(
