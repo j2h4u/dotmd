@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 
 def _settings(tmp_path: Path):  # type: ignore[no-untyped-def]
     from dotmd.core.config import Settings
@@ -13,58 +15,67 @@ def _settings(tmp_path: Path):  # type: ignore[no-untyped-def]
     )
 
 
+@pytest.fixture
+def _mock_graph_store_factory():  # type: ignore[no-untyped-def]
+    yield
+
+
 def test_create_graph_store_defaults_to_dotmd_graph_name(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from dotmd.core.config import DEFAULT_FALKORDB_GRAPH_NAME
     from dotmd.ingestion.pipeline import _create_graph_store
 
-    calls: list[dict[str, str]] = []
+    selected_graph_names: list[str] = []
 
-    class _FakeFalkorDBGraphStore:
-        def __init__(self, *, url: str, graph_name: str) -> None:
-            calls.append({"url": url, "graph_name": graph_name})
+    class _FakeGraph:
+        def query(self, _query: str) -> None:
+            return None
 
-    monkeypatch.setattr(
-        "dotmd.storage.falkordb_graph.FalkorDBGraphStore",
-        _FakeFalkorDBGraphStore,
-    )
+    class _FakeFalkorDB:
+        def __init__(self, *, host: str, port: int) -> None:
+            self.host = host
+            self.port = port
+
+        def select_graph(self, graph_name: str) -> _FakeGraph:
+            selected_graph_names.append(graph_name)
+            return _FakeGraph()
+
+    monkeypatch.setattr("dotmd.storage.falkordb_graph.FalkorDB", _FakeFalkorDB)
 
     settings = _settings(tmp_path)
 
     assert settings.falkordb_graph_name == DEFAULT_FALKORDB_GRAPH_NAME
 
-    _create_graph_store(settings)
+    graph_store = _create_graph_store(settings)
 
-    assert calls == [
-        {
-            "url": settings.falkordb_url,
-            "graph_name": DEFAULT_FALKORDB_GRAPH_NAME,
-        }
-    ]
+    assert graph_store._graph_name == DEFAULT_FALKORDB_GRAPH_NAME
+    assert selected_graph_names == [DEFAULT_FALKORDB_GRAPH_NAME]
 
 
 def test_create_graph_store_honors_overridden_graph_name(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from dotmd.ingestion.pipeline import _create_graph_store
 
-    calls: list[dict[str, str]] = []
+    selected_graph_names: list[str] = []
 
-    class _FakeFalkorDBGraphStore:
-        def __init__(self, *, url: str, graph_name: str) -> None:
-            calls.append({"url": url, "graph_name": graph_name})
+    class _FakeGraph:
+        def query(self, _query: str) -> None:
+            return None
 
-    monkeypatch.setattr(
-        "dotmd.storage.falkordb_graph.FalkorDBGraphStore",
-        _FakeFalkorDBGraphStore,
-    )
+    class _FakeFalkorDB:
+        def __init__(self, *, host: str, port: int) -> None:
+            self.host = host
+            self.port = port
+
+        def select_graph(self, graph_name: str) -> _FakeGraph:
+            selected_graph_names.append(graph_name)
+            return _FakeGraph()
+
+    monkeypatch.setattr("dotmd.storage.falkordb_graph.FalkorDB", _FakeFalkorDB)
 
     overridden_settings = _settings(tmp_path).model_copy(
         update={"falkordb_graph_name": "dotmd_shadow_baseline"}
     )
 
-    _create_graph_store(overridden_settings)
+    graph_store = _create_graph_store(overridden_settings)
 
-    assert calls == [
-        {
-            "url": overridden_settings.falkordb_url,
-            "graph_name": "dotmd_shadow_baseline",
-        }
-    ]
+    assert graph_store._graph_name == "dotmd_shadow_baseline"
+    assert selected_graph_names == ["dotmd_shadow_baseline"]

@@ -164,7 +164,7 @@ def _create_graph_store(settings: Settings) -> GraphStoreProtocol:
 
     return FalkorDBGraphStore(
         url=settings.falkordb_url,
-        graph_name="dotmd",
+        graph_name=settings.falkordb_graph_name,
     )
 
 
