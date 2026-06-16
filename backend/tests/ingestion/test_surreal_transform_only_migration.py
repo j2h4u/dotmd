@@ -933,7 +933,8 @@ def test_progress_snapshot_estimates_eta_for_partial_work(tmp_path: Path) -> Non
 def test_eta_human_omits_seconds_after_five_minutes() -> None:
     from dotmd.ingestion import migrate_surreal as migrate_module  # type: ignore[import-not-found]
 
-    assert migrate_module._format_duration(300) == "5m 0s"
+    assert migrate_module._format_duration(60) == "1m"
+    assert migrate_module._format_duration(300) == "5m"
     assert migrate_module._format_duration(301) == "5m"
     assert migrate_module._format_duration(329) == "5m"
     assert migrate_module._format_duration(330) == "6m"

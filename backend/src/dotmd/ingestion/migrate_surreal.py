@@ -1293,8 +1293,12 @@ def _format_duration(seconds: float | None) -> str | None:
     hours, remainder = divmod(total_seconds, 3600)
     minutes, secs = divmod(remainder, 60)
     if hours:
+        if secs == 0:
+            return f"{hours}h {minutes}m"
         return f"{hours}h {minutes}m {secs}s"
     if minutes:
+        if secs == 0:
+            return f"{minutes}m"
         return f"{minutes}m {secs}s"
     return f"{secs}s"
 
