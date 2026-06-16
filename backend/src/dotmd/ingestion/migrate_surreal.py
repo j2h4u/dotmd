@@ -236,6 +236,23 @@ def _normalize_tags_text(value: Any) -> str:
     return str(value).strip()
 
 
+def _fingerprint_document_ref(row: dict[str, Any]) -> str:
+    return str(row.get("file_path") or row.get("chunk_id") or row.get("document_ref") or "")
+
+
+def _fingerprint_checksum(row: dict[str, Any]) -> str:
+    return str(row.get("checksum") or row.get("fingerprint") or row.get("meta_checksum") or "")
+
+
+def _fingerprint_metadata(row: dict[str, Any]) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    if row.get("indexed_at") is not None:
+        metadata["indexed_at"] = row["indexed_at"]
+    if row.get("size_bytes") is not None:
+        metadata["size_bytes"] = row["size_bytes"]
+    return metadata
+
+
 def _composite_id(*parts: object) -> str:
     return "\x1f".join(str(part) for part in parts)
 
@@ -536,26 +553,26 @@ def load_sqlite_rows_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
     fingerprint_payloads.extend(
         {
             "schema_version": SURREAL_SCHEMA_VERSION,
-            "fingerprint_id": f"embed::{row['chunk_id']}",
+            "fingerprint_id": f"embed::{_fingerprint_document_ref(row)}",
             "fingerprint_kind": "embed",
             "namespace": "filesystem",
-            "document_ref": str(row["chunk_id"]),
-            "content_fingerprint": str(row["fingerprint"]),
+            "document_ref": _fingerprint_document_ref(row),
+            "content_fingerprint": _fingerprint_checksum(row),
             "metadata_fingerprint": None,
-            "metadata": {},
+            "metadata": _fingerprint_metadata(row),
         }
         for row in embed_fingerprint_rows
     )
     fingerprint_payloads.extend(
         {
             "schema_version": SURREAL_SCHEMA_VERSION,
-            "fingerprint_id": f"meta::{row['file_path']}",
+            "fingerprint_id": f"meta::{_fingerprint_document_ref(row)}",
             "fingerprint_kind": "meta",
             "namespace": "filesystem",
-            "document_ref": str(row["file_path"]),
+            "document_ref": _fingerprint_document_ref(row),
             "content_fingerprint": None,
-            "metadata_fingerprint": str(row["meta_checksum"]),
-            "metadata": {},
+            "metadata_fingerprint": _fingerprint_checksum(row),
+            "metadata": _fingerprint_metadata(row),
         }
         for row in meta_fingerprint_rows
     )
