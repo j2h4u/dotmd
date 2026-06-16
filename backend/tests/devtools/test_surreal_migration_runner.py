@@ -118,6 +118,7 @@ def test_run_migration_command_writes_json_markdown_and_preserves_non_ascii(
     report_markdown = tmp_path / "report.md"
     restore_manifest_json = tmp_path / "restore.json"
     manifest_json = tmp_path / "source-manifest.json"
+    progress_json = tmp_path / "progress.json"
     gate_report = _write_gate_report(tmp_path / "gate.md")
     target_path = tmp_path / "runner-target.db"
 
@@ -138,6 +139,7 @@ def test_run_migration_command_writes_json_markdown_and_preserves_non_ascii(
             manifest_json=tmp_path / "migration-manifest.json",
             report_json=report_json,
             report_markdown=report_markdown,
+            progress_json=progress_json,
             restore_manifest_json=restore_manifest_json,
             owner_id="оператор",
             max_report_samples=1,
@@ -148,6 +150,7 @@ def test_run_migration_command_writes_json_markdown_and_preserves_non_ascii(
     payload = json.loads(report_json.read_text(encoding="utf-8"))
     markdown = report_markdown.read_text(encoding="utf-8")
     restore_payload = json.loads(restore_manifest_json.read_text(encoding="utf-8"))
+    progress_payload = json.loads(progress_json.read_text(encoding="utf-8"))
 
     assert result.exit_code == 0
     assert payload["report_status"] == "verified"
@@ -158,6 +161,14 @@ def test_run_migration_command_writes_json_markdown_and_preserves_non_ascii(
     assert "оператор" in payload["target"]["owner_id"]
     assert restore_payload["restore_status"] == "verified_with_fallback"
     assert "оператор" in markdown
+    assert progress_payload["current_phase"] == "reporting"
+    assert progress_payload["current_phase_status"] == "applied"
+    applied_phases = {
+        checkpoint["phase_name"]
+        for checkpoint in progress_payload["phase_checkpoints"]
+        if checkpoint["status"] == "applied"
+    }
+    assert {"documents", "restore_rehearsal", "reporting"} <= applied_phases
 
 
 def test_run_migration_command_refuses_unsafe_apply_without_gate_or_target_inputs(

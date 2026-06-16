@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -16,9 +18,13 @@ if __package__ in {None, ""}:
 from dotmd.ingestion.migrate_surreal import (
     SurrealMigrationManifest,
     SurrealMigrationMode,
+    SurrealMigrationPhaseCheckpoint,
+    SurrealMigrationPhaseName,
+    SurrealMigrationReport,
     SurrealOverwritePolicy,
     SurrealTargetMode,
     SurrealVerificationDepth,
+    _write_progress_snapshot,
     build_surreal_migration_manifest,
     run_surreal_migration,
     verify_surreal_migration_target,
@@ -236,6 +242,111 @@ def _counts_from_expected_counts(expected_counts: dict[str, int]) -> SurrealImpo
     )
 
 
+def _runner_progress_report(
+    *,
+    config: SurrealMigrationRunnerConfig,
+    mode: SurrealMigrationMode,
+    target_mode: SurrealTargetMode,
+    phase: SurrealMigrationPhaseName,
+    planned_count: int,
+    migration_report: Any | None = None,
+    additional_checkpoints: list[SurrealMigrationPhaseCheckpoint] | None = None,
+) -> tuple[SurrealMigrationReport, SurrealMigrationPhaseCheckpoint]:
+    checkpoint = SurrealMigrationPhaseCheckpoint(
+        phase_name=phase,
+        planned_count=planned_count,
+        status="running",
+    )
+    phase_checkpoints = list(getattr(migration_report, "phase_checkpoints", []))
+    phase_checkpoints.extend(additional_checkpoints or [])
+    phase_checkpoints.append(checkpoint)
+    report = SurrealMigrationReport(
+        schema_version=str(getattr(migration_report, "schema_version", "runner")),
+        mode=mode,
+        status=mode.value,
+        target_mode=target_mode,
+        overwrite_policy=SurrealOverwritePolicy.REFUSE,
+        target_url=config.target_url,
+        target_namespace=config.target_namespace,
+        target_database=config.target_database,
+        source_capture_manifest=None,
+        phase_checkpoints=phase_checkpoints,
+    )
+    report.started_at_monotonic = float(
+        getattr(migration_report, "started_at_monotonic", time.monotonic())
+    )
+    report.last_successful_phase = getattr(migration_report, "last_successful_phase", None)
+    report.failed_phase = getattr(migration_report, "failed_phase", None)
+    return report, checkpoint
+
+
+def _copy_file_with_progress(
+    source: Path,
+    destination: Path,
+    *,
+    report: SurrealMigrationReport,
+    checkpoint: SurrealMigrationPhaseCheckpoint,
+    progress_json: Path | None,
+    applied_count: int,
+) -> int:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with source.open("rb") as reader, destination.open("wb") as writer:
+        while True:
+            chunk = reader.read(16 * 1024 * 1024)
+            if not chunk:
+                break
+            writer.write(chunk)
+            applied_count += len(chunk)
+            checkpoint.applied_count = applied_count
+            _write_progress_snapshot(progress_json, report=report, checkpoint=checkpoint)
+    shutil.copystat(source, destination)
+    return applied_count
+
+
+def _copy_path_with_progress(
+    source: Path,
+    destination: Path,
+    *,
+    report: SurrealMigrationReport,
+    checkpoint: SurrealMigrationPhaseCheckpoint,
+    progress_json: Path | None,
+    applied_count: int,
+) -> int:
+    if source.is_file():
+        return _copy_file_with_progress(
+            source,
+            destination,
+            report=report,
+            checkpoint=checkpoint,
+            progress_json=progress_json,
+            applied_count=applied_count,
+        )
+
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    for root, dirs, files in os.walk(source):
+        root_path = Path(root)
+        relative_root = root_path.relative_to(source)
+        target_root = destination / relative_root
+        target_root.mkdir(parents=True, exist_ok=True)
+        for directory in dirs:
+            (target_root / directory).mkdir(exist_ok=True)
+        for file_name in files:
+            source_file = root_path / file_name
+            destination_file = target_root / file_name
+            applied_count = _copy_file_with_progress(
+                source_file,
+                destination_file,
+                report=report,
+                checkpoint=checkpoint,
+                progress_json=progress_json,
+                applied_count=applied_count,
+            )
+    shutil.copystat(source, destination)
+    return applied_count
+
+
 def _rehearse_restore(
     *,
     config: SurrealMigrationRunnerConfig,
@@ -243,51 +354,90 @@ def _rehearse_restore(
     target_mode: SurrealTargetMode,
     overwrite_policy: str,
     expected_counts: dict[str, int],
-) -> SurrealRestoreManifest:
+    migration_report: Any | None = None,
+) -> tuple[SurrealRestoreManifest, SurrealMigrationPhaseCheckpoint | None]:
     expected = _counts_from_expected_counts(expected_counts)
     target_path = config.target_url.removeprefix("surrealkv://")
     if (
         mode is not SurrealMigrationMode.APPLY
         or target_mode is not SurrealTargetMode.EMBEDDED_LOCAL
     ):
-        return build_surreal_restore_manifest(
-            source_target=config.target_url,
-            backup_path=str(config.restore_manifest_json or ""),
-            restore_path=str(config.restore_manifest_json or ""),
-            method="surreal-export-import",
-            cli_path=None,
-            expected_counts=expected,
-            restored_counts=SurrealImportCounts(),
-            smoke_passed=False,
-            rehearsal_target=None,
-            notes=["Restore rehearsal only runs for embedded-local apply mode."],
+        return (
+            build_surreal_restore_manifest(
+                source_target=config.target_url,
+                backup_path=str(config.restore_manifest_json or ""),
+                restore_path=str(config.restore_manifest_json or ""),
+                method="surreal-export-import",
+                cli_path=None,
+                expected_counts=expected,
+                restored_counts=SurrealImportCounts(),
+                smoke_passed=False,
+                rehearsal_target=None,
+                notes=["Restore rehearsal only runs for embedded-local apply mode."],
+            ),
+            None,
         )
 
     source_file = Path(target_path)
     if not source_file.exists():
-        return build_surreal_restore_manifest(
-            source_target=config.target_url,
-            backup_path=str(config.restore_manifest_json or ""),
-            restore_path=str(config.restore_manifest_json or ""),
-            method="validated-fallback-copy",
-            cli_path=None,
-            expected_counts=expected,
-            restored_counts=SurrealImportCounts(),
-            smoke_passed=False,
-            rehearsal_target=None,
-            notes=["Target file does not exist, so restore rehearsal could not run."],
+        return (
+            build_surreal_restore_manifest(
+                source_target=config.target_url,
+                backup_path=str(config.restore_manifest_json or ""),
+                restore_path=str(config.restore_manifest_json or ""),
+                method="validated-fallback-copy",
+                cli_path=None,
+                expected_counts=expected,
+                restored_counts=SurrealImportCounts(),
+                smoke_passed=False,
+                rehearsal_target=None,
+                notes=["Target file does not exist, so restore rehearsal could not run."],
+            ),
+            None,
         )
 
     restore_root = (config.restore_manifest_json or source_file.with_suffix(".restore.json")).parent
     restore_root.mkdir(parents=True, exist_ok=True)
     backup_path = restore_root / f"{source_file.name}.backup"
     restore_path = restore_root / f"{source_file.name}.restored"
-    if source_file.is_dir():
-        shutil.copytree(source_file, backup_path, dirs_exist_ok=True)
-        shutil.copytree(backup_path, restore_path, dirs_exist_ok=True)
-    else:
-        shutil.copy2(source_file, backup_path)
-        shutil.copy2(backup_path, restore_path)
+    planned_bytes = max(1, _path_size_bytes(source_file) * 2)
+    progress_report, progress_checkpoint = _runner_progress_report(
+        config=config,
+        mode=mode,
+        target_mode=target_mode,
+        phase=SurrealMigrationPhaseName.RESTORE_REHEARSAL,
+        planned_count=planned_bytes,
+        migration_report=migration_report,
+    )
+    _write_progress_snapshot(
+        config.progress_json,
+        report=progress_report,
+        checkpoint=progress_checkpoint,
+    )
+    copied_bytes = _copy_path_with_progress(
+        source_file,
+        backup_path,
+        report=progress_report,
+        checkpoint=progress_checkpoint,
+        progress_json=config.progress_json,
+        applied_count=0,
+    )
+    copied_bytes = _copy_path_with_progress(
+        backup_path,
+        restore_path,
+        report=progress_report,
+        checkpoint=progress_checkpoint,
+        progress_json=config.progress_json,
+        applied_count=copied_bytes,
+    )
+    progress_checkpoint.applied_count = planned_bytes
+    progress_checkpoint.verified_count = planned_bytes
+    progress_checkpoint.status = "verifying"
+    _write_progress_snapshot(
+        config.progress_json,
+        report=progress_report,
+        checkpoint=progress_checkpoint,
+    )
 
     rehearsal_report = verify_surreal_migration_target(
         sqlite_snapshot_path=config.sqlite_snapshot,
@@ -304,19 +454,65 @@ def _rehearse_restore(
         ),
     )
     restored_counts = _counts_from_actual_counts(rehearsal_report.actual_counts)
-    return build_surreal_restore_manifest(
-        source_target=config.target_url,
-        backup_path=str(backup_path),
-        restore_path=str(restore_path),
-        method="validated-fallback-copy",
-        cli_path=None,
-        expected_counts=expected,
-        restored_counts=restored_counts,
-        smoke_passed=rehearsal_report.verified,
-        rehearsal_target=str(restore_path),
-        fallback_rehearsal_verified=rehearsal_report.verified,
-        notes=["Embedded-local restore rehearsal verified counts and smoke checks."],
+    progress_checkpoint.status = "applied" if rehearsal_report.verified else "failed"
+    progress_checkpoint.error = None if rehearsal_report.verified else "; ".join(
+        rehearsal_report.errors
     )
+    _write_progress_snapshot(
+        config.progress_json,
+        report=progress_report,
+        checkpoint=progress_checkpoint,
+    )
+    return (
+        build_surreal_restore_manifest(
+            source_target=config.target_url,
+            backup_path=str(backup_path),
+            restore_path=str(restore_path),
+            method="validated-fallback-copy",
+            cli_path=None,
+            expected_counts=expected,
+            restored_counts=restored_counts,
+            smoke_passed=rehearsal_report.verified,
+            rehearsal_target=str(restore_path),
+            fallback_rehearsal_verified=rehearsal_report.verified,
+            notes=["Embedded-local restore rehearsal verified counts and smoke checks."],
+        ),
+        progress_checkpoint,
+    )
+
+
+def _path_size_bytes(path: Path) -> int:
+    if path.is_file():
+        return path.stat().st_size
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for file_name in files:
+            total += (Path(root) / file_name).stat().st_size
+    return total
+
+
+def _write_reporting_progress(
+    *,
+    config: SurrealMigrationRunnerConfig,
+    mode: SurrealMigrationMode,
+    target_mode: SurrealTargetMode,
+    status: str,
+    migration_report: Any | None = None,
+    additional_checkpoints: list[SurrealMigrationPhaseCheckpoint] | None = None,
+) -> None:
+    report, checkpoint = _runner_progress_report(
+        config=config,
+        mode=mode,
+        target_mode=target_mode,
+        phase=SurrealMigrationPhaseName.REPORTING,
+        planned_count=1,
+        migration_report=migration_report,
+        additional_checkpoints=additional_checkpoints,
+    )
+    checkpoint.status = status
+    checkpoint.applied_count = 1 if status == "applied" else 0
+    checkpoint.verified_count = checkpoint.applied_count
+    _write_progress_snapshot(config.progress_json, report=report, checkpoint=checkpoint)
 
 
 def _build_evidence_report(
@@ -439,12 +635,21 @@ def run_migration_command(config: SurrealMigrationRunnerConfig) -> SurrealMigrat
         resume_from_progress=config.resume_from_progress,
     )
 
-    restore_manifest = _rehearse_restore(
+    restore_manifest, restore_checkpoint = _rehearse_restore(
         config=config,
         mode=mode,
         target_mode=target_mode,
         overwrite_policy=overwrite_policy,
         expected_counts=manifest.expected_counts,
+        migration_report=migration_report,
+    )
+    _write_reporting_progress(
+        config=config,
+        mode=mode,
+        target_mode=target_mode,
+        status="running",
+        migration_report=migration_report,
+        additional_checkpoints=[restore_checkpoint] if restore_checkpoint is not None else None,
     )
     evidence = _build_evidence_report(
         config=config,
@@ -467,6 +672,14 @@ def run_migration_command(config: SurrealMigrationRunnerConfig) -> SurrealMigrat
             max_report_samples=config.max_report_samples,
             redact_report_samples=config.redact_report_samples,
         )
+    _write_reporting_progress(
+        config=config,
+        mode=mode,
+        target_mode=target_mode,
+        status="applied",
+        migration_report=migration_report,
+        additional_checkpoints=[restore_checkpoint] if restore_checkpoint is not None else None,
+    )
 
     return SurrealMigrationRunnerResult(
         report=evidence,

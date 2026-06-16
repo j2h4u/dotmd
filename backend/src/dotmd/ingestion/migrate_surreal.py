@@ -103,6 +103,8 @@ class SurrealMigrationPhaseName(StrEnum):
     FEEDBACK = "feedback"
     CURSORS = "cursors"
     CHECKPOINTS = "checkpoints"
+    RESTORE_REHEARSAL = "restore_rehearsal"
+    REPORTING = "reporting"
 
 
 class SurrealTargetMode(StrEnum):
@@ -1027,11 +1029,19 @@ def _build_expected_counts_from_sqlite_counts(
     graph_rows: dict[str, Any],
     feedback_rows: dict[str, Any],
 ) -> dict[str, int]:
+    section_ids = {str(row.get("original_id") or row.get("chunk_id")) for row in graph_rows["sections"]}
     derived_section_ids = {str(row["source_id"]) for row in graph_rows["relations"]}
+    tag_names = {str(row.get("name")) for row in graph_rows["tags"]}
     derived_tag_ids = {
         str(row["target_id"])
         for row in graph_rows["relations"]
         if str(row.get("relation_type") or row.get("rel_type")) == "HAS_TAG"
+    }
+    entity_names = {str(row.get("name")) for row in graph_rows["entities"]}
+    derived_entity_ids = {
+        str(row["target_id"])
+        for row in graph_rows["relations"]
+        if str(row.get("relation_type") or row.get("rel_type")) != "HAS_TAG"
     }
     return {
         "documents": sqlite_counts["documents"],
@@ -1044,9 +1054,9 @@ def _build_expected_counts_from_sqlite_counts(
         "embeddings": sqlite_counts["embeddings"],
         "vector_components": sqlite_counts["vector_components"],
         "graph_files": len(graph_rows["files"]),
-        "graph_sections": max(len(graph_rows["sections"]), len(derived_section_ids)),
-        "graph_entities": len(graph_rows["entities"]),
-        "graph_tags": max(len(graph_rows["tags"]), len(derived_tag_ids)),
+        "graph_sections": len(section_ids | derived_section_ids),
+        "graph_entities": len(entity_names | derived_entity_ids),
+        "graph_tags": len(tag_names | derived_tag_ids),
         "graph_relations": len(graph_rows["relations"]),
         "feedback": len(feedback_rows["rows"]),
         "cursors": sqlite_counts["cursors"],
@@ -2198,8 +2208,12 @@ def run_surreal_migration(
     phase_checkpoints["vector_components"].planned_count = report.expected_counts[
         "vector_components"
     ]
-    phase_checkpoints["graph"].planned_count = len(graph_rows["entities"]) + len(
-        graph_rows["relations"]
+    phase_checkpoints["graph"].planned_count = (
+        report.expected_counts["graph_files"]
+        + report.expected_counts["graph_sections"]
+        + report.expected_counts["graph_entities"]
+        + report.expected_counts["graph_tags"]
+        + report.expected_counts["graph_relations"]
     )
     phase_checkpoints["feedback"].planned_count = len(feedback_rows["rows"])
     phase_checkpoints["cursors"].planned_count = len(sqlite_rows["cursors"])

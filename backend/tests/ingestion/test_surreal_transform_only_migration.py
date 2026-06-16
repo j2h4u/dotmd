@@ -613,6 +613,55 @@ def test_run_surreal_migration_dry_run_counts_transformable_rows_without_writing
     assert not (tmp_path / "dry-run.db").exists()
 
 
+def test_expected_counts_include_synthetic_graph_records() -> None:
+    from dotmd.ingestion import migrate_surreal as migrate_module  # type: ignore[import-not-found]
+
+    counts = migrate_module._build_expected_counts_from_sqlite_counts(
+        sqlite_counts={
+            "documents": 0,
+            "source_units": 0,
+            "chunks": 0,
+            "chunk_file_bindings": 0,
+            "provenance": 0,
+            "bindings": 0,
+            "fingerprints": 0,
+            "embeddings": 0,
+            "vector_components": 0,
+            "cursors": 0,
+            "checkpoints": 0,
+        },
+        graph_rows={
+            "files": [],
+            "sections": [{"original_id": "section-a"}],
+            "entities": [{"name": "entity-a"}],
+            "tags": [{"name": "tag-a"}],
+            "relations": [
+                {
+                    "source_id": "section-a",
+                    "target_id": "entity-a",
+                    "relation_type": "MENTIONS",
+                },
+                {
+                    "source_id": "section-b",
+                    "target_id": "entity-b",
+                    "relation_type": "MENTIONS",
+                },
+                {
+                    "source_id": "section-c",
+                    "target_id": "tag-b",
+                    "relation_type": "HAS_TAG",
+                },
+            ],
+        },
+        feedback_rows={"rows": []},
+    )
+
+    assert counts["graph_sections"] == 3
+    assert counts["graph_entities"] == 2
+    assert counts["graph_tags"] == 2
+    assert counts["graph_relations"] == 3
+
+
 def test_run_surreal_migration_apply_preserves_ids_vectors_feedback_and_graph_properties(
     tmp_path: Path,
 ) -> None:
