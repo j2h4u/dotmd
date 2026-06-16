@@ -226,7 +226,7 @@ Plans:
 **Goal:** Compare the old stack and SurrealDB stack on production-derived data
 and classify every material difference.
 **Depends on:** Phase 40, Phase 41, and Phase 42
-**Plans:** 1/3 plans executed
+**Plans:** 2/3 plans executed
 
 - [ ] Run old stack and Surreal stack side by side on production-derived data.
 - [ ] Record search quality, latency, index build time, store size, and memory
@@ -237,7 +237,7 @@ and classify every material difference.
 Plans:
 
 - [x] 43-01-PLAN.md - Shadow metric contract, memory evidence, and scale-gate validation.
-- [ ] 43-02-PLAN.md - Manifest-bound shadow-run runner, explicit Surreal override capture, and operator runbook.
+- [x] 43-02-PLAN.md - Manifest-bound shadow-run runner, explicit Surreal override capture, and operator runbook.
 - [ ] 43-03-PLAN.md - Bounded production-derived evidence bundle and semantic-difference acceptance ledger.
 
 ### Phase 44: Production cutover
@@ -311,7 +311,7 @@ after SurrealDB cutover is accepted.
 | 40. Evaluation harness and golden queries | 1/1 | Complete    | 2026-06-13 |
 | 41. Production-grade Surreal schema and import | v1.8 | Complete | 2026-06-14 |
 | 42. Surreal-native retrieval implementation | 4/4 | Complete    | 2026-06-14 |
-| 43. Shadow run and quality gate | 1/3 | In Progress|  |
+| 43. Shadow run and quality gate | 2/3 | In Progress|  |
 | 44. Production cutover | v1.8 | Planned | — |
 | 45. Legacy stack removal | v1.8 | Planned | — |
 

@@ -4,13 +4,13 @@ milestone: v1.8
 milestone_name: SurrealDB-Native Storage Cutover
 status: planning
 stopped_at: Completed 43-01-PLAN.md
-last_updated: "2026-06-16T06:57:27.063Z"
-last_activity: 2026-06-15
+last_updated: "2026-06-16T07:28:07.094Z"
+last_activity: 2026-06-16
 progress:
   total_phases: 14
   completed_phases: 5
   total_plans: 17
-  completed_plans: 15
+  completed_plans: 16
   percent: 36
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 Phase: 43
 Status: Phase 42 complete; Phase 43 planning is next
-Last activity: 2026-06-15
+Last activity: 2026-06-16
 
 Progress: [███████---] 71% (5/7 phases complete; Phase 43 is next; phases 44-45 remain to be planned)
 
@@ -103,6 +103,7 @@ Items acknowledged and deferred at v1.7 milestone close:
 | Phase 42 P03 | 6min | 2 tasks | 6 files |
 | Phase 42 P04 | 3 min | 2 tasks | 5 files |
 | Phase 43 P01 | 3 min | 2 tasks | 3 files |
+| Phase 43 P02 | 23 min | 4 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -230,6 +231,9 @@ Recent decisions affecting current work:
 - [Phase 43]: Phase 43 metric JSON keeps Phase 38 scale-gate field names unchanged and nests memory evidence separately.
 - [Phase 43]: Memory guardrails require paired baseline and candidate payloads and reject zero or negative baseline divisors before ratio evaluation.
 - [Phase 43]: capture_shadow_memory_metrics starts and stops tracemalloc so peak heap evidence cannot silently remain zero.
+- [Phase 43]: Added Settings.falkordb_graph_name with a dotmd default so baseline rehearsals can bind to isolated graph copies without changing production startup defaults.
+- [Phase 43]: Phase 43 ledger metadata is written as a sentinel row and stripped into a temp acceptance file before Phase 40 run_eval consumes real acceptance rows.
+- [Phase 43]: Verify-only artifact checking uses canonical query_id keyed diff maps so row-order drift does not look like a semantic regression.
 
 ### Pending Todos
 
@@ -316,7 +320,7 @@ retrieval parity failed on hybrid/RRF behavior.
 ## Current Position
 
 Phase: 43 (shadow-run-and-quality-gate) — READY FOR PLANNING
-Plan: 1 of 3 complete
+Plan: 2 of 3 complete
 Status: Ready to execute
 Last activity: 2026-06-14 -- Phase 42 verified and completed
 
@@ -326,6 +330,6 @@ Last activity: 2026-06-14 -- Phase 42 verified and completed
 
 ## Session
 
-**Last session:** 2026-06-16T06:57:27.038Z
+**Last session:** 2026-06-16T07:26:54.793Z
 **Stopped at:** Completed 43-01-PLAN.md
 **Resume file:** None
