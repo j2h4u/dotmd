@@ -1094,24 +1094,103 @@ def _connection_for_target(
 
 
 def _count_target_rows(connection: SurrealConnection) -> dict[str, int]:
+    def count(table_name: str) -> int:
+        rows = _query_surreal_rows(
+            connection,
+            f"SELECT count() AS count FROM {table_name} GROUP ALL;",
+        )
+        if not rows:
+            return 0
+        raw_count = rows[0].get("count")
+        if isinstance(raw_count, list) and raw_count:
+            raw_count = raw_count[0]
+        return int(raw_count or 0)
+
     return {
-        "documents": len(connection.scan_table("documents")),
-        "source_units": len(connection.scan_table("source_units")),
-        "chunks": len(connection.scan_table("chunks")),
-        "chunk_file_bindings": len(connection.scan_table("chunk_file_bindings")),
-        "provenance": len(connection.scan_table("provenance")),
-        "bindings": len(connection.scan_table("bindings")),
-        "fingerprints": len(connection.scan_table("fingerprints")),
-        "embeddings": len(connection.scan_table("embeddings")),
-        "vector_components": len(connection.scan_table("vector_components")),
-        "graph_files": len(connection.scan_table("files")),
-        "graph_sections": len(connection.scan_table("sections")),
-        "graph_entities": len(connection.scan_table("entities")),
-        "graph_tags": len(connection.scan_table("tags")),
-        "graph_relations": len(connection.scan_table("relations")),
-        "feedback": len(connection.scan_table("feedback")),
-        "cursors": len(connection.scan_table("cursors")),
-        "checkpoints": len(connection.scan_table("checkpoints")),
+        "documents": count("documents"),
+        "source_units": count("source_units"),
+        "chunks": count("chunks"),
+        "chunk_file_bindings": count("chunk_file_bindings"),
+        "provenance": count("provenance"),
+        "bindings": count("bindings"),
+        "fingerprints": count("fingerprints"),
+        "embeddings": count("embeddings"),
+        "vector_components": count("vector_components"),
+        "graph_files": count("files"),
+        "graph_sections": count("sections"),
+        "graph_entities": count("entities"),
+        "graph_tags": count("tags"),
+        "graph_relations": count("relations"),
+        "feedback": count("feedback"),
+        "cursors": count("cursors"),
+        "checkpoints": count("checkpoints"),
+    }
+
+
+def _query_surreal_rows(connection: SurrealConnection, statement: str) -> list[dict[str, Any]]:
+    payload = connection.query(statement)
+    if isinstance(payload, list):
+        if payload and isinstance(payload[0], dict) and "result" in payload[0]:
+            result = payload[0]["result"]
+            if isinstance(result, list):
+                return [dict(row) for row in result if isinstance(row, dict)]
+            if isinstance(result, dict):
+                return [dict(result)]
+        return [dict(row) for row in payload if isinstance(row, dict)]
+    if isinstance(payload, dict):
+        result = payload.get("result")
+        if isinstance(result, list):
+            return [dict(row) for row in result if isinstance(row, dict)]
+        if isinstance(result, dict):
+            return [dict(result)]
+        return [dict(payload)]
+    return []
+
+
+def _load_sqlite_embedding_rows_by_chunk_id(
+    sqlite_snapshot_path: Path,
+    chunk_ids: list[str],
+) -> dict[str, dict[str, Any]]:
+    if not chunk_ids:
+        return {}
+    placeholders = ", ".join("?" for _ in chunk_ids)
+    with _sqlite_connect_read_only(Path(sqlite_snapshot_path)) as conn:
+        known_tables = _discover_tables(conn)
+        conn.row_factory = sqlite3.Row
+        vec_config_rows = [
+            dict(row)
+            for row in _fetch_all(
+                conn,
+                "vec_config_contextual_512_50_multilingual_e5_large",
+                known_tables,
+            )
+        ]
+        vec_config = {str(row["key"]): str(row["value"]) for row in vec_config_rows}
+        embedding_model = vec_config.get("model", "unknown-model")
+        meta_table = _validate_table_name(
+            "vec_meta_contextual_512_50_multilingual_e5_large",
+            known_tables,
+        )
+        vec_table = _validate_table_name(
+            "vec_chunks_contextual_512_50_multilingual_e5_large",
+            known_tables,
+        )
+        rows = conn.execute(
+            f"SELECT m.rowid AS vector_rowid, m.chunk_id AS chunk_id, "
+            f"m.text_hash AS text_hash, v.embedding AS embedding "
+            f"FROM {meta_table} AS m LEFT JOIN {vec_table} AS v ON v.rowid = m.rowid "
+            f"WHERE m.chunk_id IN ({placeholders})",
+            chunk_ids,
+        ).fetchall()
+    return {
+        str(row["chunk_id"]): {
+            "chunk_id": str(row["chunk_id"]),
+            "embedding_model": embedding_model,
+            "text_hash": row["text_hash"],
+            "vector_rowid": int(row["vector_rowid"]),
+            "embedding": _decode_embedding_blob(row["embedding"] or b""),
+        }
+        for row in rows
     }
 
 
@@ -1277,7 +1356,6 @@ def verify_surreal_migration_target(
         mode=SurrealMigrationMode.VERIFY,
         overwrite_policy=overwrite_policy,
     )
-    sqlite_rows = load_sqlite_rows_for_surreal(Path(sqlite_snapshot_path))
     graph_rows = load_graph_rows_for_surreal(Path(graph_export_path))
     feedback_rows = load_feedback_rows_for_surreal(Path(feedback_export_path))
     with _connection_for_target(
@@ -1287,11 +1365,18 @@ def verify_surreal_migration_target(
     ) as connection:
         report.actual_counts = _count_target_rows(connection)
         schema_info = connection.inspect_schema()
-        stored_embeddings = connection.scan_table("embeddings")
-        stored_relations = connection.scan_table("relations")
-        stored_feedback = connection.scan_table("feedback")
-        stored_cursors = connection.scan_table("cursors")
-        stored_checkpoints = connection.scan_table("checkpoints")
+        stored_embedding_sample = _query_surreal_rows(
+            connection,
+            "SELECT chunk_id, embedding_model, text_hash, vector_rowid, embedding "
+            "FROM embeddings LIMIT 25;",
+        )
+        stored_relations_sample = _query_surreal_rows(connection, "SELECT * FROM relations LIMIT 1;")
+        stored_feedback_sample = _query_surreal_rows(connection, "SELECT * FROM feedback LIMIT 1;")
+        stored_cursors_sample = _query_surreal_rows(connection, "SELECT * FROM cursors LIMIT 1;")
+        stored_checkpoints_sample = _query_surreal_rows(
+            connection,
+            "SELECT * FROM checkpoints LIMIT 1;",
+        )
 
     for key, expected in report.expected_counts.items():
         actual = report.actual_counts.get(key, 0)
@@ -1311,7 +1396,7 @@ def verify_surreal_migration_target(
     if report.expected_vector_dimension is not None:
         if all(
             len(list(row.get("embedding", []))) == report.expected_vector_dimension
-            for row in stored_embeddings
+            for row in stored_embedding_sample
         ):
             report.cheap_invariants.append(
                 f"vector dimension matched {report.expected_vector_dimension}"
@@ -1319,36 +1404,46 @@ def verify_surreal_migration_target(
         else:
             report.errors.append("vector dimension mismatch detected")
 
-    expected_embeddings = {str(row["chunk_id"]): row for row in sqlite_rows["embeddings"]}
-    report.embedding_reuse_verified = all(
-        any(
-            str(stored.get("chunk_id")) == chunk_id
+    sample_chunk_ids = [
+        str(row.get("chunk_id"))
+        for row in stored_embedding_sample
+        if row.get("chunk_id") not in (None, "")
+    ]
+    expected_embedding_sample = _load_sqlite_embedding_rows_by_chunk_id(
+        Path(sqlite_snapshot_path),
+        sample_chunk_ids,
+    )
+    report.embedding_reuse_verified = (
+        report.actual_counts.get("embeddings") == report.expected_counts.get("embeddings")
+        and bool(stored_embedding_sample)
+        and all(
+            (expected_row := expected_embedding_sample.get(str(stored.get("chunk_id"))))
+            is not None
             and stored.get("text_hash") == expected_row.get("text_hash")
             and stored.get("vector_rowid") == expected_row.get("vector_rowid")
             and list(stored.get("embedding", [])) == list(expected_row.get("embedding", []))
-            for stored in stored_embeddings
+            for stored in stored_embedding_sample
         )
-        for chunk_id, expected_row in expected_embeddings.items()
     )
     if report.embedding_reuse_verified:
-        report.cheap_invariants.append("embedding reuse verified")
+        report.cheap_invariants.append("embedding reuse verified by bounded sample")
     else:
         report.errors.append(
-            "stored embeddings did not preserve text_hash/vector_rowid/value triples"
+            "stored embedding sample did not preserve text_hash/vector_rowid/value triples"
         )
 
     if verification_depth is SurrealVerificationDepth.DEEP:
-        if stored_relations:
-            relation_sample = stored_relations[0]
+        if stored_relations_sample:
+            relation_sample = stored_relations_sample[0]
             if relation_sample.get("rel_type") and "properties" in relation_sample:
                 report.deep_sample_checks.append(
                     "relation payload sample preserved rel_type and properties"
                 )
-        if stored_feedback:
+        if stored_feedback_sample:
             report.deep_sample_checks.append("feedback sample preserved provider-exported rows")
-        if stored_cursors:
+        if stored_cursors_sample:
             report.deep_sample_checks.append("cursor sample preserved source refs")
-        if stored_checkpoints:
+        if stored_checkpoints_sample:
             report.deep_sample_checks.append("checkpoint sample preserved source checkpoint data")
         if graph_rows["relations"]:
             report.deep_sample_checks.append(
