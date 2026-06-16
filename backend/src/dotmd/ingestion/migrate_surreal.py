@@ -1789,6 +1789,7 @@ def _write_graph_phase(
         checkpoint=checkpoint,
         applied_count=applied_count,
     )
+    graph_store.delete_all()
     writers = (
         ("files", graph_store.replace_file_rows),
         ("sections", graph_store.replace_section_rows),
