@@ -182,6 +182,26 @@ def test_sqlite_rows_can_skip_vectors_for_streaming_apply(tmp_path: Path) -> Non
     assert vector_components[0]["embedding"]
 
 
+def test_streaming_embedding_rows_normalize_missing_text_hash(tmp_path: Path) -> None:
+    from dotmd.ingestion.migrate_surreal import (  # type: ignore[import-not-found]
+        iter_sqlite_embedding_rows_for_surreal,
+        load_sqlite_rows_for_surreal,
+    )
+
+    inputs = _build_inputs(tmp_path)
+    with sqlite3.connect(inputs["sqlite_snapshot_path"]) as conn:
+        conn.execute(
+            "UPDATE vec_meta_contextual_512_50_multilingual_e5_large "
+            "SET text_hash = NULL WHERE rowid = 1"
+        )
+
+    streamed = list(iter_sqlite_embedding_rows_for_surreal(inputs["sqlite_snapshot_path"]))
+    materialized = load_sqlite_rows_for_surreal(inputs["sqlite_snapshot_path"])
+
+    assert streamed[0]["text_hash"] == ""
+    assert materialized["embeddings"][0]["text_hash"] == ""
+
+
 def test_phase42_fixture_applies_retrieval_schema_for_real_embedded_targets(tmp_path: Path) -> None:
     with isolated_surreal_connection(tmp_path) as connection:
         retrieval_plan = apply_surreal_native_retrieval_schema(

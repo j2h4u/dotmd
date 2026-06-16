@@ -242,6 +242,12 @@ def _normalize_tags_text(value: Any) -> str:
     return str(value).strip()
 
 
+def _normalize_text_hash(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    return str(value)
+
+
 def _fingerprint_document_ref(row: dict[str, Any]) -> str:
     return str(row.get("file_path") or row.get("chunk_id") or row.get("document_ref") or "")
 
@@ -535,7 +541,7 @@ def load_sqlite_rows_for_surreal(
                 "chunk_id": str(row["chunk_id"]),
                 "original_chunk_id": str(row["chunk_id"]),
                 "embedding_model": embedding_model,
-                "text_hash": row["text_hash"],
+                "text_hash": _normalize_text_hash(row["text_hash"]),
                 "vector_rowid": vector_rowid,
                 "embedding": (
                     _decode_embedding_blob(vector_row["embedding"])
@@ -704,7 +710,7 @@ def iter_sqlite_embedding_rows_for_surreal(
                 "chunk_id": str(row["chunk_id"]),
                 "original_chunk_id": str(row["chunk_id"]),
                 "embedding_model": embedding_model,
-                "text_hash": row["text_hash"],
+                "text_hash": _normalize_text_hash(row["text_hash"]),
                 "vector_rowid": int(row["vector_rowid"]),
                 "embedding": _decode_embedding_blob(row["embedding"] or b""),
                 "metadata": {},
@@ -1186,7 +1192,7 @@ def _load_sqlite_embedding_rows_by_chunk_id(
         str(row["chunk_id"]): {
             "chunk_id": str(row["chunk_id"]),
             "embedding_model": embedding_model,
-            "text_hash": row["text_hash"],
+            "text_hash": _normalize_text_hash(row["text_hash"]),
             "vector_rowid": int(row["vector_rowid"]),
             "embedding": _decode_embedding_blob(row["embedding"] or b""),
         }
