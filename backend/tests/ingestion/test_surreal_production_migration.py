@@ -458,6 +458,7 @@ def test_apply_refuses_populated_target_without_explicit_replace(
 
 def test_explicit_replace_is_the_only_destructive_path_and_records_pre_counts(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from dotmd.ingestion.migrate_surreal import (  # type: ignore[import-not-found]
         SurrealMigrationMode,
@@ -490,6 +491,15 @@ def test_explicit_replace_is_the_only_destructive_path_and_records_pre_counts(
             ]
         )
 
+    def _clear_schema_should_not_run_for_embedded_reset(self):  # type: ignore[no-untyped-def]
+        raise AssertionError("embedded explicit_replace should physically reset the target")
+
+    monkeypatch.setattr(
+        SurrealConnection,
+        "clear_schema_owned_tables",
+        _clear_schema_should_not_run_for_embedded_reset,
+    )
+
     report = run_surreal_migration(
         mode=SurrealMigrationMode.APPLY,
         sqlite_snapshot_path=inputs["sqlite_snapshot_path"],
@@ -502,7 +512,7 @@ def test_explicit_replace_is_the_only_destructive_path_and_records_pre_counts(
         inspect_target=True,
     )
 
-    assert report.status == "applied"
+    assert report.status == "applied", report.errors
     assert report.overwrite_policy is SurrealOverwritePolicy.EXPLICIT_REPLACE
     assert report.target_pre_counts["documents"] == 1
     assert report.committed_success is True
@@ -548,6 +558,7 @@ def test_apply_reports_phase_checkpoints_embedding_reuse_and_verification_depths
         "bindings",
         "fingerprints",
         "embeddings",
+        "indexes",
         "vector_components",
         "graph",
         "feedback",

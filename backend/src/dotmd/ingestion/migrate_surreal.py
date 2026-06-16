@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 import sqlite3
 import struct
 from collections.abc import Iterator
@@ -48,6 +49,7 @@ _MIGRATION_PHASE_ORDER = (
     "bindings",
     "fingerprints",
     "embeddings",
+    "indexes",
     "vector_components",
     "graph",
     "feedback",
@@ -78,6 +80,7 @@ class SurrealMigrationPhaseName(StrEnum):
     BINDINGS = "bindings"
     FINGERPRINTS = "fingerprints"
     EMBEDDINGS = "embeddings"
+    INDEXES = "indexes"
     VECTOR_COMPONENTS = "vector_components"
     GRAPH = "graph"
     FEEDBACK = "feedback"
@@ -1386,6 +1389,29 @@ def _verify_target_mode_inputs(
     return errors
 
 
+def _embedded_target_path(target_url: str) -> Path:
+    prefix = "surrealkv://"
+    if not target_url.startswith(prefix):
+        raise ValueError("embedded_local target_url must use surrealkv://")
+    raw_path = target_url.removeprefix(prefix)
+    if not raw_path:
+        raise ValueError("embedded_local target_url path is required")
+    target_path = Path(raw_path)
+    if target_path in {Path("."), Path("/")}:
+        raise ValueError("embedded_local target_url path is unsafe")
+    return target_path
+
+
+def _physically_reset_embedded_target(target_url: str) -> None:
+    target_path = _embedded_target_path(target_url)
+    if not target_path.exists():
+        return
+    if target_path.is_dir():
+        shutil.rmtree(target_path)
+        return
+    target_path.unlink()
+
+
 def _write_phase(
     checkpoint: SurrealMigrationPhaseCheckpoint,
     *,
@@ -1515,6 +1541,16 @@ def _upsert_schema_meta(connection: SurrealConnection) -> None:
             }
         },
     )
+
+
+def _rebuild_retrieval_indexes(connection: SurrealConnection) -> int:
+    try:
+        connection.query("REBUILD INDEX embeddings_hnsw_idx ON TABLE embeddings;")
+    except Exception as exc:
+        if "does not exist" in str(exc):
+            return 0
+        raise
+    return 1
 
 
 def verify_surreal_migration_target(
@@ -1797,6 +1833,19 @@ def run_surreal_migration(
         )
         return report
 
+    physically_reset_embedded_target = (
+        target_mode is SurrealTargetMode.EMBEDDED_LOCAL
+        and overwrite_policy is SurrealOverwritePolicy.EXPLICIT_REPLACE
+        and not resume_phase_names
+    )
+    if physically_reset_embedded_target:
+        try:
+            _physically_reset_embedded_target(target_url)
+        except (OSError, ValueError) as exc:
+            report.status = "target_reset_failed"
+            report.errors.append(str(exc))
+            return report
+
     phase_checkpoints = {name: _make_phase_checkpoint(name, 0) for name in _MIGRATION_PHASE_ORDER}
     phase_checkpoints["schema"].planned_count = 1
     phase_checkpoints["documents"].planned_count = len(sqlite_rows["documents"])
@@ -1807,6 +1856,7 @@ def run_surreal_migration(
     phase_checkpoints["bindings"].planned_count = len(sqlite_rows["bindings"])
     phase_checkpoints["fingerprints"].planned_count = len(sqlite_rows["fingerprints"])
     phase_checkpoints["embeddings"].planned_count = report.expected_counts["embeddings"]
+    phase_checkpoints["indexes"].planned_count = 1
     phase_checkpoints["vector_components"].planned_count = report.expected_counts[
         "vector_components"
     ]
@@ -1824,7 +1874,11 @@ def run_surreal_migration(
             target_namespace=target_namespace,
             target_database=target_database,
         ) as connection:
-            if overwrite_policy is SurrealOverwritePolicy.EXPLICIT_REPLACE:
+            if (
+                overwrite_policy is SurrealOverwritePolicy.EXPLICIT_REPLACE
+                and not physically_reset_embedded_target
+                and not resume_phase_names
+            ):
                 connection.clear_schema_owned_tables()
             try:
                 define_dotmd_surreal_schema(connection)
@@ -1899,6 +1953,13 @@ def run_surreal_migration(
                 report=report,
                 rows=iter_sqlite_embedding_rows_for_surreal(Path(sqlite_snapshot_path)),
                 writer=vector_store.replace_embedding_rows,
+                progress_path=progress_path,
+                resume_phase_names=resume_phase_names,
+            )
+            _write_phase(
+                phase_checkpoints["indexes"],
+                report=report,
+                writer=lambda: _rebuild_retrieval_indexes(connection),
                 progress_path=progress_path,
                 resume_phase_names=resume_phase_names,
             )

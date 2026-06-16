@@ -93,13 +93,14 @@ The first remediation pass has now been implemented in code:
   `contextual_512_50_multilingual_e5_large`; Surreal embeddings now preserve
   `chunk_strategy` and use `(chunk_strategy, embedding_model, chunk_id)` record
   identity.
+- embedded-local `explicit_replace` now physically resets the SurrealKV target
+  before apply when not resuming from progress, avoiding row-by-row tombstone
+  bloat in repeated rehearsals;
+- migration progress now includes an `indexes` phase that rebuilds
+  `embeddings_hnsw_idx` when that native retrieval index exists, so rows
+  inserted after index creation become visible to HNSW queries.
 
 Remaining before a trusted Phase 43 cutover attempt:
 
-1. Avoid in-place `explicit_replace` for embedded-local rehearsals; use a fresh
-   target path or a physical target reset.
-2. Rebuild retrieval indexes after bulk migration before running native HNSW
-   shadow queries; embedded Surreal HNSW does not see rows inserted after index
-   creation until `REBUILD INDEX`.
-3. Measure the fresh-target SurrealKV size after `vector_components` removal and
+1. Measure the fresh-target SurrealKV size after `vector_components` removal and
    batched writes before accepting the target for shadow-run preflight.
