@@ -830,15 +830,32 @@ def test_preflight_passes_when_target_queryable_with_records(tmp_path: Path) -> 
     )
 
     class _FakeConnection:
-        def query(self, _sql: str, **_kwargs):  # type: ignore[no-untyped-def]
-            return {
-                "counts": {"chunks": 3, "embeddings": 3},
-                "chunk_strategy": manifest.chunk_strategy,
-                "embedding_model": manifest.embedding_model,
-                "import_id": manifest.import_id,
-            }
+        def __init__(self) -> None:
+            self.queries: list[str] = []
 
-    preflight_candidate_target(_FakeConnection(), _settings(tmp_path / "index"), config, manifest)
+        def query(self, sql: str, **_kwargs):  # type: ignore[no-untyped-def]
+            self.queries.append(sql)
+            if "count() AS count FROM chunks" in sql:
+                return [{"count": manifest.expected_chunk_count}]
+            if "count() AS count FROM embeddings" in sql:
+                return [{"count": manifest.expected_embedding_count}]
+            if "chunk_strategy FROM chunks" in sql:
+                return [{"chunk_strategy": manifest.chunk_strategy}]
+            if "embedding_model FROM embeddings GROUP" in sql:
+                return [{"embedding_model": manifest.embedding_model}]
+            if "embedding_model, embedding FROM embeddings" in sql:
+                return [
+                    {
+                        "embedding_model": manifest.embedding_model,
+                        "embedding": [0.0] * config.embedding_dimension,
+                    }
+                ]
+            raise AssertionError(f"unexpected query: {sql}")
+
+    connection = _FakeConnection()
+    preflight_candidate_target(connection, _settings(tmp_path / "index"), config, manifest)
+
+    assert all(query != "phase43 preflight" for query in connection.queries)
 
 
 def test_preflight_fails_when_target_unreachable(tmp_path: Path) -> None:
@@ -884,13 +901,12 @@ def test_preflight_fails_when_target_empty(tmp_path: Path) -> None:
     )
 
     class _FakeConnection:
-        def query(self, _sql: str, **_kwargs):  # type: ignore[no-untyped-def]
-            return {
-                "counts": {"chunks": 0, "embeddings": 0},
-                "chunk_strategy": manifest.chunk_strategy,
-                "embedding_model": manifest.embedding_model,
-                "import_id": manifest.import_id,
-            }
+        def query(self, sql: str, **_kwargs):  # type: ignore[no-untyped-def]
+            if "count() AS count FROM chunks" in sql:
+                return [{"count": 0}]
+            if "count() AS count FROM embeddings" in sql:
+                return [{"count": 0}]
+            raise AssertionError(f"unexpected query: {sql}")
 
     with pytest.raises(ValueError, match="empty"):
         preflight_candidate_target(_FakeConnection(), _settings(tmp_path / "index"), config, manifest)
@@ -914,13 +930,16 @@ def test_preflight_fails_when_target_identity_mismatches_manifest(tmp_path: Path
     )
 
     class _FakeConnection:
-        def query(self, _sql: str, **_kwargs):  # type: ignore[no-untyped-def]
-            return {
-                "counts": {"chunks": 4, "embeddings": 3},
-                "chunk_strategy": manifest.chunk_strategy,
-                "embedding_model": manifest.embedding_model,
-                "import_id": manifest.import_id,
-            }
+        def query(self, sql: str, **_kwargs):  # type: ignore[no-untyped-def]
+            if "count() AS count FROM chunks" in sql:
+                return [{"count": manifest.expected_chunk_count + 1}]
+            if "count() AS count FROM embeddings" in sql:
+                return [{"count": manifest.expected_embedding_count}]
+            if "chunk_strategy FROM chunks" in sql:
+                return [{"chunk_strategy": manifest.chunk_strategy}]
+            if "embedding_model FROM embeddings GROUP" in sql:
+                return [{"embedding_model": manifest.embedding_model}]
+            raise AssertionError(f"unexpected query: {sql}")
 
     with pytest.raises(ValueError, match="expected_chunk_count"):
         preflight_candidate_target(_FakeConnection(), _settings(tmp_path / "index"), config, manifest)

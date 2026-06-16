@@ -37,7 +37,7 @@ from dotmd.search.surreal_shadow_metrics import (
     write_shadow_metric_json as _raw_write_shadow_metric_json,
 )
 from dotmd.storage.surreal import SurrealConnection, SurrealStoreConfig
-from dotmd.storage.surreal_schema import DEFAULT_HNSW_EF
+from dotmd.storage.surreal_schema import DEFAULT_HNSW_EF, validate_surreal_native_retrieval_contract
 
 try:
     from devtools.surreal_eval_runner import EvalRunnerConfig, run_eval
@@ -491,30 +491,101 @@ def preflight_candidate_target(
     candidate_config: CandidateConfig,
     expected_manifest: ExpectedSourceManifest,
 ) -> None:
-    del settings, candidate_config
-    payload = connection.query("phase43 preflight")
-    if not isinstance(payload, dict):
-        raise ValueError("candidate target preflight returned invalid payload")
-    counts = cast(dict[str, Any], payload.get("counts", {}))
-    if int(counts.get("chunks", 0)) <= 0:
+    del settings
+    chunk_rows = _query_surreal_rows(
+        connection,
+        "SELECT count() AS count FROM chunks GROUP ALL;",
+    )
+    embedding_rows = _query_surreal_rows(
+        connection,
+        "SELECT count() AS count FROM embeddings GROUP ALL;",
+    )
+    chunk_count = _first_count(chunk_rows)
+    embedding_count = _first_count(embedding_rows)
+    if chunk_count <= 0:
         raise ValueError("candidate target is empty")
+
+    chunk_strategy_rows = _query_surreal_rows(
+        connection,
+        "SELECT chunk_strategy FROM chunks GROUP BY chunk_strategy;",
+    )
+    embedding_model_rows = _query_surreal_rows(
+        connection,
+        "SELECT embedding_model FROM embeddings GROUP BY embedding_model;",
+    )
+    chunk_strategies = _single_field_values(chunk_strategy_rows, "chunk_strategy")
+    embedding_models = _single_field_values(embedding_model_rows, "embedding_model")
+    if len(chunk_strategies) != 1:
+        raise ValueError(f"chunk_strategy mismatch: expected one strategy, got {chunk_strategies!r}")
+    if len(embedding_models) != 1:
+        raise ValueError(f"embedding_model mismatch: expected one model, got {embedding_models!r}")
+
     checks = {
-        "chunk_strategy": payload.get("chunk_strategy"),
-        "embedding_model": payload.get("embedding_model"),
-        "import_id": payload.get("import_id"),
-        "expected_chunk_count": counts.get("chunks"),
-        "expected_embedding_count": counts.get("embeddings"),
+        "chunk_strategy": chunk_strategies[0],
+        "embedding_model": embedding_models[0],
+        "expected_chunk_count": chunk_count,
+        "expected_embedding_count": embedding_count,
     }
     expected = {
         "chunk_strategy": expected_manifest.chunk_strategy,
         "embedding_model": expected_manifest.embedding_model,
-        "import_id": expected_manifest.import_id,
         "expected_chunk_count": expected_manifest.expected_chunk_count,
         "expected_embedding_count": expected_manifest.expected_embedding_count,
     }
     for field_name, actual in checks.items():
         if actual != expected[field_name]:
             raise ValueError(f"{field_name} mismatch: expected {expected[field_name]!r}, got {actual!r}")
+
+    sample_embedding_rows = _query_surreal_rows(
+        connection,
+        "SELECT embedding_model, embedding FROM embeddings LIMIT 25;",
+    )
+    validate_surreal_native_retrieval_contract(
+        embedding_dimension=candidate_config.embedding_dimension,
+        embedding_rows=sample_embedding_rows,
+        top_k=candidate_config.top_k,
+        hnsw_ef=candidate_config.hnsw_ef,
+    )
+
+
+def _query_surreal_rows(connection: SurrealConnection | Any, statement: str) -> list[dict[str, Any]]:
+    payload = connection.query(statement)
+    if isinstance(payload, list):
+        if payload and isinstance(payload[0], dict) and "result" in payload[0]:
+            result = payload[0]["result"]
+            if isinstance(result, list):
+                return [dict(row) for row in result if isinstance(row, dict)]
+            if isinstance(result, dict):
+                return [dict(result)]
+        return [dict(row) for row in payload if isinstance(row, dict)]
+    if isinstance(payload, dict):
+        result = payload.get("result")
+        if isinstance(result, list):
+            return [dict(row) for row in result if isinstance(row, dict)]
+        if isinstance(result, dict):
+            return [dict(result)]
+        return [dict(payload)]
+    raise ValueError("candidate target preflight returned invalid payload")
+
+
+def _first_count(rows: list[dict[str, Any]]) -> int:
+    if not rows:
+        return 0
+    raw_count = rows[0].get("count")
+    if isinstance(raw_count, list) and raw_count:
+        raw_count = raw_count[0]
+    return int(raw_count or 0)
+
+
+def _single_field_values(rows: list[dict[str, Any]], field_name: str) -> list[str]:
+    values = sorted(
+        {
+            str(row[field_name])
+            for row in rows
+            if row.get(field_name) not in (None, "")
+        }
+    )
+    return values
 
 
 def _default_metric_bundle() -> ShadowMetricBundle:
