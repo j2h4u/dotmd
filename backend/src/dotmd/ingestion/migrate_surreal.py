@@ -163,7 +163,15 @@ class SurrealMigrationReport:
 
 
 def _sqlite_connect_read_only(db_path: Path) -> sqlite3.Connection:
-    return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn.enable_load_extension(True)
+    try:
+        import sqlite_vec  # type: ignore[import-untyped]
+
+        sqlite_vec.load(conn)
+    finally:
+        conn.enable_load_extension(False)
+    return conn
 
 
 def _discover_tables(conn: sqlite3.Connection) -> set[str]:
