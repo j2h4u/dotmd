@@ -345,6 +345,25 @@ def _fingerprint_metadata(row: dict[str, Any]) -> dict[str, Any]:
     return metadata
 
 
+def _fingerprint_sort_key(row: dict[str, Any]) -> tuple[str, str]:
+    metadata = row.get("metadata")
+    indexed_at = ""
+    if isinstance(metadata, dict):
+        indexed_at = str(metadata.get("indexed_at") or "")
+    checksum = str(row.get("content_fingerprint") or row.get("metadata_fingerprint") or "")
+    return indexed_at, checksum
+
+
+def _dedupe_fingerprint_payloads(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_id: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        fingerprint_id = str(row["fingerprint_id"])
+        existing = by_id.get(fingerprint_id)
+        if existing is None or _fingerprint_sort_key(row) >= _fingerprint_sort_key(existing):
+            by_id[fingerprint_id] = row
+    return list(by_id.values())
+
+
 def _composite_id(*parts: object) -> str:
     return "\x1f".join(str(part) for part in parts)
 
@@ -699,6 +718,7 @@ def load_sqlite_rows_for_surreal(
         }
         for row in source_unit_rows
     )
+    fingerprint_payloads = _dedupe_fingerprint_payloads(fingerprint_payloads)
 
     cursor_rows = [
         {
@@ -813,6 +833,34 @@ def iter_sqlite_vector_component_rows_for_surreal(
                 }
 
 
+def _count_distinct_fingerprint_ids(
+    conn: sqlite3.Connection,
+    known_tables: set[str],
+    *,
+    chunk_strategies: list[str],
+    vector_datasets: list[_SqliteVectorDataset],
+) -> int:
+    fingerprint_ids: set[str] = set()
+    for strategy in chunk_strategies:
+        table_name = f"chunk_fingerprints_{strategy}"
+        if table_name not in known_tables:
+            continue
+        for row in _fetch_all(conn, table_name, known_tables):
+            fingerprint_ids.add(f"chunk::{row['file_path']}")
+    for dataset in vector_datasets:
+        for table_name, prefix in (
+            (dataset.embed_fingerprint_table, "embed"),
+            (dataset.meta_fingerprint_table, "meta"),
+        ):
+            if table_name is None:
+                continue
+            for row in _fetch_all(conn, table_name, known_tables):
+                fingerprint_ids.add(f"{prefix}::{_fingerprint_document_ref(dict(row))}")
+    for row in _fetch_all(conn, "source_unit_fingerprints", known_tables):
+        fingerprint_ids.add(f"source_unit::{row['document_ref']}::{row['unit_ref']}")
+    return len(fingerprint_ids)
+
+
 def load_sqlite_stats_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
     source_path = Path(sqlite_snapshot_path)
     with _sqlite_connect_read_only(source_path) as conn:
@@ -844,24 +892,11 @@ def load_sqlite_stats_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
                 if table_name in known_tables
             ),
             "bindings": _count_rows(conn, "resource_bindings", known_tables),
-            "fingerprints": (
-                sum(
-                    _count_rows(conn, table_name, known_tables)
-                    for table_name in (
-                        f"chunk_fingerprints_{strategy}" for strategy in chunk_strategies
-                    )
-                    if table_name in known_tables
-                )
-                + sum(
-                    _count_rows(conn, table_name, known_tables)
-                    for dataset in vector_datasets
-                    for table_name in (
-                        dataset.embed_fingerprint_table,
-                        dataset.meta_fingerprint_table,
-                    )
-                    if table_name is not None
-                )
-                + _count_rows(conn, "source_unit_fingerprints", known_tables)
+            "fingerprints": _count_distinct_fingerprint_ids(
+                conn,
+                known_tables,
+                chunk_strategies=chunk_strategies,
+                vector_datasets=vector_datasets,
             ),
             "embeddings": sum(
                 _count_rows(conn, dataset.meta_table, known_tables) for dataset in vector_datasets

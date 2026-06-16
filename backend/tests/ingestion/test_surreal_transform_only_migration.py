@@ -332,6 +332,40 @@ def _create_transform_only_fixture(db_path: Path) -> dict[str, str]:
     }
 
 
+def test_dedupe_fingerprint_payloads_keeps_latest_indexed_at() -> None:
+    from dotmd.ingestion.migrate_surreal import (  # type: ignore[import-not-found]
+        _dedupe_fingerprint_payloads,
+    )
+
+    rows = [
+        {
+            "fingerprint_id": "chunk::/tmp/doc.md",
+            "content_fingerprint": "old",
+            "metadata_fingerprint": None,
+            "metadata": {"indexed_at": "2026-06-12T00:00:00Z"},
+        },
+        {
+            "fingerprint_id": "chunk::/tmp/doc.md",
+            "content_fingerprint": "new",
+            "metadata_fingerprint": None,
+            "metadata": {"indexed_at": "2026-06-12T00:01:00Z"},
+        },
+        {
+            "fingerprint_id": "chunk::/tmp/other.md",
+            "content_fingerprint": "other",
+            "metadata_fingerprint": None,
+            "metadata": {"indexed_at": "2026-06-12T00:00:30Z"},
+        },
+    ]
+
+    deduped = _dedupe_fingerprint_payloads(rows)
+
+    assert len(deduped) == 2
+    by_id = {row["fingerprint_id"]: row for row in deduped}
+    assert by_id["chunk::/tmp/doc.md"]["content_fingerprint"] == "new"
+    assert by_id["chunk::/tmp/other.md"]["content_fingerprint"] == "other"
+
+
 class _FakeGraphExporter:
     def __init__(self, fixture_ids: dict[str, str]) -> None:
         self.fixture_ids = fixture_ids
