@@ -1,0 +1,4 @@
+rehearsal-index/
+*.db
+*.db-shm
+*.db-wal

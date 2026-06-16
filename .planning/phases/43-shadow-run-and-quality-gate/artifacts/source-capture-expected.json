@@ -1,0 +1,7 @@
+{
+  "chunk_strategy": "contextual_512_50",
+  "embedding_model": "intfloat/multilingual-e5-large",
+  "expected_chunk_count": 149800,
+  "expected_embedding_count": 149800,
+  "import_id": "phase43-rehearsal-sqlite-backup-2026-06-16T07-31Z"
+}

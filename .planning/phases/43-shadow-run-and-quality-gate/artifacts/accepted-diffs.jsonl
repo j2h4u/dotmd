@@ -1,0 +1,1 @@
+{"guardrails": {"candidate_python_heap_growth_ratio": 1.25, "candidate_rss_growth_ratio": 1.25, "python_heap_slack_bytes": 134217728, "rss_slack_bytes": 268435456}, "quality_corpus": "golden", "record_type": "phase43_ledger_metadata", "replay_window": {"count": 4}}
