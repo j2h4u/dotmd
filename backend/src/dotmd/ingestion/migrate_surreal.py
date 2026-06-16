@@ -59,6 +59,20 @@ _MIGRATION_PHASE_ORDER = (
     "cursors",
     "checkpoints",
 )
+_DEFERRED_EMBEDDING_INDEX_DEFINITIONS = (
+    (
+        "embeddings_strategy_chunk_model_idx",
+        "DEFINE INDEX embeddings_strategy_chunk_model_idx ON TABLE embeddings COLUMNS chunk_strategy, chunk_id, embedding_model UNIQUE;",
+    ),
+    (
+        "embeddings_strategy_model_idx",
+        "DEFINE INDEX embeddings_strategy_model_idx ON TABLE embeddings COLUMNS chunk_strategy, embedding_model;",
+    ),
+    (
+        "embeddings_text_hash_idx",
+        "DEFINE INDEX embeddings_text_hash_idx ON TABLE embeddings COLUMNS text_hash;",
+    ),
+)
 
 
 class SurrealMigrationMode(StrEnum):
@@ -1845,14 +1859,30 @@ def _upsert_schema_meta(connection: SurrealConnection) -> None:
     )
 
 
+def _defer_embedding_indexes_for_bulk_load(connection: SurrealConnection) -> int:
+    removed = 0
+    for index_name, _statement in _DEFERRED_EMBEDDING_INDEX_DEFINITIONS:
+        try:
+            connection.query(f"REMOVE INDEX {index_name} ON TABLE embeddings;")
+            removed += 1
+        except Exception as exc:
+            if "does not exist" not in str(exc):
+                raise
+    return removed
+
+
 def _rebuild_retrieval_indexes(connection: SurrealConnection) -> int:
+    applied = 0
+    for _index_name, statement in _DEFERRED_EMBEDDING_INDEX_DEFINITIONS:
+        connection.query(statement)
+        applied += 1
     try:
         connection.query("REBUILD INDEX embeddings_hnsw_idx ON TABLE embeddings;")
     except Exception as exc:
         if "does not exist" in str(exc):
-            return 0
+            return applied
         raise
-    return 1
+    return applied + 1
 
 
 def verify_surreal_migration_target(
@@ -2158,7 +2188,7 @@ def run_surreal_migration(
     phase_checkpoints["bindings"].planned_count = len(sqlite_rows["bindings"])
     phase_checkpoints["fingerprints"].planned_count = len(sqlite_rows["fingerprints"])
     phase_checkpoints["embeddings"].planned_count = report.expected_counts["embeddings"]
-    phase_checkpoints["indexes"].planned_count = 1
+    phase_checkpoints["indexes"].planned_count = len(_DEFERRED_EMBEDDING_INDEX_DEFINITIONS)
     phase_checkpoints["vector_components"].planned_count = report.expected_counts[
         "vector_components"
     ]
@@ -2187,6 +2217,8 @@ def run_surreal_migration(
             except Exception as exc:
                 if "already exists" not in str(exc):
                     raise
+            if not resume_phase_names or "embeddings" in resume_phase_names:
+                _defer_embedding_indexes_for_bulk_load(connection)
             _upsert_schema_meta(connection)
 
             metadata_store = SurrealMetadataStore(connection)
