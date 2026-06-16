@@ -103,6 +103,7 @@ class SurrealMigrationPhaseName(StrEnum):
     FEEDBACK = "feedback"
     CURSORS = "cursors"
     CHECKPOINTS = "checkpoints"
+    VERIFICATION = "verification"
     RESTORE_REHEARSAL = "restore_rehearsal"
     REPORTING = "reporting"
 
@@ -1454,6 +1455,22 @@ def _write_progress_snapshot(
     )
 
 
+def _write_verification_progress(
+    progress_path: Path | None,
+    *,
+    report: SurrealMigrationReport,
+    checkpoint: SurrealMigrationPhaseCheckpoint,
+    status: str,
+    applied_count: int,
+    error: str | None = None,
+) -> None:
+    checkpoint.status = status
+    checkpoint.applied_count = applied_count
+    checkpoint.verified_count = applied_count if status == "applied" else 0
+    checkpoint.error = error
+    _write_progress_snapshot(progress_path, report=report, checkpoint=checkpoint)
+
+
 def _load_resume_phase_names(
     progress_path: Path | None,
     *,
@@ -2366,6 +2383,18 @@ def run_surreal_migration(
         report.errors.append(str(exc))
         return report
 
+    verification_checkpoint = SurrealMigrationPhaseCheckpoint(
+        phase_name=SurrealMigrationPhaseName.VERIFICATION,
+        planned_count=max(1, sum(report.expected_counts.values())),
+    )
+    report.phase_checkpoints.append(verification_checkpoint)
+    _write_verification_progress(
+        progress_path,
+        report=report,
+        checkpoint=verification_checkpoint,
+        status="running",
+        applied_count=0,
+    )
     verification_report = verify_surreal_migration_target(
         sqlite_snapshot_path=Path(sqlite_snapshot_path),
         graph_export_path=Path(graph_export_path),
@@ -2376,6 +2405,15 @@ def run_surreal_migration(
         target_database=target_database,
         verification_depth=verification_depth,
         overwrite_policy=overwrite_policy,
+    )
+    verification_error = "; ".join(verification_report.errors) or None
+    _write_verification_progress(
+        progress_path,
+        report=report,
+        checkpoint=verification_checkpoint,
+        status="applied" if verification_report.verified else "failed",
+        applied_count=verification_checkpoint.planned_count,
+        error=None if verification_report.verified else verification_error,
     )
     report.actual_counts = verification_report.actual_counts
     report.cheap_invariants = verification_report.cheap_invariants

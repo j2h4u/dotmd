@@ -564,6 +564,7 @@ def test_apply_reports_phase_checkpoints_embedding_reuse_and_verification_depths
         "feedback",
         "cursors",
         "checkpoints",
+        "verification",
     ]
 
     deep_report = verify_surreal_migration_target(
