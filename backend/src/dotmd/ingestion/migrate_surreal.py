@@ -1280,6 +1280,19 @@ def _make_phase_checkpoint(
     )
 
 
+def _format_duration(seconds: float | None) -> str | None:
+    if seconds is None:
+        return None
+    total_seconds = max(0, round(seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes}m {secs}s"
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
+
+
 def _write_progress_snapshot(
     progress_path: Path | None,
     *,
@@ -1290,10 +1303,33 @@ def _write_progress_snapshot(
     if progress_path is None:
         return
     current_applied = applied_count if applied_count is not None else checkpoint.applied_count
+    elapsed_seconds = time.monotonic() - report.started_at_monotonic
     current_percent = (
         round((current_applied / checkpoint.planned_count) * 100, 2)
         if checkpoint.planned_count
         else 100.0
+    )
+    current_rate = current_applied / elapsed_seconds if elapsed_seconds > 0 else 0.0
+    current_eta_seconds = (
+        (checkpoint.planned_count - current_applied) / current_rate
+        if current_rate > 0 and checkpoint.planned_count > current_applied
+        else None
+    )
+    overall_planned = sum(phase.planned_count for phase in report.phase_checkpoints)
+    overall_applied = 0
+    for phase in report.phase_checkpoints:
+        if phase.phase_name == checkpoint.phase_name:
+            overall_applied += current_applied
+        else:
+            overall_applied += phase.applied_count
+    overall_percent = (
+        round((overall_applied / overall_planned) * 100, 2) if overall_planned else 100.0
+    )
+    overall_rate = overall_applied / elapsed_seconds if elapsed_seconds > 0 else 0.0
+    overall_eta_seconds = (
+        (overall_planned - overall_applied) / overall_rate
+        if overall_rate > 0 and overall_planned > overall_applied
+        else None
     )
     payload = {
         "schema_version": report.schema_version,
@@ -1301,7 +1337,7 @@ def _write_progress_snapshot(
         "status": report.status,
         "target_mode": report.target_mode.value,
         "target_url": report.target_url,
-        "elapsed_seconds": round(time.monotonic() - report.started_at_monotonic, 3),
+        "elapsed_seconds": round(elapsed_seconds, 3),
         "progress_updated_at": datetime.now(UTC)
         .replace(microsecond=0)
         .isoformat()
@@ -1313,6 +1349,19 @@ def _write_progress_snapshot(
         "current_phase_planned_count": checkpoint.planned_count,
         "current_phase_applied_count": current_applied,
         "current_phase_percent": current_percent,
+        "current_phase_rate_per_second": round(current_rate, 3),
+        "current_phase_eta_seconds": (
+            round(current_eta_seconds, 3) if current_eta_seconds is not None else None
+        ),
+        "current_phase_eta_human": _format_duration(current_eta_seconds),
+        "overall_planned_count": overall_planned,
+        "overall_applied_count": overall_applied,
+        "overall_percent": overall_percent,
+        "overall_rate_per_second": round(overall_rate, 3),
+        "overall_eta_seconds": (
+            round(overall_eta_seconds, 3) if overall_eta_seconds is not None else None
+        ),
+        "overall_eta_human": _format_duration(overall_eta_seconds),
         "last_successful_phase": (
             report.last_successful_phase.value if report.last_successful_phase else None
         ),
