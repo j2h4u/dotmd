@@ -500,6 +500,41 @@ def test_run_surreal_migration_dry_run_counts_transformable_rows_without_writing
     fixture_ids = _create_transform_only_fixture(db_path)
     feedback_provider = _FakeFeedbackProvider()
     graph_export_path = _write_graph_export(tmp_path / "graph-export.json", fixture_ids)
+    graph_payload = json.loads(graph_export_path.read_text(encoding="utf-8"))
+    graph_payload["rows"]["files"] = [
+        {
+            "id": fixture_ids["file_path"],
+            "original_id": fixture_ids["file_path"],
+            "file_path": fixture_ids["file_path"],
+            "path": fixture_ids["file_path"],
+            "title": "Doc One",
+            "metadata": {},
+        }
+    ]
+    graph_payload["rows"]["sections"] = [
+        {
+            "id": fixture_ids["chunk_id"],
+            "original_id": fixture_ids["chunk_id"],
+            "chunk_id": fixture_ids["chunk_id"],
+            "heading": "Doc One",
+            "level": 1,
+            "file_path": fixture_ids["file_path"],
+            "text_preview": "Alpha body",
+            "metadata": {},
+        }
+    ]
+    graph_payload["rows"]["tags"] = [
+        {
+            "id": "tag/phase38",
+            "original_id": "tag/phase38",
+            "name": "tag/phase38",
+            "metadata": {},
+        }
+    ]
+    graph_export_path.write_text(
+        json.dumps(graph_payload, ensure_ascii=False, sort_keys=True),
+        encoding="utf-8",
+    )
     feedback_export_path = _write_feedback_export(
         tmp_path / "feedback-export.json",
         feedback_provider,
@@ -531,8 +566,8 @@ def test_run_surreal_migration_dry_run_counts_transformable_rows_without_writing
     assert report.expected_counts["chunks"] == 2
     assert report.expected_counts["chunk_file_bindings"] == 2
     assert report.expected_counts["embeddings"] == 2
-    assert report.expected_counts["vector_components"] == 2
-    assert report.expected_counts["graph_files"] == 0
+    assert report.expected_counts["vector_components"] == 0
+    assert report.expected_counts["graph_files"] == 1
     assert report.expected_counts["graph_entities"] == 1
     assert report.expected_counts["graph_relations"] == 2
     assert report.expected_counts["feedback"] == 2
@@ -725,3 +760,77 @@ def test_run_surreal_migration_failed_apply_reports_partial_writes_without_rollb
 
     assert documents
     assert chunks
+
+
+def test_apply_can_resume_from_progress_without_rewriting_completed_phases(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dotmd.ingestion import migrate_surreal as migrate_module  # type: ignore[import-not-found]
+    from dotmd.storage import surreal as surreal_module  # type: ignore[import-not-found]
+
+    db_path = tmp_path / "transform-only.db"
+    fixture_ids = _create_transform_only_fixture(db_path)
+    graph_export_path = _write_graph_export(tmp_path / "graph-export.json", fixture_ids)
+    feedback_export_path = _write_feedback_export(
+        tmp_path / "feedback-export.json",
+        _FakeFeedbackProvider(),
+    )
+    gate_path = _write_gate_report(tmp_path / "gate.md")
+    target_path = tmp_path / "resume.db"
+    progress_path = tmp_path / "progress.json"
+    original_feedback_writer = surreal_module.SurrealFeedbackStore.replace_feedback_rows
+
+    def _fail_feedback(self, rows):  # type: ignore[no-untyped-def]
+        raise RuntimeError("forced resume checkpoint")
+
+    monkeypatch.setattr(surreal_module.SurrealFeedbackStore, "replace_feedback_rows", _fail_feedback)
+
+    first_report = migrate_module.run_surreal_migration(
+        mode=migrate_module.SurrealMigrationMode.APPLY,
+        sqlite_snapshot_path=db_path,
+        graph_export_path=graph_export_path,
+        feedback_export_path=feedback_export_path,
+        target_url=f"surrealkv://{target_path}",
+        target_mode=migrate_module.SurrealTargetMode.EMBEDDED_LOCAL,
+        gate_report_path=gate_path,
+        progress_path=progress_path,
+    )
+
+    assert first_report.status == "failed"
+    progress_payload = json.loads(progress_path.read_text(encoding="utf-8"))
+    applied_phases = {
+        row["phase_name"]
+        for row in progress_payload["phase_checkpoints"]
+        if row["status"] == "applied"
+    }
+    assert "documents" in applied_phases
+
+    def _documents_should_be_skipped(self, rows):  # type: ignore[no-untyped-def]
+        raise AssertionError("resume should skip completed document phase")
+
+    monkeypatch.setattr(
+        surreal_module.SurrealFeedbackStore,
+        "replace_feedback_rows",
+        original_feedback_writer,
+    )
+    monkeypatch.setattr(
+        surreal_module.SurrealMetadataStore,
+        "replace_documents",
+        _documents_should_be_skipped,
+    )
+
+    second_report = migrate_module.run_surreal_migration(
+        mode=migrate_module.SurrealMigrationMode.APPLY,
+        sqlite_snapshot_path=db_path,
+        graph_export_path=graph_export_path,
+        feedback_export_path=feedback_export_path,
+        target_url=f"surrealkv://{target_path}",
+        target_mode=migrate_module.SurrealTargetMode.EMBEDDED_LOCAL,
+        gate_report_path=gate_path,
+        progress_path=progress_path,
+        resume_from_progress=True,
+    )
+
+    assert second_report.status == "applied", second_report.errors
+    assert second_report.committed_success is True

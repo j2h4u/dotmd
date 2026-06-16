@@ -1,6 +1,7 @@
 # Phase 43 Shadow Run Preflight Failure
 
 Generated: 2026-06-16T08:58:37Z
+Updated: 2026-06-16T10:57:54Z
 
 ## Status
 
@@ -9,14 +10,45 @@ Candidate-target preparation stopped before baseline or candidate capture.
 ## Current Blocker
 
 The Phase 41 migration runner is not safe to run on the production-derived
-Phase 43 snapshot in its current form. Even `--mode plan` materializes the
-production snapshot in memory, including all stored embeddings as Python float
-lists. The run was stopped after the Python process reached roughly 9 GB RSS.
+Phase 43 snapshot in its current form.
+
+The first blocker was memory: `--mode plan` materialized the production
+snapshot in memory, including all stored embeddings as Python float lists. The
+run was stopped after the Python process reached roughly 9 GB RSS. That memory
+blocker was fixed by count-only manifest construction and streaming vector row
+apply.
+
+A second `--mode apply` run on the production-derived snapshot was allowed to
+finish or fail naturally. It failed after `elapsed=2:57:54` with
+`max_rss_kb=4026316` and a `5.4G` SurrealKV target. The failure occurred in the
+graph phase while upserting file nodes:
+
+```text
+surrealdb.errors.InternalError: Found '/mnt/knowledgebase/voicenotes/20260419-1539-5Gs1Uhiw/transcript.md' for the `id` field, but a specific record has been specified
+```
+
+The immediate cause is that graph-export rows can contain an `id` field, and
+`SurrealGraphStore.replace_file_rows()` passes that field in the payload while
+also specifying the target record id in `upsert(record, payload)`.
+
+The larger blocker is now migration design, not only that one bad field:
+
+- destructive `explicit_replace` scans and deletes existing target rows one at
+  a time, causing SurrealKV log/tombstone bloat after failed partial imports;
+- most migration writes are row-by-row Surreal operations rather than bulk
+  inserts;
+- live progress is not persisted during long phases, so multi-hour runs are
+  opaque until they finish or fail;
+- `vector_components` is optional derived storage but is treated as required
+  migration payload, duplicating a second large vector store;
+- migration is hard-coded to `contextual_512_50_multilingual_e5_large` instead
+  of discovering all `(chunk_strategy, embedding_model)` vector tables.
 
 This supersedes the earlier stop note that blamed a missing
 `DOTMD_SHADOW_TARGET_URL`. The target URL can be supplied explicitly, but the
-target cannot be prepared safely until the migration plan/apply path avoids
-full embedding materialization.
+target cannot be prepared safely until the migration plan/apply path is fixed
+for memory, graph payload shape, progress telemetry, target replacement,
+optional vector components, and multi-model/multi-strategy parity.
 
 ## Inputs Prepared
 
@@ -45,7 +77,23 @@ backend, rechunking, reembedding, or entity re-extraction were performed.
 
 ## Required Next Fix
 
-Fix the Phase 41 migration runner so manifest/plan and target preparation do
-not decode and retain every production embedding in memory. The next attempt
-must use streaming, batching, or count-only manifest construction with a memory
-guard before any Phase 43 target preparation is retried.
+Fix the Phase 41 migration runner before retrying Phase 43 target preparation.
+The first remediation pass has now been implemented in code:
+
+- graph node payloads strip source `id` before explicit Surreal record upserts;
+- apply catches unexpected Surreal exceptions and returns failed evidence state;
+- `--progress-json` and `--resume-from-progress` support persisted phase
+  checkpoints, so a retry can skip completed phases;
+- default production migration no longer treats `vector_components` as required
+  payload;
+- primary metadata/vector/graph-node writes use batched `INSERT INTO ... $rows`
+  instead of per-row Surreal calls.
+
+Remaining before a trusted Phase 43 cutover attempt:
+
+1. Avoid in-place `explicit_replace` for embedded-local rehearsals; use a fresh
+   target path or a physical target reset.
+2. Discover and preserve all `(chunk_strategy, embedding_model)` vector table
+   pairs instead of hard-coding one suffix.
+3. Measure the fresh-target SurrealKV size after `vector_components` removal and
+   batched writes before accepting the target for shadow-run preflight.

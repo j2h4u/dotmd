@@ -788,11 +788,11 @@ def load_sqlite_stats_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
                 "vec_meta_contextual_512_50_multilingual_e5_large",
                 known_tables,
             ),
-            "vector_components": _count_rows(
-                conn,
-                "vec_components_contextual_512_50_multilingual_e5_large",
-                known_tables,
-            ),
+            # vector_components is optional derived storage, not a retrieval
+            # prerequisite. Migrating it by default duplicates a second large
+            # vector payload class, so production migration preserves primary
+            # embeddings only unless a later phase reintroduces a proven need.
+            "vector_components": 0,
             "cursors": _count_rows(conn, "resource_bindings", known_tables),
             "checkpoints": _count_rows(conn, "source_checkpoints", known_tables),
         }
@@ -1214,6 +1214,80 @@ def _make_phase_checkpoint(
     )
 
 
+def _write_progress_snapshot(
+    progress_path: Path | None,
+    *,
+    report: SurrealMigrationReport,
+    checkpoint: SurrealMigrationPhaseCheckpoint,
+    applied_count: int | None = None,
+) -> None:
+    if progress_path is None:
+        return
+    payload = {
+        "schema_version": report.schema_version,
+        "mode": report.mode.value,
+        "status": report.status,
+        "target_mode": report.target_mode.value,
+        "target_url": report.target_url,
+        "current_phase": checkpoint.phase_name.value,
+        "current_phase_status": checkpoint.status,
+        "current_phase_planned_count": checkpoint.planned_count,
+        "current_phase_applied_count": (
+            applied_count if applied_count is not None else checkpoint.applied_count
+        ),
+        "last_successful_phase": (
+            report.last_successful_phase.value if report.last_successful_phase else None
+        ),
+        "failed_phase": report.failed_phase.value if report.failed_phase else None,
+        "phase_checkpoints": [
+            {
+                "phase_name": phase.phase_name.value,
+                "planned_count": phase.planned_count,
+                "applied_count": phase.applied_count,
+                "verified_count": phase.verified_count,
+                "status": phase.status,
+                "error": phase.error,
+            }
+            for phase in report.phase_checkpoints
+        ],
+    }
+    progress_path.parent.mkdir(parents=True, exist_ok=True)
+    progress_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _load_resume_phase_names(
+    progress_path: Path | None,
+    *,
+    report: SurrealMigrationReport,
+    enabled: bool,
+) -> set[str]:
+    if not enabled or progress_path is None or not progress_path.exists():
+        return set()
+    try:
+        payload = json.loads(progress_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    if not isinstance(payload, dict):
+        return set()
+    if payload.get("schema_version") != report.schema_version:
+        return set()
+    if payload.get("mode") != report.mode.value:
+        return set()
+    if payload.get("target_url") != report.target_url:
+        return set()
+    checkpoints = payload.get("phase_checkpoints")
+    if not isinstance(checkpoints, list):
+        return set()
+    return {
+        str(checkpoint.get("phase_name"))
+        for checkpoint in checkpoints
+        if isinstance(checkpoint, dict) and checkpoint.get("status") == "applied"
+    }
+
+
 def _inspect_target(
     report: SurrealMigrationReport,
     *,
@@ -1258,7 +1332,18 @@ def _write_phase(
     *,
     report: SurrealMigrationReport,
     writer: Any,
+    progress_path: Path | None = None,
+    resume_phase_names: set[str] | None = None,
 ) -> None:
+    if checkpoint.phase_name.value in (resume_phase_names or set()):
+        checkpoint.applied_count = checkpoint.planned_count
+        checkpoint.verified_count = checkpoint.planned_count
+        checkpoint.status = "applied"
+        report.last_successful_phase = checkpoint.phase_name
+        _write_progress_snapshot(progress_path, report=report, checkpoint=checkpoint)
+        return
+    checkpoint.status = "running"
+    _write_progress_snapshot(progress_path, report=report, checkpoint=checkpoint)
     try:
         applied_count = int(writer())
     except Exception as exc:
@@ -1266,11 +1351,13 @@ def _write_phase(
         checkpoint.error = str(exc)
         report.failed_phase = checkpoint.phase_name
         report.errors.append(str(exc))
+        _write_progress_snapshot(progress_path, report=report, checkpoint=checkpoint)
         raise
     checkpoint.applied_count = applied_count
     checkpoint.status = "applied"
     checkpoint.verified_count = applied_count
     report.last_successful_phase = checkpoint.phase_name
+    _write_progress_snapshot(progress_path, report=report, checkpoint=checkpoint)
 
 
 def _write_iterable_phase(
@@ -1280,23 +1367,58 @@ def _write_iterable_phase(
     rows: Iterator[dict[str, Any]],
     writer: Any,
     batch_size: int = 1000,
+    progress_path: Path | None = None,
+    resume_phase_names: set[str] | None = None,
 ) -> None:
+    if checkpoint.phase_name.value in (resume_phase_names or set()):
+        checkpoint.applied_count = checkpoint.planned_count
+        checkpoint.verified_count = checkpoint.planned_count
+        checkpoint.status = "applied"
+        report.last_successful_phase = checkpoint.phase_name
+        _write_progress_snapshot(progress_path, report=report, checkpoint=checkpoint)
+        return
     applied_count = 0
     batch: list[dict[str, Any]] = []
+    checkpoint.status = "running"
+    _write_progress_snapshot(
+        progress_path,
+        report=report,
+        checkpoint=checkpoint,
+        applied_count=applied_count,
+    )
     try:
         for row in rows:
             batch.append(row)
             if len(batch) < batch_size:
                 continue
             applied_count += int(writer(batch))
+            _write_progress_snapshot(
+                progress_path,
+                report=report,
+                checkpoint=checkpoint,
+                applied_count=applied_count,
+            )
             batch = []
         if batch:
             applied_count += int(writer(batch))
+            _write_progress_snapshot(
+                progress_path,
+                report=report,
+                checkpoint=checkpoint,
+                applied_count=applied_count,
+            )
     except Exception as exc:
         checkpoint.status = "failed"
         checkpoint.error = str(exc)
         report.failed_phase = checkpoint.phase_name
         report.errors.append(str(exc))
+        checkpoint.applied_count = applied_count
+        _write_progress_snapshot(
+            progress_path,
+            report=report,
+            checkpoint=checkpoint,
+            applied_count=applied_count,
+        )
         raise
     checkpoint.applied_count = applied_count
     checkpoint.status = "applied"
@@ -1478,6 +1600,8 @@ def run_surreal_migration(
     gate_report_path: Path | None = None,
     verification_depth: SurrealVerificationDepth = SurrealVerificationDepth.CHEAP,
     requested_recompute_steps: tuple[str, ...] = (),
+    progress_path: Path | None = None,
+    resume_from_progress: bool = False,
 ) -> SurrealMigrationReport:
     input_errors = _verify_target_mode_inputs(
         target_mode=target_mode,
@@ -1587,6 +1711,11 @@ def run_surreal_migration(
         target_namespace=target_namespace,
         target_database=target_database,
     )
+    resume_phase_names = _load_resume_phase_names(
+        progress_path,
+        report=report,
+        enabled=resume_from_progress,
+    )
     if (
         "SCHEMALESS" in schema_info.get("table_modes", "")
         and overwrite_policy is not SurrealOverwritePolicy.EXPLICIT_REPLACE
@@ -1600,6 +1729,7 @@ def run_surreal_migration(
     if (
         any(count > 0 for count in report.target_pre_counts.values())
         and overwrite_policy is SurrealOverwritePolicy.REFUSE
+        and not resume_phase_names
     ):
         report.status = "target_not_empty"
         report.errors.append(
@@ -1648,53 +1778,76 @@ def run_surreal_migration(
             graph_store = SurrealGraphStore(connection)
             feedback_store = SurrealFeedbackStore(connection)
 
-            _write_phase(phase_checkpoints["schema"], report=report, writer=lambda: 1)
+            _write_phase(
+                phase_checkpoints["schema"],
+                report=report,
+                writer=lambda: 1,
+                progress_path=progress_path,
+                resume_phase_names=resume_phase_names,
+            )
             _write_phase(
                 phase_checkpoints["documents"],
                 report=report,
                 writer=lambda: metadata_store.replace_documents(sqlite_rows["documents"]),
+                progress_path=progress_path,
+                resume_phase_names=resume_phase_names,
             )
             _write_phase(
                 phase_checkpoints["source_units"],
                 report=report,
                 writer=lambda: metadata_store.replace_source_units(sqlite_rows["source_units"]),
+                progress_path=progress_path,
+                resume_phase_names=resume_phase_names,
             )
             _write_phase(
                 phase_checkpoints["chunks"],
                 report=report,
                 writer=lambda: metadata_store.replace_chunk_rows(sqlite_rows["chunks"]),
+                progress_path=progress_path,
+                resume_phase_names=resume_phase_names,
             )
             _write_phase(
                 phase_checkpoints["chunk_file_bindings"],
                 report=report,
                 writer=lambda: len(sqlite_rows["chunk_file_bindings"]),
+                progress_path=progress_path,
+                resume_phase_names=resume_phase_names,
             )
             _write_phase(
                 phase_checkpoints["provenance"],
                 report=report,
                 writer=lambda: metadata_store.replace_provenance_rows(sqlite_rows["provenance"]),
+                progress_path=progress_path,
+                resume_phase_names=resume_phase_names,
             )
             _write_phase(
                 phase_checkpoints["bindings"],
                 report=report,
                 writer=lambda: metadata_store.replace_binding_rows(sqlite_rows["bindings"]),
+                progress_path=progress_path,
+                resume_phase_names=resume_phase_names,
             )
             _write_phase(
                 phase_checkpoints["fingerprints"],
                 report=report,
                 writer=lambda: metadata_store.replace_fingerprint_rows(sqlite_rows["fingerprints"]),
+                progress_path=progress_path,
+                resume_phase_names=resume_phase_names,
             )
             _write_iterable_phase(
                 phase_checkpoints["embeddings"],
                 report=report,
                 rows=iter_sqlite_embedding_rows_for_surreal(Path(sqlite_snapshot_path)),
                 writer=vector_store.replace_embedding_rows,
+                progress_path=progress_path,
+                resume_phase_names=resume_phase_names,
             )
-            _write_iterable_phase(
+            _write_phase(
                 phase_checkpoints["vector_components"],
                 report=report,
-                rows=iter_sqlite_vector_component_rows_for_surreal(Path(sqlite_snapshot_path)),
-                writer=vector_store.replace_vector_component_rows,
+                writer=lambda: 0,
+                progress_path=progress_path,
+                resume_phase_names=resume_phase_names,
             )
             _write_phase(
                 phase_checkpoints["graph"],
@@ -1706,23 +1859,31 @@ def run_surreal_migration(
                     sections=graph_rows["sections"],
                     tags=graph_rows["tags"],
                 ),
+                progress_path=progress_path,
+                resume_phase_names=resume_phase_names,
             )
             _write_phase(
                 phase_checkpoints["feedback"],
                 report=report,
                 writer=lambda: feedback_store.replace_feedback_rows(feedback_rows["rows"]),
+                progress_path=progress_path,
+                resume_phase_names=resume_phase_names,
             )
             _write_phase(
                 phase_checkpoints["cursors"],
                 report=report,
                 writer=lambda: metadata_store.replace_cursor_rows(sqlite_rows["cursors"]),
+                progress_path=progress_path,
+                resume_phase_names=resume_phase_names,
             )
             _write_phase(
                 phase_checkpoints["checkpoints"],
                 report=report,
                 writer=lambda: metadata_store.replace_checkpoint_rows(sqlite_rows["checkpoints"]),
+                progress_path=progress_path,
+                resume_phase_names=resume_phase_names,
             )
-    except (KeyError, RuntimeError, TypeError, ValueError) as exc:
+    except Exception as exc:
         report.status = "failed"
         report.committed_success = False
         report.partial_writes_present = report.last_successful_phase is not None

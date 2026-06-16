@@ -52,6 +52,8 @@ class SurrealMigrationRunnerConfig:
     manifest_json: Path | None = None
     report_json: Path | None = None
     report_markdown: Path | None = None
+    progress_json: Path | None = None
+    resume_from_progress: bool = False
     restore_manifest_json: Path | None = None
     owner_id: str = "unknown"
     max_report_samples: int = 0
@@ -433,6 +435,8 @@ def run_migration_command(config: SurrealMigrationRunnerConfig) -> SurrealMigrat
         ),
         gate_report_path=config.gate_report,
         verification_depth=verification_depth,
+        progress_path=config.progress_json,
+        resume_from_progress=config.resume_from_progress,
     )
 
     restore_manifest = _rehearse_restore(
@@ -506,6 +510,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--manifest-json", type=Path, default=None)
     parser.add_argument("--report-json", type=Path, default=None)
     parser.add_argument("--report-markdown", type=Path, default=None)
+    parser.add_argument("--progress-json", type=Path, default=None)
+    parser.add_argument("--resume-from-progress", action="store_true")
     parser.add_argument("--restore-manifest-json", type=Path, default=None)
     parser.add_argument("--owner-id", default="unknown")
     parser.add_argument("--max-report-samples", type=int, default=0)
@@ -534,6 +540,8 @@ def main(argv: list[str] | None = None) -> int:
             manifest_json=args.manifest_json,
             report_json=args.report_json,
             report_markdown=args.report_markdown,
+            progress_json=args.progress_json,
+            resume_from_progress=args.resume_from_progress,
             restore_manifest_json=args.restore_manifest_json,
             owner_id=args.owner_id,
             max_report_samples=args.max_report_samples,

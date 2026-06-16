@@ -149,6 +149,21 @@ class SurrealConnection:
     def upsert(self, record: RecordID | str, data: dict[str, Any]) -> Any:
         return self._db.upsert(record, data)
 
+    def insert_rows(
+        self,
+        table_name: str,
+        rows: list[dict[str, Any]],
+        *,
+        batch_size: int = 1000,
+    ) -> Any:
+        if not rows:
+            return []
+        result = []
+        for offset in range(0, len(rows), batch_size):
+            batch = rows[offset : offset + batch_size]
+            result.append(self._db.query(f"INSERT INTO {table_name} $rows;", {"rows": batch}))
+        return result
+
     def delete(self, record: RecordID | str) -> Any:
         return self._db.delete(record)
 
@@ -346,40 +361,43 @@ class SurrealMetadataStore:
             self._connection.delete_all_from_table(table_name)
 
     def replace_documents(self, rows: list[dict[str, Any]]) -> int:
+        payloads = []
         for row in rows:
-            self._connection.upsert(
-                self._codec.encode("documents", str(row["ref"])),
-                dict(row),
-            )
+            payload = dict(row)
+            payload["id"] = self._codec.encode("documents", str(row["ref"]))
+            payloads.append(payload)
+        self._connection.insert_rows("documents", payloads)
         return len(rows)
 
     def replace_source_units(self, rows: list[dict[str, Any]]) -> int:
+        payloads = []
         for row in rows:
-            self._connection.upsert(
-                self._codec.encode(
-                    "source_units",
-                    _composite_id(row["namespace"], row["document_ref"], row["unit_ref"]),
-                ),
-                dict(row),
+            payload = dict(row)
+            payload["id"] = self._codec.encode(
+                "source_units",
+                _composite_id(row["namespace"], row["document_ref"], row["unit_ref"]),
             )
+            payloads.append(payload)
+        self._connection.insert_rows("source_units", payloads)
         return len(rows)
 
     def replace_provenance_rows(self, rows: list[dict[str, Any]]) -> int:
+        payloads = []
         for row in rows:
-            self._connection.upsert(
-                self._codec.encode("provenance", str(row["provenance_id"])),
-                dict(row),
-            )
+            payload = dict(row)
+            payload["id"] = self._codec.encode("provenance", str(row["provenance_id"]))
+            payloads.append(payload)
+        self._connection.insert_rows("provenance", payloads)
         return len(rows)
 
     def replace_chunk_rows(self, rows: list[dict[str, Any]]) -> int:
+        chunk_payloads = []
+        binding_payloads = []
         for row in rows:
             payload = dict(row)
             file_bindings = list(payload.pop("file_bindings", []))
-            self._connection.upsert(
-                self._codec.encode("chunks", str(payload["chunk_id"])),
-                payload,
-            )
+            payload["id"] = self._codec.encode("chunks", str(payload["chunk_id"]))
+            chunk_payloads.append(payload)
             for binding in file_bindings:
                 binding_payload = dict(binding)
                 binding_id = _composite_id(
@@ -387,28 +405,30 @@ class SurrealMetadataStore:
                     binding_payload["file_path"],
                     binding_payload["chunk_index"],
                 )
-                self._connection.upsert(
-                    self._codec.encode("chunk_file_bindings", binding_id),
-                    binding_payload,
-                )
+                binding_payload["id"] = self._codec.encode("chunk_file_bindings", binding_id)
+                binding_payloads.append(binding_payload)
+        self._connection.insert_rows("chunks", chunk_payloads)
+        self._connection.insert_rows("chunk_file_bindings", binding_payloads)
         return len(rows)
 
     def replace_binding_rows(self, rows: list[dict[str, Any]]) -> int:
+        payloads = []
         for row in rows:
-            self._connection.upsert(
-                self._codec.encode(
-                    "bindings", _composite_id(row["namespace"], row["resource_ref"])
-                ),
-                dict(row),
+            payload = dict(row)
+            payload["id"] = self._codec.encode(
+                "bindings", _composite_id(row["namespace"], row["resource_ref"])
             )
+            payloads.append(payload)
+        self._connection.insert_rows("bindings", payloads)
         return len(rows)
 
     def replace_fingerprint_rows(self, rows: list[dict[str, Any]]) -> int:
+        payloads = []
         for row in rows:
-            self._connection.upsert(
-                self._codec.encode("fingerprints", str(row["fingerprint_id"])),
-                dict(row),
-            )
+            payload = dict(row)
+            payload["id"] = self._codec.encode("fingerprints", str(row["fingerprint_id"]))
+            payloads.append(payload)
+        self._connection.insert_rows("fingerprints", payloads)
         return len(rows)
 
     def replace_checkpoint_rows(self, rows: list[dict[str, Any]]) -> int:
@@ -493,11 +513,12 @@ class SurrealVectorStore:
         return result
 
     def replace_embedding_rows(self, rows: list[dict[str, Any]]) -> int:
+        payloads = []
         for row in rows:
-            self._connection.upsert(
-                self._codec.encode("embeddings", str(row["chunk_id"])),
-                dict(row),
-            )
+            payload = dict(row)
+            payload["id"] = self._codec.encode("embeddings", str(row["chunk_id"]))
+            payloads.append(payload)
+        self._connection.insert_rows("embeddings", payloads)
         return len(rows)
 
     def replace_vector_component_rows(self, rows: list[dict[str, Any]]) -> int:
@@ -753,13 +774,14 @@ class SurrealGraphStore:
         return {"nodes": nodes, "edges": edges}
 
     def replace_entity_rows(self, rows: list[dict[str, Any]]) -> int:
+        payloads = []
         for row in rows:
             payload = dict(row)
+            payload.pop("id", None)
             payload.setdefault("original_entity_name", str(payload.get("name", "")))
-            self._connection.upsert(
-                self._codec.encode("entities", str(payload["name"])),
-                payload,
-            )
+            payload["id"] = self._codec.encode("entities", str(payload["name"]))
+            payloads.append(payload)
+        self._connection.insert_rows("entities", payloads)
         return len(rows)
 
     def replace_relation_rows(self, rows: list[dict[str, Any]]) -> int:
@@ -780,31 +802,45 @@ class SurrealGraphStore:
         return len(rows)
 
     def replace_file_rows(self, rows: list[dict[str, Any]]) -> int:
+        payloads = []
         for row in rows:
             payload = dict(row)
+            payload.pop("id", None)
             payload.setdefault("schema_version", "41.1.0")
             payload.setdefault("metadata", {})
             original_id = str(payload.get("original_id") or payload.get("path"))
-            self._connection.upsert(self._codec.encode("files", original_id), payload)
+            payload.setdefault("original_id", original_id)
+            payload["id"] = self._codec.encode("files", original_id)
+            payloads.append(payload)
+        self._connection.insert_rows("files", payloads)
         return len(rows)
 
     def replace_section_rows(self, rows: list[dict[str, Any]]) -> int:
+        payloads = []
         for row in rows:
             payload = dict(row)
+            payload.pop("id", None)
             payload.setdefault("schema_version", "41.1.0")
             payload.setdefault("metadata", {})
             original_id = str(payload.get("original_id") or payload.get("chunk_id"))
-            self._connection.upsert(self._codec.encode("sections", original_id), payload)
+            payload.setdefault("original_id", original_id)
+            payload["id"] = self._codec.encode("sections", original_id)
+            payloads.append(payload)
+        self._connection.insert_rows("sections", payloads)
         return len(rows)
 
     def replace_tag_rows(self, rows: list[dict[str, Any]]) -> int:
+        payloads = []
         for row in rows:
             payload = dict(row)
+            payload.pop("id", None)
             payload.setdefault("schema_version", "41.1.0")
             payload.setdefault("metadata", {})
             payload.setdefault("original_id", str(payload.get("name")))
             name = str(payload.get("name"))
-            self._connection.upsert(self._codec.encode("tags", name), payload)
+            payload["id"] = self._codec.encode("tags", name)
+            payloads.append(payload)
+        self._connection.insert_rows("tags", payloads)
         return len(rows)
 
     def replace_graph_rows(
