@@ -865,6 +865,7 @@ class SurrealGraphStore:
         sections: list[dict[str, Any]] | None = None,
         tags: list[dict[str, Any]] | None = None,
     ) -> int:
+        self.delete_all()
         replaced = 0
         section_rows = list(sections or [])
         section_ids = {str(row.get("original_id") or row.get("chunk_id")) for row in section_rows}
