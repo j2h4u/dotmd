@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import struct
+import time
 from pathlib import Path
 
 import pytest
@@ -973,6 +974,92 @@ def test_list_phase_progress_is_written_per_batch(tmp_path: Path) -> None:
     assert progress_payload["process_rss_bytes"] > 0
     assert "current_phase_eta_human" in progress_payload
     assert "overall_eta_human" in progress_payload
+
+
+def test_index_phase_progress_is_written_per_index_step(tmp_path: Path) -> None:
+    from dotmd.ingestion import migrate_surreal as migrate_module  # type: ignore[import-not-found]
+
+    progress_path = tmp_path / "progress.json"
+    checkpoint = migrate_module.SurrealMigrationPhaseCheckpoint(
+        phase_name=migrate_module.SurrealMigrationPhaseName.INDEXES,
+        planned_count=4,
+    )
+    report = migrate_module.SurrealMigrationReport(
+        schema_version="test",
+        mode=migrate_module.SurrealMigrationMode.APPLY,
+        status="apply",
+        target_mode=migrate_module.SurrealTargetMode.EMBEDDED_LOCAL,
+        overwrite_policy=migrate_module.SurrealOverwritePolicy.REFUSE,
+        target_url=f"surrealkv://{tmp_path / 'target.db'}",
+        target_namespace="dotmd",
+        target_database="phase43",
+        source_capture_manifest=None,
+        phase_checkpoints=[checkpoint],
+    )
+    queries: list[str] = []
+
+    class _FakeConnection:
+        def query(self, statement: str):  # type: ignore[no-untyped-def]
+            queries.append(statement)
+            return []
+
+    migrate_module._write_index_phase(
+        checkpoint,
+        report=report,
+        connection=_FakeConnection(),
+        progress_path=progress_path,
+    )
+
+    progress_payload = json.loads(progress_path.read_text(encoding="utf-8"))
+    assert len(queries) == 4
+    assert queries[-1] == "REBUILD INDEX embeddings_hnsw_idx ON TABLE embeddings;"
+    assert progress_payload["current_phase"] == "indexes"
+    assert progress_payload["current_phase_applied_count"] == 4
+    assert progress_payload["current_phase_percent"] == 100.0
+    assert checkpoint.status == "applied"
+
+
+def test_index_query_heartbeat_refreshes_progress_snapshot(tmp_path: Path) -> None:
+    from dotmd.ingestion import migrate_surreal as migrate_module  # type: ignore[import-not-found]
+
+    progress_path = tmp_path / "progress.json"
+    checkpoint = migrate_module.SurrealMigrationPhaseCheckpoint(
+        phase_name=migrate_module.SurrealMigrationPhaseName.INDEXES,
+        planned_count=4,
+        status="running",
+    )
+    report = migrate_module.SurrealMigrationReport(
+        schema_version="test",
+        mode=migrate_module.SurrealMigrationMode.APPLY,
+        status="apply",
+        target_mode=migrate_module.SurrealTargetMode.EMBEDDED_LOCAL,
+        overwrite_policy=migrate_module.SurrealOverwritePolicy.REFUSE,
+        target_url=f"surrealkv://{tmp_path / 'target.db'}",
+        target_namespace="dotmd",
+        target_database="phase43",
+        source_capture_manifest=None,
+        phase_checkpoints=[checkpoint],
+    )
+
+    class _SlowConnection:
+        def query(self, _statement: str):  # type: ignore[no-untyped-def]
+            time.sleep(0.03)
+            return []
+
+    migrate_module._query_with_progress_heartbeat(
+        _SlowConnection(),
+        "DEFINE INDEX slow_idx ON TABLE embeddings COLUMNS text_hash;",
+        report=report,
+        checkpoint=checkpoint,
+        progress_path=progress_path,
+        applied_count=0,
+        heartbeat_seconds=0.01,
+    )
+
+    progress_payload = json.loads(progress_path.read_text(encoding="utf-8"))
+    assert progress_payload["current_phase"] == "indexes"
+    assert progress_payload["current_phase_status"] == "running"
+    assert progress_payload["current_phase_applied_count"] == 0
 
 
 def test_progress_snapshot_estimates_eta_for_partial_work(tmp_path: Path) -> None:

@@ -10,6 +10,7 @@ import resource
 import shutil
 import sqlite3
 import struct
+import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -73,6 +74,7 @@ _DEFERRED_EMBEDDING_INDEX_DEFINITIONS = (
         "DEFINE INDEX embeddings_text_hash_idx ON TABLE embeddings COLUMNS text_hash;",
     ),
 )
+_INDEX_PROGRESS_HEARTBEAT_SECONDS = 30.0
 
 
 class SurrealMigrationMode(StrEnum):
@@ -286,7 +288,7 @@ def _discover_vector_datasets(
             _SqliteVectorDataset(
                 chunk_strategy=strategy,
                 model_key=model_key,
-                embedding_model=vec_config.get("model", model_key),
+                embedding_model=str(vec_config["model"]),
                 vector_dimension=int(vec_config["dim"]) if "dim" in vec_config else None,
                 meta_table=meta_table,
                 vec_table=vec_table,
@@ -1918,6 +1920,120 @@ def _rebuild_retrieval_indexes(connection: SurrealConnection) -> int:
     return applied + 1
 
 
+def _query_with_progress_heartbeat(
+    connection: SurrealConnection,
+    statement: str,
+    *,
+    report: SurrealMigrationReport,
+    checkpoint: SurrealMigrationPhaseCheckpoint,
+    progress_path: Path | None,
+    applied_count: int,
+    heartbeat_seconds: float = _INDEX_PROGRESS_HEARTBEAT_SECONDS,
+) -> None:
+    result: list[BaseException | None] = [None]
+
+    def _run_query() -> None:
+        try:
+            connection.query(statement)
+        except BaseException as exc:
+            result[0] = exc
+
+    worker = threading.Thread(target=_run_query, daemon=True)
+    worker.start()
+    while worker.is_alive():
+        worker.join(timeout=heartbeat_seconds)
+        if worker.is_alive():
+            _write_progress_snapshot(
+                progress_path,
+                report=report,
+                checkpoint=checkpoint,
+                applied_count=applied_count,
+            )
+    if result[0] is not None:
+        raise result[0]
+
+
+def _write_index_phase(
+    checkpoint: SurrealMigrationPhaseCheckpoint,
+    *,
+    report: SurrealMigrationReport,
+    connection: SurrealConnection,
+    progress_path: Path | None = None,
+    resume_phase_names: set[str] | None = None,
+) -> None:
+    if checkpoint.phase_name.value in (resume_phase_names or set()):
+        checkpoint.applied_count = checkpoint.planned_count
+        checkpoint.verified_count = checkpoint.planned_count
+        checkpoint.status = "applied"
+        report.last_successful_phase = checkpoint.phase_name
+        _write_progress_snapshot(progress_path, report=report, checkpoint=checkpoint)
+        return
+
+    applied_count = 0
+    checkpoint.status = "running"
+    _write_progress_snapshot(
+        progress_path,
+        report=report,
+        checkpoint=checkpoint,
+        applied_count=applied_count,
+    )
+    try:
+        for _index_name, statement in _DEFERRED_EMBEDDING_INDEX_DEFINITIONS:
+            _query_with_progress_heartbeat(
+                connection,
+                statement,
+                report=report,
+                checkpoint=checkpoint,
+                progress_path=progress_path,
+                applied_count=applied_count,
+            )
+            applied_count += 1
+            _write_progress_snapshot(
+                progress_path,
+                report=report,
+                checkpoint=checkpoint,
+                applied_count=applied_count,
+            )
+        try:
+            _query_with_progress_heartbeat(
+                connection,
+                "REBUILD INDEX embeddings_hnsw_idx ON TABLE embeddings;",
+                report=report,
+                checkpoint=checkpoint,
+                progress_path=progress_path,
+                applied_count=applied_count,
+            )
+        except Exception as exc:
+            if "does not exist" not in str(exc):
+                raise
+        else:
+            applied_count += 1
+            _write_progress_snapshot(
+                progress_path,
+                report=report,
+                checkpoint=checkpoint,
+                applied_count=applied_count,
+            )
+    except Exception as exc:
+        checkpoint.status = "failed"
+        checkpoint.error = str(exc)
+        checkpoint.applied_count = applied_count
+        report.failed_phase = checkpoint.phase_name
+        report.errors.append(str(exc))
+        _write_progress_snapshot(
+            progress_path,
+            report=report,
+            checkpoint=checkpoint,
+            applied_count=applied_count,
+        )
+        raise
+    checkpoint.applied_count = applied_count
+    checkpoint.status = "applied"
+    checkpoint.verified_count = applied_count
+    report.last_successful_phase = checkpoint.phase_name
+    _write_progress_snapshot(progress_path, report=report, checkpoint=checkpoint)
+
+
 def verify_surreal_migration_target(
     *,
     sqlite_snapshot_path: Path,
@@ -2063,6 +2179,7 @@ def run_surreal_migration(
     requested_recompute_steps: tuple[str, ...] = (),
     progress_path: Path | None = None,
     resume_from_progress: bool = False,
+    build_deferred_indexes: bool = False,
 ) -> SurrealMigrationReport:
     input_errors = _verify_target_mode_inputs(
         target_mode=target_mode,
@@ -2222,7 +2339,9 @@ def run_surreal_migration(
     phase_checkpoints["bindings"].planned_count = len(sqlite_rows["bindings"])
     phase_checkpoints["fingerprints"].planned_count = len(sqlite_rows["fingerprints"])
     phase_checkpoints["embeddings"].planned_count = report.expected_counts["embeddings"]
-    phase_checkpoints["indexes"].planned_count = len(_DEFERRED_EMBEDDING_INDEX_DEFINITIONS)
+    phase_checkpoints["indexes"].planned_count = (
+        len(_DEFERRED_EMBEDDING_INDEX_DEFINITIONS) + 1 if build_deferred_indexes else 0
+    )
     phase_checkpoints["vector_components"].planned_count = report.expected_counts[
         "vector_components"
     ]
@@ -2331,13 +2450,22 @@ def run_surreal_migration(
                 progress_path=progress_path,
                 resume_phase_names=resume_phase_names,
             )
-            _write_phase(
-                phase_checkpoints["indexes"],
-                report=report,
-                writer=lambda: _rebuild_retrieval_indexes(connection),
-                progress_path=progress_path,
-                resume_phase_names=resume_phase_names,
-            )
+            if build_deferred_indexes:
+                _write_index_phase(
+                    phase_checkpoints["indexes"],
+                    report=report,
+                    connection=connection,
+                    progress_path=progress_path,
+                    resume_phase_names=resume_phase_names,
+                )
+            else:
+                _write_phase(
+                    phase_checkpoints["indexes"],
+                    report=report,
+                    writer=lambda: 0,
+                    progress_path=progress_path,
+                    resume_phase_names=resume_phase_names,
+                )
             _write_phase(
                 phase_checkpoints["vector_components"],
                 report=report,

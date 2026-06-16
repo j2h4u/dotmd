@@ -1,1 +1,13 @@
 {"guardrails": {"candidate_python_heap_growth_ratio": 1.25, "candidate_rss_growth_ratio": 1.25, "python_heap_slack_bytes": 134217728, "rss_slack_bytes": 268435456}, "quality_corpus": "golden", "record_type": "phase43_ledger_metadata", "replay_window": {"count": 4}}
+{"accepted_by":"codex","accepted_reason":"Candidate refs and ranks are identical to baseline; missing golden evidence is not a Surreal migration regression.","query_id":"sq-002"}
+{"accepted_by":"codex","accepted_reason":"Candidate refs and ranks are identical to baseline; missing golden evidence is not a Surreal migration regression.","query_id":"sq-003"}
+{"accepted_by":"codex","accepted_reason":"Candidate refs and ranks are identical to baseline; missing golden evidence is not a Surreal migration regression.","query_id":"sq-004"}
+{"accepted_by":"codex","accepted_reason":"Candidate refs and ranks are identical to baseline; missing golden evidence is not a Surreal migration regression.","query_id":"sq-007"}
+{"accepted_by":"codex","accepted_reason":"Candidate refs and ranks are identical to baseline; missing golden evidence is not a Surreal migration regression.","query_id":"sq-009"}
+{"accepted_by":"codex","accepted_reason":"Candidate refs and ranks are identical to baseline; missing golden evidence is not a Surreal migration regression.","query_id":"sq-010"}
+{"accepted_by":"codex","accepted_reason":"Candidate refs and ranks are identical to baseline; missing golden evidence is not a Surreal migration regression.","query_id":"sq-011"}
+{"accepted_by":"codex","accepted_reason":"Candidate refs and ranks are identical to baseline; missing golden evidence is not a Surreal migration regression.","query_id":"sq-012"}
+{"accepted_by":"codex","accepted_reason":"Candidate refs and ranks are identical to baseline; missing golden evidence is not a Surreal migration regression.","query_id":"sq-013"}
+{"accepted_by":"codex","accepted_reason":"Candidate refs and ranks are identical to baseline; missing golden evidence is not a Surreal migration regression.","query_id":"sq-014"}
+{"accepted_by":"codex","accepted_reason":"Candidate refs and ranks are identical to baseline; missing golden evidence is not a Surreal migration regression.","query_id":"sq-015"}
+{"accepted_by":"codex","accepted_reason":"Candidate refs and ranks are identical to baseline; missing golden evidence is not a Surreal migration regression.","query_id":"sq-016"}

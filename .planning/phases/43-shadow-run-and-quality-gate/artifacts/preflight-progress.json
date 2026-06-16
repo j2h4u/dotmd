@@ -1,0 +1,7 @@
+{
+  "error": null,
+  "schema_version": "phase43-preflight-v1",
+  "status": "running",
+  "step": "target_embedding_model",
+  "updated_at": "2026-06-16T19:09:44Z"
+}

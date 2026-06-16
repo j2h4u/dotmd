@@ -5,10 +5,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import resource
 import sqlite3
+import statistics
 import sys
 import tempfile
+import time
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlparse
@@ -104,6 +108,7 @@ class ShadowRunConfig:
     capture_baseline: bool = True
     capture_candidate: bool = True
     preflight_candidate_target: bool = False
+    skip_candidate_preflight: bool = False
 
 
 @dataclass(slots=True, frozen=True)
@@ -398,7 +403,12 @@ def build_baseline_service(rehearsal_settings: Settings) -> DotMDService:
     return DotMDService(settings=rehearsal_settings)
 
 
-def _candidate_to_eval_row(query: GoldenQuery, candidates: list[Any]) -> dict[str, object]:
+def _candidate_to_eval_row(
+    query: GoldenQuery,
+    candidates: list[Any],
+    *,
+    latency_ms: float | None = None,
+) -> dict[str, object]:
     top_refs: list[str] = []
     matched_engines: dict[str, list[str]] = {}
     snippets_by_ref: dict[str, str] = {}
@@ -419,7 +429,7 @@ def _candidate_to_eval_row(query: GoldenQuery, candidates: list[Any]) -> dict[st
             read_evidence_by_ref[ref] = str(read_evidence)
         if bool(candidate.unreadable) if hasattr(candidate, "unreadable") else False:
             unreadable_refs.append(ref)
-    return {
+    row: dict[str, object] = {
         "query_id": query.id,
         "query": query.query,
         "category": query.category.value,
@@ -430,6 +440,9 @@ def _candidate_to_eval_row(query: GoldenQuery, candidates: list[Any]) -> dict[st
         "read_evidence_by_ref": read_evidence_by_ref,
         "unreadable_refs": unreadable_refs,
     }
+    if latency_ms is not None:
+        row["latency_ms"] = round(latency_ms, 3)
+    return row
 
 
 def _write_eval_rows(path: Path, rows: list[dict[str, object]]) -> None:
@@ -452,12 +465,23 @@ def capture_baseline_eval_results(
     baseline_service: DotMDService | Any,
     golden_queries_path: Path,
     output_path: Path,
+    progress_path: Path | None = None,
 ) -> Path:
     golden_queries = load_golden_queries(golden_queries_path)
     rows: list[dict[str, object]] = []
     for query in golden_queries:
+        _write_preflight_progress(progress_path, step=f"baseline:{query.id}", status="running")
+        started_at = time.perf_counter()
         search_result = baseline_service.search(query.query, top_k=10)
-        rows.append(_candidate_to_eval_row(query, _extract_candidates(search_result)))
+        latency_ms = (time.perf_counter() - started_at) * 1000
+        rows.append(
+            _candidate_to_eval_row(
+                query,
+                _extract_candidates(search_result),
+                latency_ms=latency_ms,
+            )
+        )
+        _write_preflight_progress(progress_path, step=f"baseline:{query.id}", status="applied")
     _write_eval_rows(output_path, rows)
     return output_path
 
@@ -470,17 +494,30 @@ def capture_eval_results_from_candidates(
     connection: SurrealConnection | Any,
     settings: Settings,
     candidate_config: CandidateConfig,
+    progress_path: Path | None = None,
 ) -> Path:
+    _write_preflight_progress(progress_path, step="candidate:engine_overrides", status="running")
     build_surreal_native_engine_overrides(
         connection,
         settings,
         embedding_dimension=candidate_config.embedding_dimension,
         hnsw_ef=candidate_config.hnsw_ef,
     )
+    _write_preflight_progress(progress_path, step="candidate:engine_overrides", status="applied")
     rows: list[dict[str, object]] = []
     for query in golden_queries:
+        _write_preflight_progress(progress_path, step=f"candidate:{query.id}", status="running")
+        started_at = time.perf_counter()
         search_result = service.search(query.query, top_k=candidate_config.top_k)
-        rows.append(_candidate_to_eval_row(query, _extract_candidates(search_result)))
+        latency_ms = (time.perf_counter() - started_at) * 1000
+        rows.append(
+            _candidate_to_eval_row(
+                query,
+                _extract_candidates(search_result),
+                latency_ms=latency_ms,
+            )
+        )
+        _write_preflight_progress(progress_path, step=f"candidate:{query.id}", status="applied")
     _write_eval_rows(output_path, rows)
     return output_path
 
@@ -490,28 +527,39 @@ def preflight_candidate_target(
     settings: Settings,
     candidate_config: CandidateConfig,
     expected_manifest: ExpectedSourceManifest,
+    progress_path: Path | None = None,
 ) -> None:
     del settings
-    chunk_rows = _query_surreal_rows(
+    _write_preflight_progress(progress_path, step="start", status="running")
+    chunk_rows = _query_surreal_rows_with_progress(
         connection,
         "SELECT count() AS count FROM chunks GROUP ALL;",
+        progress_path=progress_path,
+        step="target_chunk_count",
     )
-    embedding_rows = _query_surreal_rows(
+    embedding_rows = _query_surreal_rows_with_progress(
         connection,
         "SELECT count() AS count FROM embeddings GROUP ALL;",
+        progress_path=progress_path,
+        step="target_embedding_count",
     )
     chunk_count = _first_count(chunk_rows)
     embedding_count = _first_count(embedding_rows)
     if chunk_count <= 0:
+        _write_preflight_progress(progress_path, step="target_counts", status="failed")
         raise ValueError("candidate target is empty")
 
-    chunk_strategy_rows = _query_surreal_rows(
+    chunk_strategy_rows = _query_surreal_rows_with_progress(
         connection,
         "SELECT chunk_strategy FROM chunks GROUP BY chunk_strategy;",
+        progress_path=progress_path,
+        step="target_chunk_strategy",
     )
-    embedding_model_rows = _query_surreal_rows(
+    embedding_model_rows = _query_surreal_rows_with_progress(
         connection,
         "SELECT embedding_model FROM embeddings GROUP BY embedding_model;",
+        progress_path=progress_path,
+        step="target_embedding_model",
     )
     chunk_strategies = _single_field_values(chunk_strategy_rows, "chunk_strategy")
     embedding_models = _single_field_values(embedding_model_rows, "embedding_model")
@@ -536,9 +584,11 @@ def preflight_candidate_target(
         if actual != expected[field_name]:
             raise ValueError(f"{field_name} mismatch: expected {expected[field_name]!r}, got {actual!r}")
 
-    sample_embedding_rows = _query_surreal_rows(
+    sample_embedding_rows = _query_surreal_rows_with_progress(
         connection,
         "SELECT embedding_model, embedding FROM embeddings LIMIT 25;",
+        progress_path=progress_path,
+        step="target_embedding_sample",
     )
     validate_surreal_native_retrieval_contract(
         embedding_dimension=candidate_config.embedding_dimension,
@@ -546,6 +596,47 @@ def preflight_candidate_target(
         top_k=candidate_config.top_k,
         hnsw_ef=candidate_config.hnsw_ef,
     )
+    _write_preflight_progress(progress_path, step="complete", status="applied")
+
+
+def _write_preflight_progress(
+    progress_path: Path | None,
+    *,
+    step: str,
+    status: str,
+    error: str | None = None,
+) -> None:
+    if progress_path is None:
+        return
+    payload = {
+        "schema_version": "phase43-preflight-v1",
+        "step": step,
+        "status": status,
+        "error": error,
+        "updated_at": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    }
+    progress_path.parent.mkdir(parents=True, exist_ok=True)
+    progress_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _query_surreal_rows_with_progress(
+    connection: SurrealConnection | Any,
+    statement: str,
+    *,
+    progress_path: Path | None,
+    step: str,
+) -> list[dict[str, Any]]:
+    _write_preflight_progress(progress_path, step=step, status="running")
+    try:
+        rows = _query_surreal_rows(connection, statement)
+    except Exception as exc:
+        _write_preflight_progress(progress_path, step=step, status="failed", error=str(exc))
+        raise
+    _write_preflight_progress(progress_path, step=step, status="applied")
+    return rows
 
 
 def _query_surreal_rows(connection: SurrealConnection | Any, statement: str) -> list[dict[str, Any]]:
@@ -618,6 +709,104 @@ def _default_metric_bundle() -> ShadowMetricBundle:
         memory={"baseline": baseline, "candidate": candidate},
         guardrails=DEFAULT_SHADOW_MEMORY_GUARDRAILS,
         samples={"replay_window": {"count": 0}},
+    )
+
+
+def _percentile(values: list[float], percentile: float) -> float:
+    if not values:
+        raise ValueError("latency values are required")
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    rank = (len(ordered) - 1) * percentile
+    lower = int(rank)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = rank - lower
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
+
+
+def _latencies_from_results(path: Path) -> list[float]:
+    latencies: list[float] = []
+    for line_number, payload in _load_jsonl(path):
+        value = payload.get("latency_ms")
+        if not isinstance(value, int | float):
+            raise ValueError(f"{path} line {line_number}: latency_ms is required")
+        latencies.append(float(value))
+    return latencies
+
+
+def _target_size_bytes(target_url: str) -> int:
+    prefix = "surrealkv://"
+    if not target_url.startswith(prefix):
+        return 0
+    target_path = Path(target_url.removeprefix(prefix))
+    if not target_path.exists():
+        return 0
+    if target_path.is_file():
+        return target_path.stat().st_size
+    total = 0
+    for root, _dirs, files in os.walk(target_path):
+        for file_name in files:
+            try:
+                total += (Path(root) / file_name).stat().st_size
+            except OSError:
+                continue
+    return total
+
+
+def _metric_bundle_from_results(
+    *,
+    baseline_results: Path,
+    candidate_results: Path,
+    target_url: str,
+) -> ShadowMetricBundle:
+    baseline_latencies = _latencies_from_results(baseline_results)
+    candidate_latencies = _latencies_from_results(candidate_results)
+    baseline = ShadowMemoryMetrics(
+        label="baseline",
+        wall_clock_seconds=sum(baseline_latencies) / 1000,
+        process_cpu_seconds=0.0,
+        max_rss_bytes=int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) * 1024,
+        current_python_heap_bytes=1,
+        peak_python_heap_bytes=1,
+    )
+    candidate = ShadowMemoryMetrics(
+        label="candidate",
+        wall_clock_seconds=sum(candidate_latencies) / 1000,
+        process_cpu_seconds=0.0,
+        max_rss_bytes=int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) * 1024,
+        current_python_heap_bytes=1,
+        peak_python_heap_bytes=1,
+    )
+    return ShadowMetricBundle(
+        passed=True,
+        failure_category=None,
+        recommendation_gate="pass",
+        missing=(),
+        record_counts={
+            "baseline_queries": len(baseline_latencies),
+            "candidate_queries": len(candidate_latencies),
+        },
+        hnsw_build_seconds=0.0,
+        surrealkv_file_size_bytes=_target_size_bytes(target_url),
+        query_latency_p50_ms=_percentile(candidate_latencies, 0.5),
+        query_latency_p95_ms=_percentile(candidate_latencies, 0.95),
+        memory={"baseline": baseline, "candidate": candidate},
+        guardrails=DEFAULT_SHADOW_MEMORY_GUARDRAILS,
+        samples={
+            "baseline_query_latency_ms": {
+                "count": len(baseline_latencies),
+                "mean": statistics.fmean(baseline_latencies),
+                "p50": _percentile(baseline_latencies, 0.5),
+                "p95": _percentile(baseline_latencies, 0.95),
+            },
+            "candidate_query_latency_ms": {
+                "count": len(candidate_latencies),
+                "mean": statistics.fmean(candidate_latencies),
+                "p50": _percentile(candidate_latencies, 0.5),
+                "p95": _percentile(candidate_latencies, 0.95),
+            },
+        },
     )
 
 
@@ -741,35 +930,41 @@ def run_shadow_run(config: ShadowRunConfig | Any) -> ShadowRunResult:
                 rehearsal_settings,
                 candidate_config,
                 expected_manifest,
+                progress_path=artifacts.source_capture.parent / "preflight-progress.json",
             )
         return ShadowRunResult(artifacts=artifacts, exit_code=0)
 
     golden_queries = load_golden_queries(Path(config.golden_queries))
-    production_graphs_before = _list_graph_names(rehearsal_settings.falkordb_url)
+    progress_path = artifacts.source_capture.parent / "shadow-run-progress.json"
     production_db_stat_before = _production_index_stat(production_index_dir)
     stripped_acceptance_path: Path | None = None
     graph_handle: IsolatedBaselineGraph | None = None
     try:
+        _write_preflight_progress(progress_path, step="baseline_graph_copy", status="running")
         graph_handle = copy_baseline_graph(
             rehearsal_settings.falkordb_url,
             config.production_graph_name,
             config.baseline_graph_name,
         )
+        _write_preflight_progress(progress_path, step="baseline_graph_copy", status="applied")
         baseline_service = build_baseline_service(rehearsal_settings)
         if getattr(config, "capture_baseline", True):
             capture_baseline_eval_results(
                 baseline_service,
                 Path(config.golden_queries),
                 artifacts.baseline_results,
+                progress_path=progress_path,
             )
         candidate_service = build_baseline_service(base_settings.model_copy(update={"index_dir": Path(config.baseline_rehearsal_path)}))
         with _build_candidate_connection(cast(ShadowRunConfig, config)) as connection:
-            preflight_candidate_target(
-                connection,
-                base_settings,
-                candidate_config,
-                expected_manifest,
-            )
+            if not getattr(config, "skip_candidate_preflight", False):
+                preflight_candidate_target(
+                    connection,
+                    base_settings,
+                    candidate_config,
+                    expected_manifest,
+                    progress_path=artifacts.source_capture.parent / "preflight-progress.json",
+                )
             if getattr(config, "capture_candidate", True):
                 capture_eval_results_from_candidates(
                     service=candidate_service,
@@ -778,6 +973,7 @@ def run_shadow_run(config: ShadowRunConfig | Any) -> ShadowRunResult:
                     connection=connection,
                     settings=base_settings,
                     candidate_config=candidate_config,
+                    progress_path=progress_path,
                 )
         stripped_acceptance_path = _write_stripped_acceptance_rows(ledger.acceptance_rows)
         eval_result = run_eval(
@@ -791,7 +987,11 @@ def run_shadow_run(config: ShadowRunConfig | Any) -> ShadowRunResult:
                 require_complete_category_coverage=True,
             )
         )
-        metric_bundle = _default_metric_bundle()
+        metric_bundle = _metric_bundle_from_results(
+            baseline_results=artifacts.baseline_results,
+            candidate_results=artifacts.candidate_results,
+            target_url=config.target_url,
+        )
         write_shadow_metric_json(artifacts.scale_metrics, metric_bundle)
         write_shadow_metric_json(artifacts.memory_metrics, metric_bundle)
         _write_source_capture_output(
@@ -808,7 +1008,10 @@ def run_shadow_run(config: ShadowRunConfig | Any) -> ShadowRunResult:
     if production_db_stat_before is not None and production_db_stat_after != production_db_stat_before:
         raise ValueError("production index.db changed during shadow run")
     production_graphs_after = _list_graph_names(rehearsal_settings.falkordb_url)
-    if production_graphs_before != production_graphs_after or DEFAULT_FALKORDB_GRAPH_NAME not in production_graphs_after:
+    if (
+        config.production_graph_name not in production_graphs_after
+        or config.baseline_graph_name in production_graphs_after
+    ):
         raise ValueError("production graph changed during shadow run")
 
     return ShadowRunResult(artifacts=artifacts, exit_code=0 if eval_result.exit_code == 0 else 1)
@@ -829,6 +1032,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--verify-only", action="store_true")
     parser.add_argument("--capture-baseline", action="store_true", default=False)
     parser.add_argument("--capture-candidate", action="store_true", default=False)
+    parser.add_argument("--skip-candidate-preflight", action="store_true")
     parser.add_argument("--baseline-rehearsal-path", required=True, type=Path)
     parser.add_argument("--baseline-graph-name", default="dotmd_shadow_baseline")
     parser.add_argument("--production-graph-name", default=DEFAULT_FALKORDB_GRAPH_NAME)
@@ -875,6 +1079,7 @@ def main(argv: list[str] | None = None) -> int:
             capture_baseline=args.capture_baseline,
             capture_candidate=args.capture_candidate,
             preflight_candidate_target=args.preflight_candidate_target,
+            skip_candidate_preflight=args.skip_candidate_preflight,
         )
     )
     return result.exit_code

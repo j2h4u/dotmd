@@ -75,6 +75,7 @@ def _eval_result_row(query_id: str, category: GoldenQueryCategory) -> dict[str, 
         "snippets_by_ref": {f"filesystem:/mnt/{query_id}.md": query_id},
         "read_evidence_by_ref": {f"filesystem:/mnt/{query_id}.md": query_id},
         "unreadable_refs": [],
+        "latency_ms": 1.0,
     }
 
 
@@ -853,9 +854,19 @@ def test_preflight_passes_when_target_queryable_with_records(tmp_path: Path) -> 
             raise AssertionError(f"unexpected query: {sql}")
 
     connection = _FakeConnection()
-    preflight_candidate_target(connection, _settings(tmp_path / "index"), config, manifest)
+    progress_path = tmp_path / "preflight-progress.json"
+    preflight_candidate_target(
+        connection,
+        _settings(tmp_path / "index"),
+        config,
+        manifest,
+        progress_path=progress_path,
+    )
 
     assert all(query != "phase43 preflight" for query in connection.queries)
+    progress_payload = json.loads(progress_path.read_text(encoding="utf-8"))
+    assert progress_payload["step"] == "complete"
+    assert progress_payload["status"] == "applied"
 
 
 def test_preflight_fails_when_target_unreachable(tmp_path: Path) -> None:
