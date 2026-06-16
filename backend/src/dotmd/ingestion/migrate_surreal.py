@@ -1284,6 +1284,12 @@ def _format_duration(seconds: float | None) -> str | None:
     if seconds is None:
         return None
     total_seconds = max(0, round(seconds))
+    if total_seconds > 300:
+        total_minutes = round(total_seconds / 60)
+        hours, minutes = divmod(total_minutes, 60)
+        if hours:
+            return f"{hours}h {minutes}m"
+        return f"{minutes}m"
     hours, remainder = divmod(total_seconds, 3600)
     minutes, secs = divmod(remainder, 60)
     if hours:

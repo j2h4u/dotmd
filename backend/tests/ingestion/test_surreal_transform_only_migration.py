@@ -928,3 +928,13 @@ def test_progress_snapshot_estimates_eta_for_partial_work(tmp_path: Path) -> Non
     assert progress_payload["current_phase_eta_human"] in {"30s", "31s"}
     assert progress_payload["overall_eta_seconds"] == pytest.approx(30.0, abs=1.0)
     assert progress_payload["overall_eta_human"] in {"30s", "31s"}
+
+
+def test_eta_human_omits_seconds_after_five_minutes() -> None:
+    from dotmd.ingestion import migrate_surreal as migrate_module  # type: ignore[import-not-found]
+
+    assert migrate_module._format_duration(300) == "5m 0s"
+    assert migrate_module._format_duration(301) == "5m"
+    assert migrate_module._format_duration(329) == "5m"
+    assert migrate_module._format_duration(330) == "6m"
+    assert migrate_module._format_duration(3900) == "1h 5m"
