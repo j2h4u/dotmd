@@ -516,7 +516,12 @@ class SurrealVectorStore:
         payloads = []
         for row in rows:
             payload = dict(row)
-            payload["id"] = self._codec.encode("embeddings", str(row["chunk_id"]))
+            embedding_id = _composite_id(
+                payload.get("chunk_strategy", ""),
+                payload.get("embedding_model", ""),
+                payload["chunk_id"],
+            )
+            payload["id"] = self._codec.encode("embeddings", embedding_id)
             payloads.append(payload)
         self._connection.insert_rows("embeddings", payloads)
         return len(rows)
@@ -524,7 +529,12 @@ class SurrealVectorStore:
     def replace_vector_component_rows(self, rows: list[dict[str, Any]]) -> int:
         for row in rows:
             component_owner = row.get("chunk_id") or row.get("entity_id")
-            component_id = f"{component_owner}::{row['component']}"
+            component_id = _composite_id(
+                row.get("chunk_strategy", ""),
+                row.get("embedding_model", ""),
+                component_owner,
+                row["component"],
+            )
             self._connection.upsert(
                 self._codec.encode("vector_components", component_id),
                 dict(row),

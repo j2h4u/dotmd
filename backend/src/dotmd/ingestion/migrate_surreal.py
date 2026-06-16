@@ -205,6 +205,79 @@ def _count_rows(conn: sqlite3.Connection, table_name: str, known_tables: set[str
     return int(conn.execute(f"SELECT COUNT(*) FROM {safe_name}").fetchone()[0])
 
 
+@dataclass(slots=True, frozen=True)
+class _SqliteVectorDataset:
+    chunk_strategy: str
+    model_key: str
+    embedding_model: str
+    vector_dimension: int | None
+    meta_table: str
+    vec_table: str
+    config_table: str
+    component_table: str | None
+    embed_fingerprint_table: str | None
+    meta_fingerprint_table: str | None
+
+
+def _discover_chunk_strategies(known_tables: set[str]) -> list[str]:
+    return sorted(
+        table_name.removeprefix("chunks_")
+        for table_name in known_tables
+        if table_name.startswith("chunks_")
+        and not table_name.startswith("chunks_fts_")
+        and table_name != "chunks"
+    )
+
+
+def _discover_vector_datasets(
+    conn: sqlite3.Connection,
+    known_tables: set[str],
+) -> list[_SqliteVectorDataset]:
+    strategies = _discover_chunk_strategies(known_tables)
+    datasets: list[_SqliteVectorDataset] = []
+    for meta_table in sorted(table for table in known_tables if table.startswith("vec_meta_")):
+        suffix = meta_table.removeprefix("vec_meta_")
+        strategy = next(
+            (
+                candidate
+                for candidate in sorted(strategies, key=len, reverse=True)
+                if suffix.startswith(f"{candidate}_")
+            ),
+            None,
+        )
+        if strategy is None:
+            continue
+        model_key = suffix.removeprefix(f"{strategy}_")
+        vec_table = f"vec_chunks_{strategy}_{model_key}"
+        config_table = f"vec_config_{strategy}_{model_key}"
+        if vec_table not in known_tables or config_table not in known_tables:
+            continue
+        vec_config_rows = [dict(row) for row in _fetch_all(conn, config_table, known_tables)]
+        vec_config = {str(row["key"]): str(row["value"]) for row in vec_config_rows}
+        component_table = f"vec_components_{strategy}_{model_key}"
+        embed_fingerprint_table = f"embed_fingerprints_{strategy}_{model_key}"
+        meta_fingerprint_table = f"meta_fingerprints_{strategy}_{model_key}"
+        datasets.append(
+            _SqliteVectorDataset(
+                chunk_strategy=strategy,
+                model_key=model_key,
+                embedding_model=vec_config.get("model", model_key),
+                vector_dimension=int(vec_config["dim"]) if "dim" in vec_config else None,
+                meta_table=meta_table,
+                vec_table=vec_table,
+                config_table=config_table,
+                component_table=component_table if component_table in known_tables else None,
+                embed_fingerprint_table=(
+                    embed_fingerprint_table if embed_fingerprint_table in known_tables else None
+                ),
+                meta_fingerprint_table=(
+                    meta_fingerprint_table if meta_fingerprint_table in known_tables else None
+                ),
+            )
+        )
+    return datasets
+
+
 def _decode_embedding_blob(blob: bytes) -> list[float]:
     if not blob:
         return []
@@ -331,19 +404,29 @@ def load_sqlite_rows_for_surreal(
     source_path = Path(sqlite_snapshot_path)
     with _sqlite_connect_read_only(source_path) as conn:
         known_tables = _discover_tables(conn)
+        chunk_strategies = _discover_chunk_strategies(known_tables)
+        vector_datasets = _discover_vector_datasets(conn, known_tables)
 
-        chunk_rows = {
-            str(row["chunk_id"]): dict(row)
-            for row in _fetch_all(conn, "chunks_contextual_512_50", known_tables)
-        }
-        provenance_rows = [
-            dict(row)
-            for row in _fetch_all(conn, "chunk_source_provenance_contextual_512_50", known_tables)
-        ]
-        file_path_rows = [
-            dict(row)
-            for row in _fetch_all(conn, "chunk_file_paths_contextual_512_50", known_tables)
-        ]
+        chunk_rows: dict[str, dict[str, Any]] = {}
+        provenance_rows: list[dict[str, Any]] = []
+        file_path_rows: list[dict[str, Any]] = []
+        chunk_fingerprint_rows: list[dict[str, Any]] = []
+        for strategy in chunk_strategies:
+            for row in _fetch_all(conn, f"chunks_{strategy}", known_tables):
+                payload = dict(row)
+                payload.setdefault("chunk_strategy", strategy)
+                chunk_rows[str(row["chunk_id"])] = payload
+            provenance_table = f"chunk_source_provenance_{strategy}"
+            if provenance_table in known_tables:
+                provenance_rows.extend(dict(row) for row in _fetch_all(conn, provenance_table, known_tables))
+            file_paths_table = f"chunk_file_paths_{strategy}"
+            if file_paths_table in known_tables:
+                file_path_rows.extend(dict(row) for row in _fetch_all(conn, file_paths_table, known_tables))
+            chunk_fingerprint_table = f"chunk_fingerprints_{strategy}"
+            if chunk_fingerprint_table in known_tables:
+                chunk_fingerprint_rows.extend(
+                    dict(row) for row in _fetch_all(conn, chunk_fingerprint_table, known_tables)
+                )
         source_document_rows = [
             dict(row) for row in _fetch_all(conn, "source_documents", known_tables)
         ]
@@ -355,55 +438,46 @@ def load_sqlite_rows_for_surreal(
             dict(row) for row in _fetch_all(conn, "source_checkpoints", known_tables)
         ]
         vec_meta_rows: list[dict[str, Any]] = []
-        vec_chunk_rows: dict[int, dict[str, Any]] = {}
+        vec_chunk_rows: dict[tuple[str, str, int], dict[str, Any]] = {}
         vec_component_rows: list[dict[str, Any]] = []
         if include_vectors:
-            vec_meta_rows = [
-                dict(row)
-                for row in _fetch_all(
-                    conn, "vec_meta_contextual_512_50_multilingual_e5_large", known_tables
+            for dataset in vector_datasets:
+                for row in _fetch_all(conn, dataset.meta_table, known_tables):
+                    payload = dict(row)
+                    payload["chunk_strategy"] = dataset.chunk_strategy
+                    payload["embedding_model"] = dataset.embedding_model
+                    vec_meta_rows.append(payload)
+                for row in _fetch_all(conn, dataset.vec_table, known_tables):
+                    payload = dict(row)
+                    vec_chunk_rows[
+                        (dataset.chunk_strategy, dataset.embedding_model, int(row["rowid"]))
+                    ] = payload
+                if dataset.component_table is not None:
+                    vec_component_rows.extend(
+                        dict(row) for row in _fetch_all(conn, dataset.component_table, known_tables)
+                    )
+        embed_fingerprint_rows: list[dict[str, Any]] = []
+        meta_fingerprint_rows: list[dict[str, Any]] = []
+        for dataset in vector_datasets:
+            if dataset.embed_fingerprint_table is not None:
+                embed_fingerprint_rows.extend(
+                    dict(row)
+                    for row in _fetch_all(conn, dataset.embed_fingerprint_table, known_tables)
                 )
-            ]
-            vec_chunk_rows = {
-                int(row["rowid"]): dict(row)
-                for row in _fetch_all(
-                    conn, "vec_chunks_contextual_512_50_multilingual_e5_large", known_tables
+            if dataset.meta_fingerprint_table is not None:
+                meta_fingerprint_rows.extend(
+                    dict(row)
+                    for row in _fetch_all(conn, dataset.meta_fingerprint_table, known_tables)
                 )
-            }
-            vec_component_rows = [
-                dict(row)
-                for row in _fetch_all(
-                    conn, "vec_components_contextual_512_50_multilingual_e5_large", known_tables
-                )
-            ]
-        vec_config_rows = [
-            dict(row)
-            for row in _fetch_all(
-                conn, "vec_config_contextual_512_50_multilingual_e5_large", known_tables
-            )
-        ]
-        chunk_fingerprint_rows = [
-            dict(row)
-            for row in _fetch_all(conn, "chunk_fingerprints_contextual_512_50", known_tables)
-        ]
-        embed_fingerprint_rows = [
-            dict(row)
-            for row in _fetch_all(
-                conn,
-                "embed_fingerprints_contextual_512_50_multilingual_e5_large",
-                known_tables,
-            )
-        ]
-        meta_fingerprint_rows = [
-            dict(row)
-            for row in _fetch_all(
-                conn, "meta_fingerprints_contextual_512_50_multilingual_e5_large", known_tables
-            )
-        ]
 
-    vec_config = {str(row["key"]): str(row["value"]) for row in vec_config_rows}
-    vector_dimension = int(vec_config["dim"]) if "dim" in vec_config else None
-    embedding_model = vec_config.get("model", "unknown-model")
+    vector_dimension = next(
+        (dataset.vector_dimension for dataset in vector_datasets if dataset.vector_dimension),
+        None,
+    )
+    embedding_model = next(
+        (dataset.embedding_model for dataset in vector_datasets),
+        "unknown-model",
+    )
 
     file_paths_by_chunk: dict[str, list[str]] = {}
     file_bindings_by_chunk: dict[str, list[dict[str, Any]]] = {}
@@ -534,13 +608,16 @@ def load_sqlite_rows_for_surreal(
     embedding_payloads: list[dict[str, Any]] = []
     for row in vec_meta_rows:
         vector_rowid = int(row["rowid"])
-        vector_row = vec_chunk_rows.get(vector_rowid)
+        chunk_strategy = str(row["chunk_strategy"])
+        row_embedding_model = str(row["embedding_model"])
+        vector_row = vec_chunk_rows.get((chunk_strategy, row_embedding_model, vector_rowid))
         embedding_payloads.append(
             {
                 "schema_version": SURREAL_SCHEMA_VERSION,
                 "chunk_id": str(row["chunk_id"]),
                 "original_chunk_id": str(row["chunk_id"]),
-                "embedding_model": embedding_model,
+                "chunk_strategy": chunk_strategy,
+                "embedding_model": row_embedding_model,
                 "text_hash": _normalize_text_hash(row["text_hash"]),
                 "vector_rowid": vector_rowid,
                 "embedding": (
@@ -680,41 +757,27 @@ def iter_sqlite_embedding_rows_for_surreal(
     with _sqlite_connect_read_only(source_path) as conn:
         known_tables = _discover_tables(conn)
         conn.row_factory = sqlite3.Row
-        vec_config_rows = [
-            dict(row)
-            for row in _fetch_all(
-                conn,
-                "vec_config_contextual_512_50_multilingual_e5_large",
-                known_tables,
+        for dataset in _discover_vector_datasets(conn, known_tables):
+            meta_table = _validate_table_name(dataset.meta_table, known_tables)
+            vec_table = _validate_table_name(dataset.vec_table, known_tables)
+            cursor = conn.execute(
+                f"SELECT m.rowid AS vector_rowid, m.chunk_id AS chunk_id, "
+                f"m.text_hash AS text_hash, v.embedding AS embedding "
+                f"FROM {meta_table} AS m LEFT JOIN {vec_table} AS v ON v.rowid = m.rowid "
+                f"ORDER BY m.rowid"
             )
-        ]
-        vec_config = {str(row["key"]): str(row["value"]) for row in vec_config_rows}
-        embedding_model = vec_config.get("model", "unknown-model")
-        meta_table = _validate_table_name(
-            "vec_meta_contextual_512_50_multilingual_e5_large",
-            known_tables,
-        )
-        vec_table = _validate_table_name(
-            "vec_chunks_contextual_512_50_multilingual_e5_large",
-            known_tables,
-        )
-        cursor = conn.execute(
-            f"SELECT m.rowid AS vector_rowid, m.chunk_id AS chunk_id, "
-            f"m.text_hash AS text_hash, v.embedding AS embedding "
-            f"FROM {meta_table} AS m LEFT JOIN {vec_table} AS v ON v.rowid = m.rowid "
-            f"ORDER BY m.rowid"
-        )
-        for row in _fetchmany_dicts(cursor, batch_size=batch_size):
-            yield {
-                "schema_version": SURREAL_SCHEMA_VERSION,
-                "chunk_id": str(row["chunk_id"]),
-                "original_chunk_id": str(row["chunk_id"]),
-                "embedding_model": embedding_model,
-                "text_hash": _normalize_text_hash(row["text_hash"]),
-                "vector_rowid": int(row["vector_rowid"]),
-                "embedding": _decode_embedding_blob(row["embedding"] or b""),
-                "metadata": {},
-            }
+            for row in _fetchmany_dicts(cursor, batch_size=batch_size):
+                yield {
+                    "schema_version": SURREAL_SCHEMA_VERSION,
+                    "chunk_id": str(row["chunk_id"]),
+                    "original_chunk_id": str(row["chunk_id"]),
+                    "chunk_strategy": dataset.chunk_strategy,
+                    "embedding_model": dataset.embedding_model,
+                    "text_hash": _normalize_text_hash(row["text_hash"]),
+                    "vector_rowid": int(row["vector_rowid"]),
+                    "embedding": _decode_embedding_blob(row["embedding"] or b""),
+                    "metadata": {},
+                }
 
 
 def iter_sqlite_vector_component_rows_for_surreal(
@@ -726,67 +789,75 @@ def iter_sqlite_vector_component_rows_for_surreal(
     with _sqlite_connect_read_only(source_path) as conn:
         known_tables = _discover_tables(conn)
         conn.row_factory = sqlite3.Row
-        table_name = _validate_table_name(
-            "vec_components_contextual_512_50_multilingual_e5_large",
-            known_tables,
-        )
-        cursor = conn.execute(f"SELECT * FROM {table_name}")
-        for row in _fetchmany_dicts(cursor, batch_size=batch_size):
-            yield {
-                "schema_version": SURREAL_SCHEMA_VERSION,
-                "chunk_id": str(row.get("chunk_id") or row.get("entity_id")),
-                "component": str(row["component"]),
-                "embedding": _decode_embedding_blob(row["embedding"]),
-                "metadata": {},
-            }
+        for dataset in _discover_vector_datasets(conn, known_tables):
+            if dataset.component_table is None:
+                continue
+            table_name = _validate_table_name(dataset.component_table, known_tables)
+            cursor = conn.execute(f"SELECT * FROM {table_name}")
+            for row in _fetchmany_dicts(cursor, batch_size=batch_size):
+                yield {
+                    "schema_version": SURREAL_SCHEMA_VERSION,
+                    "chunk_strategy": dataset.chunk_strategy,
+                    "embedding_model": dataset.embedding_model,
+                    "chunk_id": str(row.get("chunk_id") or row.get("entity_id")),
+                    "component": str(row["component"]),
+                    "embedding": _decode_embedding_blob(row["embedding"]),
+                    "metadata": {},
+                }
 
 
 def load_sqlite_stats_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
     source_path = Path(sqlite_snapshot_path)
     with _sqlite_connect_read_only(source_path) as conn:
         known_tables = _discover_tables(conn)
-        vec_config_rows = [
-            dict(row)
-            for row in _fetch_all(
-                conn,
-                "vec_config_contextual_512_50_multilingual_e5_large",
-                known_tables,
-            )
-        ]
-        vec_config = {str(row["key"]): str(row["value"]) for row in vec_config_rows}
+        chunk_strategies = _discover_chunk_strategies(known_tables)
+        vector_datasets = _discover_vector_datasets(conn, known_tables)
+        vector_dimensions = {
+            dataset.vector_dimension
+            for dataset in vector_datasets
+            if dataset.vector_dimension is not None
+        }
         counts = {
             "documents": _count_rows(conn, "source_documents", known_tables),
             "source_units": _count_rows(conn, "source_unit_fingerprints", known_tables),
-            "chunks": _count_rows(conn, "chunks_contextual_512_50", known_tables),
-            "chunk_file_bindings": _count_rows(
-                conn,
-                "chunk_file_paths_contextual_512_50",
-                known_tables,
+            "chunks": sum(
+                _count_rows(conn, f"chunks_{strategy}", known_tables)
+                for strategy in chunk_strategies
             ),
-            "provenance": _count_rows(
-                conn,
-                "chunk_source_provenance_contextual_512_50",
-                known_tables,
+            "chunk_file_bindings": sum(
+                _count_rows(conn, table_name, known_tables)
+                for table_name in (f"chunk_file_paths_{strategy}" for strategy in chunk_strategies)
+                if table_name in known_tables
+            ),
+            "provenance": sum(
+                _count_rows(conn, table_name, known_tables)
+                for table_name in (
+                    f"chunk_source_provenance_{strategy}" for strategy in chunk_strategies
+                )
+                if table_name in known_tables
             ),
             "bindings": _count_rows(conn, "resource_bindings", known_tables),
             "fingerprints": (
-                _count_rows(conn, "chunk_fingerprints_contextual_512_50", known_tables)
-                + _count_rows(
-                    conn,
-                    "embed_fingerprints_contextual_512_50_multilingual_e5_large",
-                    known_tables,
+                sum(
+                    _count_rows(conn, table_name, known_tables)
+                    for table_name in (
+                        f"chunk_fingerprints_{strategy}" for strategy in chunk_strategies
+                    )
+                    if table_name in known_tables
                 )
-                + _count_rows(
-                    conn,
-                    "meta_fingerprints_contextual_512_50_multilingual_e5_large",
-                    known_tables,
+                + sum(
+                    _count_rows(conn, table_name, known_tables)
+                    for dataset in vector_datasets
+                    for table_name in (
+                        dataset.embed_fingerprint_table,
+                        dataset.meta_fingerprint_table,
+                    )
+                    if table_name is not None
                 )
                 + _count_rows(conn, "source_unit_fingerprints", known_tables)
             ),
-            "embeddings": _count_rows(
-                conn,
-                "vec_meta_contextual_512_50_multilingual_e5_large",
-                known_tables,
+            "embeddings": sum(
+                _count_rows(conn, dataset.meta_table, known_tables) for dataset in vector_datasets
             ),
             # vector_components is optional derived storage, not a retrieval
             # prerequisite. Migrating it by default duplicates a second large
@@ -798,7 +869,9 @@ def load_sqlite_stats_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
         }
     return {
         "counts": counts,
-        "expected_vector_dimension": int(vec_config["dim"]) if "dim" in vec_config else None,
+        "expected_vector_dimension": (
+            next(iter(vector_dimensions)) if len(vector_dimensions) == 1 else None
+        ),
     }
 
 
@@ -1160,44 +1233,30 @@ def _load_sqlite_embedding_rows_by_chunk_id(
     if not chunk_ids:
         return {}
     placeholders = ", ".join("?" for _ in chunk_ids)
+    result: dict[str, dict[str, Any]] = {}
     with _sqlite_connect_read_only(Path(sqlite_snapshot_path)) as conn:
         known_tables = _discover_tables(conn)
         conn.row_factory = sqlite3.Row
-        vec_config_rows = [
-            dict(row)
-            for row in _fetch_all(
-                conn,
-                "vec_config_contextual_512_50_multilingual_e5_large",
-                known_tables,
-            )
-        ]
-        vec_config = {str(row["key"]): str(row["value"]) for row in vec_config_rows}
-        embedding_model = vec_config.get("model", "unknown-model")
-        meta_table = _validate_table_name(
-            "vec_meta_contextual_512_50_multilingual_e5_large",
-            known_tables,
-        )
-        vec_table = _validate_table_name(
-            "vec_chunks_contextual_512_50_multilingual_e5_large",
-            known_tables,
-        )
-        rows = conn.execute(
-            f"SELECT m.rowid AS vector_rowid, m.chunk_id AS chunk_id, "
-            f"m.text_hash AS text_hash, v.embedding AS embedding "
-            f"FROM {meta_table} AS m LEFT JOIN {vec_table} AS v ON v.rowid = m.rowid "
-            f"WHERE m.chunk_id IN ({placeholders})",
-            chunk_ids,
-        ).fetchall()
-    return {
-        str(row["chunk_id"]): {
-            "chunk_id": str(row["chunk_id"]),
-            "embedding_model": embedding_model,
-            "text_hash": _normalize_text_hash(row["text_hash"]),
-            "vector_rowid": int(row["vector_rowid"]),
-            "embedding": _decode_embedding_blob(row["embedding"] or b""),
-        }
-        for row in rows
-    }
+        for dataset in _discover_vector_datasets(conn, known_tables):
+            meta_table = _validate_table_name(dataset.meta_table, known_tables)
+            vec_table = _validate_table_name(dataset.vec_table, known_tables)
+            rows = conn.execute(
+                f"SELECT m.rowid AS vector_rowid, m.chunk_id AS chunk_id, "
+                f"m.text_hash AS text_hash, v.embedding AS embedding "
+                f"FROM {meta_table} AS m LEFT JOIN {vec_table} AS v ON v.rowid = m.rowid "
+                f"WHERE m.chunk_id IN ({placeholders})",
+                chunk_ids,
+            ).fetchall()
+            for row in rows:
+                result[str(row["chunk_id"])] = {
+                    "chunk_id": str(row["chunk_id"]),
+                    "chunk_strategy": dataset.chunk_strategy,
+                    "embedding_model": dataset.embedding_model,
+                    "text_hash": _normalize_text_hash(row["text_hash"]),
+                    "vector_rowid": int(row["vector_rowid"]),
+                    "embedding": _decode_embedding_blob(row["embedding"] or b""),
+                }
+    return result
 
 
 def _phase_name(name: str) -> SurrealMigrationPhaseName:
@@ -1495,7 +1554,7 @@ def verify_surreal_migration_target(
         schema_info = connection.inspect_schema()
         stored_embedding_sample = _query_surreal_rows(
             connection,
-            "SELECT chunk_id, embedding_model, text_hash, vector_rowid, embedding "
+            "SELECT chunk_id, chunk_strategy, embedding_model, text_hash, vector_rowid, embedding "
             "FROM embeddings LIMIT 25;",
         )
         stored_relations_sample = _query_surreal_rows(connection, "SELECT * FROM relations LIMIT 1;")
@@ -1548,6 +1607,7 @@ def verify_surreal_migration_target(
             (expected_row := expected_embedding_sample.get(str(stored.get("chunk_id"))))
             is not None
             and stored.get("text_hash") == expected_row.get("text_hash")
+            and stored.get("chunk_strategy") == expected_row.get("chunk_strategy")
             and stored.get("vector_rowid") == expected_row.get("vector_rowid")
             and list(stored.get("embedding", [])) == list(expected_row.get("embedding", []))
             for stored in stored_embedding_sample

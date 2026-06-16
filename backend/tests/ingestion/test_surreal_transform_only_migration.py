@@ -640,7 +640,12 @@ def test_run_surreal_migration_apply_preserves_ids_vectors_feedback_and_graph_pr
     )
     with SurrealConnection(config) as connection:
         stored_chunk = connection.select(codec.encode("chunks", fixture_ids["chunk_id"]))
-        stored_embedding = connection.select(codec.encode("embeddings", fixture_ids["chunk_id"]))
+        stored_embedding = connection.select(
+            codec.encode(
+                "embeddings",
+                "contextual_512_50\x1fmultilingual-e5-large\x1f" + fixture_ids["chunk_id"],
+            )
+        )
         stored_entity = connection.select(codec.encode("entities", fixture_ids["entity_name"]))
         stored_relation = connection.select(codec.encode("relations", fixture_ids["relation_id"]))
         stored_feedback = connection.select(codec.encode("feedback", 'feedback:/ one {"quoted"}'))
@@ -651,6 +656,7 @@ def test_run_surreal_migration_apply_preserves_ids_vectors_feedback_and_graph_pr
     assert stored_chunk["original_chunk_id"] == fixture_ids["chunk_id"]
     assert stored_chunk["ref"] == fixture_ids["ref"]
     assert stored_embedding["chunk_id"] == fixture_ids["chunk_id"]
+    assert stored_embedding["chunk_strategy"] == "contextual_512_50"
     assert stored_embedding["text_hash"] == "hash-alpha"
     assert stored_embedding["vector_rowid"] == 1
     assert len(stored_embedding["embedding"]) == 3

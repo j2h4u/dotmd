@@ -116,11 +116,13 @@ def test_search_uses_hnsw_knn_query_with_model_filter_and_cosine_projection(
     assert "SELECT chunk_id" in statement
     assert "vector::similarity::cosine(embedding, $qvec) AS score" in statement
     assert "embedding_model = $embedding_model" in statement
+    assert "chunk_strategy = $chunk_strategy" in statement
     assert "$active_chunk_ids CONTAINS chunk_id" in statement
     assert "embedding <|5,40|> $qvec" in statement
     assert "ORDER BY score DESC, chunk_id ASC" in statement
     assert variables == {
         "embedding_model": "phase42-model",
+        "chunk_strategy": "contextual_512_50",
         "active_chunk_ids": ["chunk-alpha", "chunk-beta"],
         "qvec": [1.0, 0.0, 0.0],
         "limit": 5,
@@ -130,7 +132,7 @@ def test_search_uses_hnsw_knn_query_with_model_filter_and_cosine_projection(
     assert active_variables == {"chunk_strategy": "contextual_512_50"}
     _precondition_statement, precondition_variables = connection.calls[1]
     assert precondition_variables == {
-        "active_chunk_ids": ["chunk-alpha", "chunk-beta"],
+        "chunk_strategy": "contextual_512_50",
         "embedding_model": "phase42-model",
     }
 
@@ -151,6 +153,7 @@ def test_search_scopes_preconditions_and_hnsw_query_to_configured_chunk_strategy
     assert connection.calls[0][1] == {"chunk_strategy": "heading_512_50"}
     search_variables = connection.calls[-1][1]
     assert search_variables is not None
+    assert search_variables["chunk_strategy"] == "heading_512_50"
     assert search_variables["active_chunk_ids"] == ["chunk-alpha", "chunk-beta"]
 
 
@@ -216,7 +219,7 @@ def test_search_allows_other_models_in_active_strategy_when_selected_model_is_va
     assert len(connection.calls) == 3
     _precondition_statement, precondition_variables = connection.calls[1]
     assert precondition_variables == {
-        "active_chunk_ids": ["chunk-alpha", "chunk-beta"],
+        "chunk_strategy": "contextual_512_50",
         "embedding_model": "phase42-model",
     }
 
@@ -273,6 +276,7 @@ def test_embedded_surreal_hnsw_returns_nearest_neighbor_without_scan_table(
             {
                 "schema_version": "42.1.0",
                 "chunk_id": "chunk-alpha",
+                "chunk_strategy": "contextual_512_50",
                 "embedding_model": "phase42-model",
                 "text_hash": "alpha",
                 "vector_rowid": 1,
@@ -285,6 +289,7 @@ def test_embedded_surreal_hnsw_returns_nearest_neighbor_without_scan_table(
             {
                 "schema_version": "42.1.0",
                 "chunk_id": "chunk-beta",
+                "chunk_strategy": "contextual_512_50",
                 "embedding_model": "phase42-model",
                 "text_hash": "beta",
                 "vector_rowid": 2,
@@ -292,6 +297,7 @@ def test_embedded_surreal_hnsw_returns_nearest_neighbor_without_scan_table(
                 "metadata": {},
             },
         )
+        connection.query("REBUILD INDEX embeddings_hnsw_idx ON TABLE embeddings;")
 
         engine = _engine_class()(connection, model_name="phase42-model", embedding_dimension=3)
         monkeypatch.setattr(engine, "encode", lambda text: [1.0, 0.0, 0.0])

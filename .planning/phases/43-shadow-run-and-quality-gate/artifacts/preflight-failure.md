@@ -88,12 +88,18 @@ The first remediation pass has now been implemented in code:
   payload;
 - primary metadata/vector/graph-node writes use batched `INSERT INTO ... $rows`
   instead of per-row Surreal calls.
+- SQLite vector table discovery now walks all discovered
+  `(chunk_strategy, embedding_model)` pairs instead of hard-coding
+  `contextual_512_50_multilingual_e5_large`; Surreal embeddings now preserve
+  `chunk_strategy` and use `(chunk_strategy, embedding_model, chunk_id)` record
+  identity.
 
 Remaining before a trusted Phase 43 cutover attempt:
 
 1. Avoid in-place `explicit_replace` for embedded-local rehearsals; use a fresh
    target path or a physical target reset.
-2. Discover and preserve all `(chunk_strategy, embedding_model)` vector table
-   pairs instead of hard-coding one suffix.
+2. Rebuild retrieval indexes after bulk migration before running native HNSW
+   shadow queries; embedded Surreal HNSW does not see rows inserted after index
+   creation until `REBUILD INDEX`.
 3. Measure the fresh-target SurrealKV size after `vector_components` removal and
    batched writes before accepting the target for shadow-run preflight.

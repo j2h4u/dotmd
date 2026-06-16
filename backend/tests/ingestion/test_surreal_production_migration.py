@@ -15,6 +15,7 @@ from tests.fixtures.surreal_native import (
 from tests.ingestion.test_surreal_transform_only_migration import (
     _create_transform_only_fixture,
     _FakeFeedbackProvider,
+    _serialize_embedding,
     _write_feedback_export,
     _write_gate_report,
     _write_graph_export,
@@ -200,6 +201,112 @@ def test_streaming_embedding_rows_normalize_missing_text_hash(tmp_path: Path) ->
 
     assert streamed[0]["text_hash"] == ""
     assert materialized["embeddings"][0]["text_hash"] == ""
+
+
+def test_migration_discovers_multiple_chunk_strategy_model_pairs(tmp_path: Path) -> None:
+    from dotmd.ingestion.migrate_surreal import (  # type: ignore[import-not-found]
+        SurrealTargetMode,
+        build_surreal_migration_manifest,
+        iter_sqlite_embedding_rows_for_surreal,
+        load_sqlite_rows_for_surreal,
+    )
+
+    inputs = _build_inputs(tmp_path)
+    with sqlite3.connect(inputs["sqlite_snapshot_path"]) as conn:
+        conn.executescript("""
+            CREATE TABLE chunks_heading_512_50 (
+                chunk_id TEXT PRIMARY KEY,
+                heading_hierarchy TEXT NOT NULL,
+                level INTEGER NOT NULL,
+                text TEXT NOT NULL
+            );
+            CREATE TABLE chunk_source_provenance_heading_512_50 (
+                chunk_id TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                document_ref TEXT NOT NULL,
+                source_unit_refs TEXT NOT NULL,
+                chunk_strategy TEXT NOT NULL,
+                parser_name TEXT,
+                PRIMARY KEY (chunk_id, namespace, document_ref)
+            );
+            CREATE TABLE chunk_file_paths_heading_512_50 (
+                chunk_id TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                PRIMARY KEY (chunk_id, file_path, chunk_index)
+            );
+            CREATE TABLE vec_meta_heading_512_50_other_model (
+                rowid INTEGER PRIMARY KEY,
+                chunk_id TEXT NOT NULL UNIQUE,
+                text_hash TEXT
+            );
+            CREATE TABLE vec_chunks_heading_512_50_other_model (
+                rowid INTEGER PRIMARY KEY,
+                embedding BLOB NOT NULL
+            );
+            CREATE TABLE vec_config_heading_512_50_other_model (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            CREATE TABLE embed_fingerprints_heading_512_50_other_model (
+                chunk_id TEXT PRIMARY KEY,
+                fingerprint TEXT NOT NULL
+            );
+            CREATE TABLE meta_fingerprints_heading_512_50_other_model (
+                file_path TEXT PRIMARY KEY,
+                meta_checksum TEXT NOT NULL
+            );
+        """)
+        conn.execute(
+            "INSERT INTO chunks_heading_512_50 VALUES (?, ?, ?, ?)",
+            ("heading:chunk", '["Heading"]', 1, "Heading body"),
+        )
+        conn.execute(
+            "INSERT INTO chunk_source_provenance_heading_512_50 VALUES (?, ?, ?, ?, ?, ?)",
+            ("heading:chunk", "filesystem", "/tmp/Doc Two.md", '["unit:3"]', "heading_512_50", "markdown"),
+        )
+        conn.execute(
+            "INSERT INTO chunk_file_paths_heading_512_50 VALUES (?, ?, ?)",
+            ("heading:chunk", "/tmp/Doc Two.md", 2),
+        )
+        conn.execute(
+            "INSERT INTO vec_meta_heading_512_50_other_model VALUES (?, ?, ?)",
+            (1, "heading:chunk", "hash-heading"),
+        )
+        conn.execute(
+            "INSERT INTO vec_chunks_heading_512_50_other_model VALUES (?, ?)",
+            (1, _serialize_embedding([0.7, 0.8, 0.9])),
+        )
+        conn.execute(
+            "INSERT INTO vec_config_heading_512_50_other_model VALUES ('dim', '3'), ('model', 'vendor/other-model')"
+        )
+        conn.execute(
+            "INSERT INTO embed_fingerprints_heading_512_50_other_model VALUES (?, ?)",
+            ("heading:chunk", "embed-heading"),
+        )
+        conn.execute(
+            "INSERT INTO meta_fingerprints_heading_512_50_other_model VALUES (?, ?)",
+            ("/tmp/Doc Two.md", "meta-heading"),
+        )
+
+    manifest = build_surreal_migration_manifest(
+        sqlite_snapshot_path=inputs["sqlite_snapshot_path"],
+        graph_export_path=inputs["graph_export_path"],
+        feedback_export_path=inputs["feedback_export_path"],
+        target_url=f"surrealkv://{tmp_path / 'multi.db'}",
+        target_mode=SurrealTargetMode.EMBEDDED_LOCAL,
+    )
+    materialized = load_sqlite_rows_for_surreal(inputs["sqlite_snapshot_path"])
+    streamed = list(iter_sqlite_embedding_rows_for_surreal(inputs["sqlite_snapshot_path"]))
+
+    assert manifest.expected_counts["chunks"] == 3
+    assert manifest.expected_counts["embeddings"] == 3
+    assert {row["chunk_strategy"] for row in streamed} == {"contextual_512_50", "heading_512_50"}
+    assert {row["embedding_model"] for row in streamed} == {
+        "multilingual-e5-large",
+        "vendor/other-model",
+    }
+    assert materialized["embeddings"][-1]["chunk_strategy"] == "heading_512_50"
 
 
 def test_phase42_fixture_applies_retrieval_schema_for_real_embedded_targets(tmp_path: Path) -> None:

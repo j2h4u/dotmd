@@ -27,7 +27,7 @@ WHERE chunk_strategy = $chunk_strategy;
 _PRECONDITION_STATEMENT = """
 SELECT embedding_model, array::len(embedding) AS embedding_dimension
 FROM embeddings
-WHERE $active_chunk_ids CONTAINS chunk_id
+WHERE chunk_strategy = $chunk_strategy
   AND embedding_model = $embedding_model;
 """.strip()
 
@@ -142,7 +142,7 @@ class SurrealVectorSearchEngine(SemanticSearchEngine):
         rows = self._connection.query(
             _PRECONDITION_STATEMENT,
             {
-                "active_chunk_ids": active_chunk_ids,
+                "chunk_strategy": self._chunk_strategy,
                 "embedding_model": self._model_name,
             },
         )
@@ -203,12 +203,18 @@ class SurrealVectorSearchEngine(SemanticSearchEngine):
 
     def _build_search_statement(self, top_k: int) -> str:
         return f"""
-SELECT chunk_id,
-    vector::similarity::cosine(embedding, $qvec) AS score
-FROM embeddings
+SELECT chunk_id, score
+FROM (
+    SELECT chunk_id,
+        chunk_strategy,
+        embedding_model,
+        vector::similarity::cosine(embedding, $qvec) AS score
+    FROM embeddings
+    WHERE embedding <|{top_k},{self._hnsw_ef}|> $qvec
+)
 WHERE embedding_model = $embedding_model
+  AND chunk_strategy = $chunk_strategy
   AND $active_chunk_ids CONTAINS chunk_id
-  AND embedding <|{top_k},{self._hnsw_ef}|> $qvec
 ORDER BY score DESC, chunk_id ASC
 LIMIT $limit;
 """.strip()
@@ -246,6 +252,7 @@ LIMIT $limit;
                 self._build_search_statement(top_k),
                 {
                     "embedding_model": self._model_name,
+                    "chunk_strategy": self._chunk_strategy,
                     "active_chunk_ids": active_chunk_ids,
                     "qvec": query_embedding,
                     "limit": top_k,

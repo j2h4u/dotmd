@@ -501,6 +501,7 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
             fields=(
                 _field("schema_version", "string"),
                 _field("chunk_id", "string"),
+                _field("chunk_strategy", "string"),
                 _field("embedding_model", "string"),
                 _field("text_hash", "string"),
                 _field("vector_rowid", "int"),
@@ -508,7 +509,14 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
                 _field("metadata", "object", required=False, flexible_json=True),
             ),
             indexes=(
-                _index("embeddings_chunk_model_idx", "chunk_id", "embedding_model", unique=True),
+                _index(
+                    "embeddings_strategy_chunk_model_idx",
+                    "chunk_strategy",
+                    "chunk_id",
+                    "embedding_model",
+                    unique=True,
+                ),
+                _index("embeddings_strategy_model_idx", "chunk_strategy", "embedding_model"),
                 _index("embeddings_text_hash_idx", "text_hash"),
             ),
         ),
@@ -518,13 +526,20 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
             fields=(
                 _field("schema_version", "string"),
                 _field("chunk_id", "string"),
+                _field("chunk_strategy", "string"),
+                _field("embedding_model", "string"),
                 _field("component", "string"),
                 _field("embedding", "array<float>"),
                 _field("metadata", "object", required=False, flexible_json=True),
             ),
             indexes=(
                 _index(
-                    "vector_components_chunk_component_idx", "chunk_id", "component", unique=True
+                    "vector_components_strategy_model_chunk_component_idx",
+                    "chunk_strategy",
+                    "embedding_model",
+                    "chunk_id",
+                    "component",
+                    unique=True,
                 ),
             ),
             optional=True,
