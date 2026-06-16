@@ -788,6 +788,8 @@ class SurrealGraphStore:
         for row in rows:
             payload = dict(row)
             payload.pop("id", None)
+            payload.setdefault("schema_version", "41.1.0")
+            payload.setdefault("metadata", {})
             payload.setdefault("original_entity_name", str(payload.get("name", "")))
             payload["id"] = self._codec.encode("entities", str(payload["name"]))
             payloads.append(payload)
@@ -798,6 +800,8 @@ class SurrealGraphStore:
         payloads: list[dict[str, Any]] = []
         for row in rows:
             payload = dict(row)
+            payload.setdefault("schema_version", "41.1.0")
+            payload.setdefault("metadata", {})
             payload.setdefault("rel_type", payload.get("relation_type"))
             payload.setdefault("relation_type", payload.get("rel_type"))
             relation_id = str(payload.pop("relation_id"))
