@@ -25,7 +25,6 @@ from dotmd.ingestion.migrate_surreal import (
     SurrealTargetMode,
     SurrealVerificationDepth,
     _write_progress_snapshot,
-    build_surreal_migration_manifest,
     run_surreal_migration,
     verify_surreal_migration_target,
 )
@@ -37,6 +36,7 @@ from dotmd.storage.surreal_ops import (
     classify_surreal_migration_report,
     write_surreal_migration_evidence_reports,
 )
+from dotmd.storage.surreal_schema import SURREAL_SCHEMA_VERSION
 
 
 @dataclass(slots=True, frozen=True)
@@ -280,6 +280,94 @@ def _runner_progress_report(
     return report, checkpoint
 
 
+def _checkpoint_from_progress_payload(
+    payload: dict[str, Any],
+) -> SurrealMigrationPhaseCheckpoint | None:
+    phase_name = payload.get("phase_name")
+    if not isinstance(phase_name, str):
+        return None
+    try:
+        normalized_phase_name = SurrealMigrationPhaseName(phase_name)
+    except ValueError:
+        return None
+    return SurrealMigrationPhaseCheckpoint(
+        phase_name=normalized_phase_name,
+        planned_count=int(payload.get("planned_count") or 0),
+        applied_count=int(payload.get("applied_count") or 0),
+        verified_count=int(payload.get("verified_count") or 0),
+        status=str(payload.get("status") or "unknown"),
+        error=payload.get("error") if isinstance(payload.get("error"), str) else None,
+    )
+
+
+def _load_existing_progress_checkpoints(
+    progress_json: Path | None,
+) -> list[SurrealMigrationPhaseCheckpoint]:
+    if progress_json is None or not progress_json.exists():
+        return []
+    try:
+        payload = json.loads(progress_json.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(payload, dict):
+        return []
+    checkpoints = payload.get("phase_checkpoints")
+    if not isinstance(checkpoints, list):
+        return []
+    loaded: list[SurrealMigrationPhaseCheckpoint] = []
+    seen: set[SurrealMigrationPhaseName] = set()
+    for checkpoint_payload in checkpoints:
+        if not isinstance(checkpoint_payload, dict):
+            continue
+        checkpoint = _checkpoint_from_progress_payload(checkpoint_payload)
+        if checkpoint is None or checkpoint.phase_name in seen:
+            continue
+        loaded.append(checkpoint)
+        seen.add(checkpoint.phase_name)
+    return loaded
+
+
+def _write_source_capture_progress(
+    *,
+    config: SurrealMigrationRunnerConfig,
+    mode: SurrealMigrationMode,
+    target_mode: SurrealTargetMode,
+    status: str,
+    applied_count: int,
+    planned_count: int,
+) -> SurrealMigrationPhaseCheckpoint:
+    checkpoint = SurrealMigrationPhaseCheckpoint(
+        phase_name=SurrealMigrationPhaseName.SOURCE_CAPTURE,
+        planned_count=max(1, planned_count),
+        applied_count=applied_count,
+        verified_count=applied_count if status == "applied" else 0,
+        status=status,
+    )
+    report = SurrealMigrationReport(
+        schema_version=SURREAL_SCHEMA_VERSION,
+        mode=mode,
+        status=mode.value,
+        target_mode=target_mode,
+        overwrite_policy=SurrealOverwritePolicy.REFUSE,
+        target_url=config.target_url,
+        target_namespace=config.target_namespace,
+        target_database=config.target_database,
+        source_capture_manifest=None,
+        phase_checkpoints=[
+            *[
+                existing_checkpoint
+                for existing_checkpoint in _load_existing_progress_checkpoints(
+                    config.progress_json
+                )
+                if existing_checkpoint.phase_name is not SurrealMigrationPhaseName.SOURCE_CAPTURE
+            ],
+            checkpoint,
+        ],
+    )
+    _write_progress_snapshot(config.progress_json, report=report, checkpoint=checkpoint)
+    return checkpoint
+
+
 def _copy_file_with_progress(
     source: Path,
     destination: Path,
@@ -355,6 +443,7 @@ def _rehearse_restore(
     overwrite_policy: str,
     expected_counts: dict[str, int],
     migration_report: Any | None = None,
+    additional_checkpoints: list[SurrealMigrationPhaseCheckpoint] | None = None,
 ) -> tuple[SurrealRestoreManifest, SurrealMigrationPhaseCheckpoint | None]:
     expected = _counts_from_expected_counts(expected_counts)
     target_path = config.target_url.removeprefix("surrealkv://")
@@ -408,6 +497,7 @@ def _rehearse_restore(
         phase=SurrealMigrationPhaseName.RESTORE_REHEARSAL,
         planned_count=planned_bytes,
         migration_report=migration_report,
+        additional_checkpoints=additional_checkpoints,
     )
     _write_progress_snapshot(
         config.progress_json,
@@ -581,47 +671,28 @@ def run_migration_command(config: SurrealMigrationRunnerConfig) -> SurrealMigrat
     if mode is SurrealMigrationMode.APPLY and not config.target_url:
         raise ValueError("target_url is required for apply mode")
 
-    load_graph_rows_from_json(config.graph_export_json)
-    load_feedback_rows_from_json(config.feedback_export_json)
-
-    manifest = build_surreal_migration_manifest(
-        sqlite_snapshot_path=config.sqlite_snapshot,
-        graph_export_path=config.graph_export_json,
-        feedback_export_path=config.feedback_export_json,
-        target_url=config.target_url
-        or f"surrealkv://{config.sqlite_snapshot.with_suffix('.surreal.db')}",
-        target_mode=target_mode,
-        target_namespace=config.target_namespace,
-        target_database=config.target_database,
+    source_capture_planned_bytes = (
+        config.sqlite_snapshot.stat().st_size
+        + config.graph_export_json.stat().st_size
+        + config.feedback_export_json.stat().st_size
     )
-    if config.manifest_json is not None:
-        config.manifest_json.parent.mkdir(parents=True, exist_ok=True)
-        config.manifest_json.write_text(
-            json.dumps(
-                _manifest_to_jsonable(manifest), ensure_ascii=False, indent=2, sort_keys=True
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-    if config.source_capture_manifest_json is not None:
-        config.source_capture_manifest_json.parent.mkdir(parents=True, exist_ok=True)
-        config.source_capture_manifest_json.write_text(
-            json.dumps(
-                asdict(manifest.source_capture_manifest),
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
+    source_capture_checkpoint = _write_source_capture_progress(
+        config=config,
+        mode=mode,
+        target_mode=target_mode,
+        status="running",
+        applied_count=0,
+        planned_count=source_capture_planned_bytes,
+    )
+
+    target_url = config.target_url or f"surrealkv://{config.sqlite_snapshot.with_suffix('.surreal.db')}"
 
     migration_report = run_surreal_migration(
         mode=mode,
         sqlite_snapshot_path=config.sqlite_snapshot,
         graph_export_path=config.graph_export_json,
         feedback_export_path=config.feedback_export_json,
-        target_url=manifest.target_url,
+        target_url=target_url,
         target_mode=target_mode,
         target_namespace=config.target_namespace,
         target_database=config.target_database,
@@ -634,14 +705,59 @@ def run_migration_command(config: SurrealMigrationRunnerConfig) -> SurrealMigrat
         progress_path=config.progress_json,
         resume_from_progress=config.resume_from_progress,
     )
+    source_capture_checkpoint = _write_source_capture_progress(
+        config=config,
+        mode=mode,
+        target_mode=target_mode,
+        status="applied" if migration_report.source_capture_manifest is not None else "failed",
+        applied_count=max(1, source_capture_planned_bytes),
+        planned_count=source_capture_planned_bytes,
+    )
+    if config.manifest_json is not None:
+        manifest = SurrealMigrationManifest(
+            schema_version=migration_report.schema_version,
+            target_url=migration_report.target_url,
+            target_namespace=migration_report.target_namespace,
+            target_database=migration_report.target_database,
+            target_mode=migration_report.target_mode,
+            source_capture_manifest=migration_report.source_capture_manifest,
+            expected_counts=dict(migration_report.expected_counts),
+            unsupported_categories=list(migration_report.unsupported_categories),
+            recompute_forbidden=migration_report.recompute_forbidden,
+            expected_vector_dimension=migration_report.expected_vector_dimension,
+        )
+        config.manifest_json.parent.mkdir(parents=True, exist_ok=True)
+        config.manifest_json.write_text(
+            json.dumps(
+                _manifest_to_jsonable(manifest), ensure_ascii=False, indent=2, sort_keys=True
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    if (
+        config.source_capture_manifest_json is not None
+        and migration_report.source_capture_manifest is not None
+    ):
+        config.source_capture_manifest_json.parent.mkdir(parents=True, exist_ok=True)
+        config.source_capture_manifest_json.write_text(
+            json.dumps(
+                asdict(migration_report.source_capture_manifest),
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
     restore_manifest, restore_checkpoint = _rehearse_restore(
         config=config,
         mode=mode,
         target_mode=target_mode,
         overwrite_policy=overwrite_policy,
-        expected_counts=manifest.expected_counts,
+        expected_counts=migration_report.expected_counts,
         migration_report=migration_report,
+        additional_checkpoints=[source_capture_checkpoint],
     )
     _write_reporting_progress(
         config=config,
@@ -649,7 +765,10 @@ def run_migration_command(config: SurrealMigrationRunnerConfig) -> SurrealMigrat
         target_mode=target_mode,
         status="running",
         migration_report=migration_report,
-        additional_checkpoints=[restore_checkpoint] if restore_checkpoint is not None else None,
+        additional_checkpoints=[
+            source_capture_checkpoint,
+            *([restore_checkpoint] if restore_checkpoint is not None else []),
+        ],
     )
     evidence = _build_evidence_report(
         config=config,
@@ -678,7 +797,10 @@ def run_migration_command(config: SurrealMigrationRunnerConfig) -> SurrealMigrat
         target_mode=target_mode,
         status="applied",
         migration_report=migration_report,
-        additional_checkpoints=[restore_checkpoint] if restore_checkpoint is not None else None,
+        additional_checkpoints=[
+            source_capture_checkpoint,
+            *([restore_checkpoint] if restore_checkpoint is not None else []),
+        ],
     )
 
     return SurrealMigrationRunnerResult(

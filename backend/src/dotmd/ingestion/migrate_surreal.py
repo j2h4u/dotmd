@@ -88,6 +88,7 @@ class SurrealOverwritePolicy(StrEnum):
 
 
 class SurrealMigrationPhaseName(StrEnum):
+    SOURCE_CAPTURE = "source_capture"
     SCHEMA = "schema"
     DOCUMENTS = "documents"
     SOURCE_UNITS = "source_units"
@@ -1395,7 +1396,7 @@ def _write_progress_snapshot(
     overall_percent = (
         round((overall_applied / overall_planned) * 100, 2) if overall_planned else 100.0
     )
-    overall_rate = overall_applied / elapsed_seconds if elapsed_seconds > 0 else 0.0
+    overall_rate = current_rate
     overall_eta_seconds = (
         (overall_planned - overall_applied) / overall_rate
         if overall_rate > 0 and overall_planned > overall_applied

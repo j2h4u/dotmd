@@ -168,7 +168,13 @@ def test_run_migration_command_writes_json_markdown_and_preserves_non_ascii(
         for checkpoint in progress_payload["phase_checkpoints"]
         if checkpoint["status"] == "applied"
     }
-    assert {"documents", "verification", "restore_rehearsal", "reporting"} <= applied_phases
+    assert {
+        "source_capture",
+        "documents",
+        "verification",
+        "restore_rehearsal",
+        "reporting",
+    } <= applied_phases
 
 
 def test_run_migration_command_refuses_unsafe_apply_without_gate_or_target_inputs(
