@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import resource
 import shutil
 import sqlite3
 import struct
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -164,6 +167,7 @@ class SurrealMigrationReport:
     rollback_evidence: str | None = None
     gate_status: str = "not_required"
     errors: list[str] = field(default_factory=list)
+    started_at_monotonic: float = field(default_factory=time.monotonic)
 
 
 def _sqlite_connect_read_only(db_path: Path) -> sqlite3.Connection:
@@ -1285,18 +1289,30 @@ def _write_progress_snapshot(
 ) -> None:
     if progress_path is None:
         return
+    current_applied = applied_count if applied_count is not None else checkpoint.applied_count
+    current_percent = (
+        round((current_applied / checkpoint.planned_count) * 100, 2)
+        if checkpoint.planned_count
+        else 100.0
+    )
     payload = {
         "schema_version": report.schema_version,
         "mode": report.mode.value,
         "status": report.status,
         "target_mode": report.target_mode.value,
         "target_url": report.target_url,
+        "elapsed_seconds": round(time.monotonic() - report.started_at_monotonic, 3),
+        "progress_updated_at": datetime.now(UTC)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z"),
+        "process_rss_bytes": _process_rss_bytes(),
+        "target_size_bytes": _target_size_bytes(report.target_url),
         "current_phase": checkpoint.phase_name.value,
         "current_phase_status": checkpoint.status,
         "current_phase_planned_count": checkpoint.planned_count,
-        "current_phase_applied_count": (
-            applied_count if applied_count is not None else checkpoint.applied_count
-        ),
+        "current_phase_applied_count": current_applied,
+        "current_phase_percent": current_percent,
         "last_successful_phase": (
             report.last_successful_phase.value if report.last_successful_phase else None
         ),
@@ -1412,6 +1428,31 @@ def _physically_reset_embedded_target(target_url: str) -> None:
     target_path.unlink()
 
 
+def _target_size_bytes(target_url: str) -> int | None:
+    if not target_url.startswith("surrealkv://"):
+        return None
+    try:
+        target_path = _embedded_target_path(target_url)
+    except ValueError:
+        return None
+    if not target_path.exists():
+        return 0
+    if target_path.is_file():
+        return target_path.stat().st_size
+    total = 0
+    for root, _dirs, files in os.walk(target_path):
+        for file_name in files:
+            try:
+                total += (Path(root) / file_name).stat().st_size
+            except OSError:
+                continue
+    return total
+
+
+def _process_rss_bytes() -> int:
+    return int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) * 1024
+
+
 def _write_phase(
     checkpoint: SurrealMigrationPhaseCheckpoint,
     *,
@@ -1492,6 +1533,173 @@ def _write_iterable_phase(
                 checkpoint=checkpoint,
                 applied_count=applied_count,
             )
+    except Exception as exc:
+        checkpoint.status = "failed"
+        checkpoint.error = str(exc)
+        report.failed_phase = checkpoint.phase_name
+        report.errors.append(str(exc))
+        checkpoint.applied_count = applied_count
+        _write_progress_snapshot(
+            progress_path,
+            report=report,
+            checkpoint=checkpoint,
+            applied_count=applied_count,
+        )
+        raise
+    checkpoint.applied_count = applied_count
+    checkpoint.status = "applied"
+    checkpoint.verified_count = applied_count
+    report.last_successful_phase = checkpoint.phase_name
+
+
+def _write_list_phase(
+    checkpoint: SurrealMigrationPhaseCheckpoint,
+    *,
+    report: SurrealMigrationReport,
+    rows: list[dict[str, Any]],
+    writer: Any,
+    batch_size: int = 1000,
+    progress_path: Path | None = None,
+    resume_phase_names: set[str] | None = None,
+) -> None:
+    if checkpoint.phase_name.value in (resume_phase_names or set()):
+        checkpoint.applied_count = checkpoint.planned_count
+        checkpoint.verified_count = checkpoint.planned_count
+        checkpoint.status = "applied"
+        report.last_successful_phase = checkpoint.phase_name
+        _write_progress_snapshot(progress_path, report=report, checkpoint=checkpoint)
+        return
+    applied_count = 0
+    checkpoint.status = "running"
+    _write_progress_snapshot(
+        progress_path,
+        report=report,
+        checkpoint=checkpoint,
+        applied_count=applied_count,
+    )
+    try:
+        for offset in range(0, len(rows), batch_size):
+            batch = rows[offset : offset + batch_size]
+            applied_count += int(writer(batch))
+            _write_progress_snapshot(
+                progress_path,
+                report=report,
+                checkpoint=checkpoint,
+                applied_count=applied_count,
+            )
+    except Exception as exc:
+        checkpoint.status = "failed"
+        checkpoint.error = str(exc)
+        report.failed_phase = checkpoint.phase_name
+        report.errors.append(str(exc))
+        checkpoint.applied_count = applied_count
+        _write_progress_snapshot(
+            progress_path,
+            report=report,
+            checkpoint=checkpoint,
+            applied_count=applied_count,
+        )
+        raise
+    checkpoint.applied_count = applied_count
+    checkpoint.status = "applied"
+    checkpoint.verified_count = applied_count
+    report.last_successful_phase = checkpoint.phase_name
+
+
+def _expanded_graph_rows_for_replace(graph_rows: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    section_rows = list(graph_rows["sections"])
+    section_ids = {str(row.get("original_id") or row.get("chunk_id")) for row in section_rows}
+    tag_rows = list(graph_rows["tags"])
+    tag_names = {str(row.get("name")) for row in tag_rows}
+    entity_rows = list(graph_rows["entities"])
+    entity_names = {str(row.get("name")) for row in entity_rows}
+
+    for relation in graph_rows["relations"]:
+        source_id = str(relation["source_id"])
+        if source_id not in section_ids:
+            section_rows.append(
+                {
+                    "original_id": source_id,
+                    "document_ref": source_id,
+                    "metadata": {},
+                }
+            )
+            section_ids.add(source_id)
+
+        relation_type = str(relation.get("relation_type") or relation.get("rel_type"))
+        target_id = str(relation["target_id"])
+        if relation_type == "HAS_TAG":
+            if target_id not in tag_names:
+                tag_rows.append({"original_id": target_id, "name": target_id, "metadata": {}})
+                tag_names.add(target_id)
+        elif target_id not in entity_names:
+            entity_rows.append(
+                {
+                    "original_id": target_id,
+                    "original_entity_name": target_id,
+                    "name": target_id,
+                    "entity_type": "Entity",
+                    "source": source_id,
+                    "metadata": {},
+                }
+            )
+            entity_names.add(target_id)
+
+    return {
+        "files": list(graph_rows["files"]),
+        "sections": section_rows,
+        "tags": tag_rows,
+        "entities": entity_rows,
+        "relations": list(graph_rows["relations"]),
+    }
+
+
+def _write_graph_phase(
+    checkpoint: SurrealMigrationPhaseCheckpoint,
+    *,
+    report: SurrealMigrationReport,
+    graph_store: SurrealGraphStore,
+    graph_rows: dict[str, Any],
+    batch_size: int = 1000,
+    progress_path: Path | None = None,
+    resume_phase_names: set[str] | None = None,
+) -> None:
+    if checkpoint.phase_name.value in (resume_phase_names or set()):
+        checkpoint.applied_count = checkpoint.planned_count
+        checkpoint.verified_count = checkpoint.planned_count
+        checkpoint.status = "applied"
+        report.last_successful_phase = checkpoint.phase_name
+        _write_progress_snapshot(progress_path, report=report, checkpoint=checkpoint)
+        return
+    rows = _expanded_graph_rows_for_replace(graph_rows)
+    checkpoint.planned_count = sum(len(value) for value in rows.values())
+    applied_count = 0
+    checkpoint.status = "running"
+    _write_progress_snapshot(
+        progress_path,
+        report=report,
+        checkpoint=checkpoint,
+        applied_count=applied_count,
+    )
+    writers = (
+        ("files", graph_store.replace_file_rows),
+        ("sections", graph_store.replace_section_rows),
+        ("tags", graph_store.replace_tag_rows),
+        ("entities", graph_store.replace_entity_rows),
+        ("relations", graph_store.replace_relation_rows),
+    )
+    try:
+        for key, writer in writers:
+            category_rows = rows[key]
+            for offset in range(0, len(category_rows), batch_size):
+                batch = category_rows[offset : offset + batch_size]
+                applied_count += int(writer(batch))
+                _write_progress_snapshot(
+                    progress_path,
+                    report=report,
+                    checkpoint=checkpoint,
+                    applied_count=applied_count,
+                )
     except Exception as exc:
         checkpoint.status = "failed"
         checkpoint.error = str(exc)
@@ -1913,10 +2121,11 @@ def run_surreal_migration(
                 progress_path=progress_path,
                 resume_phase_names=resume_phase_names,
             )
-            _write_phase(
+            _write_list_phase(
                 phase_checkpoints["chunks"],
                 report=report,
-                writer=lambda: metadata_store.replace_chunk_rows(sqlite_rows["chunks"]),
+                rows=sqlite_rows["chunks"],
+                writer=metadata_store.replace_chunk_rows,
                 progress_path=progress_path,
                 resume_phase_names=resume_phase_names,
             )
@@ -1970,16 +2179,11 @@ def run_surreal_migration(
                 progress_path=progress_path,
                 resume_phase_names=resume_phase_names,
             )
-            _write_phase(
+            _write_graph_phase(
                 phase_checkpoints["graph"],
                 report=report,
-                writer=lambda: graph_store.replace_graph_rows(
-                    entities=graph_rows["entities"],
-                    relations=graph_rows["relations"],
-                    files=graph_rows["files"],
-                    sections=graph_rows["sections"],
-                    tags=graph_rows["tags"],
-                ),
+                graph_store=graph_store,
+                graph_rows=graph_rows,
                 progress_path=progress_path,
                 resume_phase_names=resume_phase_names,
             )

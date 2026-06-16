@@ -805,6 +805,10 @@ def test_apply_can_resume_from_progress_without_rewriting_completed_phases(
 
     assert first_report.status == "failed"
     progress_payload = json.loads(progress_path.read_text(encoding="utf-8"))
+    assert progress_payload["elapsed_seconds"] >= 0
+    assert progress_payload["process_rss_bytes"] > 0
+    assert progress_payload["target_size_bytes"] is not None
+    assert "current_phase_percent" in progress_payload
     applied_phases = {
         row["phase_name"]
         for row in progress_payload["phase_checkpoints"]
@@ -840,3 +844,47 @@ def test_apply_can_resume_from_progress_without_rewriting_completed_phases(
 
     assert second_report.status == "applied", second_report.errors
     assert second_report.committed_success is True
+
+
+def test_list_phase_progress_is_written_per_batch(tmp_path: Path) -> None:
+    from dotmd.ingestion import migrate_surreal as migrate_module  # type: ignore[import-not-found]
+
+    progress_path = tmp_path / "progress.json"
+    checkpoint = migrate_module.SurrealMigrationPhaseCheckpoint(
+        phase_name=migrate_module.SurrealMigrationPhaseName.CHUNKS,
+        planned_count=2501,
+    )
+    report = migrate_module.SurrealMigrationReport(
+        schema_version="test",
+        mode=migrate_module.SurrealMigrationMode.APPLY,
+        status="apply",
+        target_mode=migrate_module.SurrealTargetMode.EMBEDDED_LOCAL,
+        overwrite_policy=migrate_module.SurrealOverwritePolicy.REFUSE,
+        target_url=f"surrealkv://{tmp_path / 'target.db'}",
+        target_namespace="dotmd",
+        target_database="phase43",
+        source_capture_manifest=None,
+        phase_checkpoints=[checkpoint],
+    )
+    batch_lengths: list[int] = []
+
+    def _writer(rows):  # type: ignore[no-untyped-def]
+        batch_lengths.append(len(rows))
+        return len(rows)
+
+    migrate_module._write_list_phase(
+        checkpoint,
+        report=report,
+        rows=[{"n": i} for i in range(2501)],
+        writer=_writer,
+        batch_size=1000,
+        progress_path=progress_path,
+    )
+
+    progress_payload = json.loads(progress_path.read_text(encoding="utf-8"))
+    assert batch_lengths == [1000, 1000, 501]
+    assert progress_payload["current_phase"] == "chunks"
+    assert progress_payload["current_phase_applied_count"] == 2501
+    assert progress_payload["current_phase_percent"] == 100.0
+    assert progress_payload["elapsed_seconds"] >= 0
+    assert progress_payload["process_rss_bytes"] > 0
