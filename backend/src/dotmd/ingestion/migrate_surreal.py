@@ -1871,7 +1871,12 @@ def _defer_embedding_indexes_for_bulk_load(connection: SurrealConnection) -> int
     return removed
 
 
+def _relax_embedding_schema_for_bulk_load(connection: SurrealConnection) -> None:
+    connection.query("ALTER TABLE embeddings SCHEMALESS;")
+
+
 def _rebuild_retrieval_indexes(connection: SurrealConnection) -> int:
+    connection.query("ALTER TABLE embeddings SCHEMAFULL;")
     applied = 0
     for _index_name, statement in _DEFERRED_EMBEDDING_INDEX_DEFINITIONS:
         connection.query(statement)
@@ -2219,6 +2224,7 @@ def run_surreal_migration(
                     raise
             if not resume_phase_names or "embeddings" in resume_phase_names:
                 _defer_embedding_indexes_for_bulk_load(connection)
+                _relax_embedding_schema_for_bulk_load(connection)
             _upsert_schema_meta(connection)
 
             metadata_store = SurrealMetadataStore(connection)
@@ -2288,6 +2294,7 @@ def run_surreal_migration(
                 report=report,
                 rows=iter_sqlite_embedding_rows_for_surreal(Path(sqlite_snapshot_path)),
                 writer=vector_store.replace_embedding_rows,
+                batch_size=250,
                 progress_path=progress_path,
                 resume_phase_names=resume_phase_names,
             )
