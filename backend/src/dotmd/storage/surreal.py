@@ -834,6 +834,9 @@ class SurrealGraphStore:
             payload.setdefault("metadata", {})
             original_id = str(payload.get("original_id") or payload.get("chunk_id"))
             payload.setdefault("original_id", original_id)
+            payload["document_ref"] = str(
+                payload.get("document_ref") or payload.get("file_path") or original_id
+            )
             payload["id"] = self._codec.encode("sections", original_id)
             payloads.append(payload)
         self._connection.insert_rows("sections", payloads)
