@@ -7,6 +7,7 @@ import json
 import re
 import sqlite3
 import struct
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -199,6 +200,11 @@ def _fetch_all(
     return conn.execute(f"SELECT * FROM {safe_name}").fetchall()
 
 
+def _count_rows(conn: sqlite3.Connection, table_name: str, known_tables: set[str]) -> int:
+    safe_name = _validate_table_name(table_name, known_tables)
+    return int(conn.execute(f"SELECT COUNT(*) FROM {safe_name}").fetchone()[0])
+
+
 def _decode_embedding_blob(blob: bytes) -> list[float]:
     if not blob:
         return []
@@ -305,7 +311,17 @@ def _load_gate_report(path: Path) -> SurrealEmbeddedSafetyReport:
     )
 
 
-def load_sqlite_rows_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
+def _fetchmany_dicts(cursor: sqlite3.Cursor, *, batch_size: int) -> Iterator[dict[str, Any]]:
+    while rows := cursor.fetchmany(batch_size):
+        for row in rows:
+            yield dict(row)
+
+
+def load_sqlite_rows_for_surreal(
+    sqlite_snapshot_path: Path,
+    *,
+    include_vectors: bool = True,
+) -> dict[str, Any]:
     source_path = Path(sqlite_snapshot_path)
     with _sqlite_connect_read_only(source_path) as conn:
         known_tables = _discover_tables(conn)
@@ -332,24 +348,28 @@ def load_sqlite_rows_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
         checkpoint_rows = [
             dict(row) for row in _fetch_all(conn, "source_checkpoints", known_tables)
         ]
-        vec_meta_rows = [
-            dict(row)
-            for row in _fetch_all(
-                conn, "vec_meta_contextual_512_50_multilingual_e5_large", known_tables
-            )
-        ]
-        vec_chunk_rows = {
-            int(row["rowid"]): dict(row)
-            for row in _fetch_all(
-                conn, "vec_chunks_contextual_512_50_multilingual_e5_large", known_tables
-            )
-        }
-        vec_component_rows = [
-            dict(row)
-            for row in _fetch_all(
-                conn, "vec_components_contextual_512_50_multilingual_e5_large", known_tables
-            )
-        ]
+        vec_meta_rows: list[dict[str, Any]] = []
+        vec_chunk_rows: dict[int, dict[str, Any]] = {}
+        vec_component_rows: list[dict[str, Any]] = []
+        if include_vectors:
+            vec_meta_rows = [
+                dict(row)
+                for row in _fetch_all(
+                    conn, "vec_meta_contextual_512_50_multilingual_e5_large", known_tables
+                )
+            ]
+            vec_chunk_rows = {
+                int(row["rowid"]): dict(row)
+                for row in _fetch_all(
+                    conn, "vec_chunks_contextual_512_50_multilingual_e5_large", known_tables
+                )
+            }
+            vec_component_rows = [
+                dict(row)
+                for row in _fetch_all(
+                    conn, "vec_components_contextual_512_50_multilingual_e5_large", known_tables
+                )
+            ]
         vec_config_rows = [
             dict(row)
             for row in _fetch_all(
@@ -645,6 +665,137 @@ def load_sqlite_rows_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
     }
 
 
+def iter_sqlite_embedding_rows_for_surreal(
+    sqlite_snapshot_path: Path,
+    *,
+    batch_size: int = 1000,
+) -> Iterator[dict[str, Any]]:
+    source_path = Path(sqlite_snapshot_path)
+    with _sqlite_connect_read_only(source_path) as conn:
+        known_tables = _discover_tables(conn)
+        conn.row_factory = sqlite3.Row
+        vec_config_rows = [
+            dict(row)
+            for row in _fetch_all(
+                conn,
+                "vec_config_contextual_512_50_multilingual_e5_large",
+                known_tables,
+            )
+        ]
+        vec_config = {str(row["key"]): str(row["value"]) for row in vec_config_rows}
+        embedding_model = vec_config.get("model", "unknown-model")
+        meta_table = _validate_table_name(
+            "vec_meta_contextual_512_50_multilingual_e5_large",
+            known_tables,
+        )
+        vec_table = _validate_table_name(
+            "vec_chunks_contextual_512_50_multilingual_e5_large",
+            known_tables,
+        )
+        cursor = conn.execute(
+            f"SELECT m.rowid AS vector_rowid, m.chunk_id AS chunk_id, "
+            f"m.text_hash AS text_hash, v.embedding AS embedding "
+            f"FROM {meta_table} AS m LEFT JOIN {vec_table} AS v ON v.rowid = m.rowid "
+            f"ORDER BY m.rowid"
+        )
+        for row in _fetchmany_dicts(cursor, batch_size=batch_size):
+            yield {
+                "schema_version": SURREAL_SCHEMA_VERSION,
+                "chunk_id": str(row["chunk_id"]),
+                "original_chunk_id": str(row["chunk_id"]),
+                "embedding_model": embedding_model,
+                "text_hash": row["text_hash"],
+                "vector_rowid": int(row["vector_rowid"]),
+                "embedding": _decode_embedding_blob(row["embedding"] or b""),
+                "metadata": {},
+            }
+
+
+def iter_sqlite_vector_component_rows_for_surreal(
+    sqlite_snapshot_path: Path,
+    *,
+    batch_size: int = 1000,
+) -> Iterator[dict[str, Any]]:
+    source_path = Path(sqlite_snapshot_path)
+    with _sqlite_connect_read_only(source_path) as conn:
+        known_tables = _discover_tables(conn)
+        conn.row_factory = sqlite3.Row
+        table_name = _validate_table_name(
+            "vec_components_contextual_512_50_multilingual_e5_large",
+            known_tables,
+        )
+        cursor = conn.execute(f"SELECT * FROM {table_name}")
+        for row in _fetchmany_dicts(cursor, batch_size=batch_size):
+            yield {
+                "schema_version": SURREAL_SCHEMA_VERSION,
+                "chunk_id": str(row.get("chunk_id") or row.get("entity_id")),
+                "component": str(row["component"]),
+                "embedding": _decode_embedding_blob(row["embedding"]),
+                "metadata": {},
+            }
+
+
+def load_sqlite_stats_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
+    source_path = Path(sqlite_snapshot_path)
+    with _sqlite_connect_read_only(source_path) as conn:
+        known_tables = _discover_tables(conn)
+        vec_config_rows = [
+            dict(row)
+            for row in _fetch_all(
+                conn,
+                "vec_config_contextual_512_50_multilingual_e5_large",
+                known_tables,
+            )
+        ]
+        vec_config = {str(row["key"]): str(row["value"]) for row in vec_config_rows}
+        counts = {
+            "documents": _count_rows(conn, "source_documents", known_tables),
+            "source_units": _count_rows(conn, "source_unit_fingerprints", known_tables),
+            "chunks": _count_rows(conn, "chunks_contextual_512_50", known_tables),
+            "chunk_file_bindings": _count_rows(
+                conn,
+                "chunk_file_paths_contextual_512_50",
+                known_tables,
+            ),
+            "provenance": _count_rows(
+                conn,
+                "chunk_source_provenance_contextual_512_50",
+                known_tables,
+            ),
+            "bindings": _count_rows(conn, "resource_bindings", known_tables),
+            "fingerprints": (
+                _count_rows(conn, "chunk_fingerprints_contextual_512_50", known_tables)
+                + _count_rows(
+                    conn,
+                    "embed_fingerprints_contextual_512_50_multilingual_e5_large",
+                    known_tables,
+                )
+                + _count_rows(
+                    conn,
+                    "meta_fingerprints_contextual_512_50_multilingual_e5_large",
+                    known_tables,
+                )
+                + _count_rows(conn, "source_unit_fingerprints", known_tables)
+            ),
+            "embeddings": _count_rows(
+                conn,
+                "vec_meta_contextual_512_50_multilingual_e5_large",
+                known_tables,
+            ),
+            "vector_components": _count_rows(
+                conn,
+                "vec_components_contextual_512_50_multilingual_e5_large",
+                known_tables,
+            ),
+            "cursors": _count_rows(conn, "resource_bindings", known_tables),
+            "checkpoints": _count_rows(conn, "source_checkpoints", known_tables),
+        }
+    return {
+        "counts": counts,
+        "expected_vector_dimension": int(vec_config["dim"]) if "dim" in vec_config else None,
+    }
+
+
 def load_graph_rows_for_surreal(graph_export_path: Path) -> dict[str, Any]:
     payload = json.loads(Path(graph_export_path).read_text(encoding="utf-8"))
     rows = dict(payload.get("rows", {}))
@@ -717,6 +868,30 @@ def _build_expected_counts(
     graph_rows: dict[str, Any],
     feedback_rows: dict[str, Any],
 ) -> dict[str, int]:
+    return _build_expected_counts_from_sqlite_counts(
+        sqlite_counts={
+            "documents": len(sqlite_rows["documents"]),
+            "source_units": len(sqlite_rows["source_units"]),
+            "chunks": len(sqlite_rows["chunks"]),
+            "chunk_file_bindings": len(sqlite_rows["chunk_file_bindings"]),
+            "provenance": len(sqlite_rows["provenance"]),
+            "bindings": len(sqlite_rows["bindings"]),
+            "fingerprints": len(sqlite_rows["fingerprints"]),
+            "embeddings": len(sqlite_rows["embeddings"]),
+            "vector_components": len(sqlite_rows["vector_components"]),
+            "cursors": len(sqlite_rows["cursors"]),
+            "checkpoints": len(sqlite_rows["checkpoints"]),
+        },
+        graph_rows=graph_rows,
+        feedback_rows=feedback_rows,
+    )
+
+
+def _build_expected_counts_from_sqlite_counts(
+    sqlite_counts: dict[str, int],
+    graph_rows: dict[str, Any],
+    feedback_rows: dict[str, Any],
+) -> dict[str, int]:
     derived_section_ids = {str(row["source_id"]) for row in graph_rows["relations"]}
     derived_tag_ids = {
         str(row["target_id"])
@@ -724,23 +899,23 @@ def _build_expected_counts(
         if str(row.get("relation_type") or row.get("rel_type")) == "HAS_TAG"
     }
     return {
-        "documents": len(sqlite_rows["documents"]),
-        "source_units": len(sqlite_rows["source_units"]),
-        "chunks": len(sqlite_rows["chunks"]),
-        "chunk_file_bindings": len(sqlite_rows["chunk_file_bindings"]),
-        "provenance": len(sqlite_rows["provenance"]),
-        "bindings": len(sqlite_rows["bindings"]),
-        "fingerprints": len(sqlite_rows["fingerprints"]),
-        "embeddings": len(sqlite_rows["embeddings"]),
-        "vector_components": len(sqlite_rows["vector_components"]),
+        "documents": sqlite_counts["documents"],
+        "source_units": sqlite_counts["source_units"],
+        "chunks": sqlite_counts["chunks"],
+        "chunk_file_bindings": sqlite_counts["chunk_file_bindings"],
+        "provenance": sqlite_counts["provenance"],
+        "bindings": sqlite_counts["bindings"],
+        "fingerprints": sqlite_counts["fingerprints"],
+        "embeddings": sqlite_counts["embeddings"],
+        "vector_components": sqlite_counts["vector_components"],
         "graph_files": len(graph_rows["files"]),
         "graph_sections": max(len(graph_rows["sections"]), len(derived_section_ids)),
         "graph_entities": len(graph_rows["entities"]),
         "graph_tags": max(len(graph_rows["tags"]), len(derived_tag_ids)),
         "graph_relations": len(graph_rows["relations"]),
         "feedback": len(feedback_rows["rows"]),
-        "cursors": len(sqlite_rows["cursors"]),
-        "checkpoints": len(sqlite_rows["checkpoints"]),
+        "cursors": sqlite_counts["cursors"],
+        "checkpoints": sqlite_counts["checkpoints"],
     }
 
 
@@ -763,6 +938,27 @@ def _build_source_capture_manifest(
         "cursors": len(sqlite_rows["cursors"]),
         "checkpoints": len(sqlite_rows["checkpoints"]),
     }
+    return _build_source_capture_manifest_from_counts(
+        sqlite_snapshot_path=sqlite_snapshot_path,
+        sqlite_counts=sqlite_counts,
+        graph_export_path=graph_export_path,
+        graph_rows=graph_rows,
+        feedback_export_path=feedback_export_path,
+        feedback_rows=feedback_rows,
+        skew_policy=skew_policy,
+    )
+
+
+def _build_source_capture_manifest_from_counts(
+    *,
+    sqlite_snapshot_path: Path,
+    sqlite_counts: dict[str, int],
+    graph_export_path: Path,
+    graph_rows: dict[str, Any],
+    feedback_export_path: Path,
+    feedback_rows: dict[str, Any],
+    skew_policy: str,
+) -> SurrealSourceCaptureManifest:
     graph_counts = {
         "entities": len(graph_rows["entities"]),
         "relations": len(graph_rows["relations"]),
@@ -804,7 +1000,8 @@ def build_surreal_migration_manifest(
     target_database: str = "phase41_migration",
     skew_policy: str = "bounded_skew_accepted",
 ) -> SurrealMigrationManifest:
-    sqlite_rows = load_sqlite_rows_for_surreal(Path(sqlite_snapshot_path))
+    sqlite_stats = load_sqlite_stats_for_surreal(Path(sqlite_snapshot_path))
+    sqlite_counts = sqlite_stats["counts"]
     graph_rows = load_graph_rows_for_surreal(Path(graph_export_path))
     feedback_rows = load_feedback_rows_for_surreal(Path(feedback_export_path))
     return SurrealMigrationManifest(
@@ -813,19 +1010,23 @@ def build_surreal_migration_manifest(
         target_namespace=target_namespace,
         target_database=target_database,
         target_mode=target_mode,
-        source_capture_manifest=_build_source_capture_manifest(
+        source_capture_manifest=_build_source_capture_manifest_from_counts(
             sqlite_snapshot_path=Path(sqlite_snapshot_path),
-            sqlite_rows=sqlite_rows,
+            sqlite_counts=sqlite_counts,
             graph_export_path=Path(graph_export_path),
             graph_rows=graph_rows,
             feedback_export_path=Path(feedback_export_path),
             feedback_rows=feedback_rows,
             skew_policy=skew_policy,
         ),
-        expected_counts=_build_expected_counts(sqlite_rows, graph_rows, feedback_rows),
+        expected_counts=_build_expected_counts_from_sqlite_counts(
+            sqlite_counts,
+            graph_rows,
+            feedback_rows,
+        ),
         unsupported_categories=list(_STABLE_UNSUPPORTED_CATEGORIES),
         recompute_forbidden=True,
-        expected_vector_dimension=sqlite_rows["expected_vector_dimension"],
+        expected_vector_dimension=sqlite_stats["expected_vector_dimension"],
     )
 
 
@@ -975,6 +1176,37 @@ def _write_phase(
 ) -> None:
     try:
         applied_count = int(writer())
+    except Exception as exc:
+        checkpoint.status = "failed"
+        checkpoint.error = str(exc)
+        report.failed_phase = checkpoint.phase_name
+        report.errors.append(str(exc))
+        raise
+    checkpoint.applied_count = applied_count
+    checkpoint.status = "applied"
+    checkpoint.verified_count = applied_count
+    report.last_successful_phase = checkpoint.phase_name
+
+
+def _write_iterable_phase(
+    checkpoint: SurrealMigrationPhaseCheckpoint,
+    *,
+    report: SurrealMigrationReport,
+    rows: Iterator[dict[str, Any]],
+    writer: Any,
+    batch_size: int = 1000,
+) -> None:
+    applied_count = 0
+    batch: list[dict[str, Any]] = []
+    try:
+        for row in rows:
+            batch.append(row)
+            if len(batch) < batch_size:
+                continue
+            applied_count += int(writer(batch))
+            batch = []
+        if batch:
+            applied_count += int(writer(batch))
     except Exception as exc:
         checkpoint.status = "failed"
         checkpoint.error = str(exc)
@@ -1187,9 +1419,6 @@ def run_surreal_migration(
         )
 
     report = _report_from_manifest(manifest, mode=mode, overwrite_policy=overwrite_policy)
-    sqlite_rows = load_sqlite_rows_for_surreal(Path(sqlite_snapshot_path))
-    graph_rows = load_graph_rows_for_surreal(Path(graph_export_path))
-    feedback_rows = load_feedback_rows_for_surreal(Path(feedback_export_path))
 
     if requested_recompute_steps:
         report.status = "recompute_blocked"
@@ -1227,6 +1456,13 @@ def run_surreal_migration(
             verification_depth=verification_depth,
             overwrite_policy=overwrite_policy,
         )
+
+    sqlite_rows = load_sqlite_rows_for_surreal(
+        Path(sqlite_snapshot_path),
+        include_vectors=False,
+    )
+    graph_rows = load_graph_rows_for_surreal(Path(graph_export_path))
+    feedback_rows = load_feedback_rows_for_surreal(Path(feedback_export_path))
 
     if target_mode is SurrealTargetMode.EMBEDDED_LOCAL:
         if gate_report_path is None:
@@ -1279,8 +1515,10 @@ def run_surreal_migration(
     phase_checkpoints["provenance"].planned_count = len(sqlite_rows["provenance"])
     phase_checkpoints["bindings"].planned_count = len(sqlite_rows["bindings"])
     phase_checkpoints["fingerprints"].planned_count = len(sqlite_rows["fingerprints"])
-    phase_checkpoints["embeddings"].planned_count = len(sqlite_rows["embeddings"])
-    phase_checkpoints["vector_components"].planned_count = len(sqlite_rows["vector_components"])
+    phase_checkpoints["embeddings"].planned_count = report.expected_counts["embeddings"]
+    phase_checkpoints["vector_components"].planned_count = report.expected_counts[
+        "vector_components"
+    ]
     phase_checkpoints["graph"].planned_count = len(graph_rows["entities"]) + len(
         graph_rows["relations"]
     )
@@ -1345,17 +1583,17 @@ def run_surreal_migration(
                 report=report,
                 writer=lambda: metadata_store.replace_fingerprint_rows(sqlite_rows["fingerprints"]),
             )
-            _write_phase(
+            _write_iterable_phase(
                 phase_checkpoints["embeddings"],
                 report=report,
-                writer=lambda: vector_store.replace_embedding_rows(sqlite_rows["embeddings"]),
+                rows=iter_sqlite_embedding_rows_for_surreal(Path(sqlite_snapshot_path)),
+                writer=vector_store.replace_embedding_rows,
             )
-            _write_phase(
+            _write_iterable_phase(
                 phase_checkpoints["vector_components"],
                 report=report,
-                writer=lambda: vector_store.replace_vector_component_rows(
-                    sqlite_rows["vector_components"]
-                ),
+                rows=iter_sqlite_vector_component_rows_for_surreal(Path(sqlite_snapshot_path)),
+                writer=vector_store.replace_vector_component_rows,
             )
             _write_phase(
                 phase_checkpoints["graph"],

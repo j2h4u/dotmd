@@ -108,6 +108,33 @@ def test_build_manifest_records_source_capture_schema_counts_and_no_recompute_de
     assert not (tmp_path / "manifest.db").exists()
 
 
+def test_plan_uses_sqlite_stats_without_materializing_source_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dotmd.ingestion import migrate_surreal as migrate_module  # type: ignore[import-not-found]
+
+    inputs = _build_inputs(tmp_path)
+
+    def _explode(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("PLAN must not materialize source rows")
+
+    monkeypatch.setattr(migrate_module, "load_sqlite_rows_for_surreal", _explode)
+
+    report = migrate_module.run_surreal_migration(
+        mode=migrate_module.SurrealMigrationMode.PLAN,
+        sqlite_snapshot_path=inputs["sqlite_snapshot_path"],
+        graph_export_path=inputs["graph_export_path"],
+        feedback_export_path=inputs["feedback_export_path"],
+        target_url=f"surrealkv://{tmp_path / 'plan.db'}",
+        target_mode=migrate_module.SurrealTargetMode.EMBEDDED_LOCAL,
+    )
+
+    assert report.status == "plan"
+    assert report.expected_counts["embeddings"] == 2
+    assert not (tmp_path / "plan.db").exists()
+
+
 def test_load_sqlite_rows_for_surreal_materializes_title_and_tags_text_from_source_documents(
     tmp_path: Path,
 ) -> None:
@@ -130,6 +157,29 @@ def test_load_sqlite_rows_for_surreal_materializes_title_and_tags_text_from_sour
     assert tagged_chunk["text"] == "Alpha body"
     assert tagged_chunk["document_ref"] == inputs["fixture_ids"]["file_path"]
     assert tagged_chunk["ref"] == inputs["fixture_ids"]["ref"]
+
+
+def test_sqlite_rows_can_skip_vectors_for_streaming_apply(tmp_path: Path) -> None:
+    from dotmd.ingestion.migrate_surreal import (  # type: ignore[import-not-found]
+        iter_sqlite_embedding_rows_for_surreal,
+        iter_sqlite_vector_component_rows_for_surreal,
+        load_sqlite_rows_for_surreal,
+    )
+
+    inputs = _build_inputs(tmp_path)
+
+    rows = load_sqlite_rows_for_surreal(inputs["sqlite_snapshot_path"], include_vectors=False)
+    embeddings = list(iter_sqlite_embedding_rows_for_surreal(inputs["sqlite_snapshot_path"]))
+    vector_components = list(
+        iter_sqlite_vector_component_rows_for_surreal(inputs["sqlite_snapshot_path"])
+    )
+
+    assert rows["embeddings"] == []
+    assert rows["vector_components"] == []
+    assert len(embeddings) == 2
+    assert len(vector_components) == 2
+    assert embeddings[0]["embedding"]
+    assert vector_components[0]["embedding"]
 
 
 def test_phase42_fixture_applies_retrieval_schema_for_real_embedded_targets(tmp_path: Path) -> None:
