@@ -1,4 +1,7 @@
 rehearsal-index/
+graph-export.json
+feedback-export.json
+migration-*
 *.db
 *.db-shm
 *.db-wal
