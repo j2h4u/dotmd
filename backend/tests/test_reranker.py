@@ -2,7 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
 
 from dotmd.search.reranker import CrossEncoderReranker, Reranker, available_rerankers
@@ -33,7 +32,7 @@ class TestRerankerScoring:
     def test_candidate_texts_are_scored_in_chunk_id_order(self, MockCE: MagicMock) -> None:
         """Model input order follows requested chunk_ids, not store return order."""
         mock_model = MagicMock()
-        mock_model.predict.return_value = np.array([1.0, 2.0, 3.0])
+        mock_model.predict.return_value = [1.0, 2.0, 3.0]
         MockCE.return_value.return_value = mock_model
 
         store = MagicMock()
@@ -61,7 +60,7 @@ class TestRerankerScoring:
     def test_scores_map_back_to_original_chunk_ids(self, MockCE: MagicMock) -> None:
         """Returned scores remain attached to the original requested chunk IDs."""
         mock_model = MagicMock()
-        mock_model.predict.return_value = np.array([0.2, 9.0, 1.5])
+        mock_model.predict.return_value = [0.2, 9.0, 1.5]
         MockCE.return_value.return_value = mock_model
 
         reranker = _make_reranker()
@@ -80,7 +79,7 @@ class TestRerankerScoring:
     def test_relevance_floor_none_keeps_low_scores(self, MockCE: MagicMock) -> None:
         """None disables raw-score filtering, including negative scores."""
         mock_model = MagicMock()
-        mock_model.predict.return_value = np.array([-20.0, -10.0, -5.0])
+        mock_model.predict.return_value = [-20.0, -10.0, -5.0]
         MockCE.return_value.return_value = mock_model
 
         reranker = _make_reranker()
@@ -99,7 +98,7 @@ class TestRerankerScoring:
     def test_relevance_floor_filters_when_configured(self, MockCE: MagicMock) -> None:
         """Configured floors filter scores below the threshold."""
         mock_model = MagicMock()
-        mock_model.predict.return_value = np.array([-1.0, 0.5, 2.0])
+        mock_model.predict.return_value = [-1.0, 0.5, 2.0]
         MockCE.return_value.return_value = mock_model
 
         reranker = Reranker(
@@ -126,7 +125,7 @@ class TestRerankerScoring:
     ) -> None:
         """Length penalty lowers short chunks even when raw scores are negative."""
         mock_model = MagicMock()
-        mock_model.predict.return_value = np.array([-5.0, -5.0])
+        mock_model.predict.return_value = [-5.0, -5.0]
         MockCE.return_value.return_value = mock_model
 
         store = MagicMock()
@@ -155,7 +154,7 @@ class TestRerankerScoring:
     def test_top_k_truncation_works(self, MockCE: MagicMock) -> None:
         """top_k limits output even when more candidates pass relevance floor."""
         mock_model = MagicMock()
-        mock_model.predict.return_value = np.array([1.0, 3.0, 5.0, 7.0, 9.0])
+        mock_model.predict.return_value = [1.0, 3.0, 5.0, 7.0, 9.0]
         MockCE.return_value.return_value = mock_model
 
         reranker = _make_reranker()

@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir 'torch<2.5' --index-url https://download.pytorch.
 # Layer 2 (rare): project dependencies — only rebuilds when pyproject.toml changes
 COPY pyproject.toml ./
 RUN mkdir -p src/dotmd && touch src/dotmd/__init__.py && \
-    pip install --no-cache-dir -e . && \
+    pip install --no-cache-dir -e '.[local-ml]' && \
     pip cache purge
 
 # Layer 3 (frequent): application code only

@@ -11,13 +11,8 @@ requires-python = ">=3.12"
 dependencies = [
     "blake3>=1.0",
     "click>=8.0",
-    "sentence-transformers>=3.0",
-    "transformers>=5.11.0,<6",
-    "torch<2.13",
-    "einops>=0.8",
     "sqlite-vec>=0.1.6",
     "FalkorDB>=1.6.0",
-    "gliner>=0.2",
     "pydantic>=2.0",
     "pydantic-settings[toml]>=2.14.1",
     "watchdog>=6.0",
@@ -31,6 +26,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+local-ml = [
+    "sentence-transformers>=3.0",
+    "gliner>=0.2",
+    "torch<2.5",
+]
 dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=0.24",
@@ -44,6 +44,16 @@ dev = [
 ]
 [project.scripts]
 dotmd = "dotmd.cli:main"
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.pytest.ini_options]
 # Leave no /tmp residue on green runs (shared host): passed tests' tmp_path dirs are
