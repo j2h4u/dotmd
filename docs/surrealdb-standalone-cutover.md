@@ -72,6 +72,10 @@ The production WAL is large, so full migration tooling must use SQLite backup
 API or an equivalent consistent snapshot path. Small proof exports can read
 inside the running `dotmd` container without copying the full DB.
 
+The full migration uses the joined corpus, not raw `vec_meta` count. The live
+source has 5 `vec_meta` rows without matching vector payloads, so the migratable
+chunk/vector total is 149,834.
+
 ### Schema Apply
 
 Schema application is idempotent and instrumented per statement:
@@ -138,6 +142,20 @@ Record IDs must use the `SurrealRecordIdCodec` base32 encoding. URL-safe base64
 is not safe enough for `type::record(...)`: encoded `-` can truncate parsed
 record IDs and cause collisions.
 
+Live full SQLite migration completed with checkpoint resume semantics:
+
+- `documents`: 1,736
+- `chunks`: 149,834
+- `embeddings`: 149,834
+- `chunk_file_bindings`: 24,352
+- `chunk_source_provenance`: 149,970
+
+Observed completion:
+
+```text
+surreal sqlite migration ok: chunks=149834 records=475726 last_rowid=188336 complete=True counts={"chunk": 149834, "chunk_file_binding": 24352, "chunk_source_provenance": 149970, "document": 1736, "embedding": 149834}
+```
+
 ### FalkorDB Graph Runner
 
 `devtools/surreal_falkor_migration_runner.py` exports FalkorDB into dedicated
@@ -176,3 +194,13 @@ Native HNSW index creation on the 100 migrated embeddings succeeded:
 DEFINE INDEX IF NOT EXISTS embeddings_vector_hnsw ON TABLE embeddings FIELDS vector HNSW DIMENSION 1024 TYPE F32 DIST COSINE EFC 150 M 12;
 [115/115] done in 0.296s
 ```
+
+On the full 149,834-vector corpus, blocking HNSW creation failed once with a
+RocksDB transaction-conflict error while building the index. A follow-up
+`CONCURRENTLY` HNSW build reached `ready` with `initial=149834`, `pending=0`,
+and `updated=0`.
+
+The first live KNN query against the full HNSW index timed out after 40 seconds
+while the container was still under high memory pressure after index build.
+Treat the 100-row HNSW gate as syntax/runtime proof only. Treat the full-corpus
+HNSW build as passed for construction, but not yet passed for query latency.

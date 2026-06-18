@@ -4,7 +4,7 @@ This module intentionally keeps the surface small:
 
 - configuration comes from environment variables or explicit values;
 - the connection wrapper delegates directly to the SurrealDB Python SDK;
-- record identifiers are encoded with URL-safe base64 for Surreal-friendly IDs;
+- record identifiers are encoded with base32 for Surreal-friendly IDs;
 - no embedded SurrealKV or sharding helpers are introduced here.
 """
 

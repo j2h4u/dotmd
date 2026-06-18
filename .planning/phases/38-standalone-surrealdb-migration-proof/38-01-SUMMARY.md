@@ -104,10 +104,22 @@ Full SQLite runner:
 
 - added `devtools/surreal_sqlite_migration_runner.py`;
 - reads SQLite by `vec_meta.rowid`;
+- counts only the fully joinable source rows (`vec_meta` + `chunks` +
+  `vec_chunks`), because the live source has 5 `vec_meta` rows without matching
+  vector payloads;
 - writes batch SurrealQL `UPSERT`;
 - persists checkpoint after every successful batch;
 - supports resume through `last_vector_rowid`;
 - prints chunks done, records done, last rowid, batch timing, rate, and ETA.
+
+Full SQLite migration result:
+
+- source raw counts: `chunks=149839`, `vec_meta=149839`, `vec_chunks=149839`;
+- source migratable join count: `149834`;
+- target counts: `documents=1736`, `chunks=149834`, `embeddings=149834`,
+  `chunk_file_bindings=24352`, `chunk_source_provenance=149970`;
+- final checkpoint: `chunks_done=149834`, `records_done=475726`,
+  `last_vector_rowid=188336`, `complete=true`.
 
 Record ID fix:
 
@@ -128,6 +140,17 @@ FalkorDB graph runner:
 - live target counts after base32 fix: `graph_nodes=54334`,
   `graph_edges=355239`;
 - final graph import: `nodes=54334 edges=355239 elapsed=192.050s`.
+
+Full-corpus HNSW gate:
+
+- blocking `DEFINE INDEX ... HNSW ...` failed once with a RocksDB transaction
+  conflict during index build;
+- `CONCURRENTLY` HNSW creation reached `ready` with `initial=149834`,
+  `pending=0`, and `updated=0`;
+- a first live KNN query timed out after 40 seconds while the container was
+  still under high memory pressure;
+- SurrealDB standalone has passed storage migration and HNSW construction
+  gates, but not the full vector-query latency gate.
 
 ## Notes
 

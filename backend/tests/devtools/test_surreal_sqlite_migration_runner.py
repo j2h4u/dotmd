@@ -10,6 +10,8 @@ from typing import Any
 import pytest
 from devtools.surreal_sqlite_migration_runner import (
     SQLiteMigrationConfig,
+    _connect,
+    _total_chunks,
     run_sqlite_migration,
 )
 
@@ -217,3 +219,32 @@ def test_sqlite_migration_respects_complete_checkpoint(tmp_path: Path) -> None:
 
     assert checkpoint.complete is True
     assert checkpoint.chunks_done == 3
+
+
+def test_sqlite_migration_total_ignores_unmigratable_vec_meta_rows(tmp_path: Path) -> None:
+    sqlite_path = tmp_path / "index.db"
+    _write_fixture_db(sqlite_path)
+    with sqlite3.connect(sqlite_path) as conn:
+        conn.execute(
+            "INSERT INTO vec_meta_contextual_512_50_multilingual_e5_large (chunk_id, text_hash)"
+            " VALUES (?, ?)",
+            ("chunk-without-vector", "orphan-hash"),
+        )
+
+    with _connect(sqlite_path) as conn:
+        assert (
+            conn.execute(
+                "SELECT count(*) FROM vec_meta_contextual_512_50_multilingual_e5_large"
+            ).fetchone()[0]
+            == 4
+        )
+        assert _total_chunks(
+            conn,
+            SQLiteMigrationConfig(
+                sqlite_path=sqlite_path,
+                chunk_strategy="contextual_512_50",
+                embedding_model="intfloat/multilingual-e5-large",
+                batch_chunks=2,
+                checkpoint=tmp_path / "checkpoint.json",
+            ),
+        ) == 3

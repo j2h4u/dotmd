@@ -114,7 +114,16 @@ def _decode_f32_blob(blob: bytes) -> list[float]:
 
 def _total_chunks(conn: sqlite3.Connection, config: SQLiteMigrationConfig) -> int:
     tables = build_source_tables(config.chunk_strategy, config.embedding_model)
-    total = int(conn.execute(f"SELECT count(*) FROM {tables.vec_meta}").fetchone()[0])
+    total = int(
+        conn.execute(
+            f"""
+            SELECT count(*)
+            FROM {tables.vec_meta} m
+            JOIN {tables.chunks} c ON c.chunk_id = m.chunk_id
+            JOIN {tables.vec_chunks} v ON v.rowid = m.rowid
+            """
+        ).fetchone()[0]
+    )
     if config.limit_chunks is None:
         return total
     return min(total, config.limit_chunks)
@@ -288,7 +297,10 @@ def run_sqlite_migration(
     codec = SurrealRecordIdCodec()
     with _connect(migration_config.sqlite_path) as sqlite_conn:
         total_chunks = _total_chunks(sqlite_conn, migration_config)
-        if checkpoint.complete and checkpoint.chunks_done >= total_chunks:
+        if checkpoint.chunks_done >= total_chunks:
+            if not checkpoint.complete:
+                checkpoint.complete = True
+                checkpoint.save(migration_config.checkpoint)
             _emit(printer, "surreal sqlite migration: checkpoint already complete")
             return checkpoint
         _emit(
