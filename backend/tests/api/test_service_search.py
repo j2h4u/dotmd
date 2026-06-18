@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from types import ModuleType
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
@@ -12,6 +14,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dotmd.storage.metadata import SQLiteMetadataStore
+from dotmd.storage.surreal import SurrealVectorStore
+
+_fake_torch = ModuleType("torch")
+_fake_torch.set_num_threads = MagicMock()
+_fake_torch.set_num_interop_threads = MagicMock()
+sys.modules.setdefault("torch", _fake_torch)
+
+import dotmd.ingestion.pipeline  # noqa: E402,F401
 
 
 def _get_service(tmp_path: Path):  # type: ignore[no-untyped-def]
@@ -72,6 +82,45 @@ def test_format_elapsed_ms_for_human_diagnostics() -> None:
     assert format_elapsed_ms(12_592.2) == "13s"
     assert format_elapsed_ms(197_214.1) == "3m17s"
     assert format_elapsed_ms(3_723_000.0) == "1h02m03s"
+
+
+def _install_fake_torch(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_torch = ModuleType("torch")
+    fake_torch.set_num_threads = MagicMock()
+    fake_torch.set_num_interop_threads = MagicMock()
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+
+def test_semantic_vector_store_defaults_to_legacy_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_torch(monkeypatch)
+    from dotmd.api.service import _semantic_vector_store_for_settings
+    from dotmd.core.config import Settings
+
+    legacy = MagicMock()
+    settings = Settings(embedding_url="http://localhost:8088")
+
+    assert _semantic_vector_store_for_settings(settings, legacy) is legacy
+
+
+def test_semantic_vector_store_uses_surreal_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_torch(monkeypatch)
+    from dotmd.api.service import _semantic_vector_store_for_settings
+    from dotmd.core.config import Settings
+
+    settings = Settings(
+        embedding_url="http://localhost:8088",
+        search_backend="surreal",
+        surreal_vector_ef=200,
+        surreal_query_timeout_seconds=45,
+    )
+
+    vector_store = _semantic_vector_store_for_settings(settings, MagicMock())
+
+    assert isinstance(vector_store, SurrealVectorStore)
 
 
 class TestSearchReturnsFilePaths:

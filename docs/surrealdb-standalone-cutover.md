@@ -233,6 +233,13 @@ Treat the 100-row HNSW gate as syntax/runtime proof only. Treat the full-corpus
 HNSW build as passed for construction and warm query latency, but not yet passed
 for cold-query latency.
 
+ANN recall is a separate gate. When queried with an existing row's own vector,
+exact brute-force KNN returned that same chunk first with distance `0.0` in
+`17.981s`. HNSW ANN did not return that same chunk in top 5 with `ef=80`,
+`ef=200`, or `ef=1000`. The data is therefore intact, but HNSW recall needs a
+product-level acceptance decision before it becomes the only production vector
+path.
+
 ### DISKANN Gate
 
 DISKANN can be built alongside HNSW and queried explicitly with `WITH INDEX`:
@@ -286,3 +293,22 @@ Post-cleanup live state:
 - `embeddings_vector_hnsw` remains the only vector index;
 - SurrealDB restart dropped container memory to about `214MiB`;
 - `/srv/surrealdb/data` compacted back to about `3.5G`.
+
+## Runtime Semantic Read Slice
+
+The first runtime cutover slice is semantic-only and leaves indexing, FTS5,
+graph-direct, graph traversal, candidate hydration, and reranking on the
+existing pipeline.
+
+Enable it with:
+
+```text
+DOTMD_SEARCH_BACKEND=surreal
+DOTMD_SURREAL_VECTOR_INDEX_NAME=embeddings_vector_hnsw
+DOTMD_SURREAL_VECTOR_EF=80
+DOTMD_SURREAL_QUERY_TIMEOUT_SECONDS=30
+```
+
+`DotMDService` then wires `SemanticSearchEngine` to the read-only
+`SurrealVectorStore`. Mutation methods on that vector store intentionally raise
+`NotImplementedError`; this slice is not an indexing cutover.

@@ -187,6 +187,10 @@ class Settings(BaseSettings):
         return v
 
     # Search
+    search_backend: Literal["legacy", "surreal"] = "legacy"
+    surreal_vector_index_name: str = "embeddings_vector_hnsw"
+    surreal_vector_ef: int = 80
+    surreal_query_timeout_seconds: int = 30
     default_top_k: int = DEFAULT_DEFAULT_TOP_K
     fusion_k: int = DEFAULT_FUSION_K
     rerank_pool_size: int = DEFAULT_RERANK_POOL_SIZE

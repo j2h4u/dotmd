@@ -42,7 +42,12 @@ from dotmd.search.graph_search import GraphSearchEngine
 from dotmd.search.query import QueryExpander
 from dotmd.search.reranker import RerankerFactory
 from dotmd.search.semantic import SemanticSearchEngine
-from dotmd.storage.base import MetadataStoreProtocol
+from dotmd.storage.base import MetadataStoreProtocol, VectorStoreProtocol
+from dotmd.storage.surreal import (
+    SurrealStoreConfig,
+    SurrealVectorStore,
+    SurrealVectorStoreConfig,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +196,23 @@ def _is_low_signal_federated_candidate(candidate: SearchCandidate) -> bool:
     return False
 
 
+def _semantic_vector_store_for_settings(
+    settings: Settings,
+    legacy_vector_store: VectorStoreProtocol,
+) -> VectorStoreProtocol:
+    """Return the vector store used by the semantic search leg."""
+    if settings.search_backend != "surreal":
+        return legacy_vector_store
+    return SurrealVectorStore(
+        SurrealStoreConfig.from_env(),
+        SurrealVectorStoreConfig(
+            index_name=settings.surreal_vector_index_name,
+            k_ef=settings.surreal_vector_ef,
+            query_timeout_seconds=settings.surreal_query_timeout_seconds,
+        ),
+    )
+
+
 def _merge_with_federated_quota(
     local_candidates: list[SearchCandidate],
     fed_candidates: list[SearchCandidate],
@@ -251,7 +273,10 @@ class DotMDService:
 
         # Search engines -- reuse stores and shared connection from pipeline.
         self._semantic_engine = SemanticSearchEngine(
-            self._pipeline.vector_store,
+            _semantic_vector_store_for_settings(
+                self._settings,
+                self._pipeline.vector_store,
+            ),
             self._settings.embedding_model,
             score_floor=self._settings.semantic_score_floor,
             embedding_url=self._settings.embedding_url,

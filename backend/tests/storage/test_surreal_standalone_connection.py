@@ -9,6 +9,8 @@ from dotmd.storage.surreal import (
     SurrealConnection,
     SurrealRecordIdCodec,
     SurrealStoreConfig,
+    SurrealVectorStore,
+    SurrealVectorStoreConfig,
 )
 
 pytestmark = pytest.mark.real_schema_check
@@ -145,3 +147,72 @@ def test_connection_delegates_and_suppresses_close_error() -> None:
         ("insert", ("documents", [{"title": "doc"}]), {}),
         ("close", (), {}),
     ]
+
+
+@dataclass
+class FakeSurrealVectorConnection:
+    config: SurrealStoreConfig
+    calls: list[tuple[str, dict[str, Any] | None]] = field(default_factory=list)
+    closed: bool = False
+
+    def query(self, statement: str, variables: dict[str, Any] | None = None) -> Any:
+        self.calls.append((statement, variables))
+        if "count()" in statement:
+            return [{"count": 149834}]
+        assert "FROM embeddings WITH INDEX embeddings_vector_hnsw" in statement
+        assert "WHERE vector <|3,80|> $query_vector TIMEOUT 30s" in statement
+        assert variables == {"query_vector": [0.1, 0.2]}
+        return [
+            {"chunk_id": "chunk-a", "distance": 0.0},
+            {"chunk_id": "chunk-b", "distance": 0.25},
+            {"chunk_id": "chunk-c", "distance": "bad"},
+        ]
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_surreal_vector_store_search_uses_forced_index_and_scores() -> None:
+    holder: dict[str, FakeSurrealVectorConnection] = {}
+
+    def factory(config: SurrealStoreConfig) -> FakeSurrealVectorConnection:
+        connection = FakeSurrealVectorConnection(config)
+        holder["connection"] = connection
+        return connection
+
+    store = SurrealVectorStore(
+        SurrealStoreConfig(url="ws://example.invalid/rpc"),
+        SurrealVectorStoreConfig(index_name="embeddings_vector_hnsw"),
+        connection_factory=factory,
+    )
+
+    assert store.search([0.1, 0.2], top_k=3) == [
+        ("chunk-a", 1.0),
+        ("chunk-b", 0.75),
+    ]
+    assert holder["connection"].closed is True
+
+
+def test_surreal_vector_store_count() -> None:
+    store = SurrealVectorStore(
+        SurrealStoreConfig(url="ws://example.invalid/rpc"),
+        connection_factory=FakeSurrealVectorConnection,
+    )
+
+    assert store.count() == 149834
+
+
+def test_surreal_vector_store_rejects_invalid_config() -> None:
+    with pytest.raises(ValueError, match="invalid SurrealDB index name"):
+        SurrealVectorStoreConfig(index_name="bad-index")
+
+
+def test_surreal_vector_store_is_read_only() -> None:
+    store = SurrealVectorStore(SurrealStoreConfig(url="ws://example.invalid/rpc"))
+
+    with pytest.raises(NotImplementedError, match="read-only"):
+        store.add_chunks([], [])
+    with pytest.raises(NotImplementedError, match="read-only"):
+        store.delete_all()
+    with pytest.raises(NotImplementedError, match="read-only"):
+        store.delete_vectors_by_chunk_ids(["chunk-a"])

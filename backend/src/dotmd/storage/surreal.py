@@ -11,14 +11,20 @@ This module intentionally keeps the surface small:
 from __future__ import annotations
 
 import base64
+import logging
 import os
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from dotmd.core.models import Chunk
+
 DEFAULT_SURREAL_URL = "ws://127.0.0.1:8000/rpc"
 DEFAULT_SURREAL_NAMESPACE = "dotmd"
 DEFAULT_SURREAL_DATABASE = "phase43"
+
+logger = logging.getLogger(__name__)
 
 
 def _env_first(source: Mapping[str, str], *names: str, default: str = "") -> str:
@@ -132,3 +138,96 @@ class SurrealConnection:
             self.client.close()
         except NotImplementedError:
             return
+
+
+@dataclass(frozen=True, slots=True)
+class SurrealVectorStoreConfig:
+    """Read-side vector search settings for migrated SurrealDB embeddings."""
+
+    index_name: str = "embeddings_vector_hnsw"
+    k_ef: int = 80
+    query_timeout_seconds: int = 30
+
+    def __post_init__(self) -> None:
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", self.index_name):
+            raise ValueError(f"invalid SurrealDB index name: {self.index_name}")
+        if self.k_ef <= 0:
+            raise ValueError("k_ef must be positive")
+        if self.query_timeout_seconds <= 0:
+            raise ValueError("query_timeout_seconds must be positive")
+
+
+class SurrealVectorStore:
+    """Read-only vector store backed by migrated standalone SurrealDB embeddings."""
+
+    def __init__(
+        self,
+        store_config: SurrealStoreConfig | None = None,
+        vector_config: SurrealVectorStoreConfig | None = None,
+        *,
+        connection_factory: Callable[[SurrealStoreConfig], SurrealConnection] = SurrealConnection,
+    ) -> None:
+        self._store_config = store_config or SurrealStoreConfig.from_env()
+        self._vector_config = vector_config or SurrealVectorStoreConfig()
+        self._connection_factory = connection_factory
+
+    def add_chunks(
+        self,
+        chunks: list[Chunk],
+        embeddings: list[list[float]],
+        *,
+        overwrite: bool = True,
+        text_hashes: dict[str, str] | None = None,
+    ) -> None:
+        raise NotImplementedError("SurrealVectorStore is read-only during standalone cutover")
+
+    def search(
+        self,
+        query_embedding: list[float],
+        top_k: int = 10,
+    ) -> list[tuple[str, float]]:
+        if not query_embedding or top_k <= 0:
+            return []
+        query = (
+            "SELECT chunk_id, vector::distance::knn() AS distance "
+            f"FROM embeddings WITH INDEX {self._vector_config.index_name} "
+            f"WHERE vector <|{top_k},{self._vector_config.k_ef}|> $query_vector "
+            f"TIMEOUT {self._vector_config.query_timeout_seconds}s;"
+        )
+        connection = self._connection_factory(self._store_config)
+        try:
+            rows = connection.query(query, {"query_vector": query_embedding})
+        except (RuntimeError, ValueError, TypeError):
+            logger.warning("Surreal vector search query failed", exc_info=True)
+            return []
+        finally:
+            connection.close()
+
+        results: list[tuple[str, float]] = []
+        for row in rows if isinstance(rows, list) else []:
+            chunk_id = row.get("chunk_id")
+            distance = row.get("distance")
+            if not isinstance(chunk_id, str) or not isinstance(distance, int | float):
+                continue
+            results.append((chunk_id, 1.0 - float(distance)))
+        return results
+
+    def delete_all(self) -> None:
+        raise NotImplementedError("SurrealVectorStore is read-only during standalone cutover")
+
+    def delete_vectors_by_chunk_ids(self, chunk_ids: list[str]) -> int:
+        raise NotImplementedError("SurrealVectorStore is read-only during standalone cutover")
+
+    def count(self) -> int:
+        connection = self._connection_factory(self._store_config)
+        try:
+            rows = connection.query("SELECT count() FROM embeddings GROUP ALL;")
+        except (RuntimeError, ValueError, TypeError):
+            logger.warning("Surreal vector count query failed", exc_info=True)
+            return 0
+        finally:
+            connection.close()
+        if not isinstance(rows, list) or not rows:
+            return 0
+        count = rows[0].get("count")
+        return int(count) if isinstance(count, int | float) else 0

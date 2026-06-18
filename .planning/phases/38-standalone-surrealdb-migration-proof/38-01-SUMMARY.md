@@ -172,6 +172,22 @@ Full-corpus DISKANN gate:
 - after cleanup restart, SurrealDB memory was about `214MiB` and
   `/srv/surrealdb/data` was about `3.5G`.
 
+ANN recall check:
+
+- exact brute-force KNN on an existing row's own vector returned the same chunk
+  first with distance `0.0` in `17.981s`;
+- HNSW ANN did not return that same chunk in top 5 with `ef=80`, `ef=200`, or
+  `ef=1000`;
+- data integrity is intact, but HNSW recall remains an acceptance risk.
+
+Runtime semantic read slice:
+
+- added `DOTMD_SEARCH_BACKEND=surreal` for semantic-only read cutover;
+- `DotMDService` wires `SemanticSearchEngine` to read-only
+  `SurrealVectorStore` when enabled;
+- indexing, FTS5, graph-direct, graph traversal, hydration, and reranking stay
+  on the existing pipeline for this slice.
+
 ## Notes
 
 SurrealDB v3 uses `type::record`, not the old `type::thing` helper in write
