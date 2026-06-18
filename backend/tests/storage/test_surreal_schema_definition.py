@@ -6,8 +6,10 @@ from dotmd.storage import surreal_schema
 from dotmd.storage.surreal_schema import (
     MONOLITHIC_TABLES,
     SurrealSchemaPlan,
+    build_analyzer_statement,
     build_embeddings_diskann_index_statement,
     build_embeddings_hnsw_index_statement,
+    build_fulltext_index_statement,
     build_minimal_monolithic_schema_plan,
 )
 
@@ -93,12 +95,21 @@ def test_schema_plan_is_monolithic_and_covers_expected_tables() -> None:
         "DEFINE FIELD IF NOT EXISTS source ON TABLE relations TYPE record<entities>;"
         in field_statements
     )
+    assert plan.fulltext_statements() == (
+        "DEFINE ANALYZER IF NOT EXISTS dotmd_fts TOKENIZERS class, punct "
+        "FILTERS lowercase, ascii;",
+        "DEFINE INDEX IF NOT EXISTS chunks_title_fts ON TABLE chunks FIELDS title "
+        "FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75) CONCURRENTLY;",
+        "DEFINE INDEX IF NOT EXISTS chunks_text_fts ON TABLE chunks FIELDS text "
+        "FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75) CONCURRENTLY;",
+    )
+    assert not any("tags" in statement.lower() for statement in plan.fulltext_statements())
     assert len(plan.scalar_index_statements()) == 10
     assert len(plan.index_statements()) == 1
     assert len(plan.index_statements(vector_index="diskann")) == 1
     assert plan.index_statements(vector_index="none") == ()
     assert len(plan.vector_index_statements()) == 2
-    assert len(plan.statements()) == len(MONOLITHIC_TABLES) + len(field_statements) + 10 + 1
+    assert len(plan.statements()) == len(MONOLITHIC_TABLES) + len(field_statements) + 10 + 3 + 1
 
 
 def test_embedding_index_builders_emit_expected_sql() -> None:
@@ -112,6 +123,30 @@ def test_embedding_index_builders_emit_expected_sql() -> None:
     assert diskann == (
         "DEFINE INDEX IF NOT EXISTS embeddings_vector_diskann ON TABLE embeddings FIELDS vector "
         "DISKANN DIMENSION 1536 TYPE F32 DIST COSINE DEGREE 64 L_BUILD 100 ALPHA 1.2;"
+    )
+
+
+def test_fulltext_builders_emit_expected_sql() -> None:
+    assert build_analyzer_statement() == (
+        "DEFINE ANALYZER IF NOT EXISTS dotmd_fts TOKENIZERS class, punct "
+        "FILTERS lowercase, ascii;"
+    )
+    assert build_fulltext_index_statement(
+        index_name="chunks_title_fts",
+        table="chunks",
+        field="title",
+    ) == (
+        "DEFINE INDEX IF NOT EXISTS chunks_title_fts ON TABLE chunks FIELDS title "
+        "FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75) CONCURRENTLY;"
+    )
+    assert build_fulltext_index_statement(
+        index_name="chunks_text_fts",
+        table="chunks",
+        field="text",
+        highlights=True,
+    ) == (
+        "DEFINE INDEX IF NOT EXISTS chunks_text_fts ON TABLE chunks FIELDS text "
+        "FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75) HIGHLIGHTS CONCURRENTLY;"
     )
 
 

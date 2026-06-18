@@ -294,6 +294,54 @@ Post-cleanup live state:
 - SurrealDB restart dropped container memory to about `214MiB`;
 - `/srv/surrealdb/data` compacted back to about `3.5G`.
 
+### FTS Gate
+
+The standalone FTS slice keeps SurrealDB full-text indexes single-field:
+
+- `chunks_title_fts` on `chunks.title`
+- `chunks_text_fts` on `chunks.text`
+
+Both indexes share the same custom analyzer:
+
+- `dotmd_fts` with `TOKENIZERS class, punct`
+- `FILTERS lowercase, ascii`
+- explicit `BM25(1.2,0.75)` params to avoid relying on default scoring behavior
+- `CONCURRENTLY` so creation runs in the background instead of blocking inside one
+  long `DEFINE INDEX`
+
+This preserves the current parity intent:
+
+- title remains a separate search signal from body text;
+- body text remains the broader lexical match path;
+- tags are still deferred until a third, explicit tags index is added.
+
+The gate itself is bounded and instrumented:
+
+```bash
+cd backend
+set -a
+. /opt/docker/surrealdb/.env
+set +a
+uv run python devtools/surreal_fts_gate.py \
+  --db-timeout-seconds 30 \
+  --max-seconds 5 \
+  --explain
+```
+
+It applies the analyzer and both indexes idempotently, samples an existing
+chunk, runs `search::analyze()` as an analyzer check, then polls
+`INFO FOR INDEX ... ON chunks` for both indexes until they report `ready`.
+While polling, it prints status, initial/pending/updated counters when present,
+elapsed time, and an ETA-style estimate when it can derive one from successive
+samples.
+
+`--apply-mode blocking` exists only as an explicit fallback for environments
+that cannot use concurrent builds. It is not the default and prints a warning
+before issuing non-concurrent `DEFINE INDEX` statements.
+
+Default polling is intentionally calm at 60 seconds between `INFO FOR INDEX`
+checks. Use `--poll-interval-seconds` for shorter debug/test loops.
+
 ## Runtime Semantic Read Slice
 
 The first runtime cutover slice is semantic-only and leaves indexing, FTS5,

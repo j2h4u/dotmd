@@ -71,6 +71,38 @@ def build_index_statement(index_name: str, table: str, fields: str) -> str:
     return f"DEFINE INDEX IF NOT EXISTS {index_name} ON TABLE {table} FIELDS {fields};"
 
 
+def build_analyzer_statement(
+    analyzer_name: str = "dotmd_fts",
+    *,
+    tokenizers: str = "class, punct",
+    filters: str = "lowercase, ascii",
+) -> str:
+    return (
+        f"DEFINE ANALYZER IF NOT EXISTS {analyzer_name} "
+        f"TOKENIZERS {tokenizers} FILTERS {filters};"
+    )
+
+
+def build_fulltext_index_statement(
+    *,
+    index_name: str,
+    table: str,
+    field: str,
+    analyzer_name: str = "dotmd_fts",
+    bm25_k1: float = 1.2,
+    bm25_b: float = 0.75,
+    highlights: bool = False,
+    concurrently: bool = True,
+) -> str:
+    highlight_clause = " HIGHLIGHTS" if highlights else ""
+    concurrent_clause = " CONCURRENTLY" if concurrently else ""
+    return (
+        f"DEFINE INDEX IF NOT EXISTS {index_name} ON TABLE {table} FIELDS {field} "
+        f"FULLTEXT ANALYZER {analyzer_name} BM25({bm25_k1},{bm25_b})"
+        f"{highlight_clause}{concurrent_clause};"
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class SurrealSchemaPlan:
     """Simple monolithic schema plan for the standalone SurrealDB backend."""
@@ -234,6 +266,23 @@ class SurrealSchemaPlan:
             ),
         )
 
+    def fulltext_statements(self, *, concurrently: bool = True) -> tuple[str, ...]:
+        return (
+            build_analyzer_statement(),
+            build_fulltext_index_statement(
+                index_name="chunks_title_fts",
+                table="chunks",
+                field="title",
+                concurrently=concurrently,
+            ),
+            build_fulltext_index_statement(
+                index_name="chunks_text_fts",
+                table="chunks",
+                field="text",
+                concurrently=concurrently,
+            ),
+        )
+
     def index_statements(self, *, vector_index: str = "hnsw") -> tuple[str, ...]:
         if vector_index == "hnsw":
             return (
@@ -269,6 +318,7 @@ class SurrealSchemaPlan:
         return (
             self.table_statements()
             + self.field_statements()
+            + self.fulltext_statements(concurrently=True)
             + self.scalar_index_statements()
             + self.index_statements(vector_index=vector_index)
         )
