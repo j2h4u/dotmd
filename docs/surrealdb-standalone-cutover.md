@@ -232,3 +232,57 @@ warm explained run returned `knn rows=5 elapsed=0.010s status=pass`.
 Treat the 100-row HNSW gate as syntax/runtime proof only. Treat the full-corpus
 HNSW build as passed for construction and warm query latency, but not yet passed
 for cold-query latency.
+
+### DISKANN Gate
+
+DISKANN can be built alongside HNSW and queried explicitly with `WITH INDEX`:
+
+```text
+DEFINE INDEX IF NOT EXISTS embeddings_vector_diskann ON TABLE embeddings FIELDS vector
+DISKANN DIMENSION 1024 TYPE F32 DIST COSINE DEGREE 64 L_BUILD 100 ALPHA 1.2
+CONCURRENTLY;
+```
+
+Live full-corpus DISKANN build reached `ready`:
+
+```text
+INFO FOR INDEX embeddings_vector_diskann ON embeddings;
+{'building': {'initial': 149834, 'pending': 0, 'status': 'ready', 'updated': 0}}
+```
+
+Forced DISKANN query:
+
+```bash
+uv run python devtools/surreal_knn_gate.py \
+  --k 5 \
+  --ef 80 \
+  --db-timeout-seconds 30 \
+  --max-seconds 5 \
+  --index-name embeddings_vector_diskann \
+  --explain
+```
+
+Observed DISKANN results:
+
+- first forced DISKANN query after build: `22.987s`, fail against the 5s gate;
+- second forced DISKANN query: `4.343s`, pass;
+- `EXPLAIN FULL` confirmed `KnnScan` used `index=embeddings_vector_diskann`.
+
+Observed same-session HNSW comparison:
+
+- forced HNSW warm query: `0.987s`, pass;
+- `EXPLAIN FULL` confirmed `KnnScan` used `index=embeddings_vector_hnsw`.
+
+DISKANN did not eliminate cold-query latency in this corpus and did not
+outperform warm HNSW. The experimental DISKANN index was removed after the
+measurement:
+
+```text
+REMOVE INDEX embeddings_vector_diskann ON TABLE embeddings;
+```
+
+Post-cleanup live state:
+
+- `embeddings_vector_hnsw` remains the only vector index;
+- SurrealDB restart dropped container memory to about `214MiB`;
+- `/srv/surrealdb/data` compacted back to about `3.5G`.

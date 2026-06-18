@@ -156,6 +156,22 @@ Full-corpus HNSW gate:
 - SurrealDB standalone has passed storage migration, HNSW construction, and
   warm HNSW query gates, but not the cold-query latency gate.
 
+Full-corpus DISKANN gate:
+
+- `CONCURRENTLY` DISKANN creation reached `ready` with `initial=149834`,
+  `pending=0`, and `updated=0`;
+- forced DISKANN query with `WITH INDEX embeddings_vector_diskann` used
+  `KnnScan` and returned 5 rows;
+- first forced DISKANN query after build took `22.987s`, failing the 5-second
+  gate;
+- second forced DISKANN query took `4.343s`, passing the warm gate;
+- same-session forced HNSW query took `0.987s`, so DISKANN did not outperform
+  HNSW for the measured warm query;
+- experimental DISKANN index was removed after measurement; live target now has
+  only `embeddings_vector_hnsw` as the vector index;
+- after cleanup restart, SurrealDB memory was about `214MiB` and
+  `/srv/surrealdb/data` was about `3.5G`.
+
 ## Notes
 
 SurrealDB v3 uses `type::record`, not the old `type::thing` helper in write
