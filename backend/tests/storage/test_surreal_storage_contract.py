@@ -504,3 +504,44 @@ def test_surreal_stores_expose_existing_protocol_method_names(tmp_path: Path) ->
         assert isinstance(metadata_store, MetadataStoreProtocol)
         assert isinstance(vector_store, VectorStoreProtocol)
         assert isinstance(graph_store, GraphStoreProtocol)
+
+
+def test_surreal_vector_store_uses_vector_field_only(tmp_path: Path) -> None:
+    from dotmd.storage.surreal import (  # type: ignore[import-not-found]
+        SurrealConnection,
+        SurrealStoreConfig,
+        SurrealVectorStore,
+        define_dotmd_surreal_schema,
+    )
+    from dotmd.storage.surreal_schema import SURREAL_SCHEMA_VERSION
+
+    db_path = tmp_path / "vector-contract.db"
+    config = SurrealStoreConfig(url=f"surrealkv://{db_path}")
+
+    with SurrealConnection(config) as connection:
+        define_dotmd_surreal_schema(connection)
+        vector_store = SurrealVectorStore(connection)
+        vector_store.replace_embedding_rows(
+            [
+                {
+                    "schema_version": SURREAL_SCHEMA_VERSION,
+                    "chunk_id": "chunk-1",
+                    "original_chunk_id": "chunk-1",
+                    "chunk_strategy": "contextual_512_50",
+                    "embedding_model": "multilingual-e5-large",
+                    "text_hash": "hash-1",
+                    "vector_rowid": 1,
+                    "vector": [0.1, 0.2, 0.3],
+                    "metadata": {},
+                }
+            ]
+        )
+        stored = connection.select(
+            vector_store._codec.encode(
+                "embeddings",
+                "contextual_512_50\x1fmultilingual-e5-large\x1fchunk-1",
+            )
+        )
+
+    assert stored["vector"] == [0.1, 0.2, 0.3]
+    assert "embedding" not in stored

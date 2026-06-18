@@ -614,6 +614,45 @@ def test_run_surreal_migration_dry_run_counts_transformable_rows_without_writing
     assert not (tmp_path / "dry-run.db").exists()
 
 
+def test_run_surreal_migration_skips_orphan_vec_meta_rows_without_embedding_blob(
+    tmp_path: Path,
+) -> None:
+    from dotmd.ingestion.migrate_surreal import (  # type: ignore[import-not-found]
+        SurrealMigrationMode,
+        SurrealTargetMode,
+        run_surreal_migration,
+    )
+
+    db_path = tmp_path / "source.db"
+    fixture_ids = _create_transform_only_fixture(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO vec_meta_contextual_512_50_multilingual_e5_large "
+            "(rowid, chunk_id, text_hash) VALUES (?, ?, ?)",
+            (99, "chunk:orphan-vector", "hash-orphan"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    graph_export_path = _write_graph_export(tmp_path / "graph-export.json", fixture_ids)
+    feedback_export_path = _write_feedback_export(
+        tmp_path / "feedback-export.json",
+        _FakeFeedbackProvider(),
+    )
+
+    report = run_surreal_migration(
+        mode=SurrealMigrationMode.DRY_RUN,
+        sqlite_snapshot_path=db_path,
+        graph_export_path=graph_export_path,
+        feedback_export_path=feedback_export_path,
+        target_url=f"surrealkv://{tmp_path / 'dry-run.db'}",
+        target_mode=SurrealTargetMode.EMBEDDED_LOCAL,
+    )
+
+    assert report.expected_counts["embeddings"] == 2
+
+
 def test_expected_counts_include_synthetic_graph_records() -> None:
     from dotmd.ingestion import migrate_surreal as migrate_module  # type: ignore[import-not-found]
 
@@ -743,7 +782,8 @@ def test_run_surreal_migration_apply_preserves_ids_vectors_feedback_and_graph_pr
     assert stored_embedding["chunk_strategy"] == "contextual_512_50"
     assert stored_embedding["text_hash"] == "hash-alpha"
     assert stored_embedding["vector_rowid"] == 1
-    assert len(stored_embedding["embedding"]) == 3
+    assert len(stored_embedding["vector"]) == 3
+    assert "embedding" not in stored_embedding
     assert stored_entity["original_entity_name"] == fixture_ids["entity_name"]
     assert stored_relation["rel_type"] == "MENTIONS"
     assert stored_relation["weight"] == pytest.approx(0.75)
@@ -1012,7 +1052,7 @@ def test_index_phase_progress_is_written_per_index_step(tmp_path: Path) -> None:
 
     progress_payload = json.loads(progress_path.read_text(encoding="utf-8"))
     assert len(queries) == 4
-    assert queries[-1] == "REBUILD INDEX embeddings_hnsw_idx ON TABLE embeddings;"
+    assert queries[-1] == "REBUILD INDEX embeddings_vector_hnsw ON TABLE embeddings;"
     assert progress_payload["current_phase"] == "indexes"
     assert progress_payload["current_phase_applied_count"] == 4
     assert progress_payload["current_phase_percent"] == 100.0

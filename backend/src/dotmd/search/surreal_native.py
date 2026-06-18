@@ -8,7 +8,7 @@ from dotmd.search.base import SearchEngineProtocol
 from dotmd.search.surreal_fts import SurrealFTSSearchEngine
 from dotmd.search.surreal_graph import SurrealGraphDirectEngine
 from dotmd.search.surreal_vector import SurrealVectorSearchEngine
-from dotmd.storage.surreal_schema import DEFAULT_HNSW_EF
+from dotmd.storage.surreal_schema import DEFAULT_EMBEDDING_SHARD_COUNT, DEFAULT_HNSW_EF
 
 if TYPE_CHECKING:
     from dotmd.core.config import Settings
@@ -21,6 +21,7 @@ def build_surreal_native_engine_overrides(
     *,
     embedding_dimension: int,
     hnsw_ef: int = DEFAULT_HNSW_EF,
+    embedding_shard_count: int = DEFAULT_EMBEDDING_SHARD_COUNT,
 ) -> dict[str, SearchEngineProtocol]:
     """Build explicit Surreal-native retrieval engines for one service call."""
 
@@ -36,10 +37,14 @@ def build_surreal_native_engine_overrides(
             use_prefix=settings.needs_embedding_prefix,
             query_instruction=settings.query_instruction,
             hnsw_ef=hnsw_ef,
+            embedding_shard_count=embedding_shard_count,
         ),
         "keyword": SurrealFTSSearchEngine(
             connection,
             chunk_strategy=settings.chunk_strategy,
         ),
-        "graph_direct": SurrealGraphDirectEngine(connection),
+        "graph_direct": SurrealGraphDirectEngine(
+            connection,
+            chunk_strategy=settings.chunk_strategy,
+        ),
     }

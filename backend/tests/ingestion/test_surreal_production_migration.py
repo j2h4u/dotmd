@@ -179,7 +179,8 @@ def test_sqlite_rows_can_skip_vectors_for_streaming_apply(tmp_path: Path) -> Non
     assert rows["vector_components"] == []
     assert len(embeddings) == 2
     assert len(vector_components) == 2
-    assert embeddings[0]["embedding"]
+    assert embeddings[0]["vector"]
+    assert "embedding" not in embeddings[0]
     assert vector_components[0]["embedding"]
 
 
@@ -201,6 +202,8 @@ def test_streaming_embedding_rows_normalize_missing_text_hash(tmp_path: Path) ->
 
     assert streamed[0]["text_hash"] == ""
     assert materialized["embeddings"][0]["text_hash"] == ""
+    assert "embedding" not in streamed[0]
+    assert "embedding" not in materialized["embeddings"][0]
 
 
 def test_migration_discovers_multiple_chunk_strategy_model_pairs(tmp_path: Path) -> None:
@@ -307,6 +310,8 @@ def test_migration_discovers_multiple_chunk_strategy_model_pairs(tmp_path: Path)
         "vendor/other-model",
     }
     assert materialized["embeddings"][-1]["chunk_strategy"] == "heading_512_50"
+    assert all("embedding" not in row for row in streamed)
+    assert all("embedding" not in row for row in materialized["embeddings"])
 
 
 def test_phase42_fixture_applies_retrieval_schema_for_real_embedded_targets(tmp_path: Path) -> None:
@@ -319,7 +324,7 @@ def test_phase42_fixture_applies_retrieval_schema_for_real_embedded_targets(tmp_
         schema_info = connection.query_raw("INFO FOR TABLE embeddings;")
 
     assert retrieval_plan.embedding_dimension == 3
-    assert "embedding" in str(schema_info)
+    assert "vector" in str(schema_info)
 
 
 @pytest.mark.parametrize("mode_name", ["PLAN", "DRY_RUN"])

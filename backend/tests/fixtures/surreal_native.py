@@ -43,6 +43,29 @@ def apply_surreal_native_retrieval_schema(
             connection.query(statement)
         except (RuntimeError, SurrealError) as exc:
             detail = str(exc).lower()
+            fallback_statement = _legacy_fulltext_statement(statement)
+            if fallback_statement is not None:
+                try:
+                    connection.query(fallback_statement)
+                    continue
+                except (RuntimeError, SurrealError):
+                    pass
             if "already exists" not in detail and "already defined" not in detail:
                 raise
     return retrieval_plan
+
+
+def _legacy_fulltext_statement(statement: str) -> str | None:
+    if statement == (
+        "DEFINE INDEX chunks_title_fts ON chunks FIELDS title FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75)"
+    ):
+        return (
+            "DEFINE INDEX chunks_title_fts ON TABLE chunks COLUMNS title SEARCH ANALYZER dotmd_fts BM25;"
+        )
+    if statement == (
+        "DEFINE INDEX chunks_text_fts ON chunks FIELDS text FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75)"
+    ):
+        return (
+            "DEFINE INDEX chunks_text_fts ON TABLE chunks COLUMNS text SEARCH ANALYZER dotmd_fts BM25;"
+        )
+    return None

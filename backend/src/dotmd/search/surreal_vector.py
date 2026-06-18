@@ -9,7 +9,11 @@ from surrealdb import SurrealError
 
 from dotmd.search.semantic import SemanticSearchEngine
 from dotmd.storage.surreal_schema import (
+    DEFAULT_EMBEDDING_SHARD_COUNT,
     DEFAULT_HNSW_EF,
+    MAX_TOP_K,
+    MIN_TOP_K,
+    surreal_embedding_shard_tables,
     validate_surreal_native_retrieval_contract,
 )
 
@@ -19,16 +23,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-_ACTIVE_CHUNK_IDS_STATEMENT = """
-SELECT VALUE chunk_id
-FROM chunks
-WHERE chunk_strategy = $chunk_strategy;
-""".strip()
+_MAX_HNSW_RESULTS_PER_SHARD = 20
 _PRECONDITION_STATEMENT = """
-SELECT embedding_model, array::len(embedding) AS embedding_dimension
-FROM embeddings
+SELECT embedding_model, array::len(vector) AS embedding_dimension
+FROM {table_name}
 WHERE chunk_strategy = $chunk_strategy
-  AND embedding_model = $embedding_model;
+  AND embedding_model = $embedding_model
+LIMIT 25;
 """.strip()
 
 
@@ -87,6 +88,7 @@ class SurrealVectorSearchEngine(SemanticSearchEngine):
         use_prefix: bool = True,
         query_instruction: str = "",
         hnsw_ef: int = DEFAULT_HNSW_EF,
+        embedding_shard_count: int = DEFAULT_EMBEDDING_SHARD_COUNT,
     ) -> None:
         super().__init__(
             _UnusedVectorStore(),
@@ -101,51 +103,39 @@ class SurrealVectorSearchEngine(SemanticSearchEngine):
         self._chunk_strategy = chunk_strategy
         self._embedding_dimension = embedding_dimension
         self._hnsw_ef = hnsw_ef
+        self._embedding_tables = surreal_embedding_shard_tables(embedding_shard_count)
         self._preconditions_valid: bool | None = None
-        self._active_chunk_ids: list[str] | None = None
 
     def _placeholder_validation_rows(self) -> list[dict[str, object]]:
         return [
             {
                 "embedding_model": self._model_name,
-                "embedding": [0.0] * self._embedding_dimension,
+                "vector": [0.0] * self._embedding_dimension,
             }
         ]
 
     def _validate_request_bounds(self, top_k: int) -> None:
+        if top_k < MIN_TOP_K or top_k > MAX_TOP_K:
+            raise ValueError(f"top_k must be between {MIN_TOP_K} and {MAX_TOP_K}, inclusive")
         validate_surreal_native_retrieval_contract(
             embedding_dimension=self._embedding_dimension,
             embedding_rows=self._placeholder_validation_rows(),
-            top_k=top_k,
+            top_k=min(top_k, _MAX_HNSW_RESULTS_PER_SHARD),
             hnsw_ef=self._hnsw_ef,
         )
 
-    def _load_active_chunk_ids(self) -> list[str]:
-        if self._active_chunk_ids is not None:
-            return self._active_chunk_ids
-        rows = self._connection.query(
-            _ACTIVE_CHUNK_IDS_STATEMENT,
-            {"chunk_strategy": self._chunk_strategy},
-        )
-        chunk_ids: list[str] = []
-        for row in rows:
-            raw_chunk_id = row.get("chunk_id", row.get("value")) if isinstance(row, dict) else row
-            if raw_chunk_id not in (None, ""):
-                chunk_ids.append(str(raw_chunk_id))
-        self._active_chunk_ids = chunk_ids
-        return chunk_ids
-
     def _load_precondition_rows(self) -> list[dict[str, object]]:
-        active_chunk_ids = self._load_active_chunk_ids()
-        if not active_chunk_ids:
-            return []
-        rows = self._connection.query(
-            _PRECONDITION_STATEMENT,
-            {
-                "chunk_strategy": self._chunk_strategy,
-                "embedding_model": self._model_name,
-            },
-        )
+        rows: list[Any] = []
+        for table_name in self._embedding_tables:
+            rows.extend(
+                self._connection.query(
+                    _PRECONDITION_STATEMENT.format(table_name=table_name),
+                    {
+                        "chunk_strategy": self._chunk_strategy,
+                        "embedding_model": self._model_name,
+                    },
+                )
+            )
         validation_rows: list[dict[str, object]] = []
         for row in rows:
             embedding_model = row.get("embedding_model")
@@ -159,7 +149,7 @@ class SurrealVectorSearchEngine(SemanticSearchEngine):
             validation_rows.append(
                 {
                     "embedding_model": str(embedding_model),
-                    "embedding": vector,
+                    "vector": vector,
                 }
             )
         return validation_rows
@@ -201,20 +191,20 @@ class SurrealVectorSearchEngine(SemanticSearchEngine):
             return f"query: {query}"
         return query
 
-    def _build_search_statement(self, top_k: int) -> str:
+    def _build_search_statement(self, *, table_name: str, top_k: int) -> str:
+        shard_top_k = min(top_k, _MAX_HNSW_RESULTS_PER_SHARD)
         return f"""
 SELECT chunk_id, score
 FROM (
     SELECT chunk_id,
         chunk_strategy,
         embedding_model,
-        vector::similarity::cosine(embedding, $qvec) AS score
-    FROM embeddings
-    WHERE embedding <|{top_k},{self._hnsw_ef}|> $qvec
+        vector::similarity::cosine(vector, $qvec) AS score
+    FROM {table_name}
+    WHERE vector <|{shard_top_k},{self._hnsw_ef}|> $qvec
 )
 WHERE embedding_model = $embedding_model
   AND chunk_strategy = $chunk_strategy
-  AND $active_chunk_ids CONTAINS chunk_id
 ORDER BY score DESC, chunk_id ASC
 LIMIT $limit;
 """.strip()
@@ -240,24 +230,24 @@ LIMIT $limit;
         self._validate_request_bounds(top_k)
         if not self._ensure_retrieval_preconditions():
             return []
-        active_chunk_ids = self._load_active_chunk_ids()
-        if not active_chunk_ids:
-            return []
 
         encoded_query = self._normalize_query_text(query)
         query_embedding = self.encode(encoded_query)
 
         try:
-            rows = self._connection.query(
-                self._build_search_statement(top_k),
-                {
-                    "embedding_model": self._model_name,
-                    "chunk_strategy": self._chunk_strategy,
-                    "active_chunk_ids": active_chunk_ids,
-                    "qvec": query_embedding,
-                    "limit": top_k,
-                },
-            )
+            rows = []
+            for table_name in self._embedding_tables:
+                rows.extend(
+                    self._connection.query(
+                        self._build_search_statement(table_name=table_name, top_k=top_k),
+                        {
+                            "embedding_model": self._model_name,
+                            "chunk_strategy": self._chunk_strategy,
+                            "qvec": query_embedding,
+                            "limit": top_k,
+                        },
+                    )
+                )
         except (RuntimeError, SurrealError) as exc:
             logger.warning(
                 "Surreal vector search failed: query_len=%d error_type=%s",
@@ -266,7 +256,10 @@ LIMIT $limit;
             )
             return []
 
-        results = self._normalize_results(rows)
+        results = sorted(
+            self._normalize_results(rows),
+            key=lambda item: (-item[1], item[0]),
+        )[:top_k]
         if not results:
             return []
         if self._score_floor > 0.0:

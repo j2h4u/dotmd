@@ -120,6 +120,7 @@ def test_search_matches_entities_like_graph_direct_and_returns_empty_without_mat
     assert relation_variables == {
         "entity_names": ["Николай Сенин", "Surreal"],
         "allowed_rel_types": ["MENTIONS", "HAS_TAG"],
+        "chunk_strategy": "contextual_512_50",
         "limit": 3,
     }
 
@@ -154,12 +155,15 @@ def test_search_uses_indexed_target_id_relation_query_with_bound_variables() -> 
     assert "target_id IN $entity_names" in statement
     assert "rel_type IN $allowed_rel_types" in statement
     assert "source_table = 'sections'" in statement
+    assert "source_id IN (" in statement
+    assert "SELECT VALUE chunk_id" in statement
     assert "GROUP BY source_id" in statement
     assert "ORDER BY total_weight DESC, source_id ASC" in statement
     assert "LIMIT $limit" in statement
     assert variables == {
         "entity_names": ["Surreal", "retrieval"],
         "allowed_rel_types": ["MENTIONS", "HAS_TAG"],
+        "chunk_strategy": "contextual_512_50",
         "limit": 7,
     }
     assert "surreal retrieval!!!" not in statement
@@ -260,6 +264,7 @@ def test_search_limits_after_chunk_aggregation_not_raw_relation_rows() -> None:
     assert "GROUP BY source_id" in statement
     assert "LIMIT $limit" in statement
     assert variables is not None
+    assert variables["chunk_strategy"] == "contextual_512_50"
     assert variables["limit"] == 1
 
 
@@ -308,6 +313,23 @@ def test_embedded_surreal_graph_returns_only_allowed_relation_matches(
 ) -> None:  # type: ignore[no-untyped-def]
     with isolated_surreal_connection(tmp_path) as connection:
         apply_surreal_native_retrieval_schema(connection, embedding_dimension=3, hnsw_ef=40)
+
+        for chunk_id in ("chunk-alpha", "chunk-beta", "chunk-blocked"):
+            connection.create(
+                f"chunks:{chunk_id.replace('-', '_')}",
+                {
+                    "schema_version": "42.1.0",
+                    "chunk_id": chunk_id,
+                    "original_chunk_id": chunk_id,
+                    "chunk_strategy": "contextual_512_50",
+                    "document_ref": f"doc:{chunk_id}",
+                    "ref": f"filesystem:/tmp/{chunk_id}.md",
+                    "title": chunk_id,
+                    "tags_text": "",
+                    "text": chunk_id,
+                    "metadata": {},
+                },
+            )
 
         connection.create(
             "entities:surreal",

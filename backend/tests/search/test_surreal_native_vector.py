@@ -25,12 +25,10 @@ class _FakeVectorConnection:
     def __init__(
         self,
         *,
-        active_chunk_ids: list[str] | None = None,
         precondition_rows: list[dict[str, object]] | None = None,
         search_rows: list[dict[str, object]] | None = None,
         search_error: Exception | None = None,
     ) -> None:
-        self.active_chunk_ids = active_chunk_ids or ["chunk-alpha", "chunk-beta"]
         self.precondition_rows = precondition_rows or [
             {"embedding_model": "phase42-model", "embedding_dimension": 3}
         ]
@@ -44,9 +42,7 @@ class _FakeVectorConnection:
         variables: dict[str, object] | None = None,
     ) -> list[Any]:
         self.calls.append((statement, variables))
-        if "SELECT VALUE chunk_id" in statement:
-            return list(self.active_chunk_ids)
-        if "array::len(embedding)" in statement:
+        if "array::len(vector)" in statement:
             return list(self.precondition_rows)
         if self.search_error is not None:
             raise self.search_error
@@ -54,6 +50,30 @@ class _FakeVectorConnection:
 
     def scan_table(self, table_name: str) -> list[dict[str, object]]:
         raise AssertionError(f"scan_table() must not be used in vector retrieval: {table_name}")
+
+
+class _FakeShardedVectorConnection(_FakeVectorConnection):
+    def __init__(self) -> None:
+        super().__init__(
+            precondition_rows=[{"embedding_model": "phase42-model", "embedding_dimension": 3}],
+        )
+
+    def query(
+        self,
+        statement: str,
+        variables: dict[str, object] | None = None,
+    ) -> list[Any]:
+        self.calls.append((statement, variables))
+        if "array::len(vector)" in statement:
+            return list(self.precondition_rows)
+        if "FROM embeddings_0" in statement:
+            return [
+                {"chunk_id": "chunk-alpha", "score": 0.91},
+                {"chunk_id": "chunk-gamma", "score": 0.72},
+            ]
+        if "FROM embeddings_1" in statement:
+            return [{"chunk_id": "chunk-beta", "score": 0.95}]
+        raise AssertionError(f"unexpected statement: {statement}")
 
 
 @pytest.mark.parametrize(
@@ -110,27 +130,23 @@ def test_search_uses_hnsw_knn_query_with_model_filter_and_cosine_projection(
     results = engine.search("surreal retrieval", top_k=5)
 
     assert results == [("chunk-alpha", 0.99), ("chunk-beta", 0.75)]
-    assert len(connection.calls) == 3
+    assert len(connection.calls) == 2
 
     statement, variables = connection.calls[-1]
     assert "SELECT chunk_id" in statement
-    assert "vector::similarity::cosine(embedding, $qvec) AS score" in statement
+    assert "vector::similarity::cosine(vector, $qvec) AS score" in statement
     assert "embedding_model = $embedding_model" in statement
     assert "chunk_strategy = $chunk_strategy" in statement
-    assert "$active_chunk_ids CONTAINS chunk_id" in statement
-    assert "embedding <|5,40|> $qvec" in statement
+    assert "vector <|5,40|> $qvec" in statement
     assert "ORDER BY score DESC, chunk_id ASC" in statement
     assert variables == {
         "embedding_model": "phase42-model",
         "chunk_strategy": "contextual_512_50",
-        "active_chunk_ids": ["chunk-alpha", "chunk-beta"],
         "qvec": [1.0, 0.0, 0.0],
         "limit": 5,
     }
 
-    _active_statement, active_variables = connection.calls[0]
-    assert active_variables == {"chunk_strategy": "contextual_512_50"}
-    _precondition_statement, precondition_variables = connection.calls[1]
+    _precondition_statement, precondition_variables = connection.calls[0]
     assert precondition_variables == {
         "chunk_strategy": "contextual_512_50",
         "embedding_model": "phase42-model",
@@ -150,11 +166,58 @@ def test_search_scopes_preconditions_and_hnsw_query_to_configured_chunk_strategy
     monkeypatch.setattr(engine, "encode", lambda text: [1.0, 0.0, 0.0])
 
     assert engine.search("surreal retrieval", top_k=3) == [("chunk-active", 0.9)]
-    assert connection.calls[0][1] == {"chunk_strategy": "heading_512_50"}
+    assert connection.calls[0][1] == {
+        "chunk_strategy": "heading_512_50",
+        "embedding_model": "phase42-model",
+    }
     search_variables = connection.calls[-1][1]
     assert search_variables is not None
     assert search_variables["chunk_strategy"] == "heading_512_50"
-    assert search_variables["active_chunk_ids"] == ["chunk-alpha", "chunk-beta"]
+
+
+def test_search_queries_embedding_shards_and_merges_global_top_k(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = _FakeShardedVectorConnection()
+    engine = _engine_class()(
+        connection,
+        model_name="phase42-model",
+        embedding_dimension=3,
+        embedding_shard_count=2,
+    )
+    monkeypatch.setattr(engine, "encode", lambda text: [1.0, 0.0, 0.0])
+
+    results = engine.search("surreal retrieval", top_k=2)
+
+    assert results == [("chunk-beta", 0.95), ("chunk-alpha", 0.91)]
+    search_statements = [
+        statement for statement, _variables in connection.calls if "<|2,40|>" in statement
+    ]
+    assert len(search_statements) == 2
+    assert "FROM embeddings_0" in search_statements[0]
+    assert "FROM embeddings_1" in search_statements[1]
+
+
+def test_search_caps_hnsw_results_per_shard_when_service_overfetches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = _FakeShardedVectorConnection()
+    engine = _engine_class()(
+        connection,
+        model_name="phase42-model",
+        embedding_dimension=3,
+        embedding_shard_count=2,
+        hnsw_ef=20,
+    )
+    monkeypatch.setattr(engine, "encode", lambda text: [1.0, 0.0, 0.0])
+
+    engine.search("surreal retrieval", top_k=60)
+
+    search_statements = [
+        statement for statement, _variables in connection.calls if "vector <|" in statement
+    ]
+    assert search_statements
+    assert all("<|20,20|>" in statement and "vector <|" in statement for statement in search_statements)
 
 
 @pytest.mark.parametrize("top_k", [0, 101])
@@ -216,8 +279,8 @@ def test_search_allows_other_models_in_active_strategy_when_selected_model_is_va
     results = engine.search("surreal retrieval", top_k=5)
 
     assert results == [("chunk-alpha", 0.99)]
-    assert len(connection.calls) == 3
-    _precondition_statement, precondition_variables = connection.calls[1]
+    assert len(connection.calls) == 2
+    _precondition_statement, precondition_variables = connection.calls[0]
     assert precondition_variables == {
         "chunk_strategy": "contextual_512_50",
         "embedding_model": "phase42-model",
@@ -242,7 +305,7 @@ def test_search_returns_empty_when_embedding_dimension_mismatches(
         results = engine.search("surreal retrieval", top_k=5)
 
     assert results == []
-    assert len(connection.calls) == 2
+    assert len(connection.calls) == 1
     assert "embedding_dimension mismatch" in caplog.text
 
 
@@ -280,7 +343,7 @@ def test_embedded_surreal_hnsw_returns_nearest_neighbor_without_scan_table(
                 "embedding_model": "phase42-model",
                 "text_hash": "alpha",
                 "vector_rowid": 1,
-                "embedding": [1.0, 0.0, 0.0],
+                "vector": [1.0, 0.0, 0.0],
                 "metadata": {},
             },
         )
@@ -293,11 +356,11 @@ def test_embedded_surreal_hnsw_returns_nearest_neighbor_without_scan_table(
                 "embedding_model": "phase42-model",
                 "text_hash": "beta",
                 "vector_rowid": 2,
-                "embedding": [0.0, 1.0, 0.0],
+                "vector": [0.0, 1.0, 0.0],
                 "metadata": {},
             },
         )
-        connection.query("REBUILD INDEX embeddings_hnsw_idx ON TABLE embeddings;")
+        connection.query("REBUILD INDEX embeddings_vector_hnsw ON TABLE embeddings;")
 
         engine = _engine_class()(connection, model_name="phase42-model", embedding_dimension=3)
         monkeypatch.setattr(engine, "encode", lambda text: [1.0, 0.0, 0.0])
@@ -350,7 +413,7 @@ def test_search_propagates_encode_errors_like_semantic_engine(
     with pytest.raises(RuntimeError, match="encode failed"):
         engine.search("surreal retrieval", top_k=2)
 
-    assert len(connection.calls) == 2
+    assert len(connection.calls) == 1
 
 
 def test_search_logs_and_returns_empty_on_surreal_query_errors(
@@ -365,6 +428,6 @@ def test_search_logs_and_returns_empty_on_surreal_query_errors(
         results = engine.search("surreal retrieval", top_k=2)
 
     assert results == []
-    assert len(connection.calls) == 3
+    assert len(connection.calls) == 2
     assert "query_len=17" in caplog.text
     assert "error_type=RuntimeError" in caplog.text

@@ -10,9 +10,13 @@ from surrealdb import SurrealError
 SURREAL_SCHEMA_VERSION = "42.1.0"
 MIN_TOP_K = 1
 MAX_TOP_K = 100
+MIN_HNSW_M = 1
+MAX_HNSW_M = 64
+DEFAULT_HNSW_M = 12
 MIN_HNSW_EF = 10
 MAX_HNSW_EF = 400
 DEFAULT_HNSW_EF = 40
+DEFAULT_EMBEDDING_SHARD_COUNT = 1
 
 _REQUIRED_MIGRATION_CATEGORIES = (
     "documents",
@@ -98,6 +102,7 @@ _REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "embedding_model",
         "text_hash",
         "vector_rowid",
+        "vector",
         "metadata",
     ),
     "vector_components": (
@@ -193,6 +198,7 @@ class SurrealSchemaApplyStatus:
 @dataclass(slots=True, frozen=True)
 class SurrealRetrievalIndexPlan:
     embedding_dimension: int
+    hnsw_m: int
     hnsw_ef: int
     analyzer_statement: str
     bm25_index_statements: tuple[str, ...]
@@ -227,6 +233,30 @@ class SurrealRetrievalCapabilityReport:
     @property
     def overall_passed(self) -> bool:
         return all(check.passed for check in self.required_checks)
+
+
+def surreal_embedding_table_name(shard_index: int | None = None) -> str:
+    if shard_index is None:
+        return "embeddings"
+    if shard_index < 0:
+        raise ValueError("shard_index must be non-negative")
+    return f"embeddings_{shard_index}"
+
+
+def surreal_embedding_hnsw_index_name(shard_index: int | None = None) -> str:
+    if shard_index is None:
+        return "embeddings_vector_hnsw"
+    if shard_index < 0:
+        raise ValueError("shard_index must be non-negative")
+    return f"embeddings_{shard_index}_vector_hnsw"
+
+
+def surreal_embedding_shard_tables(shard_count: int) -> tuple[str, ...]:
+    if shard_count <= 0:
+        raise ValueError("shard_count must be positive")
+    if shard_count == 1:
+        return ("embeddings",)
+    return tuple(surreal_embedding_table_name(index) for index in range(shard_count))
 
 
 def _field(
@@ -309,32 +339,63 @@ def required_migration_categories() -> tuple[str, ...]:
 def build_surreal_native_retrieval_index_plan(
     *,
     embedding_dimension: int,
+    hnsw_m: int = DEFAULT_HNSW_M,
     hnsw_ef: int = DEFAULT_HNSW_EF,
 ) -> SurrealRetrievalIndexPlan:
     if embedding_dimension <= 0:
         raise ValueError("embedding_dimension must be a positive integer")
+    if hnsw_m < MIN_HNSW_M or hnsw_m > MAX_HNSW_M:
+        raise ValueError(f"hnsw_m must be between {MIN_HNSW_M} and {MAX_HNSW_M}, inclusive")
     if hnsw_ef < MIN_HNSW_EF or hnsw_ef > MAX_HNSW_EF:
         raise ValueError(f"hnsw_ef must be between {MIN_HNSW_EF} and {MAX_HNSW_EF}, inclusive")
 
     return SurrealRetrievalIndexPlan(
         embedding_dimension=embedding_dimension,
+        hnsw_m=hnsw_m,
         hnsw_ef=hnsw_ef,
         analyzer_statement=(
-            "DEFINE ANALYZER chunks_bm25_analyzer TOKENIZERS blank,class FILTERS lowercase,snowball(english);"
+            "DEFINE ANALYZER dotmd_fts TOKENIZERS CLASS,PUNCT FILTERS LOWERCASE, ASCII"
         ),
         bm25_index_statements=(
-            "DEFINE INDEX chunks_title_bm25_idx ON TABLE chunks COLUMNS title SEARCH ANALYZER chunks_bm25_analyzer BM25;",
-            "DEFINE INDEX chunks_tags_text_bm25_idx ON TABLE chunks COLUMNS tags_text SEARCH ANALYZER chunks_bm25_analyzer BM25;",
-            "DEFINE INDEX chunks_text_bm25_idx ON TABLE chunks COLUMNS text SEARCH ANALYZER chunks_bm25_analyzer BM25;",
+            "DEFINE INDEX chunks_title_fts ON chunks FIELDS title FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75)",
+            "DEFINE INDEX chunks_text_fts ON chunks FIELDS text FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75)",
         ),
-        hnsw_index_statement=(
-            f"DEFINE INDEX embeddings_hnsw_idx ON TABLE embeddings COLUMNS embedding HNSW DIMENSION {embedding_dimension} DIST COSINE EFC {hnsw_ef};"
+        hnsw_index_statement=build_surreal_embedding_hnsw_index_statement(
+            table_name=surreal_embedding_table_name(),
+            index_name=surreal_embedding_hnsw_index_name(),
+            embedding_dimension=embedding_dimension,
+            hnsw_m=hnsw_m,
+            hnsw_ef=hnsw_ef,
         ),
         relation_index_statements=(
             "DEFINE INDEX relations_rel_type_idx ON TABLE relations COLUMNS rel_type;",
             "DEFINE INDEX relations_target_id_idx ON TABLE relations COLUMNS target_id;",
             "DEFINE INDEX relations_source_target_idx ON TABLE relations COLUMNS source_id, target_id;",
         ),
+    )
+
+
+def build_surreal_embedding_hnsw_index_statement(
+    *,
+    table_name: str,
+    index_name: str,
+    embedding_dimension: int,
+    hnsw_m: int = DEFAULT_HNSW_M,
+    hnsw_ef: int = DEFAULT_HNSW_EF,
+) -> str:
+    if not table_name:
+        raise ValueError("table_name must not be empty")
+    if not index_name:
+        raise ValueError("index_name must not be empty")
+    if embedding_dimension <= 0:
+        raise ValueError("embedding_dimension must be a positive integer")
+    if hnsw_m < MIN_HNSW_M or hnsw_m > MAX_HNSW_M:
+        raise ValueError(f"hnsw_m must be between {MIN_HNSW_M} and {MAX_HNSW_M}, inclusive")
+    if hnsw_ef < MIN_HNSW_EF or hnsw_ef > MAX_HNSW_EF:
+        raise ValueError(f"hnsw_ef must be between {MIN_HNSW_EF} and {MAX_HNSW_EF}, inclusive")
+    return (
+        f"DEFINE INDEX {index_name} ON TABLE {table_name} FIELDS vector "
+        f"HNSW DIMENSION {embedding_dimension} DIST COSINE TYPE F32 EFC {hnsw_ef} M {hnsw_m};"
     )
 
 
@@ -363,7 +424,7 @@ def validate_surreal_native_retrieval_contract(
         raise ValueError("target must contain a single active embedding_model")
 
     for row in embedding_rows:
-        vector = row.get("embedding")
+        vector = row.get("vector")
         if not isinstance(vector, list) or not vector:
             continue
         if len(vector) != embedding_dimension:
@@ -505,7 +566,7 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
                 _field("embedding_model", "string"),
                 _field("text_hash", "string"),
                 _field("vector_rowid", "int"),
-                _field("embedding", "array<float>", required=False),
+                _field("vector", "array<float>", required=False),
                 _field("metadata", "object", required=False, flexible_json=True),
             ),
             indexes=(
@@ -912,27 +973,21 @@ def probe_surreal_native_retrieval_capabilities(
     required_checks = (
         _run_probe_statement(
             connection,
-            name="bm25_analyzer",
+            name="fts_analyzer",
             required=True,
             statement=retrieval_plan.analyzer_statement,
         ),
         _run_probe_statement(
             connection,
-            name="bm25_title_index",
+            name="fts_title_index",
             required=True,
             statement=retrieval_plan.bm25_index_statements[0],
         ),
         _run_probe_statement(
             connection,
-            name="bm25_tags_text_index",
+            name="fts_text_index",
             required=True,
             statement=retrieval_plan.bm25_index_statements[1],
-        ),
-        _run_probe_statement(
-            connection,
-            name="bm25_text_index",
-            required=True,
-            statement=retrieval_plan.bm25_index_statements[2],
         ),
         _run_probe_statement(
             connection,
@@ -959,7 +1014,7 @@ def probe_surreal_native_retrieval_capabilities(
             name="fulltext_analyzer_v3",
             required=False,
             statement=(
-                "DEFINE INDEX chunks_title_fulltext_probe_idx ON TABLE chunks COLUMNS title FULLTEXT ANALYZER chunks_bm25_analyzer BM25;"
+                "DEFINE INDEX chunks_title_fulltext_probe_idx ON chunks FIELDS title FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75)"
             ),
         ),
         _run_probe_statement(
@@ -967,7 +1022,7 @@ def probe_surreal_native_retrieval_capabilities(
             name="diskann_v3",
             required=False,
             statement=(
-                "DEFINE INDEX embeddings_diskann_probe_idx ON TABLE embeddings COLUMNS embedding DISKANN DIMENSION 3 DIST COSINE;"
+                "DEFINE INDEX embeddings_diskann_probe_idx ON TABLE embeddings FIELDS vector DISKANN DIMENSION 3 DIST COSINE;"
             ),
         ),
         _run_probe_statement(

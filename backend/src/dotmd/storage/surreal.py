@@ -471,17 +471,17 @@ class SurrealVectorStore:
                 "original_chunk_id": chunk.chunk_id,
                 "text_hash": text_hashes.get(chunk.chunk_id) if text_hashes else None,
                 "vector_rowid": None,
-                "embedding": list(embedding),
+                "vector": list(embedding),
             }
             self._connection.upsert(self._codec.encode("embeddings", chunk.chunk_id), payload)
 
     def search(self, query_embedding: list[float], top_k: int = 10) -> list[tuple[str, float]]:
         scored: list[tuple[str, float]] = []
         for row in self._connection.scan_table("embeddings"):
-            embedding = [float(value) for value in row.get("embedding", [])]
-            if not embedding:
+            vector = [float(value) for value in row["vector"]]
+            if not vector:
                 continue
-            score = _cosine_similarity(query_embedding, embedding)
+            score = _cosine_similarity(query_embedding, vector)
             scored.append((str(row["chunk_id"]), score))
         scored.sort(key=lambda item: item[1], reverse=True)
         return scored[:top_k]
@@ -509,7 +509,7 @@ class SurrealVectorStore:
         for row in self._connection.scan_table("embeddings"):
             text_hash = row.get("text_hash")
             if isinstance(text_hash, str) and text_hash in text_hashes:
-                result[text_hash] = [float(value) for value in row.get("embedding", [])]
+                result[text_hash] = [float(value) for value in row["vector"]]
         return result
 
     def replace_embedding_rows(self, rows: list[dict[str, Any]]) -> int:

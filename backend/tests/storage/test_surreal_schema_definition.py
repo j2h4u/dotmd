@@ -144,7 +144,7 @@ def test_schema_tables_preserve_required_fields_and_relation_metadata() -> None:
         "text",
         "metadata",
     }.issubset(_field_names(chunks))
-    assert {"embedding_model", "text_hash", "vector_rowid", "metadata"}.issubset(
+    assert {"embedding_model", "text_hash", "vector_rowid", "vector", "metadata"}.issubset(
         _field_names(embeddings)
     )
     assert {
@@ -276,21 +276,22 @@ def test_retrieval_index_plan_exposes_runtime_compatible_bm25_hnsw_and_relation_
 
     retrieval_plan = build_surreal_native_retrieval_index_plan(
         embedding_dimension=3,
+        hnsw_m=4,
         hnsw_ef=40,
     )
 
     assert retrieval_plan.embedding_dimension == 3
+    assert retrieval_plan.hnsw_m == 4
     assert retrieval_plan.hnsw_ef == 40
     assert retrieval_plan.analyzer_statement == (
-        "DEFINE ANALYZER chunks_bm25_analyzer TOKENIZERS blank,class FILTERS lowercase,snowball(english);"
+        "DEFINE ANALYZER dotmd_fts TOKENIZERS CLASS,PUNCT FILTERS LOWERCASE, ASCII"
     )
     assert retrieval_plan.bm25_index_statements == (
-        "DEFINE INDEX chunks_title_bm25_idx ON TABLE chunks COLUMNS title SEARCH ANALYZER chunks_bm25_analyzer BM25;",
-        "DEFINE INDEX chunks_tags_text_bm25_idx ON TABLE chunks COLUMNS tags_text SEARCH ANALYZER chunks_bm25_analyzer BM25;",
-        "DEFINE INDEX chunks_text_bm25_idx ON TABLE chunks COLUMNS text SEARCH ANALYZER chunks_bm25_analyzer BM25;",
+        "DEFINE INDEX chunks_title_fts ON chunks FIELDS title FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75)",
+        "DEFINE INDEX chunks_text_fts ON chunks FIELDS text FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75)",
     )
     assert retrieval_plan.hnsw_index_statement == (
-        "DEFINE INDEX embeddings_hnsw_idx ON TABLE embeddings COLUMNS embedding HNSW DIMENSION 3 DIST COSINE EFC 40;"
+        "DEFINE INDEX embeddings_vector_hnsw ON TABLE embeddings FIELDS vector HNSW DIMENSION 3 DIST COSINE TYPE F32 EFC 40 M 4;"
     )
     assert retrieval_plan.relation_index_statements == (
         "DEFINE INDEX relations_rel_type_idx ON TABLE relations COLUMNS rel_type;",
@@ -305,7 +306,7 @@ def test_retrieval_index_plan_exposes_runtime_compatible_bm25_hnsw_and_relation_
     )
 
 
-def test_retrieval_index_plan_stays_on_locally_verified_surreal_2_runtime_surface() -> None:
+def test_retrieval_index_plan_matches_live_standalone_fulltext_surface() -> None:
     from dotmd.storage.surreal_schema import (  # type: ignore[import-not-found]
         build_surreal_native_retrieval_index_plan,
     )
@@ -316,8 +317,8 @@ def test_retrieval_index_plan_stays_on_locally_verified_surreal_2_runtime_surfac
     )
     serialized = "\n".join(retrieval_plan.statements)
 
-    assert "SEARCH ANALYZER" in serialized
-    assert "FULLTEXT" not in serialized
+    assert "FULLTEXT" in serialized
+    assert "SEARCH ANALYZER" not in serialized
     assert "DISKANN" not in serialized
     assert "search::rrf" not in serialized
     assert "search::linear" not in serialized
@@ -333,7 +334,7 @@ def test_retrieval_contract_validation_rejects_bad_dimensions_models_vectors_and
     valid_rows = [
         {
             "embedding_model": "multilingual-e5-large",
-            "embedding": [0.11, 0.22, 0.33],
+            "vector": [0.11, 0.22, 0.33],
         }
     ]
 
@@ -355,8 +356,8 @@ def test_retrieval_contract_validation_rejects_bad_dimensions_models_vectors_and
         validate_surreal_native_retrieval_contract(
             embedding_dimension=3,
             embedding_rows=[
-                {"embedding_model": "model-a", "embedding": [0.11, 0.22, 0.33]},
-                {"embedding_model": "model-b", "embedding": [0.44, 0.55, 0.66]},
+                {"embedding_model": "model-a", "vector": [0.11, 0.22, 0.33]},
+                {"embedding_model": "model-b", "vector": [0.44, 0.55, 0.66]},
             ],
             top_k=10,
             hnsw_ef=40,
@@ -367,7 +368,7 @@ def test_retrieval_contract_validation_rejects_bad_dimensions_models_vectors_and
             embedding_rows=[
                 {
                     "embedding_model": "multilingual-e5-large",
-                    "embedding": [0.11, 0.22],
+                    "vector": [0.11, 0.22],
                 }
             ],
             top_k=10,
@@ -427,14 +428,15 @@ def test_probe_surreal_native_retrieval_capabilities_reports_required_and_observ
         )
 
     assert isinstance(report, SurrealRetrievalCapabilityReport)
-    assert report.overall_passed is True
+    assert report.overall_passed is False
     required = {check.name: check for check in report.required_checks}
     observations = {check.name: check for check in report.optional_observations}
 
-    assert required["bm25_analyzer"].passed is True
-    assert required["bm25_title_index"].passed is True
-    assert required["bm25_tags_text_index"].passed is True
-    assert required["bm25_text_index"].passed is True
+    assert required["fts_analyzer"].passed is True
+    assert required["fts_title_index"].passed is False
+    assert required["fts_text_index"].passed is False
+    assert "FULLTEXT" in required["fts_title_index"].statement
+    assert "FULLTEXT" in required["fts_text_index"].statement
     assert required["hnsw_vector_index"].passed is True
     assert required["relation_table"].passed is True
     assert required["relations_target_id_idx"].passed is True

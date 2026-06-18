@@ -74,6 +74,10 @@ _DEFERRED_EMBEDDING_INDEX_DEFINITIONS = (
         "DEFINE INDEX embeddings_text_hash_idx ON TABLE embeddings COLUMNS text_hash;",
     ),
 )
+DEFERRED_EMBEDDING_INDEX_NAMES = tuple(
+    index_name for index_name, _statement in _DEFERRED_EMBEDDING_INDEX_DEFINITIONS
+)
+HNSW_EMBEDDING_INDEX_NAME = "embeddings_vector_hnsw"
 _INDEX_PROGRESS_HEARTBEAT_SECONDS = 30.0
 
 
@@ -186,6 +190,10 @@ class SurrealMigrationReport:
     restore_required: bool = False
     rollback_evidence: str | None = None
     gate_status: str = "not_required"
+    deferred_indexes_status: str = "not_evaluated"
+    deferred_indexes_expected: list[str] = field(default_factory=list)
+    deferred_indexes_present: list[str] = field(default_factory=list)
+    hnsw_rebuild_status: str = "not_evaluated"
     errors: list[str] = field(default_factory=list)
     started_at_monotonic: float = field(default_factory=time.monotonic)
 
@@ -244,6 +252,22 @@ class _SqliteVectorDataset:
     component_table: str | None
     embed_fingerprint_table: str | None
     meta_fingerprint_table: str | None
+
+
+def _count_valid_vector_rows(
+    conn: sqlite3.Connection,
+    dataset: _SqliteVectorDataset,
+    known_tables: set[str],
+) -> int:
+    meta_table = _validate_table_name(dataset.meta_table, known_tables)
+    vec_table = _validate_table_name(dataset.vec_table, known_tables)
+    return int(
+        conn.execute(
+            f"SELECT COUNT(*) FROM {meta_table} AS m "
+            f"JOIN {vec_table} AS v ON v.rowid = m.rowid "
+            "WHERE v.embedding IS NOT NULL"
+        ).fetchone()[0]
+    )
 
 
 def _discover_chunk_strategies(known_tables: set[str]) -> list[str]:
@@ -657,6 +681,8 @@ def load_sqlite_rows_for_surreal(
         chunk_strategy = str(row["chunk_strategy"])
         row_embedding_model = str(row["embedding_model"])
         vector_row = vec_chunk_rows.get((chunk_strategy, row_embedding_model, vector_rowid))
+        if vector_row is None or not vector_row.get("embedding"):
+            continue
         embedding_payloads.append(
             {
                 "schema_version": SURREAL_SCHEMA_VERSION,
@@ -666,11 +692,7 @@ def load_sqlite_rows_for_surreal(
                 "embedding_model": row_embedding_model,
                 "text_hash": _normalize_text_hash(row["text_hash"]),
                 "vector_rowid": vector_rowid,
-                "embedding": (
-                    _decode_embedding_blob(vector_row["embedding"])
-                    if vector_row is not None
-                    else []
-                ),
+                "vector": _decode_embedding_blob(vector_row["embedding"]),
                 "metadata": {},
             }
         )
@@ -814,6 +836,8 @@ def iter_sqlite_embedding_rows_for_surreal(
                 f"ORDER BY m.rowid"
             )
             for row in _fetchmany_dicts(cursor, batch_size=batch_size):
+                if not row["embedding"]:
+                    continue
                 yield {
                     "schema_version": SURREAL_SCHEMA_VERSION,
                     "chunk_id": str(row["chunk_id"]),
@@ -822,7 +846,7 @@ def iter_sqlite_embedding_rows_for_surreal(
                     "embedding_model": dataset.embedding_model,
                     "text_hash": _normalize_text_hash(row["text_hash"]),
                     "vector_rowid": int(row["vector_rowid"]),
-                    "embedding": _decode_embedding_blob(row["embedding"] or b""),
+                    "vector": _decode_embedding_blob(row["embedding"]),
                     "metadata": {},
                 }
 
@@ -919,7 +943,8 @@ def load_sqlite_stats_for_surreal(sqlite_snapshot_path: Path) -> dict[str, Any]:
                 vector_datasets=vector_datasets,
             ),
             "embeddings": sum(
-                _count_rows(conn, dataset.meta_table, known_tables) for dataset in vector_datasets
+                _count_valid_vector_rows(conn, dataset, known_tables)
+                for dataset in vector_datasets
             ),
             # vector_components is optional derived storage, not a retrieval
             # prerequisite. Migrating it by default duplicates a second large
@@ -1324,7 +1349,7 @@ def _load_sqlite_embedding_rows_by_chunk_id(
                     "embedding_model": dataset.embedding_model,
                     "text_hash": _normalize_text_hash(row["text_hash"]),
                     "vector_rowid": int(row["vector_rowid"]),
-                    "embedding": _decode_embedding_blob(row["embedding"] or b""),
+                    "vector": _decode_embedding_blob(row["embedding"] or b""),
                 }
     return result
 
@@ -1439,6 +1464,10 @@ def _write_progress_snapshot(
             report.last_successful_phase.value if report.last_successful_phase else None
         ),
         "failed_phase": report.failed_phase.value if report.failed_phase else None,
+        "deferred_indexes_status": report.deferred_indexes_status,
+        "deferred_indexes_expected": report.deferred_indexes_expected,
+        "deferred_indexes_present": report.deferred_indexes_present,
+        "hnsw_rebuild_status": report.hnsw_rebuild_status,
         "phase_checkpoints": [
             {
                 "phase_name": phase.phase_name.value,
@@ -1912,7 +1941,7 @@ def _rebuild_retrieval_indexes(connection: SurrealConnection) -> int:
         connection.query(statement)
         applied += 1
     try:
-        connection.query("REBUILD INDEX embeddings_hnsw_idx ON TABLE embeddings;")
+        connection.query(f"REBUILD INDEX {HNSW_EMBEDDING_INDEX_NAME} ON TABLE embeddings;")
     except Exception as exc:
         if "does not exist" in str(exc):
             return applied
@@ -1997,7 +2026,7 @@ def _write_index_phase(
         try:
             _query_with_progress_heartbeat(
                 connection,
-                "REBUILD INDEX embeddings_hnsw_idx ON TABLE embeddings;",
+                f"REBUILD INDEX {HNSW_EMBEDDING_INDEX_NAME} ON TABLE embeddings;",
                 report=report,
                 checkpoint=checkpoint,
                 progress_path=progress_path,
@@ -2031,6 +2060,10 @@ def _write_index_phase(
     checkpoint.status = "applied"
     checkpoint.verified_count = applied_count
     report.last_successful_phase = checkpoint.phase_name
+    report.deferred_indexes_status = "built"
+    report.deferred_indexes_expected = list(DEFERRED_EMBEDDING_INDEX_NAMES)
+    report.deferred_indexes_present = list(DEFERRED_EMBEDDING_INDEX_NAMES)
+    report.hnsw_rebuild_status = "rebuilt" if applied_count > len(DEFERRED_EMBEDDING_INDEX_NAMES) else "not_present"
     _write_progress_snapshot(progress_path, report=report, checkpoint=checkpoint)
 
 
@@ -2071,7 +2104,7 @@ def verify_surreal_migration_target(
         schema_info = connection.inspect_schema()
         stored_embedding_sample = _query_surreal_rows(
             connection,
-            "SELECT chunk_id, chunk_strategy, embedding_model, text_hash, vector_rowid, embedding "
+            "SELECT chunk_id, chunk_strategy, embedding_model, text_hash, vector_rowid, vector "
             "FROM embeddings LIMIT 25;",
         )
         stored_relations_sample = _query_surreal_rows(connection, "SELECT * FROM relations LIMIT 1;")
@@ -2099,7 +2132,7 @@ def verify_surreal_migration_target(
 
     if report.expected_vector_dimension is not None:
         if all(
-            len(list(row.get("embedding", []))) == report.expected_vector_dimension
+            len(list(row.get("vector", []))) == report.expected_vector_dimension
             for row in stored_embedding_sample
         ):
             report.cheap_invariants.append(
@@ -2126,7 +2159,7 @@ def verify_surreal_migration_target(
             and stored.get("text_hash") == expected_row.get("text_hash")
             and stored.get("chunk_strategy") == expected_row.get("chunk_strategy")
             and stored.get("vector_rowid") == expected_row.get("vector_rowid")
-            and list(stored.get("embedding", [])) == list(expected_row.get("embedding", []))
+            and list(stored.get("vector", [])) == list(expected_row.get("vector", []))
             for stored in stored_embedding_sample
         )
     )
@@ -2342,6 +2375,13 @@ def run_surreal_migration(
     phase_checkpoints["indexes"].planned_count = (
         len(_DEFERRED_EMBEDDING_INDEX_DEFINITIONS) + 1 if build_deferred_indexes else 0
     )
+    report.deferred_indexes_expected = list(DEFERRED_EMBEDDING_INDEX_NAMES)
+    if build_deferred_indexes:
+        report.deferred_indexes_status = "planned"
+        report.hnsw_rebuild_status = "planned"
+    else:
+        report.deferred_indexes_status = "skipped"
+        report.hnsw_rebuild_status = "not_rebuilt"
     phase_checkpoints["vector_components"].planned_count = report.expected_counts[
         "vector_components"
     ]

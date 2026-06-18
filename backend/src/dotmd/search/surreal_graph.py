@@ -37,10 +37,12 @@ class SurrealGraphDirectEngine:
         self,
         connection: _SurrealQueryConnection,
         *,
+        chunk_strategy: str = "contextual_512_50",
         allowed_rel_types: tuple[str, ...] = _DEFAULT_ALLOWED_REL_TYPES,
         catalog_limit: int = _DEFAULT_CATALOG_LIMIT,
     ) -> None:
         self._connection = connection
+        self._chunk_strategy = chunk_strategy
         self._allowed_rel_types = tuple(allowed_rel_types)
         self._catalog_limit = catalog_limit
         self._entity_catalog: dict[str, str] = {}
@@ -55,6 +57,11 @@ FROM relations
 WHERE source_table = 'sections'
   AND target_id IN $entity_names
   AND rel_type IN $allowed_rel_types
+  AND source_id IN (
+      SELECT VALUE chunk_id
+      FROM chunks
+      WHERE chunk_strategy = $chunk_strategy
+  )
 GROUP BY source_id
 ORDER BY total_weight DESC, source_id ASC
 LIMIT $limit;
@@ -107,6 +114,7 @@ LIMIT $limit;
                 {
                     "entity_names": matched_entities,
                     "allowed_rel_types": list(self._allowed_rel_types),
+                    "chunk_strategy": self._chunk_strategy,
                     "limit": top_k,
                 },
             )

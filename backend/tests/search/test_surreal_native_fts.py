@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 
 import pytest
 from tests.fixtures.surreal_native import (
@@ -20,16 +21,12 @@ def _engine_class():
     return SurrealFTSSearchEngine
 
 
+@dataclass
 class _FakeFTSConnection:
-    def __init__(
-        self,
-        *,
-        rows: list[dict[str, object]] | None = None,
-        error: Exception | None = None,
-    ) -> None:
-        self.rows = rows or []
-        self.error = error
-        self.calls: list[tuple[str, dict[str, object] | None]] = []
+    title_rows: list[dict[str, object]] = field(default_factory=list)
+    text_rows: list[dict[str, object]] = field(default_factory=list)
+    error: Exception | None = None
+    calls: list[tuple[str, dict[str, object] | None]] = field(default_factory=list)
 
     def query(
         self,
@@ -39,7 +36,13 @@ class _FakeFTSConnection:
         self.calls.append((statement, variables))
         if self.error is not None:
             raise self.error
-        return list(self.rows)
+        if "WITH INDEX chunks_title_fts" in statement:
+            return list(self.title_rows)
+        if "WITH INDEX chunks_text_fts" in statement:
+            return list(self.text_rows)
+        if statement.startswith("EXPLAIN FULL"):
+            return [{"plan": {"index": "chunks_title_fts"}}]
+        return []
 
 
 def test_search_returns_empty_for_blank_or_punctuation_queries_without_hitting_surreal() -> None:
@@ -50,44 +53,59 @@ def test_search_returns_empty_for_blank_or_punctuation_queries_without_hitting_s
     assert engine.search("!!! ???", top_k=5) == []
 
 
-def test_search_uses_fixed_weighted_surrealql_with_bound_query_variables() -> None:
+def test_search_uses_title_and_text_queries_with_bound_query_variables() -> None:
     connection = _FakeFTSConnection(
-        rows=[
-            {"chunk_id": "chunk-title", "score": 9.5},
-            {"chunk_id": "chunk-tags", "score": 3.0},
-        ]
+        title_rows=[
+            {"chunk_id": "chunk-a", "score": 0.9},
+            {"chunk_id": "chunk-b", "score": 0.4},
+            {"chunk_id": "chunk-dup", "score": 0.3},
+        ],
+        text_rows=[
+            {"chunk_id": "chunk-dup", "score": 0.6},
+            {"chunk_id": "chunk-c", "score": 0.2},
+        ],
     )
     engine = _engine_class()(connection)
 
     results = engine.search('surreal: retrieval!!! "quoted"', top_k=7)
 
-    assert results == [("chunk-title", 9.5), ("chunk-tags", 3.0)]
-    assert len(connection.calls) == 1
+    assert results == [
+        ("chunk-a", 4.5),
+        ("chunk-dup", 2.1),
+        ("chunk-b", 2.0),
+        ("chunk-c", 0.2),
+    ]
+    assert len(connection.calls) == 2
 
-    statement, variables = connection.calls[0]
-    assert "SELECT chunk_id" in statement
-    assert "FROM chunks" in statement
-    assert "chunk_strategy = $chunk_strategy" in statement
-    assert "title @1@ $query" in statement
-    assert "tags_text @2@ $query" in statement
-    assert "text @3@ $query" in statement
-    assert "5 * search::score(1)" in statement
-    assert "3 * search::score(2)" in statement
-    assert "1 * search::score(3)" in statement
-    assert "ORDER BY score DESC, chunk_id ASC" in statement
-    assert variables == {
+    title_statement, title_variables = connection.calls[0]
+    text_statement, text_variables = connection.calls[1]
+    assert "SELECT chunk_id" in title_statement
+    assert "FROM chunks" in title_statement
+    assert "WITH INDEX chunks_title_fts" in title_statement
+    assert "chunk_strategy = $chunk_strategy" in title_statement
+    assert "title @0@ $query" in title_statement
+    assert "ORDER BY score DESC" in title_statement
+    assert title_variables == {
         "query": "surreal retrieval quoted",
         "chunk_strategy": "contextual_512_50",
         "limit": 7,
     }
-    assert "surreal: retrieval!!!" not in statement
+
+    assert "WITH INDEX chunks_text_fts" in text_statement
+    assert "chunk_strategy = $chunk_strategy" in text_statement
+    assert "text @1@ $query" in text_statement
+    assert text_variables == title_variables
+    assert "surreal: retrieval!!!" not in title_statement
+    assert "surreal: retrieval!!!" not in text_statement
 
 
 def test_search_filters_to_configured_chunk_strategy() -> None:
-    connection = _FakeFTSConnection(rows=[{"chunk_id": "chunk-active", "score": 1.0}])
+    connection = _FakeFTSConnection(
+        title_rows=[{"chunk_id": "chunk-active", "score": 1.0}],
+    )
     engine = _engine_class()(connection, chunk_strategy="heading_512_50")
 
-    assert engine.search("surreal retrieval", top_k=3) == [("chunk-active", 1.0)]
+    assert engine.search("surreal retrieval", top_k=3) == [("chunk-active", 5.0)]
 
     _statement, variables = connection.calls[0]
     assert variables is not None
@@ -107,7 +125,9 @@ def test_search_logs_and_returns_empty_on_surreal_errors(caplog: pytest.LogCaptu
     assert "error_type=RuntimeError" in caplog.text
 
 
-def test_embedded_surreal_fts_returns_weighted_chunk_hits(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_embedded_surreal_fts_filters_to_chunk_strategy_and_returns_chunk_hits(
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
     with isolated_surreal_connection(tmp_path) as connection:
         apply_surreal_native_retrieval_schema(connection, embedding_dimension=3, hnsw_ef=40)
         connection.create(
@@ -131,7 +151,7 @@ def test_embedded_surreal_fts_returns_weighted_chunk_hits(tmp_path) -> None:  # 
                 "schema_version": "42.1.0",
                 "original_chunk_id": "chunk:body-only",
                 "chunk_id": "chunk:body-only",
-                "chunk_strategy": "contextual_512_50",
+                "chunk_strategy": "heading_512_50",
                 "document_ref": "doc:body-only",
                 "ref": "filesystem:/tmp/body-only.md",
                 "title": "General Notes",
@@ -141,9 +161,10 @@ def test_embedded_surreal_fts_returns_weighted_chunk_hits(tmp_path) -> None:  # 
             },
         )
 
-        engine = _engine_class()(connection)
+        engine = _engine_class()(connection, chunk_strategy="contextual_512_50")
         results = engine.search("surreal retrieval", top_k=5)
 
     assert results
     assert any(chunk_id == "chunk:title-tag" for chunk_id, _score in results)
+    assert all(chunk_id != "chunk:body-only" for chunk_id, _score in results)
     assert all(isinstance(score, float) for _chunk_id, score in results)
