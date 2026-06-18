@@ -26,13 +26,17 @@ class _FakeGraphConnection:
         *,
         entity_rows: list[dict[str, object]] | None = None,
         relation_rows: list[dict[str, object]] | None = None,
+        chunk_rows: list[dict[str, object]] | None = None,
         entity_error: Exception | None = None,
         relation_error: Exception | None = None,
+        chunk_error: Exception | None = None,
     ) -> None:
         self.entity_rows = entity_rows or []
         self.relation_rows = relation_rows or []
+        self.chunk_rows = chunk_rows
         self.entity_error = entity_error
         self.relation_error = relation_error
+        self.chunk_error = chunk_error
         self.calls: list[tuple[str, dict[str, object] | None]] = []
 
     def query(
@@ -49,6 +53,15 @@ class _FakeGraphConnection:
             if self.relation_error is not None:
                 raise self.relation_error
             return list(self.relation_rows)
+        if "FROM chunks" in statement:
+            if self.chunk_error is not None:
+                raise self.chunk_error
+            if self.chunk_rows is not None:
+                return list(self.chunk_rows)
+            source_ids = [] if variables is None else variables.get("source_ids", [])
+            if not isinstance(source_ids, list):
+                return []
+            return [{"chunk_id": source_id} for source_id in source_ids]
         raise AssertionError(f"unexpected query: {statement}")
 
     def scan_table(self, table_name: str) -> list[dict[str, object]]:
@@ -120,8 +133,7 @@ def test_search_matches_entities_like_graph_direct_and_returns_empty_without_mat
     assert relation_variables == {
         "entity_names": ["Николай Сенин", "Surreal"],
         "allowed_rel_types": ["MENTIONS", "HAS_TAG"],
-        "chunk_strategy": "contextual_512_50",
-        "limit": 3,
+        "limit": 75,
     }
 
 
@@ -147,26 +159,33 @@ def test_search_uses_indexed_target_id_relation_query_with_bound_variables() -> 
     results = engine.search("surreal retrieval!!!", top_k=7)
 
     assert results == [("chunk-alpha", 1.0)]
-    assert len(connection.calls) == 2
+    assert len(connection.calls) == 3
 
-    statement, variables = connection.calls[-1]
+    statement, variables = connection.calls[-2]
     assert "SELECT source_id, math::sum(weight) AS total_weight" in statement
     assert "FROM relations" in statement
     assert "target_id IN $entity_names" in statement
     assert "rel_type IN $allowed_rel_types" in statement
     assert "source_table = 'sections'" in statement
-    assert "source_id IN (" in statement
-    assert "SELECT VALUE chunk_id" in statement
+    assert "source_id IN (" not in statement
+    assert "SELECT VALUE chunk_id" not in statement
     assert "GROUP BY source_id" in statement
     assert "ORDER BY total_weight DESC, source_id ASC" in statement
     assert "LIMIT $limit" in statement
     assert variables == {
         "entity_names": ["Surreal", "retrieval"],
         "allowed_rel_types": ["MENTIONS", "HAS_TAG"],
-        "chunk_strategy": "contextual_512_50",
-        "limit": 7,
+        "limit": 175,
     }
     assert "surreal retrieval!!!" not in statement
+
+    chunk_statement, chunk_variables = connection.calls[-1]
+    assert "FROM chunks" in chunk_statement
+    assert chunk_variables == {
+        "chunk_strategy": "contextual_512_50",
+        "source_ids": ["chunk-alpha"],
+        "limit": 1,
+    }
 
 
 def test_search_uses_relation_weights_normalizes_scores_and_breaks_ties_by_chunk_id() -> None:
@@ -229,6 +248,38 @@ def test_search_uses_relation_weights_normalizes_scores_and_breaks_ties_by_chunk
     ]
 
 
+def test_search_filters_relation_sources_missing_from_active_chunks() -> None:
+    connection = _FakeGraphConnection(
+        entity_rows=[{"name": "Surreal"}],
+        relation_rows=[
+            {
+                "source_id": "stale-chunk",
+                "target_id": "Surreal",
+                "rel_type": "MENTIONS",
+                "weight": 9.0,
+            },
+            {
+                "source_id": "chunk-active",
+                "target_id": "Surreal",
+                "rel_type": "MENTIONS",
+                "weight": 1.0,
+            },
+        ],
+        chunk_rows=[{"chunk_id": "chunk-active"}],
+    )
+    engine = _engine_class()(connection)
+
+    assert engine.search("surreal", top_k=3) == [("chunk-active", 1.0)]
+
+    chunk_statement, chunk_variables = connection.calls[-1]
+    assert "FROM chunks" in chunk_statement
+    assert chunk_variables == {
+        "chunk_strategy": "contextual_512_50",
+        "source_ids": ["stale-chunk", "chunk-active"],
+        "limit": 2,
+    }
+
+
 def test_search_limits_after_chunk_aggregation_not_raw_relation_rows() -> None:
     connection = _FakeGraphConnection(
         entity_rows=[
@@ -260,12 +311,12 @@ def test_search_limits_after_chunk_aggregation_not_raw_relation_rows() -> None:
 
     assert engine.search("surreal retrieval", top_k=1) == [("chunk-beta", 1.0)]
 
-    statement, variables = connection.calls[-1]
+    statement, variables = connection.calls[-2]
     assert "GROUP BY source_id" in statement
     assert "LIMIT $limit" in statement
     assert variables is not None
-    assert variables["chunk_strategy"] == "contextual_512_50"
-    assert variables["limit"] == 1
+    assert "chunk_strategy" not in variables
+    assert variables["limit"] == 25
 
 
 def test_search_uses_flat_relation_fields_even_when_surreal_endpoints_are_present() -> None:

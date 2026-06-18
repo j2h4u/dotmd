@@ -292,6 +292,21 @@ def _field_statement(table_name: str, field_def: SurrealFieldDefinition) -> str:
     return f"DEFINE FIELD {field_def.name} ON TABLE {table_name} TYPE {declared_type};"
 
 
+def _field_statements(
+    table_name: str,
+    field_def: SurrealFieldDefinition,
+    *,
+    schema_mode: str,
+) -> tuple[str, ...]:
+    statements = [_field_statement(table_name, field_def)]
+    if field_def.flexible_json and schema_mode == "SCHEMAFULL":
+        json_value_type = "option<object | string | number | bool | array>"
+        statements.append(
+            f"DEFINE FIELD {field_def.name}.* ON TABLE {table_name} TYPE {json_value_type} FLEXIBLE;"
+        )
+    return tuple(statements)
+
+
 def _index_statement(table_name: str, index_def: SurrealIndexDefinition) -> str:
     unique_fragment = " UNIQUE" if index_def.unique else ""
     columns = ", ".join(index_def.columns)
@@ -341,6 +356,7 @@ def build_surreal_native_retrieval_index_plan(
     embedding_dimension: int,
     hnsw_m: int = DEFAULT_HNSW_M,
     hnsw_ef: int = DEFAULT_HNSW_EF,
+    fulltext_concurrently: bool = False,
 ) -> SurrealRetrievalIndexPlan:
     if embedding_dimension <= 0:
         raise ValueError("embedding_dimension must be a positive integer")
@@ -349,16 +365,18 @@ def build_surreal_native_retrieval_index_plan(
     if hnsw_ef < MIN_HNSW_EF or hnsw_ef > MAX_HNSW_EF:
         raise ValueError(f"hnsw_ef must be between {MIN_HNSW_EF} and {MAX_HNSW_EF}, inclusive")
 
+    fulltext_suffix = " CONCURRENTLY" if fulltext_concurrently else ""
+
     return SurrealRetrievalIndexPlan(
         embedding_dimension=embedding_dimension,
         hnsw_m=hnsw_m,
         hnsw_ef=hnsw_ef,
         analyzer_statement=(
-            "DEFINE ANALYZER dotmd_fts TOKENIZERS CLASS,PUNCT FILTERS LOWERCASE, ASCII"
+            "DEFINE ANALYZER dotmd_fts TOKENIZERS CLASS,PUNCT FILTERS LOWERCASE"
         ),
         bm25_index_statements=(
-            "DEFINE INDEX chunks_title_fts ON chunks FIELDS title FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75)",
-            "DEFINE INDEX chunks_text_fts ON chunks FIELDS text FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75)",
+            f"DEFINE INDEX chunks_title_fts ON chunks FIELDS title FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75){fulltext_suffix}",
+            f"DEFINE INDEX chunks_text_fts ON chunks FIELDS text FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75){fulltext_suffix}",
         ),
         hnsw_index_statement=build_surreal_embedding_hnsw_index_statement(
             table_name=surreal_embedding_table_name(),
@@ -371,6 +389,7 @@ def build_surreal_native_retrieval_index_plan(
             "DEFINE INDEX relations_rel_type_idx ON TABLE relations COLUMNS rel_type;",
             "DEFINE INDEX relations_target_id_idx ON TABLE relations COLUMNS target_id;",
             "DEFINE INDEX relations_source_target_idx ON TABLE relations COLUMNS source_id, target_id;",
+            "DEFINE INDEX relations_graph_direct_idx ON TABLE relations COLUMNS target_id, rel_type, source_table;",
         ),
     )
 
@@ -481,11 +500,16 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
                 _field("original_chunk_id", "string"),
                 _field("chunk_id", "string"),
                 _field("chunk_strategy", "string"),
+                _field("heading_hierarchy", "array", required=False),
+                _field("level", "int", required=False),
                 _field("document_ref", "string"),
                 _field("ref", "string"),
                 _field("title", "string", required=False),
                 _field("tags_text", "string", required=False),
                 _field("text", "string"),
+                _field("file_paths", "array", required=False),
+                _field("file_bindings", "array", required=False),
+                _field("source_unit_refs", "array", required=False),
                 _field("metadata", "object", required=False, flexible_json=True),
             ),
             indexes=(
@@ -499,8 +523,10 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
             fields=(
                 _field("schema_version", "string"),
                 _field("chunk_id", "string"),
+                _field("provenance_id", "string", required=False),
                 _field("namespace", "string"),
                 _field("document_ref", "string"),
+                _field("chunk_strategy", "string", required=False),
                 _field("source_unit_refs", "array", required=False),
                 _field("parser_name", "string", required=False),
                 _field("metadata", "object", required=False, flexible_json=True),
@@ -512,6 +538,7 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
             "Many-to-many chunk/file/path/index bindings retained from SQLite holder rows.",
             fields=(
                 _field("schema_version", "string"),
+                _field("binding_id", "string", required=False),
                 _field("chunk_id", "string"),
                 _field("file_path", "string"),
                 _field("chunk_index", "int"),
@@ -529,6 +556,7 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
                 _field("namespace", "string"),
                 _field("document_ref", "string"),
                 _field("ref", "string"),
+                _field("resource_ref", "string", required=False),
                 _field("active", "bool"),
                 _field("bound_at", "datetime"),
                 _field("unbound_at", "datetime", required=False),
@@ -547,6 +575,7 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
             "Chunk, embed, metadata, and source-unit fingerprints kept as distinct records.",
             fields=(
                 _field("schema_version", "string"),
+                _field("fingerprint_id", "string", required=False),
                 _field("fingerprint_kind", "string"),
                 _field("namespace", "string", required=False),
                 _field("document_ref", "string", required=False),
@@ -612,7 +641,9 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
             fields=(
                 _field("schema_version", "string"),
                 _field("original_id", "string"),
+                _field("file_path", "string", required=False),
                 _field("path", "string"),
+                _field("title", "string", required=False),
                 _field("metadata", "object", required=False, flexible_json=True),
             ),
             indexes=(_index("files_path_idx", "path", unique=True),),
@@ -623,7 +654,12 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
             fields=(
                 _field("schema_version", "string"),
                 _field("original_id", "string"),
-                _field("document_ref", "string"),
+                _field("chunk_id", "string", required=False),
+                _field("document_ref", "string", required=False),
+                _field("file_path", "string", required=False),
+                _field("heading", "string", required=False),
+                _field("level", "int", required=False),
+                _field("text_preview", "string", required=False),
                 _field("metadata", "object", required=False, flexible_json=True),
             ),
             indexes=(_index("sections_original_id_idx", "original_id", unique=True),),
@@ -636,6 +672,8 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
                 _field("original_id", "string"),
                 _field("original_entity_name", "string", required=False),
                 _field("name", "string"),
+                _field("entity_type", "string", required=False),
+                _field("source", "string", required=False),
                 _field("metadata", "object", required=False, flexible_json=True),
             ),
             indexes=(_index("entities_name_idx", "name"),),
@@ -656,7 +694,9 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
             "Metadata-carrying relation records preserving canonical rel_type and endpoint hints.",
             fields=(
                 _field("schema_version", "string"),
+                _field("relation_id", "string", required=False),
                 _field("rel_type", "string"),
+                _field("relation_type", "string", required=False),
                 _field("weight", "number"),
                 _field("source_id", "string"),
                 _field("target_id", "string"),
@@ -669,6 +709,7 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
                 _index("relations_rel_type_idx", "rel_type"),
                 _index("relations_target_id_idx", "target_id"),
                 _index("relations_source_target_idx", "source_id", "target_id"),
+                _index("relations_graph_direct_idx", "target_id", "rel_type", "source_table"),
             ),
             schema_mode="RELATION",
             incoming_tables=("files", "sections", "entities", "tags"),
@@ -683,7 +724,10 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
                 _field("original_feedback_id", "string"),
                 _field("status", "string"),
                 _field("submitted_at", "datetime"),
+                _field("message", "string", required=False),
                 _field("severity", "string", required=False),
+                _field("context", "string", required=False),
+                _field("model", "string", required=False),
                 _field("metadata", "object", required=False, flexible_json=True),
             ),
             indexes=(_index("feedback_status_idx", "status"),),
@@ -693,9 +737,13 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
             "Resource-ref keyed cursor and read-audit state.",
             fields=(
                 _field("schema_version", "string"),
+                _field("cursor_id", "string", required=False),
                 _field("namespace", "string"),
                 _field("ref", "string"),
                 _field("document_ref", "string"),
+                _field("active", "bool", required=False),
+                _field("bound_at", "datetime", required=False),
+                _field("unbound_at", "datetime", required=False),
                 _field("metadata", "object", required=False, flexible_json=True),
             ),
             indexes=(_index("cursors_ref_idx", "ref", unique=True),),
@@ -741,7 +789,10 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
     statements: list[str] = []
     for table in tables:
         statements.append(table.statement)
-        statements.extend(_field_statement(table.name, field_def) for field_def in table.fields)
+        for field_def in table.fields:
+            statements.extend(
+                _field_statements(table.name, field_def, schema_mode=table.schema_mode)
+            )
         statements.extend(_index_statement(table.name, index_def) for index_def in table.indexes)
 
     return SurrealSchemaPlan(

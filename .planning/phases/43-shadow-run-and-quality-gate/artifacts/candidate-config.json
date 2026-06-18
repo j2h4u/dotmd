@@ -1,6 +1,7 @@
 {
   "embedding_dimension": 1024,
-  "hnsw_ef": 64,
+  "embedding_shard_count": 1,
+  "hnsw_ef": 100,
   "pool_size": 20,
   "top_k": 10
 }

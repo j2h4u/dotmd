@@ -213,10 +213,35 @@ def test_build_parser_exposes_phase_43_flags_and_folded_candidate_config() -> No
     assert args.metrics_replay_queries == Path("replay.jsonl")
     assert args.candidate_config_json == Path("candidate-config.json")
     parser_help = parser.format_help()
+    assert "--target-url-env" in parser_help
     assert "--embedding-dimension" not in parser_help
     assert "--hnsw-ef" not in parser_help
     assert "--top-k" not in parser_help
     assert "--pool-size" not in parser_help
+
+
+def test_resolve_target_url_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    from devtools.surreal_shadow_runner import _resolve_target_url, build_parser
+
+    monkeypatch.setenv("DOTMD_TEST_SURREAL_URL", "ws://user:secret@127.0.0.1:8000/rpc")
+    args = build_parser().parse_args(
+        [
+            "--artifacts-dir",
+            "artifacts",
+            "--golden-queries",
+            "golden.jsonl",
+            "--source-capture-manifest-json",
+            "source-capture-expected.json",
+            "--candidate-config-json",
+            "candidate-config.json",
+            "--baseline-rehearsal-path",
+            "rehearsal",
+            "--target-url-env",
+            "DOTMD_TEST_SURREAL_URL",
+        ]
+    )
+
+    assert _resolve_target_url(args) == "ws://user:secret@127.0.0.1:8000/rpc"
 
 
 def test_ledger_sentinel_only_strips_and_yields_no_acceptance_rows(tmp_path: Path) -> None:
@@ -309,6 +334,43 @@ def test_ledger_malformed_sentinel_fails_closed(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="record_type"):
         load_shadow_acceptance_ledger(ledger)
+
+
+def test_metric_bundle_uses_standalone_data_dir_and_hnsw_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from devtools.surreal_shadow_runner import _metric_bundle_from_results
+
+    from dotmd.search.surreal_shadow_metrics import validate_shadow_metric_bundle
+
+    baseline = _write_jsonl(
+        tmp_path / "baseline.jsonl",
+        [{"query_id": "sq-001", "latency_ms": 10.0}],
+    )
+    candidate = _write_jsonl(
+        tmp_path / "candidate.jsonl",
+        [{"query_id": "sq-001", "latency_ms": 8.0}],
+    )
+    data_dir = tmp_path / "surrealdb"
+    data_dir.mkdir()
+    (data_dir / "segment.sst").write_bytes(b"x" * 123)
+    monkeypatch.setenv("DOTMD_PHASE43_TARGET_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("DOTMD_PHASE43_HNSW_BUILD_SECONDS", "267.7")
+
+    payload = validate_shadow_metric_bundle(
+        _metric_bundle_from_results(
+            baseline_results=baseline,
+            candidate_results=candidate,
+            target_url="ws://127.0.0.1:8000/rpc",
+        )
+    )
+
+    assert payload["passed"] is True
+    assert payload["recommendation_gate"] == "pass"
+    assert payload["missing"] == []
+    assert payload["hnsw_build_seconds"] == 267.7
+    assert payload["surrealkv_file_size_bytes"] == 123
 
 
 def test_run_eval_receives_stripped_acceptance_path_not_raw_sentinel_file(
@@ -415,6 +477,124 @@ def test_run_eval_receives_stripped_acceptance_path_not_raw_sentinel_file(
     ]
 
 
+def test_run_shadow_run_reuses_existing_baseline_without_graph_copy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from devtools.surreal_shadow_runner import ShadowArtifactPaths, run_shadow_run
+
+    golden = _write_complete_golden_corpus(tmp_path / "golden.jsonl")
+    expected_manifest = _write_json(
+        tmp_path / "source-capture-expected.json",
+        _expected_manifest_payload(),
+    )
+    rehearsal_root = tmp_path / "rehearsal"
+    _create_rehearsal_index_db(rehearsal_root)
+    artifacts = _artifact_payloads(tmp_path)
+    _write_jsonl(
+        artifacts["accepted_diffs"],
+        [
+            {
+                "record_type": "phase43_ledger_metadata",
+                "quality_corpus": "golden",
+                "replay_window": {"count": 2},
+                "guardrails": {"rss_ratio": 1.25},
+            }
+        ],
+    )
+    _write_jsonl(
+        artifacts["baseline_results"],
+        [_eval_result_row(f"sq-{index:03d}", category) for index, category in enumerate(GoldenQueryCategory, start=1)],
+    )
+    copy_calls: list[tuple[object, ...]] = []
+    candidate_calls: list[Path] = []
+
+    def _fake_capture_candidate(*_args, **kwargs):  # type: ignore[no-untyped-def]
+        candidate_calls.append(kwargs["output_path"])
+        return _write_jsonl(
+            artifacts["candidate_results"],
+            [_eval_result_row(f"sq-{index:03d}", category) for index, category in enumerate(GoldenQueryCategory, start=1)],
+        )
+
+    monkeypatch.setattr("devtools.surreal_shadow_runner.load_settings", lambda: _settings(tmp_path / "prod-index"))
+    monkeypatch.setattr("devtools.surreal_shadow_runner.copy_baseline_graph", lambda *args, **_kwargs: copy_calls.append(args))
+    monkeypatch.setattr("devtools.surreal_shadow_runner.build_baseline_service", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(
+        "devtools.surreal_shadow_runner.capture_eval_results_from_candidates",
+        _fake_capture_candidate,
+    )
+    monkeypatch.setattr("devtools.surreal_shadow_runner.run_eval", lambda config: SimpleNamespace(exit_code=0, rows=(), summary=SimpleNamespace(passed=True)))
+    monkeypatch.setattr("devtools.surreal_shadow_runner.preflight_candidate_target", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "devtools.surreal_shadow_runner.write_shadow_metric_json",
+        lambda path, _bundle: _write_json(path, {"passed": True}),
+    )
+
+    config = SimpleNamespace(
+        golden_queries=golden,
+        source_capture_manifest_json=expected_manifest,
+        candidate_config_json=_write_json(
+            tmp_path / "candidate-config.json",
+            {
+                "embedding_dimension": 1024,
+                "top_k": 5,
+                "pool_size": 8,
+            },
+        ),
+        baseline_rehearsal_path=rehearsal_root,
+        baseline_graph_name="dotmd_shadow_baseline",
+        production_graph_name=DEFAULT_FALKORDB_GRAPH_NAME,
+        metrics_replay_queries=None,
+        target_url="surrealkv:///tmp/shadow.db",
+        target_namespace="dotmd",
+        target_database="phase43_shadow",
+        verify_only=False,
+        capture_baseline=False,
+        capture_candidate=True,
+        preflight_candidate_target=False,
+        artifacts=ShadowArtifactPaths(**artifacts),
+    )
+
+    run_shadow_run(config)
+
+    assert copy_calls == []
+    assert candidate_calls == [artifacts["candidate_results"]]
+
+
+def test_temporary_noop_candidate_graph_store_restores_factory() -> None:
+    from devtools.surreal_shadow_runner import _temporary_noop_candidate_graph_store
+
+    import dotmd.ingestion.pipeline as pipeline_module
+
+    original = pipeline_module._create_graph_store
+
+    with _temporary_noop_candidate_graph_store():
+        assert pipeline_module._create_graph_store is not original
+        graph_store = pipeline_module._create_graph_store(object())
+        assert graph_store.node_count() == 0
+        assert graph_store.get_related_sections("chunk-1") == []
+
+    assert pipeline_module._create_graph_store is original
+
+
+def test_progress_search_engine_records_engine_step(tmp_path: Path) -> None:
+    from devtools.surreal_shadow_runner import _ProgressSearchEngine
+
+    class _FakeEngine:
+        def search(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
+            assert query == "hello"
+            assert top_k == 3
+            return [("chunk-1", 1.0)]
+
+    progress_path = tmp_path / "progress.json"
+    engine = _ProgressSearchEngine("semantic", _FakeEngine(), progress_path, "sq-001")
+
+    assert engine.search("hello", top_k=3) == [("chunk-1", 1.0)]
+    payload = json.loads(progress_path.read_text(encoding="utf-8"))
+    assert payload["step"] == "candidate:sq-001:semantic"
+    assert payload["status"] == "applied"
+
+
 def test_candidate_config_routes_only_embedding_dimension_and_hnsw_ef_to_overrides(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -430,6 +610,7 @@ def test_candidate_config_routes_only_embedding_dimension_and_hnsw_ef_to_overrid
             {
                 "embedding_dimension": 1024,
                 "hnsw_ef": 55,
+                "embedding_shard_count": 3,
                 "top_k": 7,
                 "pool_size": 11,
             },
@@ -456,7 +637,9 @@ def test_candidate_config_routes_only_embedding_dimension_and_hnsw_ef_to_overrid
         candidate_config=config,
     )
 
-    assert recorded_kwargs == [{"embedding_dimension": 1024, "hnsw_ef": 55}]
+    assert recorded_kwargs == [
+        {"embedding_dimension": 1024, "hnsw_ef": 55, "embedding_shard_count": 3}
+    ]
 
 
 def test_candidate_config_defaults_hnsw_ef(tmp_path: Path) -> None:
@@ -474,6 +657,7 @@ def test_candidate_config_defaults_hnsw_ef(tmp_path: Path) -> None:
     )
 
     assert config.hnsw_ef == DEFAULT_HNSW_EF
+    assert config.embedding_shard_count == 1
 
 
 @pytest.mark.parametrize("extra_key", ["unknown", "graph_name"])
@@ -503,6 +687,7 @@ def test_candidate_config_rejects_unknown_keys(tmp_path: Path, extra_key: str) -
         ("top_k", 0),
         ("pool_size", -1),
         ("hnsw_ef", 0),
+        ("embedding_shard_count", 0),
     ],
 )
 def test_candidate_config_rejects_non_positive_integer(
@@ -842,13 +1027,13 @@ def test_preflight_passes_when_target_queryable_with_records(tmp_path: Path) -> 
                 return [{"count": manifest.expected_embedding_count}]
             if "chunk_strategy FROM chunks" in sql:
                 return [{"chunk_strategy": manifest.chunk_strategy}]
-            if "embedding_model FROM embeddings GROUP" in sql:
+            if "embedding_model FROM embeddings LIMIT" in sql:
                 return [{"embedding_model": manifest.embedding_model}]
-            if "embedding_model, embedding FROM embeddings" in sql:
+            if "embedding_model, vector FROM embeddings" in sql:
                 return [
                     {
                         "embedding_model": manifest.embedding_model,
-                        "embedding": [0.0] * config.embedding_dimension,
+                        "vector": [0.0] * config.embedding_dimension,
                     }
                 ]
             raise AssertionError(f"unexpected query: {sql}")
@@ -948,7 +1133,7 @@ def test_preflight_fails_when_target_identity_mismatches_manifest(tmp_path: Path
                 return [{"count": manifest.expected_embedding_count}]
             if "chunk_strategy FROM chunks" in sql:
                 return [{"chunk_strategy": manifest.chunk_strategy}]
-            if "embedding_model FROM embeddings GROUP" in sql:
+            if "embedding_model FROM embeddings LIMIT" in sql:
                 return [{"embedding_model": manifest.embedding_model}]
             raise AssertionError(f"unexpected query: {sql}")
 

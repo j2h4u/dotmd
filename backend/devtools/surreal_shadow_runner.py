@@ -11,6 +11,7 @@ import statistics
 import sys
 import tempfile
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -80,6 +81,7 @@ class ExpectedSourceManifest:
 class CandidateConfig:
     embedding_dimension: int
     hnsw_ef: int
+    embedding_shard_count: int
     top_k: int
     pool_size: int
 
@@ -89,6 +91,80 @@ class IsolatedBaselineGraph:
     falkordb_url: str
     source_graph: str
     baseline_graph: str
+
+
+class _NoopGraphStore:
+    """Graph store placeholder for candidate service init before Surreal overrides."""
+
+    def add_file_node(self, file_path: str, title: str) -> None:
+        del file_path, title
+
+    def add_section_node(
+        self,
+        chunk_id: str,
+        heading: str,
+        level: int,
+        file_path: str,
+        text_preview: str,
+    ) -> None:
+        del chunk_id, heading, level, file_path, text_preview
+
+    def add_entity_node(self, name: str, entity_type: str, source: str) -> None:
+        del name, entity_type, source
+
+    def add_tag_node(self, name: str) -> None:
+        del name
+
+    def add_edge(
+        self,
+        source_id: str,
+        target_id: str,
+        relation_type: str,
+        weight: float = 1.0,
+    ) -> None:
+        del source_id, target_id, relation_type, weight
+
+    def get_related_sections(self, chunk_id: str) -> list[tuple[str, str, float]]:
+        del chunk_id
+        return []
+
+    def get_all_entity_names(self) -> list[str]:
+        return []
+
+    def get_chunks_by_entity(self, entity_name: str) -> list[str]:
+        del entity_name
+        return []
+
+    def get_entities_by_file(self, file_path: str) -> list[str]:
+        del file_path
+        return []
+
+    def delete_all(self) -> None:
+        return
+
+    def delete_file_subgraph(self, file_path: str) -> None:
+        del file_path
+
+    def delete_chunks_from_graph(self, chunk_ids: list[str]) -> None:
+        del chunk_ids
+
+    def delete_file_node(self, file_path: str) -> None:
+        del file_path
+
+    def delete_frontmatter_edges(self, file_path: str) -> None:
+        del file_path
+
+    def node_count(self) -> int:
+        return 0
+
+    def edge_count(self) -> int:
+        return 0
+
+    def delete_isolated_nodes(self) -> int:
+        return 0
+
+    def get_graph_data(self) -> dict[str, list[Any]]:
+        return {"nodes": [], "edges": []}
 
 
 @dataclass(slots=True, frozen=True)
@@ -212,7 +288,7 @@ def load_candidate_config(path: Path) -> CandidateConfig:
     payload = _read_json(path)
     if not isinstance(payload, dict):
         raise ValueError(f"{path.name}: expected JSON object")
-    allowed_keys = {"embedding_dimension", "hnsw_ef", "top_k", "pool_size"}
+    allowed_keys = {"embedding_dimension", "hnsw_ef", "embedding_shard_count", "top_k", "pool_size"}
     unknown_keys = sorted(set(payload) - allowed_keys)
     if unknown_keys:
         raise ValueError(f"{path.name}: unknown key {unknown_keys[0]}")
@@ -224,6 +300,13 @@ def load_candidate_config(path: Path) -> CandidateConfig:
             path=path,
             required=False,
             default=DEFAULT_HNSW_EF,
+        ),
+        embedding_shard_count=_require_positive_int(
+            payload,
+            "embedding_shard_count",
+            path=path,
+            required=False,
+            default=1,
         ),
         top_k=_require_positive_int(payload, "top_k", path=path),
         pool_size=_require_positive_int(payload, "pool_size", path=path),
@@ -377,15 +460,43 @@ def teardown_baseline_graph(handle: IsolatedBaselineGraph) -> None:
 def assert_rehearsal_identity_matches_manifest(
     rehearsal_settings: Settings,
     expected_manifest: ExpectedSourceManifest,
+    progress_path: Path | None = None,
 ) -> None:
     db_path = rehearsal_settings.index_db_path
     strategy = str(rehearsal_settings.chunk_strategy).lower()
     vec_table = f"vec_chunks_{strategy}{_model_to_table_suffix(rehearsal_settings.embedding_model)}"
     meta_table = f"vec_meta{vec_table.removeprefix('vec_chunks')}"
+    _write_preflight_progress(progress_path, step="rehearsal_identity:open_sqlite", status="running")
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
+        conn.enable_load_extension(True)
+        try:
+            import sqlite_vec  # type: ignore[import-untyped]
+
+            sqlite_vec.load(conn)
+        finally:
+            conn.enable_load_extension(False)
+        _write_preflight_progress(progress_path, step="rehearsal_identity:chunk_count", status="running")
         chunk_count = int(conn.execute(f"SELECT COUNT(*) FROM chunks_{strategy}").fetchone()[0])
-        embedding_count = int(conn.execute(f"SELECT COUNT(*) FROM {meta_table}").fetchone()[0])
+        _write_preflight_progress(progress_path, step="rehearsal_identity:embedding_table", status="running")
+        vec_table_exists = (
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (vec_table,),
+            ).fetchone()
+            is not None
+        )
+        if vec_table_exists:
+            _write_preflight_progress(progress_path, step="rehearsal_identity:embedding_count", status="running")
+            embedding_count = int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM {meta_table} AS m "
+                    f"JOIN {vec_table} AS v ON v.rowid = m.rowid "
+                    "WHERE v.embedding IS NOT NULL"
+                ).fetchone()[0]
+            )
+        else:
+            embedding_count = int(conn.execute(f"SELECT COUNT(*) FROM {meta_table}").fetchone()[0])
     finally:
         conn.close()
     checks = {
@@ -396,7 +507,9 @@ def assert_rehearsal_identity_matches_manifest(
     }
     for field_name, (actual, expected) in checks.items():
         if actual != expected:
+            _write_preflight_progress(progress_path, step="rehearsal_identity", status="failed")
             raise ValueError(f"{field_name} mismatch: expected {expected!r}, got {actual!r}")
+    _write_preflight_progress(progress_path, step="rehearsal_identity", status="applied")
 
 
 def build_baseline_service(rehearsal_settings: Settings) -> DotMDService:
@@ -497,29 +610,141 @@ def capture_eval_results_from_candidates(
     progress_path: Path | None = None,
 ) -> Path:
     _write_preflight_progress(progress_path, step="candidate:engine_overrides", status="running")
-    build_surreal_native_engine_overrides(
+    engine_overrides = build_surreal_native_engine_overrides(
         connection,
         settings,
         embedding_dimension=candidate_config.embedding_dimension,
         hnsw_ef=candidate_config.hnsw_ef,
+        embedding_shard_count=candidate_config.embedding_shard_count,
     )
     _write_preflight_progress(progress_path, step="candidate:engine_overrides", status="applied")
+    if hasattr(service, "_lifecycle_bundles"):
+        service._lifecycle_bundles = {}
+    if hasattr(service, "_lifecycle_init_errors"):
+        service._lifecycle_init_errors = {}
     rows: list[dict[str, object]] = []
     for query in golden_queries:
         _write_preflight_progress(progress_path, step=f"candidate:{query.id}", status="running")
-        started_at = time.perf_counter()
-        search_result = service.search(query.query, top_k=candidate_config.top_k)
-        latency_ms = (time.perf_counter() - started_at) * 1000
-        rows.append(
-            _candidate_to_eval_row(
-                query,
-                _extract_candidates(search_result),
-                latency_ms=latency_ms,
-            )
+        query_engine_overrides = _wrap_candidate_engine_overrides_with_progress(
+            engine_overrides,
+            progress_path=progress_path,
+            current_query_id=query.id,
         )
+        with _temporary_candidate_engine_overrides(service, query_engine_overrides):
+            started_at = time.perf_counter()
+            search_result = service.search(query.query, top_k=candidate_config.top_k)
+            latency_ms = (time.perf_counter() - started_at) * 1000
+            rows.append(
+                _candidate_to_eval_row(
+                    query,
+                    _extract_candidates(search_result),
+                    latency_ms=latency_ms,
+                )
+            )
         _write_preflight_progress(progress_path, step=f"candidate:{query.id}", status="applied")
     _write_eval_rows(output_path, rows)
     return output_path
+
+
+@contextmanager
+def _temporary_candidate_engine_overrides(
+    service: DotMDService | Any,
+    engine_overrides: dict[str, Any],
+) -> Any:
+    original_values: dict[str, Any] = {}
+    attribute_by_engine = {
+        "semantic": "_semantic_engine",
+        "keyword": "_keyword_engine",
+        "graph_direct": "_graph_direct_engine",
+    }
+    try:
+        for engine_name, attribute_name in attribute_by_engine.items():
+            if engine_name not in engine_overrides:
+                continue
+            if not hasattr(service, attribute_name):
+                continue
+            original_values[attribute_name] = getattr(service, attribute_name)
+            setattr(service, attribute_name, engine_overrides[engine_name])
+        yield
+    finally:
+        for attribute_name, original_value in original_values.items():
+            setattr(service, attribute_name, original_value)
+
+
+class _ProgressSearchEngine:
+    def __init__(
+        self,
+        engine_name: str,
+        wrapped: Any,
+        progress_path: Path | None,
+        current_query_id: str,
+    ) -> None:
+        self._engine_name = engine_name
+        self._wrapped = wrapped
+        self._progress_path = progress_path
+        self._current_query_id = current_query_id
+
+    def search(self, query: str, top_k: int = 10) -> Any:
+        step = f"candidate:{self._current_query_id}:{self._engine_name}"
+        _write_preflight_progress(self._progress_path, step=step, status="running")
+        previous_progress_path = os.environ.get("DOTMD_SEARCH_PROGRESS_PATH")
+        previous_progress_prefix = os.environ.get("DOTMD_SEARCH_PROGRESS_PREFIX")
+        if self._progress_path is not None:
+            os.environ["DOTMD_SEARCH_PROGRESS_PATH"] = str(self._progress_path)
+            os.environ["DOTMD_SEARCH_PROGRESS_PREFIX"] = step
+        try:
+            result = self._wrapped.search(query, top_k=top_k)
+        except Exception as exc:
+            _write_preflight_progress(
+                self._progress_path,
+                step=step,
+                status="failed",
+                error=str(exc),
+            )
+            raise
+        finally:
+            if previous_progress_path is None:
+                os.environ.pop("DOTMD_SEARCH_PROGRESS_PATH", None)
+            else:
+                os.environ["DOTMD_SEARCH_PROGRESS_PATH"] = previous_progress_path
+            if previous_progress_prefix is None:
+                os.environ.pop("DOTMD_SEARCH_PROGRESS_PREFIX", None)
+            else:
+                os.environ["DOTMD_SEARCH_PROGRESS_PREFIX"] = previous_progress_prefix
+        _write_preflight_progress(self._progress_path, step=step, status="applied")
+        return result
+
+    def __getattr__(self, attribute_name: str) -> Any:
+        return getattr(self._wrapped, attribute_name)
+
+
+def _wrap_candidate_engine_overrides_with_progress(
+    engine_overrides: dict[str, Any],
+    *,
+    progress_path: Path | None,
+    current_query_id: str,
+) -> dict[str, Any]:
+    return {
+        engine_name: _ProgressSearchEngine(
+            engine_name,
+            engine,
+            progress_path,
+            current_query_id,
+        )
+        for engine_name, engine in engine_overrides.items()
+    }
+
+
+@contextmanager
+def _temporary_noop_candidate_graph_store() -> Any:
+    import dotmd.ingestion.pipeline as pipeline_module
+
+    original_create_graph_store = pipeline_module._create_graph_store
+    pipeline_module._create_graph_store = lambda _settings: _NoopGraphStore()
+    try:
+        yield
+    finally:
+        pipeline_module._create_graph_store = original_create_graph_store
 
 
 def preflight_candidate_target(
@@ -551,13 +776,13 @@ def preflight_candidate_target(
 
     chunk_strategy_rows = _query_surreal_rows_with_progress(
         connection,
-        "SELECT chunk_strategy FROM chunks GROUP BY chunk_strategy;",
+        "SELECT chunk_strategy FROM chunks LIMIT 25;",
         progress_path=progress_path,
         step="target_chunk_strategy",
     )
     embedding_model_rows = _query_surreal_rows_with_progress(
         connection,
-        "SELECT embedding_model FROM embeddings GROUP BY embedding_model;",
+        "SELECT embedding_model FROM embeddings LIMIT 25;",
         progress_path=progress_path,
         step="target_embedding_model",
     )
@@ -586,7 +811,7 @@ def preflight_candidate_target(
 
     sample_embedding_rows = _query_surreal_rows_with_progress(
         connection,
-        "SELECT embedding_model, embedding FROM embeddings LIMIT 25;",
+        "SELECT embedding_model, vector FROM embeddings LIMIT 25;",
         progress_path=progress_path,
         step="target_embedding_sample",
     )
@@ -697,10 +922,10 @@ def _default_metric_bundle() -> ShadowMetricBundle:
         peak_python_heap_bytes=90,
     )
     return ShadowMetricBundle(
-        passed=True,
-        failure_category=None,
-        recommendation_gate="pass",
-        missing=(),
+        passed=False,
+        failure_category="fail: unavailable scale evidence",
+        recommendation_gate="fail",
+        missing=("HNSW build time",),
         record_counts={"chunks": 1, "embeddings": 1},
         hnsw_build_seconds=1.0,
         surrealkv_file_size_bytes=1024,
@@ -737,9 +962,16 @@ def _latencies_from_results(path: Path) -> list[float]:
 
 def _target_size_bytes(target_url: str) -> int:
     prefix = "surrealkv://"
-    if not target_url.startswith(prefix):
-        return 0
-    target_path = Path(target_url.removeprefix(prefix))
+    if target_url.startswith(prefix):
+        target_path = Path(target_url.removeprefix(prefix))
+    else:
+        data_dir = (
+            os.environ.get("DOTMD_PHASE43_TARGET_DATA_DIR", "").strip()
+            or os.environ.get("DOTMD_SURREALDB_DATA_DIR", "").strip()
+        )
+        if not data_dir:
+            return 0
+        target_path = Path(data_dir)
     if not target_path.exists():
         return 0
     if target_path.is_file():
@@ -752,6 +984,22 @@ def _target_size_bytes(target_url: str) -> int:
             except OSError:
                 continue
     return total
+
+
+def _hnsw_build_seconds_from_env() -> float | None:
+    raw_value = (
+        os.environ.get("DOTMD_PHASE43_HNSW_BUILD_SECONDS", "").strip()
+        or os.environ.get("DOTMD_HNSW_BUILD_SECONDS", "").strip()
+    )
+    if not raw_value:
+        return None
+    try:
+        value = float(raw_value)
+    except ValueError:
+        return None
+    if value <= 0:
+        return None
+    return value
 
 
 def _metric_bundle_from_results(
@@ -778,16 +1026,19 @@ def _metric_bundle_from_results(
         current_python_heap_bytes=1,
         peak_python_heap_bytes=1,
     )
+    hnsw_build_seconds = _hnsw_build_seconds_from_env()
+    missing = () if hnsw_build_seconds is not None else ("HNSW build time",)
+    scale_evidence_available = hnsw_build_seconds is not None
     return ShadowMetricBundle(
-        passed=True,
-        failure_category=None,
-        recommendation_gate="pass",
-        missing=(),
+        passed=scale_evidence_available,
+        failure_category=None if scale_evidence_available else "fail: unavailable scale evidence",
+        recommendation_gate="pass" if scale_evidence_available else "fail",
+        missing=missing,
         record_counts={
             "baseline_queries": len(baseline_latencies),
             "candidate_queries": len(candidate_latencies),
         },
-        hnsw_build_seconds=0.0,
+        hnsw_build_seconds=hnsw_build_seconds,
         surrealkv_file_size_bytes=_target_size_bytes(target_url),
         query_latency_p50_ms=_percentile(candidate_latencies, 0.5),
         query_latency_p95_ms=_percentile(candidate_latencies, 0.95),
@@ -893,18 +1144,29 @@ def _write_stripped_acceptance_rows(rows: tuple[dict[str, str], ...]) -> Path | 
 
 def run_shadow_run(config: ShadowRunConfig | Any) -> ShadowRunResult:
     artifacts = config.artifacts
+    progress_path = artifacts.source_capture.parent / "shadow-run-progress.json"
     expected_manifest = load_expected_source_manifest(Path(config.source_capture_manifest_json))
     candidate_config = load_candidate_config(Path(config.candidate_config_json))
+    if getattr(config, "verify_only", False):
+        verify_shadow_artifacts(artifacts)
+        return ShadowRunResult(artifacts=artifacts, exit_code=0)
+
     base_settings = load_settings()
     production_index_dir = Path(os.environ.get("DOTMD_INDEX_DIR", str(RUNTIME_INDEX_DIR)))
+    _write_preflight_progress(progress_path, step="rehearsal_isolation", status="running")
     enforce_rehearsal_path_isolation(Path(config.baseline_rehearsal_path), production_index_dir)
+    _write_preflight_progress(progress_path, step="rehearsal_isolation", status="applied")
     rehearsal_settings = base_settings.model_copy(
         update={
             "index_dir": Path(config.baseline_rehearsal_path),
             "falkordb_graph_name": config.baseline_graph_name,
         }
     )
-    assert_rehearsal_identity_matches_manifest(rehearsal_settings, expected_manifest)
+    assert_rehearsal_identity_matches_manifest(
+        rehearsal_settings,
+        expected_manifest,
+        progress_path=progress_path,
+    )
     enforce_baseline_graph_isolation(config.baseline_graph_name)
     if not artifacts.accepted_diffs.exists():
         replay_rows = (
@@ -919,10 +1181,6 @@ def run_shadow_run(config: ShadowRunConfig | Any) -> ShadowRunResult:
         )
     ledger = load_shadow_acceptance_ledger(artifacts.accepted_diffs)
 
-    if getattr(config, "verify_only", False):
-        verify_shadow_artifacts(artifacts)
-        return ShadowRunResult(artifacts=artifacts, exit_code=0)
-
     if getattr(config, "preflight_candidate_target", False):
         with _build_candidate_connection(cast(ShadowRunConfig, config)) as connection:
             preflight_candidate_target(
@@ -935,27 +1193,44 @@ def run_shadow_run(config: ShadowRunConfig | Any) -> ShadowRunResult:
         return ShadowRunResult(artifacts=artifacts, exit_code=0)
 
     golden_queries = load_golden_queries(Path(config.golden_queries))
-    progress_path = artifacts.source_capture.parent / "shadow-run-progress.json"
     production_db_stat_before = _production_index_stat(production_index_dir)
     stripped_acceptance_path: Path | None = None
     graph_handle: IsolatedBaselineGraph | None = None
+    capture_baseline = bool(getattr(config, "capture_baseline", True))
+    if not capture_baseline and not artifacts.baseline_results.exists():
+        raise ValueError("baseline results are required when --capture-baseline is not set")
     try:
-        _write_preflight_progress(progress_path, step="baseline_graph_copy", status="running")
-        graph_handle = copy_baseline_graph(
-            rehearsal_settings.falkordb_url,
-            config.production_graph_name,
-            config.baseline_graph_name,
-        )
-        _write_preflight_progress(progress_path, step="baseline_graph_copy", status="applied")
-        baseline_service = build_baseline_service(rehearsal_settings)
-        if getattr(config, "capture_baseline", True):
+        if capture_baseline:
+            _write_preflight_progress(progress_path, step="baseline_graph_copy", status="running")
+            graph_handle = copy_baseline_graph(
+                rehearsal_settings.falkordb_url,
+                config.production_graph_name,
+                config.baseline_graph_name,
+            )
+            _write_preflight_progress(progress_path, step="baseline_graph_copy", status="applied")
+            baseline_service = build_baseline_service(rehearsal_settings)
             capture_baseline_eval_results(
                 baseline_service,
                 Path(config.golden_queries),
                 artifacts.baseline_results,
                 progress_path=progress_path,
             )
-        candidate_service = build_baseline_service(base_settings.model_copy(update={"index_dir": Path(config.baseline_rehearsal_path)}))
+        _write_preflight_progress(progress_path, step="candidate:service_init", status="running")
+        previous_init_progress_path = os.environ.get("DOTMD_INIT_PROGRESS_PATH")
+        os.environ["DOTMD_INIT_PROGRESS_PATH"] = str(progress_path)
+        try:
+            with _temporary_noop_candidate_graph_store():
+                candidate_service = build_baseline_service(
+                    base_settings.model_copy(
+                        update={"index_dir": Path(config.baseline_rehearsal_path)}
+                    )
+                )
+        finally:
+            if previous_init_progress_path is None:
+                os.environ.pop("DOTMD_INIT_PROGRESS_PATH", None)
+            else:
+                os.environ["DOTMD_INIT_PROGRESS_PATH"] = previous_init_progress_path
+        _write_preflight_progress(progress_path, step="candidate:service_init", status="applied")
         with _build_candidate_connection(cast(ShadowRunConfig, config)) as connection:
             if not getattr(config, "skip_candidate_preflight", False):
                 preflight_candidate_target(
@@ -1007,12 +1282,13 @@ def run_shadow_run(config: ShadowRunConfig | Any) -> ShadowRunResult:
     production_db_stat_after = _production_index_stat(production_index_dir)
     if production_db_stat_before is not None and production_db_stat_after != production_db_stat_before:
         raise ValueError("production index.db changed during shadow run")
-    production_graphs_after = _list_graph_names(rehearsal_settings.falkordb_url)
-    if (
-        config.production_graph_name not in production_graphs_after
-        or config.baseline_graph_name in production_graphs_after
-    ):
-        raise ValueError("production graph changed during shadow run")
+    if graph_handle is not None:
+        production_graphs_after = _list_graph_names(rehearsal_settings.falkordb_url)
+        if (
+            config.production_graph_name not in production_graphs_after
+            or config.baseline_graph_name in production_graphs_after
+        ):
+            raise ValueError("production graph changed during shadow run")
 
     return ShadowRunResult(artifacts=artifacts, exit_code=0 if eval_result.exit_code == 0 else 1)
 
@@ -1037,13 +1313,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--baseline-graph-name", default="dotmd_shadow_baseline")
     parser.add_argument("--production-graph-name", default=DEFAULT_FALKORDB_GRAPH_NAME)
     parser.add_argument("--metrics-replay-queries", type=Path, default=None)
-    parser.add_argument("--target-url", required=True)
+    parser.add_argument("--target-url", default=None)
+    parser.add_argument("--target-url-env", default=None)
     parser.add_argument("--target-namespace", default="dotmd")
     parser.add_argument("--target-database", default="phase43_shadow")
     parser.add_argument("--candidate-config-json", required=True, type=Path)
     parser.add_argument("--preflight-candidate-target", action="store_true")
     parser.add_argument("--representative-corpus", type=Path, default=None)
     return parser
+
+
+def _resolve_target_url(args: argparse.Namespace) -> str:
+    if args.target_url:
+        return str(args.target_url)
+    if args.target_url_env:
+        target_url = os.environ.get(str(args.target_url_env), "").strip()
+        if target_url:
+            return target_url
+        raise ValueError(f"{args.target_url_env} is not set")
+    raise ValueError("--target-url or --target-url-env is required")
 
 
 def _artifact_paths_from_args(args: argparse.Namespace) -> ShadowArtifactPaths:
@@ -1062,6 +1350,7 @@ def _artifact_paths_from_args(args: argparse.Namespace) -> ShadowArtifactPaths:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    target_url = "" if args.verify_only else _resolve_target_url(args)
     result = run_shadow_run(
         ShadowRunConfig(
             golden_queries=args.golden_queries,
@@ -1072,7 +1361,7 @@ def main(argv: list[str] | None = None) -> int:
             baseline_graph_name=args.baseline_graph_name,
             production_graph_name=args.production_graph_name,
             metrics_replay_queries=args.metrics_replay_queries,
-            target_url=args.target_url,
+            target_url=target_url,
             target_namespace=args.target_namespace,
             target_database=args.target_database,
             verify_only=args.verify_only,

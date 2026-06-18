@@ -108,7 +108,16 @@ def test_build_dotmd_surreal_schema_plan_covers_required_categories_and_tokens()
         "DEFINE FIELD metadata ON TABLE documents TYPE option<object>" in s for s in plan.statements
     )
     assert any(
+        "DEFINE FIELD metadata.* ON TABLE documents TYPE option<object | string | number | bool | array> FLEXIBLE"
+        in s
+        for s in plan.statements
+    )
+    assert any(
         "DEFINE FIELD properties ON TABLE relations TYPE option<object>" in statement
+        for statement in plan.statements
+    )
+    assert not any(
+        "DEFINE FIELD properties.* ON TABLE relations" in statement
         for statement in plan.statements
     )
 
@@ -266,7 +275,7 @@ def test_chunks_schema_adds_weighted_lexical_fields_without_removing_existing_id
     assert title_field.required is False
     assert tags_text_field.field_type == "string"
     assert tags_text_field.required is False
-    assert {"text", "ref", "document_ref"}.issubset(_field_names(chunks))
+    assert {"text", "ref", "document_ref", "file_paths"}.issubset(_field_names(chunks))
 
 
 def test_retrieval_index_plan_exposes_runtime_compatible_bm25_hnsw_and_relation_indexes() -> None:
@@ -284,7 +293,7 @@ def test_retrieval_index_plan_exposes_runtime_compatible_bm25_hnsw_and_relation_
     assert retrieval_plan.hnsw_m == 4
     assert retrieval_plan.hnsw_ef == 40
     assert retrieval_plan.analyzer_statement == (
-        "DEFINE ANALYZER dotmd_fts TOKENIZERS CLASS,PUNCT FILTERS LOWERCASE, ASCII"
+        "DEFINE ANALYZER dotmd_fts TOKENIZERS CLASS,PUNCT FILTERS LOWERCASE"
     )
     assert retrieval_plan.bm25_index_statements == (
         "DEFINE INDEX chunks_title_fts ON chunks FIELDS title FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75)",
@@ -297,12 +306,24 @@ def test_retrieval_index_plan_exposes_runtime_compatible_bm25_hnsw_and_relation_
         "DEFINE INDEX relations_rel_type_idx ON TABLE relations COLUMNS rel_type;",
         "DEFINE INDEX relations_target_id_idx ON TABLE relations COLUMNS target_id;",
         "DEFINE INDEX relations_source_target_idx ON TABLE relations COLUMNS source_id, target_id;",
+        "DEFINE INDEX relations_graph_direct_idx ON TABLE relations COLUMNS target_id, rel_type, source_table;",
     )
     assert retrieval_plan.statements == (
         retrieval_plan.analyzer_statement,
         *retrieval_plan.bm25_index_statements,
         retrieval_plan.hnsw_index_statement,
         *retrieval_plan.relation_index_statements,
+    )
+
+    standalone_plan = build_surreal_native_retrieval_index_plan(
+        embedding_dimension=3,
+        hnsw_m=4,
+        hnsw_ef=40,
+        fulltext_concurrently=True,
+    )
+    assert standalone_plan.bm25_index_statements == (
+        "DEFINE INDEX chunks_title_fts ON chunks FIELDS title FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75) CONCURRENTLY",
+        "DEFINE INDEX chunks_text_fts ON chunks FIELDS text FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75) CONCURRENTLY",
     )
 
 
