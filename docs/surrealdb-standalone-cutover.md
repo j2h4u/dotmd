@@ -200,7 +200,31 @@ RocksDB transaction-conflict error while building the index. A follow-up
 `CONCURRENTLY` HNSW build reached `ready` with `initial=149834`, `pending=0`,
 and `updated=0`.
 
-The first live KNN query against the full HNSW index timed out after 40 seconds
-while the container was still under high memory pressure after index build.
+The first live KNN query against the full HNSW index took 65 seconds while the
+container was still under high memory pressure after index build. After a clean
+SurrealDB restart, the first cold KNN query still exceeded a 90-second process
+timeout. A subsequent warm HNSW query passed:
+
+```bash
+cd backend
+set -a
+. /opt/docker/surrealdb/.env
+set +a
+uv run python devtools/surreal_knn_gate.py \
+  --k 5 \
+  --ef 80 \
+  --db-timeout-seconds 30 \
+  --max-seconds 5
+```
+
+Observed warm result:
+
+```text
+surreal knn gate: sample rows=1 elapsed=0.005s
+surreal knn gate: vector_dim=1024
+surreal knn gate: knn rows=5 elapsed=2.223s status=pass
+```
+
 Treat the 100-row HNSW gate as syntax/runtime proof only. Treat the full-corpus
-HNSW build as passed for construction, but not yet passed for query latency.
+HNSW build as passed for construction and warm query latency, but not yet passed
+for cold-query latency.

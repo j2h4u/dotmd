@@ -147,10 +147,14 @@ Full-corpus HNSW gate:
   conflict during index build;
 - `CONCURRENTLY` HNSW creation reached `ready` with `initial=149834`,
   `pending=0`, and `updated=0`;
-- a first live KNN query timed out after 40 seconds while the container was
-  still under high memory pressure;
-- SurrealDB standalone has passed storage migration and HNSW construction
-  gates, but not the full vector-query latency gate.
+- a first live KNN query took 65 seconds while the container was still under
+  high memory pressure;
+- after clean SurrealDB restart, the first cold KNN query exceeded a 90-second
+  process timeout;
+- the next warm KNN query passed through `devtools/surreal_knn_gate.py` with
+  `knn rows=5 elapsed=2.223s status=pass`;
+- SurrealDB standalone has passed storage migration, HNSW construction, and
+  warm HNSW query gates, but not the cold-query latency gate.
 
 ## Notes
 
