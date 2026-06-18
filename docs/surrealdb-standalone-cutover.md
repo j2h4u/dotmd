@@ -225,6 +225,10 @@ surreal knn gate: vector_dim=1024
 surreal knn gate: knn rows=5 elapsed=2.223s status=pass
 ```
 
+`--explain` confirmed SurrealDB uses `KnnScan` with
+`index=embeddings_vector_hnsw`, `dimension=1024`, `k=5`, and `ef=80`. A later
+warm explained run returned `knn rows=5 elapsed=0.010s status=pass`.
+
 Treat the 100-row HNSW gate as syntax/runtime proof only. Treat the full-corpus
 HNSW build as passed for construction and warm query latency, but not yet passed
 for cold-query latency.

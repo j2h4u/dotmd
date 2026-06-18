@@ -18,12 +18,14 @@ class FakeSurrealConnection:
     statements: list[str] = field(default_factory=list)
     closed: bool = False
 
-    def query(self, statement: str, variables: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    def query(self, statement: str, variables: dict[str, Any] | None = None) -> Any:
         self.statements.append(statement)
         if "LIMIT 1" in statement:
             return [{"id": "embeddings:sample", "vector": [1.0, 2.0, 3.0, 4.0]}]
         assert "WHERE vector <|5,80|> $query_vector TIMEOUT 30s" in statement
         assert variables == {"query_vector": [1.0, 2.0, 3.0, 4.0]}
+        if "EXPLAIN FULL" in statement:
+            return {"operator": "Timeout", "total_rows": 1}
         return [{"id": "embeddings:sample", "chunk_id": "chunk-1"}]
 
     def close(self) -> None:
@@ -69,3 +71,20 @@ def test_knn_gate_fails_when_query_exceeds_threshold() -> None:
 
     assert result.passed is False
     assert result.knn_seconds == pytest.approx(6.0)
+
+
+def test_knn_gate_prints_explain_result() -> None:
+    times = iter([0.0, 0.1, 0.1, 0.2])
+    messages: list[str] = []
+
+    result = run_gate(
+        SurrealStoreConfig(),
+        KnnGateConfig(explain=True),
+        connection_factory=lambda config: FakeSurrealConnection(config, elapsed=0.1),
+        printer=lambda message, **_: messages.append(message),
+        clock=lambda: next(times),
+    )
+
+    assert result.passed is True
+    assert result.row_count == 1
+    assert any(message.startswith("surreal knn gate: explain ") for message in messages)

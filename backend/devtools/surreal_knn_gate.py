@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 from collections.abc import Callable
@@ -69,6 +70,14 @@ def _knn_statement(config: KnnGateConfig) -> str:
     return statement + ";"
 
 
+def _result_row_count(result: Any) -> int:
+    if isinstance(result, list):
+        return len(result)
+    if isinstance(result, dict) and isinstance(result.get("total_rows"), int):
+        return result["total_rows"]
+    return 0
+
+
 def run_gate(
     store_config: SurrealStoreConfig,
     gate_config: KnnGateConfig,
@@ -113,8 +122,14 @@ def run_gate(
         knn_started = clock()
         result = connection.query(_knn_statement(gate_config), {"query_vector": vector})
         knn_seconds = clock() - knn_started
-        row_count = len(result)
+        row_count = _result_row_count(result)
         passed = knn_seconds <= gate_config.max_seconds and row_count > 0
+        if gate_config.explain:
+            _emit(
+                printer,
+                "surreal knn gate: explain "
+                + json.dumps(result, ensure_ascii=False, default=str),
+            )
         _emit(
             printer,
             (
