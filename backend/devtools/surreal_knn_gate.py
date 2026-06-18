@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 from collections.abc import Callable
@@ -34,6 +35,7 @@ class KnnGateConfig:
     db_timeout_seconds: int = 30
     max_seconds: float = 5.0
     explain: bool = False
+    index_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,8 +62,11 @@ def _emit(printer: Callable[..., None], message: str) -> None:
 
 
 def _knn_statement(config: KnnGateConfig) -> str:
+    if config.index_name and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", config.index_name):
+        raise ValueError(f"invalid index name: {config.index_name}")
+    index_clause = f" WITH INDEX {config.index_name}" if config.index_name else ""
     statement = (
-        "SELECT id, chunk_id FROM embeddings "
+        f"SELECT id, chunk_id FROM embeddings{index_clause} "
         f"WHERE vector <|{config.k},{config.ef}|> $query_vector "
         f"TIMEOUT {config.db_timeout_seconds}s"
     )
@@ -100,7 +105,8 @@ def run_gate(
             "surreal knn gate: config "
             f"k={gate_config.k} ef={gate_config.ef} "
             f"db_timeout={gate_config.db_timeout_seconds}s "
-            f"max_seconds={gate_config.max_seconds:.3f} explain={gate_config.explain}"
+            f"max_seconds={gate_config.max_seconds:.3f} explain={gate_config.explain} "
+            f"index_name={gate_config.index_name or 'auto'}"
         ),
     )
     connection = connection_factory(store_config)
@@ -155,6 +161,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--db-timeout-seconds", type=int, default=30)
     parser.add_argument("--max-seconds", type=float, default=5.0)
     parser.add_argument("--explain", action="store_true")
+    parser.add_argument("--index-name")
     return parser
 
 
@@ -168,6 +175,7 @@ def main(argv: list[str] | None = None) -> int:
             db_timeout_seconds=args.db_timeout_seconds,
             max_seconds=args.max_seconds,
             explain=args.explain,
+            index_name=args.index_name,
         ),
     )
     return 0 if result.passed else 2

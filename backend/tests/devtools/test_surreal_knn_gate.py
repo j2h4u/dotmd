@@ -15,6 +15,7 @@ pytestmark = pytest.mark.real_schema_check
 class FakeSurrealConnection:
     config: SurrealStoreConfig
     elapsed: float
+    expected_index: str | None = None
     statements: list[str] = field(default_factory=list)
     closed: bool = False
 
@@ -22,6 +23,10 @@ class FakeSurrealConnection:
         self.statements.append(statement)
         if "LIMIT 1" in statement:
             return [{"id": "embeddings:sample", "vector": [1.0, 2.0, 3.0, 4.0]}]
+        if self.expected_index:
+            assert f"FROM embeddings WITH INDEX {self.expected_index} WHERE" in statement
+        else:
+            assert "FROM embeddings WHERE" in statement
         assert "WHERE vector <|5,80|> $query_vector TIMEOUT 30s" in statement
         assert variables == {"query_vector": [1.0, 2.0, 3.0, 4.0]}
         if "EXPLAIN FULL" in statement:
@@ -88,3 +93,38 @@ def test_knn_gate_prints_explain_result() -> None:
     assert result.passed is True
     assert result.row_count == 1
     assert any(message.startswith("surreal knn gate: explain ") for message in messages)
+
+
+def test_knn_gate_can_force_specific_index() -> None:
+    holder: dict[str, FakeSurrealConnection] = {}
+    times = iter([0.0, 0.1, 0.1, 0.2])
+
+    def factory(config: SurrealStoreConfig) -> FakeSurrealConnection:
+        connection = FakeSurrealConnection(
+            config,
+            elapsed=0.1,
+            expected_index="embeddings_vector_diskann",
+        )
+        holder["connection"] = connection
+        return connection
+
+    result = run_gate(
+        SurrealStoreConfig(),
+        KnnGateConfig(index_name="embeddings_vector_diskann"),
+        connection_factory=factory,
+        printer=lambda *_args, **_kwargs: None,
+        clock=lambda: next(times),
+    )
+
+    assert result.passed is True
+    assert "WITH INDEX embeddings_vector_diskann" in holder["connection"].statements[1]
+
+
+def test_knn_gate_rejects_invalid_index_name() -> None:
+    with pytest.raises(ValueError, match="invalid index name"):
+        run_gate(
+            SurrealStoreConfig(),
+            KnnGateConfig(index_name="embeddings-vector-hnsw"),
+            connection_factory=lambda config: FakeSurrealConnection(config, elapsed=0.1),
+            printer=lambda *_args, **_kwargs: None,
+        )
