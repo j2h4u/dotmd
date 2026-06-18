@@ -155,6 +155,15 @@ def _emit(printer: Callable[..., None], message: str) -> None:
     printer(message, flush=True)
 
 
+def batch_upsert(connection: SurrealConnection, rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    connection.query(
+        "FOR $row IN $rows { UPSERT type::record($row.id) CONTENT $row.data; };",
+        {"rows": rows},
+    )
+
+
 def run_migration_proof(
     store_config: SurrealStoreConfig,
     proof_config: MigrationProofConfig,
@@ -179,13 +188,16 @@ def run_migration_proof(
     connection = connection_factory(store_config)
     processed = 0
     try:
+        pending: list[dict[str, Any]] = []
         for record in _iter_jsonl(proof_config.input_jsonl):
             target, data = _target_and_data(record, codec)
-            connection.query("UPSERT type::record($id) CONTENT $data;", {"id": target, "data": data})
+            pending.append({"id": target, "data": data})
             processed += 1
             record_type = str(record["type"])
             counts[record_type] = counts.get(record_type, 0) + 1
             if processed % proof_config.batch_size == 0 or processed == total:
+                batch_upsert(connection, pending)
+                pending = []
                 elapsed = max(clock() - started, 0.001)
                 rate = processed / elapsed
                 remaining = (total - processed) / rate if rate > 0 else 0

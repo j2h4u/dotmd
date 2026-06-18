@@ -102,6 +102,12 @@ Observed run:
 surreal migration proof ok: records=401 counts={"chunk": 100, "chunk_file_binding": 100, "chunk_source_provenance": 100, "document": 1, "embedding": 100} elapsed=3.883s
 ```
 
+After switching the loader from one query per record to SurrealQL batch upsert:
+
+```text
+surreal migration proof ok: records=401 counts={"chunk": 100, "chunk_file_binding": 100, "chunk_source_provenance": 100, "document": 1, "embedding": 100} elapsed=0.727s
+```
+
 Repeating the same proof did not duplicate rows. Target counts stayed:
 
 - `documents`: 1
@@ -109,6 +115,24 @@ Repeating the same proof did not duplicate rows. Target counts stayed:
 - `chunk_file_bindings`: 100
 - `chunk_source_provenance`: 100
 - `embeddings`: 100
+
+### Full SQLite Runner
+
+`devtools/surreal_sqlite_migration_runner.py` is the direct full-migration path.
+It reads SQLite in batches ordered by `vec_meta.rowid`, writes SurrealDB through
+batch `UPSERT`, and stores a checkpoint after each successful batch.
+
+Checkpoint fields include:
+
+- `last_vector_rowid`
+- `chunks_done`
+- `records_done`
+- per-record-type `counts`
+- `complete`
+
+If the process dies, rerun with the same checkpoint path. Already committed
+batches are skipped; a partially failed batch is safe to replay because target
+record IDs are deterministic.
 
 ### HNSW Gate
 

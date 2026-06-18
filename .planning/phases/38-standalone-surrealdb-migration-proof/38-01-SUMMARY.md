@@ -81,6 +81,12 @@ Live migration proof:
 surreal migration proof ok: records=401 counts={"chunk": 100, "chunk_file_binding": 100, "chunk_source_provenance": 100, "document": 1, "embedding": 100} elapsed=3.883s
 ```
 
+After changing the proof loader to batch SurrealQL `UPSERT`, live proof improved:
+
+```text
+surreal migration proof ok: records=401 counts={"chunk": 100, "chunk_file_binding": 100, "chunk_source_provenance": 100, "document": 1, "embedding": 100} elapsed=0.727s
+```
+
 Idempotency check:
 
 - repeated the same proof import with `UPSERT`;
@@ -93,6 +99,15 @@ Native HNSW check:
 DEFINE INDEX IF NOT EXISTS embeddings_vector_hnsw ON TABLE embeddings FIELDS vector HNSW DIMENSION 1024 TYPE F32 DIST COSINE EFC 150 M 12;
 [115/115] done in 0.296s
 ```
+
+Full SQLite runner:
+
+- added `devtools/surreal_sqlite_migration_runner.py`;
+- reads SQLite by `vec_meta.rowid`;
+- writes batch SurrealQL `UPSERT`;
+- persists checkpoint after every successful batch;
+- supports resume through `last_vector_rowid`;
+- prints chunks done, records done, last rowid, batch timing, rate, and ETA.
 
 ## Notes
 
