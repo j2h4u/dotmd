@@ -16,6 +16,7 @@ dependencies = [
     "torch<2.13",
     "einops>=0.8",
     "sqlite-vec>=0.1.6",
+    "surrealdb>=2.0.0",
     "real_ladybug>=0.1",
     "FalkorDB>=1.6.0",
     "gliner>=0.2",

@@ -9,7 +9,8 @@
 - [x] **v1.3 Production Packaging & Background Indexing** — Phases 7-10 (shipped 2026-03-28)
 - [x] **v1.4 Search Quality & Architecture** — Phases 15-26 (shipped 2026-05-06)
 - [x] **v1.5 Telegram Source Adapter** — Phases 27-31 (shipped 2026-05-08)
-- 🚧 **v1.6 Unified Source Architecture** — Phases 32-37 (active)
+- [x] **v1.6 Unified Source Architecture** — Phases 32-37 (completed 2026-05-13)
+- 🚧 **v1.8 Standalone SurrealDB Cutover** — Phase 38 (active)
 
 <details>
 <summary>v1.1 Incremental Indexing (Phases 1-3) — SHIPPED 2026-03-26</summary>
@@ -114,6 +115,21 @@ Reference:
 
 See: `.planning/REQUIREMENTS.md`
 
+## v1.8 Standalone SurrealDB Cutover — ACTIVE
+
+Reference:
+- Runtime compose: `/opt/docker/surrealdb/docker-compose.yml`
+- Runtime data: `/srv/surrealdb/data`
+- Runtime URL from host: `ws://127.0.0.1:8000/rpc`
+- Runtime URL from dotMD network: `ws://surrealdb:8000/rpc`
+
+- [ ] Phase 38: Standalone SurrealDB migration proof
+
+Scope guardrail: v1.8 starts clean from `main`. The embedded SurrealKV research
+branch is forensic context only; do not port sharding workarounds, shadow-run
+diagnostics, or SurrealKV-specific safety probes unless a standalone benchmark
+proves they are needed.
+
 ## Progress
 
 | Phase | Milestone | Status | Completed |
@@ -155,6 +171,7 @@ See: `.planning/REQUIREMENTS.md`
 | 35. Filesystem unified source adapter | 2/2 | Complete    | 2026-05-10 |
 | 36. Telegram unified sync and federated search | 2/2 | Complete    | 2026-05-10 |
 | 37. Airweave connector compatibility spike | 4/4 | Complete    | 2026-05-13 |
+| 38. Standalone SurrealDB migration proof | v1.8 | In progress | — |
 
 ### Backlog 999.2: Pipeline parallelism — overlap GLiNER and TEI across files
 

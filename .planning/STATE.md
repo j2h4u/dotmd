@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.6
-milestone_name: Unified Source Architecture
-status: milestone_complete
-last_updated: "2026-05-13T12:16:34.599Z"
-last_activity: 2026-05-13
+milestone: v1.8
+milestone_name: Standalone SurrealDB Cutover
+status: in_progress
+last_updated: "2026-06-18T10:25:00Z"
+last_activity: 2026-06-18
 progress:
-  total_phases: 6
-  completed_phases: 6
-  total_plans: 18
-  completed_plans: 18
-  percent: 100
+  total_phases: 1
+  completed_phases: 0
+  total_plans: 1
+  completed_plans: 0
+  percent: 0
 ---
 
 # GSD State
@@ -20,17 +20,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** v1.6 milestone complete
+**Current focus:** v1.8 standalone SurrealDB cutover
 
 ## Current Milestone
 
-**v1.6 — Unified Source Architecture**
+**v1.8 — Standalone SurrealDB Cutover**
 
-Phase: 37
-Status: Milestone complete
-Last activity: 2026-05-13
+Phase: 38
+Status: In progress
+Last activity: 2026-06-18
 
-Progress: [██████████] 100% (Milestone: 6/6 phases complete)
+Progress: [░░░░░░░░░░] 0% (Milestone: 0/1 phases complete)
 
 ## Deferred Items
 
