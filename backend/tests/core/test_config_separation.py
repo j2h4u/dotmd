@@ -43,6 +43,7 @@ def test_settings_still_constructs_with_current_defaults() -> None:
     assert settings.embedding_url == "http://localhost:8088"
     assert settings.data_dir == Path()
     assert settings.index_dir == Path.home() / ".dotmd"
+    assert settings.search_backend == "legacy"
     assert settings.default_top_k == 10
     assert settings.base_url is None
 
