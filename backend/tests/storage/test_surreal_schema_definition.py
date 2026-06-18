@@ -29,6 +29,8 @@ def test_schema_plan_is_monolithic_and_covers_expected_tables() -> None:
         "source_unit_fingerprints",
         "source_checkpoints",
         "embeddings",
+        "graph_nodes",
+        "graph_edges",
         "entities",
         "relations",
         "feedback",
@@ -43,6 +45,8 @@ def test_schema_plan_is_monolithic_and_covers_expected_tables() -> None:
         "DEFINE TABLE IF NOT EXISTS source_unit_fingerprints SCHEMAFULL;",
         "DEFINE TABLE IF NOT EXISTS source_checkpoints SCHEMAFULL;",
         "DEFINE TABLE IF NOT EXISTS embeddings SCHEMAFULL;",
+        "DEFINE TABLE IF NOT EXISTS graph_nodes SCHEMAFULL;",
+        "DEFINE TABLE IF NOT EXISTS graph_edges SCHEMAFULL;",
         "DEFINE TABLE IF NOT EXISTS entities SCHEMAFULL;",
         "DEFINE TABLE IF NOT EXISTS relations SCHEMAFULL;",
         "DEFINE TABLE IF NOT EXISTS feedback SCHEMAFULL;",
@@ -78,15 +82,23 @@ def test_schema_plan_is_monolithic_and_covers_expected_tables() -> None:
         in field_statements
     )
     assert (
+        "DEFINE FIELD IF NOT EXISTS labels ON TABLE graph_nodes TYPE array<string>;"
+        in field_statements
+    )
+    assert (
+        "DEFINE FIELD IF NOT EXISTS properties ON TABLE graph_edges TYPE object FLEXIBLE;"
+        in field_statements
+    )
+    assert (
         "DEFINE FIELD IF NOT EXISTS source ON TABLE relations TYPE record<entities>;"
         in field_statements
     )
-    assert len(plan.scalar_index_statements()) == 8
+    assert len(plan.scalar_index_statements()) == 10
     assert len(plan.index_statements()) == 1
     assert len(plan.index_statements(vector_index="diskann")) == 1
     assert plan.index_statements(vector_index="none") == ()
     assert len(plan.vector_index_statements()) == 2
-    assert len(plan.statements()) == len(MONOLITHIC_TABLES) + len(field_statements) + 8 + 1
+    assert len(plan.statements()) == len(MONOLITHIC_TABLES) + len(field_statements) + 10 + 1
 
 
 def test_embedding_index_builders_emit_expected_sql() -> None:

@@ -17,6 +17,7 @@ def test_format_eta_omits_zero_seconds_and_rounds_long_minutes() -> None:
     assert format_eta(60) == "1m"
     assert format_eta(90) == "1m 30s"
     assert format_eta(300) == "5m"
+    assert format_eta(301) == "5m"
     assert format_eta(360) == "6m"
     assert format_eta(388) == "6m"
 
@@ -66,3 +67,53 @@ def test_target_and_data_requires_explicit_chunk_strategy_for_file_binding() -> 
     assert target.startswith("chunk_file_bindings:")
     assert data["chunk"].table_name == "chunks"
     assert data["chunk"].id == codec.encode("contextual_512_50\0chunk-1")
+
+
+def test_target_and_data_uses_stable_graph_key_when_node_id_is_empty() -> None:
+    codec = SurrealRecordIdCodec()
+    target, data = _target_and_data(
+        {
+            "type": "graph_node",
+            "data": {
+                "node_id": "",
+                "labels": ["Entity", "Node"],
+                "primary_label": "Entity",
+                "properties": {"type": "UNKNOWN"},
+            },
+        },
+        codec,
+    )
+
+    assert target.startswith("graph_nodes:")
+    assert target != "graph_nodes:"
+    assert data["node_id"] == ""
+
+
+def test_target_and_data_keeps_graph_node_labels_distinct() -> None:
+    codec = SurrealRecordIdCodec()
+    file_target, _ = _target_and_data(
+        {
+            "type": "graph_node",
+            "data": {
+                "node_id": "same-id",
+                "labels": ["File", "Node"],
+                "primary_label": "File",
+                "properties": {"id": "same-id"},
+            },
+        },
+        codec,
+    )
+    entity_target, _ = _target_and_data(
+        {
+            "type": "graph_node",
+            "data": {
+                "node_id": "same-id",
+                "labels": ["Entity", "Node"],
+                "primary_label": "Entity",
+                "properties": {"id": "same-id"},
+            },
+        },
+        codec,
+    )
+
+    assert file_target != entity_target

@@ -134,6 +134,40 @@ If the process dies, rerun with the same checkpoint path. Already committed
 batches are skipped; a partially failed batch is safe to replay because target
 record IDs are deterministic.
 
+Record IDs must use the `SurrealRecordIdCodec` base32 encoding. URL-safe base64
+is not safe enough for `type::record(...)`: encoded `-` can truncate parsed
+record IDs and cause collisions.
+
+### FalkorDB Graph Runner
+
+`devtools/surreal_falkor_migration_runner.py` exports FalkorDB into dedicated
+SurrealDB graph tables:
+
+- `graph_nodes`: one record per exported `(primary_label, node_id)`;
+- `graph_edges`: one record per exported FalkorDB edge, keyed by export ordinal.
+
+The runner paginates FalkorDB reads with `SKIP`/`LIMIT`. This is required:
+unpaginated reads silently cap at 10,000 rows in this environment.
+
+Live source graph counts:
+
+- `File`: 1,099
+- `Section`: 23,954
+- `Entity`: 29,002
+- `Tag`: 279
+- `REL` edges: 355,239
+
+Live SurrealDB target counts after base32 ID fix:
+
+- `graph_nodes`: 54,334
+- `graph_edges`: 355,239
+
+Observed final graph import:
+
+```text
+surreal falkor migration ok: nodes=54334 edges=355239 elapsed=192.050s counts={"graph_edge": 355239, "graph_node": 54334}
+```
+
 ### HNSW Gate
 
 Native HNSW index creation on the 100 migrated embeddings succeeded:

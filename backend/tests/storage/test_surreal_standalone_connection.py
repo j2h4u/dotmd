@@ -47,7 +47,7 @@ def test_config_from_env_uses_string_defaults(monkeypatch: pytest.MonkeyPatch) -
     assert config.password is None
 
 
-def test_record_id_codec_uses_url_safe_base64() -> None:
+def test_record_id_codec_uses_surreal_safe_base32() -> None:
     codec = SurrealRecordIdCodec()
 
     record_id = codec.record_id("documents", "a/b+c? d")
@@ -60,6 +60,8 @@ def test_record_id_codec_uses_url_safe_base64() -> None:
     assert "/" not in encoded
     assert "+" not in encoded
     assert "=" not in encoded
+    assert "-" not in encoded
+    assert "_" not in encoded
 
 
 @dataclass

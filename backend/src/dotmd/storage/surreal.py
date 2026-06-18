@@ -52,17 +52,17 @@ class SurrealStoreConfig:
 
 
 class SurrealRecordIdCodec:
-    """Encode and decode record IDs with URL-safe base64."""
+    """Encode and decode record IDs with Surreal-safe base32."""
 
     @staticmethod
     def encode(value: str | bytes) -> str:
         data = value.encode("utf-8") if isinstance(value, str) else value
-        return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+        return base64.b32encode(data).decode("ascii").rstrip("=")
 
     @staticmethod
     def decode(value: str) -> str:
-        padded = value + "=" * (-len(value) % 4)
-        return base64.urlsafe_b64decode(padded).decode("utf-8")
+        padded = value + "=" * (-len(value) % 8)
+        return base64.b32decode(padded).decode("utf-8")
 
     def record_id(self, table: str, value: str | bytes) -> str:
         return f"{table}:{self.encode(value)}"

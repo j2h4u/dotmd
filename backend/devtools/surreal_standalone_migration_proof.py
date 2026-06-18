@@ -37,7 +37,7 @@ def format_eta(seconds: float) -> str:
     if remaining < 60:
         return f"{remaining}s"
     minutes, secs = divmod(remaining, 60)
-    if minutes > 5:
+    if remaining > 300:
         return f"{round(remaining / 60)}m"
     if secs == 0:
         return f"{minutes}m"
@@ -74,6 +74,13 @@ def _record_id(codec: SurrealRecordIdCodec, table: str, *parts: object) -> str:
 
 def _record_ref(codec: SurrealRecordIdCodec, table: str, *parts: object) -> RecordID:
     return RecordID(table, codec.encode(_key(*parts)))
+
+
+def _graph_key(data: dict[str, Any], *preferred: str) -> str:
+    values = [str(data.get(key) or "") for key in preferred]
+    if any(values):
+        return _key(*values)
+    return json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def _target_and_data(
@@ -147,6 +154,22 @@ def _target_and_data(
             data["chunk_id"],
         )
         data["chunk"] = _record_ref(codec, "chunks", data["chunk_strategy"], data["chunk_id"])
+        return target, data
+    if record_type == "graph_node":
+        target = _record_id(codec, "graph_nodes", _graph_key(data, "primary_label", "node_id"))
+        return target, data
+    if record_type == "graph_edge":
+        target = _record_id(
+            codec,
+            "graph_edges",
+            _graph_key(
+                data,
+                "edge_key",
+                "source_id",
+                "target_id",
+                "relation_type",
+            ),
+        )
         return target, data
     raise ValueError(f"unsupported migration record type: {record_type}")
 

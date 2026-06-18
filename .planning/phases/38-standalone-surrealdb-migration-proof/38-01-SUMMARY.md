@@ -109,6 +109,26 @@ Full SQLite runner:
 - supports resume through `last_vector_rowid`;
 - prints chunks done, records done, last rowid, batch timing, rate, and ETA.
 
+Record ID fix:
+
+- changed `SurrealRecordIdCodec` from URL-safe base64 to base32 without padding;
+- reason: `type::record(...)` can truncate record IDs containing `-`, which caused
+  collisions for Cyrillic graph entity names;
+- all migrated data written with the old codec must be cleared and rerun.
+
+FalkorDB graph runner:
+
+- added `devtools/surreal_falkor_migration_runner.py`;
+- uses paginated `SKIP`/`LIMIT` reads because unpaginated FalkorDB results capped
+  at 10,000 rows;
+- exports to `graph_nodes` and `graph_edges`, not the narrower
+  `entities`/`relations` tables;
+- source graph counts: `File=1099`, `Section=23954`, `Entity=29002`,
+  `Tag=279`, `REL edges=355239`;
+- live target counts after base32 fix: `graph_nodes=54334`,
+  `graph_edges=355239`;
+- final graph import: `nodes=54334 edges=355239 elapsed=192.050s`.
+
 ## Notes
 
 SurrealDB v3 uses `type::record`, not the old `type::thing` helper in write
