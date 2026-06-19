@@ -786,9 +786,9 @@ class SurrealDeltaStoreWriter:
             source_record_id = self._graph_endpoint_record_id(source_table, source_id)
             target_record_id = self._graph_endpoint_record_id(target_table, target_id)
             if source_record_id is not None:
-                prepared.setdefault("out", source_record_id)
+                prepared.setdefault("in", source_record_id)
             if target_record_id is not None:
-                prepared.setdefault("in", target_record_id)
+                prepared.setdefault("out", target_record_id)
 
         allowed_fields = _SURREAL_WRITER_ALLOWED_FIELDS.get(table)
         if allowed_fields is None:
@@ -1011,9 +1011,9 @@ class SurrealDeltaStoreWriter:
                 source_record_id = self._graph_endpoint_record_id(row.get("source_table"), row.get("source_id"))
                 target_record_id = self._graph_endpoint_record_id(row.get("target_table"), row.get("target_id"))
                 if source_record_id is not None:
-                    row.setdefault("out", source_record_id)
+                    row.setdefault("in", source_record_id)
                 if target_record_id is not None:
-                    row.setdefault("in", target_record_id)
+                    row.setdefault("out", target_record_id)
                 row.setdefault("metadata", {})
                 prepared = self._prepare_payload(table, raw_identifier, row)
                 record_id = self._record_id(table, raw_identifier)

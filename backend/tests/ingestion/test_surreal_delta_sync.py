@@ -1100,8 +1100,8 @@ def test_surreal_delta_store_writer_writes_graph_rows_and_is_idempotent() -> Non
     assert connection.tables["relations"][relation_id]["relation_type"] == "MENTIONS"
     assert connection.tables["relations"][relation_id]["weight"] == 1.0
     assert connection.tables["relations"][relation_id]["properties"] == {"confidence": 0.9}
-    assert str(connection.tables["relations"][relation_id]["out"]) == section_id
-    assert str(connection.tables["relations"][relation_id]["in"]) == entity_id
+    assert str(connection.tables["relations"][relation_id]["in"]) == section_id
+    assert str(connection.tables["relations"][relation_id]["out"]) == entity_id
 
     repeat = writer.write_graph(changes)
 

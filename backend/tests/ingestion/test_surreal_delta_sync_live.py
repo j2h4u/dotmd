@@ -739,8 +739,8 @@ def test_surreal_delta_store_writer_smoke_graph_relations_use_native_inserts(
                     "target_table": "entities",
                     "properties": {"seed": "stale"},
                     "metadata": {"seed": "stale"},
-                    "out": codec.encode("files", file_path),
-                    "in": codec.encode("entities", stale_participant_name),
+                    "in": codec.encode("files", file_path),
+                    "out": codec.encode("entities", stale_participant_name),
                 },
                 {
                     "id": str(
@@ -757,8 +757,8 @@ def test_surreal_delta_store_writer_smoke_graph_relations_use_native_inserts(
                     "target_table": "tags",
                     "properties": {"seed": "stale"},
                     "metadata": {"seed": "stale"},
-                    "out": codec.encode("files", file_path),
-                    "in": codec.encode("tags", stale_tag_name),
+                    "in": codec.encode("files", file_path),
+                    "out": codec.encode("tags", stale_tag_name),
                 },
             ],
         )
@@ -834,6 +834,8 @@ def test_surreal_delta_store_writer_smoke_graph_relations_use_native_inserts(
         assert stale_participant_id not in first_snapshot["relations"]
         assert stale_tag_id not in first_snapshot["relations"]
         assert first_snapshot["relations"][fresh_relation_id]["relation_type"] == "HAS_TAG"
+        assert first_snapshot["relations"][fresh_relation_id]["in"] == writer.codec.encode("files", file_path)
+        assert first_snapshot["relations"][fresh_relation_id]["out"] == writer.codec.encode("tags", fresh_tag_name)
         assert first_snapshot["relations"][fresh_relation_id]["source_id"] == file_path
         assert first_snapshot["relations"][fresh_relation_id]["target_id"] == fresh_tag_name
         assert first_snapshot["relations"][fresh_relation_id]["properties"] == {"source": "frontmatter"}
