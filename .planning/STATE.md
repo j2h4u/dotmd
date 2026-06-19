@@ -21,20 +21,20 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 46 SurrealDB changed-file smoke and trickle boundary
-decision. Runtime retrieval works through SurrealDB, and the incremental sync
-core is implemented and verified against temporary SurrealKV storage; production
-trickle is still old-stack-only.
+**Current focus:** Phase 46 direct SurrealDB write path. Runtime retrieval works
+through SurrealDB, and the idempotent Surreal delta-apply machinery is verified;
+the product decision is to cut over directly instead of building a long-lived
+old-stack hybrid sync.
 
 ## Current Milestone
 
 **v1.8 — SurrealDB-Native Storage Cutover**
 
 Phase: 46-surrealdb-write-path-and-trickle-cutover
-Status: Plan 46-01 in progress; incremental sync core verified
+Status: Plan 46-01 in progress; direct Surreal write path selected
 Last activity: 2026-06-19
 
-Progress: [█████████-] Phase 46 incremental sync core and disposable SurrealKV smoke complete; changed-file smoke and trickle decision next
+Progress: [█████████-] Phase 46 write safety evidence complete; direct Surreal ingest/write sink next
 
 ## Deferred Items
 
@@ -325,20 +325,19 @@ are implemented or explicitly deferred as a product decision.
 
 Phase: 46-surrealdb-write-path-and-trickle-cutover
 Plan: 46-01 in progress
-Status: Incremental Surreal sync core verified; changed-file smoke remains
-Last activity: 2026-06-19 -- Phase 46 manifest, runner, writer, and disposable SurrealKV smoke completed
+Status: Direct SurrealDB write path selected; implementation remains
+Last activity: 2026-06-19 -- direct SurrealDB cutover decision recorded
 
 ## Operator Next Steps
 
-- Execute the remaining Phase 46 Plan 01 smoke: derive a real changed-file
-  delta from old-stack rows, apply it to SurrealDB without full reindex/re-embed,
-  and verify Surreal-backed search sees the update.
-- Record the trickle boundary decision: bounded hybrid sync versus direct
-  Surreal ingest sink.
+- Implement direct SurrealDB ingest/write sink for trickle/indexing.
+- Prove one changed markdown file writes directly to SurrealDB and is visible
+  through Surreal-backed search without SQLite as the daily authoritative store.
+- Update cutover criteria and then remove/quarantine old-stack writes.
 - Revisit reranker-on latency before any production cutover approval.
 
 ## Session
 
 **Last session:** 2026-06-19T00:00:00+06:00
-**Stopped at:** Executing 46-01-PLAN.md changed-file smoke and trickle decision
+**Stopped at:** Executing 46-01-PLAN.md direct SurrealDB write path
 **Resume file:** None

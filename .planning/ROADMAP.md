@@ -294,16 +294,15 @@ Decision:
 ### Phase 46: SurrealDB write path and trickle cutover
 
 **Goal:** Decide and implement the write-path boundary needed for production
-cutover: either make trickle/index writes update standalone SurrealDB directly,
-or explicitly accept a bounded hybrid transition where old-stack writes remain
-authoritative while SurrealDB is refreshed through a controlled sync path.
+cutover: make trickle/index writes update standalone SurrealDB directly so the
+SQLite/sqlite-vec/FTS5 and FalkorDB stack can be removed.
 **Depends on:** Phase 45
 **Plans:** 1/1 plan in progress
 
 Success criteria:
 
 - [ ] Trickle/index writes have an explicit SurrealDB strategy: direct write,
-  controlled sync, or documented hybrid transition.
+  without a long-lived hybrid old-stack sync layer.
 - [ ] Daily update behavior is proven without full reindex/re-embedding.
 - [x] Failure/retry behavior is idempotent and instrumented with progress/ETA
   for operations expected to exceed 120 seconds.
@@ -319,7 +318,9 @@ Progress:
 - [x] Fake-connection and temporary `surrealkv://` tests prove idempotent replay,
   stable bootstrap IDs, exact tombstones, unrelated-row preservation, and no
   bulk delete/insert paths.
-- [ ] Real changed-file daily-update smoke remains before cutover decision.
+- [x] Product decision recorded: proceed with direct SurrealDB writes, not a
+  bounded hybrid runtime.
+- [ ] Direct SurrealDB changed-file daily-update smoke remains before cutover.
 
 ### Phase 47: Legacy stack removal
 

@@ -9,7 +9,7 @@ last_updated: 2026-06-19
 
 ## What is done
 
-Phase 46 now has the core incremental SurrealDB sync path:
+Phase 46 now has the core idempotent SurrealDB delta-apply machinery:
 
 - delta manifest contract for changed old-stack rows only;
 - deterministic sync runner with resume state and progress/ETA snapshots;
@@ -19,6 +19,11 @@ Phase 46 now has the core incremental SurrealDB sync path:
 - stable record-id selection aligned with the bootstrap migration IDs;
 - tombstone deletion by stable IDs from `previous_row`;
 - fake-connection unit tests and real temporary `surrealkv://` smoke tests.
+- changed-file delta smoke from an old-stack SQLite fixture through
+  `load_sqlite_rows_for_surreal()` and `build_surreal_delta_manifest_from_rows()`;
+- schema-derived payload pruning in the writer, so old-stack row shapes do not
+  need test-side field stripping before Surreal upsert;
+- `vector_components` are accepted by the writer rather than excluded.
 
 ## Evidence
 
@@ -32,6 +37,8 @@ Commits:
 - `f1ca595` `fix(46): resolve surreal tombstones by stable ids`
 - `da3be6e` `test(46): smoke incremental surreal delta writer`
 - `779c55f` `test(46): verify fresh surreal delta reruns`
+- `f775c05` `test(46): smoke changed-file surreal delta`
+- `527fda0` `fix(46): sanitize surreal delta payloads by schema`
 
 Verification run on 2026-06-19:
 
@@ -43,7 +50,7 @@ UV_LINK_MODE=hardlink uv run ruff check src/dotmd/ingestion/surreal_delta_sync.p
 
 Result:
 
-- `20 passed`
+- `21 passed`
 - `All checks passed!`
 
 The live smoke used real temporary `surrealkv://` storage, applied the dotMD
@@ -51,20 +58,30 @@ schema, seeded bootstrap-style records, applied a delta, reran with the same
 state for resume-skip coverage, and reran with fresh state to prove no duplicate
 record IDs or unrelated-row damage.
 
+The changed-file smoke used the existing synthetic old-stack SQLite fixture,
+loaded rows with `load_sqlite_rows_for_surreal()`, built a one-document delta,
+applied it to temporary SurrealKV, and proved unrelated old-stack rows were not
+applied by that delta.
+
+## Direction Change
+
+The product decision is direct cutover to SurrealDB, not a bounded hybrid
+runtime. The delta-sync work above remains useful as migration/retry safety and
+as proof that Surreal writes are idempotent, schema-aware, and stable by record
+ID. It is not the target steady-state architecture.
+
 ## Not done yet
 
 Phase 46 is not complete. Remaining work:
 
-- derive a real changed-file delta from current old-stack rows;
-- run a controlled changed markdown file smoke without full reindex/re-embed;
-- prove Surreal-backed search sees the updated result after sync;
-- record the trickle boundary decision: bounded hybrid sync versus direct
-  Surreal ingest sink;
+- implement direct SurrealDB ingest/write sink for trickle/indexing;
+- make changed markdown files write to SurrealDB without using SQLite as the
+  daily authoritative store;
+- prove Surreal-backed search sees updated results after direct Surreal writes;
+- remove or quarantine old-stack write dependencies before production cutover;
 - update production cutover criteria with the write-path evidence.
 
 ## Current Decision
 
-Continue with the bounded hybrid path first: old-stack writes remain
-authoritative while the Surreal target is refreshed through explicit incremental
-sync. Direct Surreal ingest remains a later option after the changed-file smoke
-proves the daily update path.
+Proceed with direct SurrealDB write path. Do not build a long-lived hybrid
+old-stack-to-Surreal sync layer.
