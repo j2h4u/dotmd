@@ -2072,6 +2072,33 @@ def _query_with_progress_heartbeat(
         raise result[0]
 
 
+def _is_already_exists_error(exc: BaseException) -> bool:
+    return "already exists" in str(exc).lower()
+
+
+def _define_index_idempotently(
+    connection: SurrealConnection,
+    statement: str,
+    *,
+    report: SurrealMigrationReport,
+    checkpoint: SurrealMigrationPhaseCheckpoint,
+    progress_path: Path | None,
+    applied_count: int,
+) -> None:
+    try:
+        _query_with_progress_heartbeat(
+            connection,
+            statement,
+            report=report,
+            checkpoint=checkpoint,
+            progress_path=progress_path,
+            applied_count=applied_count,
+        )
+    except Exception as exc:
+        if not _is_already_exists_error(exc):
+            raise
+
+
 def _write_index_phase(
     checkpoint: SurrealMigrationPhaseCheckpoint,
     *,
@@ -2098,7 +2125,7 @@ def _write_index_phase(
     )
     try:
         for _index_name, statement in _DEFERRED_EMBEDDING_INDEX_DEFINITIONS:
-            _query_with_progress_heartbeat(
+            _define_index_idempotently(
                 connection,
                 statement,
                 report=report,
@@ -2115,7 +2142,7 @@ def _write_index_phase(
             )
         if report.expected_vector_dimension is None:
             raise ValueError("expected_vector_dimension is required to define embeddings HNSW index")
-        _query_with_progress_heartbeat(
+        _define_index_idempotently(
             connection,
             build_surreal_embedding_hnsw_index_statement(
                 table_name="embeddings",

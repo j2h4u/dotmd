@@ -1064,6 +1064,50 @@ def test_index_phase_progress_is_written_per_index_step(tmp_path: Path) -> None:
     assert checkpoint.status == "applied"
 
 
+def test_index_phase_treats_existing_indexes_as_applied(tmp_path: Path) -> None:
+    from dotmd.ingestion import migrate_surreal as migrate_module  # type: ignore[import-not-found]
+
+    progress_path = tmp_path / "progress.json"
+    checkpoint = migrate_module.SurrealMigrationPhaseCheckpoint(
+        phase_name=migrate_module.SurrealMigrationPhaseName.INDEXES,
+        planned_count=4,
+    )
+    report = migrate_module.SurrealMigrationReport(
+        schema_version="test",
+        mode=migrate_module.SurrealMigrationMode.APPLY,
+        status="apply",
+        target_mode=migrate_module.SurrealTargetMode.EMBEDDED_LOCAL,
+        overwrite_policy=migrate_module.SurrealOverwritePolicy.REFUSE,
+        target_url=f"surrealkv://{tmp_path / 'target.db'}",
+        target_namespace="dotmd",
+        target_database="phase43",
+        source_capture_manifest=None,
+        phase_checkpoints=[checkpoint],
+        expected_vector_dimension=1024,
+    )
+    calls = 0
+
+    class _ExistingIndexConnection:
+        def query(self, _statement: str):  # type: ignore[no-untyped-def]
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RuntimeError("The index 'embeddings_strategy_chunk_model_idx' already exists")
+            return []
+
+    migrate_module._write_index_phase(
+        checkpoint,
+        report=report,
+        connection=_ExistingIndexConnection(),
+        progress_path=progress_path,
+    )
+
+    assert calls == 4
+    assert checkpoint.status == "applied"
+    assert checkpoint.applied_count == 4
+    assert report.deferred_indexes_status == "built"
+
+
 def test_index_query_heartbeat_refreshes_progress_snapshot(tmp_path: Path) -> None:
     from dotmd.ingestion import migrate_surreal as migrate_module  # type: ignore[import-not-found]
 
