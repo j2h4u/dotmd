@@ -7,6 +7,8 @@ No live TEI required — encode_batch is mocked.
 """
 
 import pathlib
+from datetime import UTC, datetime
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -357,6 +359,225 @@ def test_index_file_embed_routes_surreal_manifests_with_complete_text_hashes(
 
     pipeline.close()
     assert pipeline._surreal_direct_writer.connection.closed is True
+
+
+def test_extract_and_populate_graph_emits_surreal_graph_manifest(
+    surreal_pipeline_settings,
+    monkeypatch,
+) -> None:
+    from dotmd.core.models import (
+        Chunk,
+        ChunkProvenance,
+        Entity,
+        ExtractionResult,
+        FileInfo,
+        Relation,
+    )
+    from dotmd.ingestion import pipeline as pipeline_module
+    from dotmd.ingestion.pipeline import IndexingPipeline
+
+    class FakeConnection:
+        def close(self) -> None:
+            pass
+
+    class FakeWriter:
+        def __init__(self) -> None:
+            self.connection = FakeConnection()
+
+    monkeypatch.setattr(
+        pipeline_module,
+        "_create_surreal_direct_writer",
+        lambda _settings: FakeWriter(),
+    )
+
+    pipeline = IndexingPipeline(surreal_pipeline_settings)
+    doc_path = surreal_pipeline_settings.data_dir / "graph.md"
+    file_info = FileInfo(
+        path=doc_path,
+        title="Graph note",
+        last_modified=datetime(2026, 6, 19, 12, 0, tzinfo=UTC),
+        size_bytes=2048,
+        kind="meeting_transcript",
+        frontmatter={
+            "tags": ["alpha"],
+            "participants": ["Carol"],
+        },
+    )
+    chunks = [
+        Chunk(
+            chunk_id="graph-chunk-0",
+            file_paths=[doc_path],
+            heading_hierarchy=["Graph note", "Overview"],
+            level=2,
+            text="Carol and Beta discussed the roadmap.",
+            chunk_index=0,
+            provenance=ChunkProvenance(
+                namespace="filesystem",
+                document_ref=str(doc_path.resolve()),
+                ref=f"filesystem:{doc_path.resolve()}",
+                source_unit_refs=[],
+                chunk_strategy=pipeline._strategy,
+                parser_name="markdown",
+            ),
+        )
+    ]
+    extraction = ExtractionResult(
+        entities=[
+            Entity(name="Beta", type="person", source="ner", chunk_ids=["graph-chunk-0"]),
+            Entity(name="Alpha", type="tag", source="structural", chunk_ids=["graph-chunk-0"]),
+        ],
+        relations=[
+            Relation(
+                source_id="graph-chunk-0",
+                target_id="Beta",
+                relation_type="MENTIONS",
+                weight=1.0,
+            ),
+            Relation(
+                source_id="graph-chunk-0",
+                target_id="Alpha",
+                relation_type="HAS_TAG",
+                weight=1.0,
+            ),
+        ],
+    )
+    extraction_bundle = pipeline_module._ExtractionBundle(
+        entities=extraction.entities,
+        relations=extraction.relations,
+        total_entities=len(extraction.entities),
+        total_relations=len(extraction.relations),
+    )
+
+    capture: dict[str, object] = {}
+    monkeypatch.setattr(pipeline, "_run_extraction", lambda _chunks: extraction_bundle)
+    monkeypatch.setattr(
+        pipeline,
+        "_populate_graph",
+        lambda *args, **kwargs: pytest.fail("surreal graph path must not call Falkor"),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_frontmatter_to_graph",
+        lambda *args, **kwargs: pytest.fail("surreal graph path must not call Falkor"),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_write_surreal_direct_manifest",
+        lambda manifest: capture.setdefault("manifest", manifest),
+    )
+
+    result = pipeline._extract_and_populate_graph([file_info], chunks, "run-graph")
+
+    assert result.total_entities == extraction_bundle.total_entities
+    assert result.total_relations == extraction_bundle.total_relations
+    manifest = cast(Any, capture["manifest"])
+    graph_rows = manifest.graph.rows
+    assert graph_rows
+    assert manifest.graph.deferred is False
+    assert [row.table for row in graph_rows].count("files") == 1
+    assert [row.table for row in graph_rows].count("sections") == 1
+    assert [row.table for row in graph_rows].count("entities") == 2
+    assert [row.table for row in graph_rows].count("tags") == 2
+    assert [row.table for row in graph_rows].count("relations") == 5
+    assert {row.ref for row in graph_rows} == {
+        str(doc_path),
+        "graph-chunk-0",
+        "Beta",
+        "Carol",
+        "alpha",
+        "Alpha",
+        f"{doc_path}\x1falpha\x1fHAS_TAG",
+        f"{doc_path}\x1fCarol\x1fHAS_PARTICIPANT",
+        f"{doc_path}\x1fgraph-chunk-0\x1fCONTAINS",
+        "graph-chunk-0\x1fBeta\x1fMENTIONS",
+        "graph-chunk-0\x1fAlpha\x1fHAS_TAG",
+    }
+
+
+def test_extract_and_populate_graph_keeps_default_sqlite_path(
+    pipeline_settings,
+    monkeypatch,
+) -> None:
+    from dotmd.core.models import (
+        Chunk,
+        ChunkProvenance,
+        Entity,
+        ExtractionResult,
+        FileInfo,
+        Relation,
+    )
+    from dotmd.ingestion import pipeline as pipeline_module
+    from dotmd.ingestion.pipeline import IndexingPipeline
+
+    pipeline = IndexingPipeline(pipeline_settings)
+    file_path = pipeline_settings.data_dir / "graph.md"
+    file_info = FileInfo(
+        path=file_path,
+        title="Graph note",
+        last_modified=datetime(2026, 6, 19, 12, 0, tzinfo=UTC),
+        size_bytes=2048,
+        kind="document",
+        frontmatter={"tags": ["alpha"]},
+    )
+    chunks = [
+        Chunk(
+            chunk_id="graph-chunk-0",
+            file_paths=[file_path],
+            heading_hierarchy=["Graph note", "Overview"],
+            level=2,
+            text="Beta discussed the roadmap.",
+            chunk_index=0,
+            provenance=ChunkProvenance(
+                namespace="filesystem",
+                document_ref=str(file_path.resolve()),
+                ref=f"filesystem:{file_path.resolve()}",
+                source_unit_refs=[],
+                chunk_strategy=pipeline._strategy,
+                parser_name="markdown",
+            ),
+        )
+    ]
+    extraction = ExtractionResult(
+        entities=[Entity(name="Beta", type="person", source="ner", chunk_ids=["graph-chunk-0"])],
+        relations=[
+            Relation(
+                source_id="graph-chunk-0",
+                target_id="Beta",
+                relation_type="MENTIONS",
+                weight=1.0,
+            )
+        ],
+    )
+    extraction_bundle = pipeline_module._ExtractionBundle(
+        entities=extraction.entities,
+        relations=extraction.relations,
+        total_entities=len(extraction.entities),
+        total_relations=len(extraction.relations),
+    )
+
+    calls: dict[str, int] = {"populate": 0, "frontmatter": 0, "direct": 0}
+    monkeypatch.setattr(pipeline, "_run_extraction", lambda _chunks: extraction_bundle)
+    monkeypatch.setattr(
+        pipeline,
+        "_populate_graph",
+        lambda *args, **kwargs: calls.__setitem__("populate", calls["populate"] + 1),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_frontmatter_to_graph",
+        lambda *args, **kwargs: calls.__setitem__("frontmatter", calls["frontmatter"] + 1),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_write_surreal_direct_manifest",
+        lambda _manifest: calls.__setitem__("direct", calls["direct"] + 1),
+    )
+
+    result = pipeline._extract_and_populate_graph([file_info], chunks, "run-sqlite")
+
+    assert result.total_entities == extraction_bundle.total_entities
+    assert result.total_relations == extraction_bundle.total_relations
+    assert calls == {"populate": 1, "frontmatter": 1, "direct": 0}
 
 
 def test_body_change_triggers_full_reembedding(pipeline_settings):

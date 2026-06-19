@@ -6,7 +6,17 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from dotmd.core.models import ApplicationSourceChange, Chunk, SourceDocument, SourceUnit
+from dotmd.core.models import (
+    ApplicationSourceChange,
+    Chunk,
+    DocKind,
+    EntityType,
+    ExtractionResult,
+    FileInfo,
+    RelationType,
+    SourceDocument,
+    SourceUnit,
+)
 from dotmd.ingestion.surreal_delta_sync import (
     SurrealDeltaChange,
     SurrealDeltaCheckpointCandidate,
@@ -339,6 +349,266 @@ def _embedding_change(
             "vector": list(embedding),
             "metadata": {},
         },
+    )
+
+
+def _graph_file_change(file_info: FileInfo) -> SurrealDeltaChange:
+    file_path = str(file_info.path)
+    return SurrealDeltaChange(
+        ref=file_path,
+        table="files",
+        row={
+            "path": file_path,
+            "file_path": file_path,
+            "title": file_info.title,
+            "metadata": {},
+        },
+    )
+
+
+def _graph_section_change(chunk: Chunk, *, file_path: str) -> SurrealDeltaChange:
+    return SurrealDeltaChange(
+        ref=chunk.chunk_id,
+        table="sections",
+        row={
+            "chunk_id": chunk.chunk_id,
+            "document_ref": file_path,
+            "file_path": file_path,
+            "heading": chunk.heading,
+            "level": chunk.level,
+            "text_preview": chunk.text[:200],
+            "metadata": {},
+        },
+    )
+
+
+def _graph_entity_change(name: str, *, entity_type: str, source: str) -> SurrealDeltaChange:
+    return SurrealDeltaChange(
+        ref=name,
+        table="entities",
+        row={
+            "name": name,
+            "entity_type": entity_type,
+            "source": source,
+            "metadata": {},
+        },
+    )
+
+
+def _graph_tag_change(name: str) -> SurrealDeltaChange:
+    return SurrealDeltaChange(
+        ref=name,
+        table="tags",
+        row={
+            "name": name,
+            "metadata": {},
+        },
+    )
+
+
+def _graph_relation_change(
+    *,
+    source_id: str,
+    source_table: str,
+    target_id: str,
+    target_table: str,
+    relation_type: str,
+    weight: float = 1.0,
+    properties: Mapping[str, object] | None = None,
+) -> SurrealDeltaChange:
+    relation_id = _stable_composite_ref(source_id, target_id, relation_type)
+    return SurrealDeltaChange(
+        ref=relation_id,
+        table="relations",
+        row={
+            "relation_id": relation_id,
+            "rel_type": relation_type,
+            "relation_type": relation_type,
+            "weight": weight,
+            "source_id": source_id,
+            "target_id": target_id,
+            "source_table": source_table,
+            "target_table": target_table,
+            "properties": dict(properties or {}),
+            "metadata": {},
+        },
+    )
+
+
+def _frontmatter_tag_targets(tag_value: object) -> tuple[str, str]:
+    tag_str = str(tag_value).strip()
+    parts = tag_str.split(":", 1)
+    if len(parts) == 2 and parts[0].strip():
+        return parts[1].strip(), parts[0].strip().upper()
+    return tag_str, ""
+
+
+def _graph_row_sort_key(change: SurrealDeltaChange) -> tuple[int, str]:
+    order = {"files": 0, "sections": 1, "entities": 2, "tags": 3, "relations": 4}
+    return order.get(change.table, 99), change.ref
+
+
+def build_surreal_graph_rows(
+    files: Sequence[FileInfo],
+    chunks: Sequence[Chunk],
+    extraction: ExtractionResult | None = None,
+) -> list[SurrealDeltaChange]:
+    """Build direct graph rows from in-memory file, chunk, and extraction state."""
+
+    rows: dict[tuple[str, str], SurrealDeltaChange] = {}
+    file_paths = {str(file_info.path) for file_info in files}
+    chunk_ids = {chunk.chunk_id for chunk in chunks}
+    entity_names: set[str] = set()
+    tag_names: set[str] = set()
+
+    def add(change: SurrealDeltaChange) -> None:
+        rows.setdefault((change.table, change.ref), change)
+
+    for file_info in files:
+        add(_graph_file_change(file_info))
+
+    for chunk in chunks:
+        file_path = str(chunk.file_paths[0]) if chunk.file_paths else (sorted(file_paths)[0] if file_paths else "")
+        add(_graph_section_change(chunk, file_path=file_path))
+        if file_path:
+            add(
+                _graph_relation_change(
+                    source_id=file_path,
+                    source_table="files",
+                    target_id=chunk.chunk_id,
+                    target_table="sections",
+                    relation_type=str(RelationType.CONTAINS),
+                )
+            )
+
+    if extraction is not None:
+        for entity in extraction.entities:
+            if entity.type.lower() == EntityType.TAG.value.lower():
+                tag_names.add(entity.name)
+                add(_graph_tag_change(entity.name))
+            else:
+                entity_names.add(entity.name)
+                add(
+                    _graph_entity_change(
+                        entity.name,
+                        entity_type=entity.type,
+                        source=str(entity.source),
+                    )
+                )
+
+    for file_info in files:
+        file_path = str(file_info.path)
+        frontmatter = file_info.frontmatter or {}
+        tags = frontmatter.get("tags", [])
+        for tag_value in tags if isinstance(tags, list) else []:
+            tag_name, entity_type = _frontmatter_tag_targets(tag_value)
+            if not tag_name:
+                continue
+            if entity_type:
+                entity_names.add(tag_name)
+                add(
+                    _graph_entity_change(
+                        tag_name,
+                        entity_type=entity_type,
+                        source="frontmatter",
+                    )
+                )
+                target_table = "entities"
+            else:
+                tag_names.add(tag_name)
+                add(_graph_tag_change(tag_name))
+                target_table = "tags"
+            add(
+                _graph_relation_change(
+                    source_id=file_path,
+                    source_table="files",
+                    target_id=tag_name,
+                    target_table=target_table,
+                    relation_type=str(RelationType.HAS_TAG),
+                )
+            )
+
+        if str(file_info.kind) == DocKind.MEETING_TRANSCRIPT.value:
+            participants = frontmatter.get("participants", [])
+            for participant in participants if isinstance(participants, list) else []:
+                participant_name = str(participant).strip()
+                if not participant_name:
+                    continue
+                entity_names.add(participant_name)
+                add(
+                    _graph_entity_change(
+                        participant_name,
+                        entity_type=EntityType.PERSON.value,
+                        source="frontmatter",
+                    )
+                )
+                add(
+                    _graph_relation_change(
+                        source_id=file_path,
+                        source_table="files",
+                        target_id=participant_name,
+                        target_table="entities",
+                        relation_type="HAS_PARTICIPANT",
+                    )
+                )
+
+    if extraction is not None:
+        for relation in extraction.relations:
+            relation_type = str(relation.relation_type)
+
+            if relation.source_id in file_paths:
+                source_table = "files"
+            elif relation.source_id in chunk_ids:
+                source_table = "sections"
+            elif relation.source_id in tag_names:
+                source_table = "tags"
+            elif relation.source_id in entity_names:
+                source_table = "entities"
+            else:
+                source_table = "entities"
+
+            if relation.target_id in file_paths:
+                target_table = "files"
+            elif relation.target_id in chunk_ids:
+                target_table = "sections"
+            elif relation.target_id in tag_names:
+                target_table = "tags"
+            elif relation.target_id in entity_names:
+                target_table = "entities"
+            else:
+                target_table = "entities"
+
+            add(
+                _graph_relation_change(
+                    source_id=relation.source_id,
+                    source_table=source_table,
+                    target_id=relation.target_id,
+                    target_table=target_table,
+                    relation_type=relation_type,
+                    weight=relation.weight,
+                    properties=relation.properties,
+                )
+            )
+
+    return sorted(rows.values(), key=_graph_row_sort_key)
+
+
+def build_surreal_graph_manifest(
+    files: Sequence[FileInfo],
+    chunks: Sequence[Chunk],
+    extraction: ExtractionResult | None,
+    *,
+    source_selection: SurrealDeltaSourceSelection,
+    checkpoint_candidate: SurrealDeltaCheckpointCandidate,
+    created_at: datetime | None = None,
+) -> SurrealDeltaManifest:
+    """Build a direct Surreal delta manifest containing only graph rows."""
+
+    return build_surreal_delta_manifest(
+        source_selection=source_selection,
+        checkpoint_candidate=checkpoint_candidate,
+        graph=SurrealDeltaSection(rows=build_surreal_graph_rows(files, chunks, extraction)),
+        created_at=created_at,
     )
 
 

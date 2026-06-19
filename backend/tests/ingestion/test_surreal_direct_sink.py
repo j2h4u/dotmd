@@ -8,6 +8,10 @@ from dotmd.core.models import (
     ApplicationSourceChange,
     Chunk,
     ChunkProvenance,
+    Entity,
+    ExtractionResult,
+    FileInfo,
+    Relation,
     SourceDocument,
     SourceUnit,
 )
@@ -23,6 +27,8 @@ from dotmd.ingestion.surreal_direct_sink import (
     SurrealDirectFileWrite,
     build_surreal_application_source_manifest,
     build_surreal_direct_manifest,
+    build_surreal_graph_manifest,
+    build_surreal_graph_rows,
 )
 
 
@@ -41,6 +47,20 @@ def _source_document() -> SourceDocument:
         metadata_fingerprint="metadata-alpha",
         metadata_json={"tags": ["alpha", "beta"]},
         file_path=Path("/notes/alpha.md"),
+    )
+
+
+def _meeting_file_info() -> FileInfo:
+    return FileInfo(
+        path=Path("/notes/meeting.md"),
+        title="Meeting note",
+        last_modified=datetime(2026, 6, 19, 12, 0, tzinfo=UTC),
+        size_bytes=1024,
+        kind="meeting_transcript",
+        frontmatter={
+            "tags": ["alpha"],
+            "participants": ["Carol"],
+        },
     )
 
 
@@ -435,6 +455,113 @@ def test_application_source_direct_sink_builds_source_rows_and_vector_components
         [1.1, 1.2, 1.3],
         [2.1, 2.2, 2.3],
     ]
+
+
+def test_graph_rows_cover_files_sections_entities_tags_and_relations() -> None:
+    file_info = _meeting_file_info()
+    chunks = [
+        Chunk(
+            chunk_id="chunk-meeting-0",
+            file_paths=[file_info.path],
+            heading_hierarchy=["Meeting note", "Overview"],
+            level=2,
+            text="Carol and Beta discussed the roadmap.",
+            chunk_index=0,
+        ),
+        Chunk(
+            chunk_id="chunk-meeting-1",
+            file_paths=[file_info.path],
+            heading_hierarchy=["Meeting note", "Details"],
+            level=2,
+            text="Alpha remained a frontmatter tag.",
+            chunk_index=1,
+        ),
+    ]
+    extraction = ExtractionResult(
+        entities=[
+            Entity(name="Beta", type="person", source="ner", chunk_ids=["chunk-meeting-0"]),
+            Entity(name="Alpha", type="tag", source="structural", chunk_ids=["chunk-meeting-1"]),
+        ],
+        relations=[
+            Relation(
+                source_id="chunk-meeting-0",
+                target_id="Beta",
+                relation_type="MENTIONS",
+                weight=2.0,
+            ),
+            Relation(
+                source_id="chunk-meeting-1",
+                target_id="Alpha",
+                relation_type="HAS_TAG",
+                weight=1.0,
+            ),
+        ],
+    )
+
+    rows = build_surreal_graph_rows([file_info], chunks, extraction)
+    manifest = build_surreal_graph_manifest(
+        [file_info],
+        chunks,
+        extraction,
+        source_selection=SurrealDeltaSourceSelection(
+            source_name="filesystem",
+            table_name="source_documents",
+            cursor="graph-test",
+        ),
+        checkpoint_candidate=SurrealDeltaCheckpointCandidate(
+            cursor="graph-test",
+            watermark="graph-test",
+        ),
+    )
+
+    assert len(rows) == 13
+    assert [row.table for row in rows].count("files") == 1
+    assert [row.table for row in rows].count("sections") == 2
+    assert [row.table for row in rows].count("entities") == 2
+    assert [row.table for row in rows].count("tags") == 2
+    assert [row.table for row in rows].count("relations") == 6
+    assert {row.ref for row in rows} == {
+        "/notes/meeting.md",
+        "chunk-meeting-0",
+        "chunk-meeting-1",
+        "Beta",
+        "Carol",
+        "Alpha",
+        "alpha",
+        "/notes/meeting.md\x1falpha\x1fHAS_TAG",
+        "/notes/meeting.md\x1fCarol\x1fHAS_PARTICIPANT",
+        "/notes/meeting.md\x1fchunk-meeting-0\x1fCONTAINS",
+        "/notes/meeting.md\x1fchunk-meeting-1\x1fCONTAINS",
+        "chunk-meeting-0\x1fBeta\x1fMENTIONS",
+        "chunk-meeting-1\x1fAlpha\x1fHAS_TAG",
+    }
+
+    file_row = rows[0]
+    assert file_row.row["path"] == "/notes/meeting.md"
+    assert file_row.row["title"] == "Meeting note"
+
+    section_row = rows[1]
+    assert section_row.row["chunk_id"] == "chunk-meeting-0"
+    assert section_row.row["document_ref"] == "/notes/meeting.md"
+    assert section_row.row["text_preview"] == "Carol and Beta discussed the roadmap."
+
+    row_by_ref = {row.ref: row for row in rows}
+    assert row_by_ref["Beta"].row["entity_type"] == "person"
+    assert row_by_ref["Carol"].row["entity_type"] == "PERSON"
+    assert row_by_ref["Alpha"].row["name"] == "Alpha"
+    assert row_by_ref["alpha"].row["name"] == "alpha"
+
+    relation_rows = {row.ref: row for row in rows[5:]}
+    assert relation_rows["/notes/meeting.md\x1fCarol\x1fHAS_PARTICIPANT"].row["source_table"] == "files"
+    assert relation_rows["/notes/meeting.md\x1fCarol\x1fHAS_PARTICIPANT"].row["target_table"] == "entities"
+    assert relation_rows["/notes/meeting.md\x1falpha\x1fHAS_TAG"].row["target_table"] == "tags"
+    assert relation_rows["chunk-meeting-0\x1fBeta\x1fMENTIONS"].row["source_table"] == "sections"
+    assert relation_rows["chunk-meeting-0\x1fBeta\x1fMENTIONS"].row["target_table"] == "entities"
+    assert relation_rows["chunk-meeting-0\x1fBeta\x1fMENTIONS"].row["weight"] == 2.0
+    assert relation_rows["chunk-meeting-1\x1fAlpha\x1fHAS_TAG"].row["target_table"] == "tags"
+
+    assert manifest.graph.deferred is False
+    assert [row.ref for row in manifest.graph.rows] == [row.ref for row in rows]
 
 
 def test_direct_sink_manifest_is_idempotent_on_fresh_rerun_and_touches_only_expected_sections() -> None:

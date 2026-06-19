@@ -89,6 +89,7 @@ from dotmd.ingestion.surreal_direct_sink import (
     SurrealDirectFileWrite,
     build_surreal_application_source_manifest,
     build_surreal_direct_manifest,
+    build_surreal_graph_manifest,
 )
 from dotmd.search.fts5 import FTS5SearchEngine
 from dotmd.search.semantic import SemanticSearchEngine
@@ -2720,6 +2721,42 @@ class IndexingPipeline:
             state=self._surreal_direct_sync_state,
         )
 
+    def _write_surreal_graph_manifest(
+        self,
+        files: list[FileInfo],
+        chunks: list[Chunk],
+        extraction: ExtractionResult | None,
+        *,
+        source_cursor: str,
+        source_time: datetime | None = None,
+    ) -> None:
+        """Emit graph-only Surreal rows from in-memory ingestion state."""
+        if self._settings.search_backend != "surreal":
+            return
+
+        graph_source_time = source_time
+        if graph_source_time is None:
+            graph_source_time = max((fi.last_modified for fi in files), default=datetime.now(UTC))
+
+        manifest = build_surreal_graph_manifest(
+            files,
+            chunks,
+            extraction,
+            source_selection=SurrealDeltaSourceSelection(
+                source_name="filesystem",
+                table_name="source_documents",
+                changed_at=graph_source_time,
+                cursor=source_cursor,
+            ),
+            checkpoint_candidate=SurrealDeltaCheckpointCandidate(
+                cursor=source_cursor,
+                watermark=source_cursor,
+                source_time=graph_source_time,
+            ),
+            created_at=graph_source_time,
+        )
+        self._write_surreal_direct_manifest(manifest)
+
     def _filesystem_surreal_tombstone_manifest(
         self,
         file_path: str,
@@ -3022,8 +3059,16 @@ class IndexingPipeline:
         )
 
         t0 = time.perf_counter()
-        self._populate_graph(files, chunks, result)
-        self._frontmatter_to_graph(files)
+        if self._settings.search_backend == "surreal":
+            self._write_surreal_graph_manifest(
+                files,
+                chunks,
+                result,
+                source_cursor=f"{run_id}:graph",
+            )
+        else:
+            self._populate_graph(files, chunks, result)
+            self._frontmatter_to_graph(files)
         logger.info(
             "[%s] graph: %d files, %d chunks (%.1fs)",
             run_id,
@@ -3275,8 +3320,17 @@ class IndexingPipeline:
 
             _beacon("graph")
             t0 = time.perf_counter()
-            self._populate_graph([file_info], chunks, extraction)
-            self._frontmatter_to_graph([file_info])
+            if self._settings.search_backend == "surreal":
+                self._write_surreal_graph_manifest(
+                    [file_info],
+                    chunks,
+                    extraction,
+                    source_cursor=f"{path_str}:graph",
+                    source_time=file_info.last_modified,
+                )
+            else:
+                self._populate_graph([file_info], chunks, extraction)
+                self._frontmatter_to_graph([file_info])
             t_graph = time.perf_counter() - t0
 
             self._save_chunk_fingerprint(file_info)
@@ -3723,6 +3777,17 @@ class IndexingPipeline:
         Kind-specific extraction (e.g. ``participants`` for meeting_transcript)
         follows the same principle: structured fields have known semantics.
         """
+        if self._settings.search_backend == "surreal":
+            cursor = ":".join(sorted(str(fi.path) for fi in files)) + ":frontmatter"
+            self._write_surreal_graph_manifest(
+                files,
+                [],
+                None,
+                source_cursor=cursor,
+                source_time=max((fi.last_modified for fi in files), default=datetime.now(UTC)),
+            )
+            return
+
         entity_rows: list[dict] = []
         edge_rows: list[dict] = []
 
