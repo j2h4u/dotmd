@@ -938,6 +938,7 @@ class IndexingPipeline:
         removed so the next provider ingest recomputes vectors with current
         pipeline semantics.
         """
+        self._raise_if_surreal_local_destructive("purge_application_source")
         if not namespace or not re.match(r"^[a-zA-Z0-9_-]+$", namespace):
             raise ValueError(f"Invalid application source namespace: {namespace!r}")
 
@@ -1032,6 +1033,13 @@ class IndexingPipeline:
             raise
 
         return result
+
+    def _raise_if_surreal_local_destructive(self, action: str) -> None:
+        if self._settings.search_backend == "surreal":
+            raise RuntimeError(
+                f"{action} is disabled when search_backend='surreal' because it mutates "
+                "local SQLite/FTS5/vector/graph state"
+            )
 
     def _application_chunk_for_unit(
         self,
@@ -1254,9 +1262,10 @@ class IndexingPipeline:
 
         .. deprecated::
             Use :meth:`drop_vectors` or :meth:`drop_chunks` for granular
-            cleanup.  This method is retained temporarily for backward
-            compatibility and will be removed in Wave 3.
+        cleanup.  This method is retained temporarily for backward
+        compatibility and will be removed in Wave 3.
         """
+        self._raise_if_surreal_local_destructive("clear")
         self._metadata_store.delete_all()  # also clears chunks_fts
         self._vector_store.delete_all()
         self._graph_store.delete_all()
@@ -1273,6 +1282,7 @@ class IndexingPipeline:
         Removes only the vector-layer data.  Chunks, FTS5, and graph remain
         intact so BM25 and graph search continue to work.
         """
+        self._raise_if_surreal_local_destructive("drop_vectors")
         strategy = self._strategy
         model_suffix = self._model_suffix
 
@@ -1307,6 +1317,7 @@ class IndexingPipeline:
         the current strategy is removed, including vector tables for ALL
         embedding models.
         """
+        self._raise_if_surreal_local_destructive("drop_chunks")
         strategy = self._strategy
         chunks_table = f"chunks_{strategy}"
         fts_table = f"chunks_fts_{strategy}"
@@ -3661,6 +3672,7 @@ class IndexingPipeline:
             needs.  This method uses the holder-aware path: delete_chunks_from_graph
             (orphan chunk_ids only) + delete_file_node (File node only).
         """
+        self._raise_if_surreal_local_destructive("_purge_file")
         if self._settings.search_backend == "surreal":
             direct_manifest = self._filesystem_surreal_tombstone_manifest(
                 file_path,
@@ -3794,6 +3806,7 @@ class IndexingPipeline:
         (chunks/vectors counters are 0 — _purge_file is the authoritative
         accounting point; callers care about files_removed only).
         """
+        self._raise_if_surreal_local_destructive("purge_orphaned_files")
         # Collect all file_paths from M2M tables across all strategies.
         strategies = self._present_strategies(self._conn)
         stored_paths: set[str] = set()
