@@ -85,7 +85,9 @@ from dotmd.ingestion.surreal_delta_sync import (
     run_surreal_delta_sync,
 )
 from dotmd.ingestion.surreal_direct_sink import (
+    SurrealApplicationSourceWrite,
     SurrealDirectFileWrite,
+    build_surreal_application_source_manifest,
     build_surreal_direct_manifest,
 )
 from dotmd.search.fts5 import FTS5SearchEngine
@@ -672,6 +674,38 @@ class IndexingPipeline:
             self._fuse_vectors(e_text, e_meta, weights)
             for e_text, e_meta in zip(e_text_vectors, e_meta_vectors, strict=False)
         ]
+
+        if self._settings.search_backend == "surreal":
+            checkpoint_cursor_for_manifest = batch.checkpoint_cursor
+            if checkpoint_cursor_for_manifest is None:
+                if isinstance(checkpoint_cursor, str):
+                    checkpoint_cursor_for_manifest = checkpoint_cursor
+                else:
+                    checkpoint_cursor_for_manifest = namespace
+            direct_manifest = build_surreal_application_source_manifest(
+                SurrealApplicationSourceWrite(
+                    changes=tuple(batch.changes),
+                    indexed_changes=tuple(item.change for item in index_items),
+                    chunks=tuple(chunks_to_index),
+                    e_text_vectors=tuple(e_text_vectors),
+                    e_meta_by_source_key=e_meta_by_source_key,
+                    e_fused_vectors=tuple(e_fused_vectors),
+                    text_hashes=dict(text_hashes),
+                    chunk_strategy=self._strategy,
+                    embedding_model=self._settings.embedding_model,
+                ),
+                source_selection=SurrealDeltaSourceSelection(
+                    source_name=namespace,
+                    table_name="source_units",
+                    cursor=checkpoint_cursor_for_manifest,
+                ),
+                checkpoint_candidate=SurrealDeltaCheckpointCandidate(
+                    cursor=checkpoint_cursor_for_manifest,
+                    watermark=batch.updated_after or batch.updated_after_cursor,
+                ),
+                created_at=None,
+            )
+            self._write_surreal_direct_manifest(direct_manifest)
 
         if e_fused_vectors:
             self._ensure_vector_tables_for_dimension(len(e_fused_vectors[0]))

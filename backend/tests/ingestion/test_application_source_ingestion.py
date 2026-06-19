@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 from dotmd.core.config import Settings
 from dotmd.core.models import (
@@ -13,6 +14,7 @@ from dotmd.core.models import (
     SourceDocument,
     SourceUnit,
 )
+from dotmd.ingestion import pipeline as pipeline_module
 from dotmd.ingestion.pipeline import IndexingPipeline
 
 from .application_source_fixtures import FixtureApplicationSourceProvider
@@ -20,22 +22,40 @@ from .application_source_fixtures import FixtureApplicationSourceProvider
 NOW = datetime(2026, 5, 8, 12, 0, tzinfo=UTC)
 
 
-def _pipeline(tmp_path: Path) -> IndexingPipeline:
+def _pipeline(tmp_path: Path, *, search_backend: str = "sqlite") -> IndexingPipeline:
     data_dir = tmp_path / "data"
     index_dir = tmp_path / "index"
     data_dir.mkdir()
     index_dir.mkdir()
-    pipeline = IndexingPipeline(
-        Settings(
-            data_dir=data_dir,
-            index_dir=index_dir,
-            embedding_url="http://localhost:18088",
-            indexing_paths=[str(data_dir)],
-            extract_depth=ExtractDepth.STRUCTURAL,
-        )
+    settings = Settings(
+        data_dir=data_dir,
+        index_dir=index_dir,
+        embedding_url="http://localhost:18088",
+        indexing_paths=[str(data_dir)],
+        extract_depth=ExtractDepth.STRUCTURAL,
+        search_backend=search_backend,
+        surreal_retrieval_url="http://localhost:8000",
+        surreal_retrieval_database="dotmd",
     )
+    if search_backend == "surreal":
+        with patch.object(
+            pipeline_module,
+            "_create_surreal_direct_writer",
+            return_value=object(),
+        ):
+            pipeline = IndexingPipeline(settings)
+    else:
+        pipeline = IndexingPipeline(settings)
     pipeline._semantic_engine.get_tei_model_id = lambda: "fixture-model"  # type: ignore[method-assign]
     return pipeline
+
+
+def _pipeline_sqlite(tmp_path: Path) -> IndexingPipeline:
+    return _pipeline(tmp_path, search_backend="sqlite")
+
+
+def _pipeline_surreal(tmp_path: Path) -> IndexingPipeline:
+    return _pipeline(tmp_path, search_backend="surreal")
 
 
 def _document(document_ref: str, title: str) -> SourceDocument:
@@ -84,7 +104,7 @@ def _change(document: SourceDocument, index: int, text: str) -> ApplicationSourc
 def test_application_source_embeddings_are_chunk_batched_and_document_meta_scoped(
     tmp_path: Path,
 ) -> None:
-    pipeline = _pipeline(tmp_path)
+    pipeline = _pipeline_sqlite(tmp_path)
     encode_calls: list[list[str]] = []
 
     def record_encode(texts: list[str]) -> list[list[float]]:
@@ -119,10 +139,102 @@ def test_application_source_embeddings_are_chunk_batched_and_document_meta_scope
     assert all("speaker" not in text for text in encode_calls[1])
 
 
+def test_application_source_emits_surreal_manifest_on_surreal_backend(
+    tmp_path: Path,
+) -> None:
+    pipeline = _pipeline_surreal(tmp_path)
+    manifest_calls: list[object] = []
+
+    def record_manifest(manifest) -> None:  # type: ignore[no-untyped-def]
+        manifest_calls.append(manifest)
+
+    pipeline._write_surreal_direct_manifest = record_manifest  # type: ignore[method-assign]
+    encode_calls: list[list[str]] = []
+
+    def record_encode(texts: list[str]) -> list[list[float]]:
+        encode_calls.append(list(texts))
+        return [[float(len(encode_calls))] * 8 for _text in texts]
+
+    pipeline._semantic_engine.encode_batch = record_encode  # type: ignore[method-assign]
+    doc_a = _document("doc:a", "Doc A")
+    doc_b = _document("doc:b", "Doc B")
+    provider = FixtureApplicationSourceProvider(
+        ApplicationSourceDescription(
+            namespace="fixture",
+            source_kind="document",
+            display_name="Fixture",
+        ),
+        [
+            _change(doc_a, 1, "alpha body"),
+            _change(doc_a, 2, "beta body"),
+            _change(doc_b, 1, "gamma body"),
+        ],
+    )
+
+    result = pipeline.ingest_application_source(provider, limit=10)
+
+    assert result.chunks_indexed == 3
+    assert len(manifest_calls) == 1
+    manifest = manifest_calls[0]
+    assert [row.ref for row in manifest.documents.rows] == ["fixture:doc:a", "fixture:doc:b"]
+    assert [row.ref for row in manifest.source_units.rows] == [
+        "fixture\x1fdoc:a\x1fdoc:a:unit:1",
+        "fixture\x1fdoc:a\x1fdoc:a:unit:2",
+        "fixture\x1fdoc:b\x1fdoc:b:unit:1",
+    ]
+    chunk_ids = {row.row["chunk_id"] for row in manifest.chunks.rows}
+    assert {row.row["chunk_id"] for row in manifest.provenance.rows} == chunk_ids
+    assert sorted(row.row["document_ref"] for row in manifest.provenance.rows) == [
+        "doc:a",
+        "doc:a",
+        "doc:b",
+    ]
+    assert [row.row["component"] for row in manifest.vector_components.rows] == [
+        "text",
+        "text",
+        "text",
+        "meta",
+        "meta",
+    ]
+    assert {row.row["chunk_id"] for row in manifest.vector_components.rows if row.row["component"] == "text"} == chunk_ids
+    assert {
+        row.row["chunk_id"] for row in manifest.vector_components.rows if row.row["component"] == "meta"
+    } == {"fixture:doc:a", "fixture:doc:b"}
+
+
+def test_application_source_does_not_emit_surreal_manifest_on_sqlite_backend(
+    tmp_path: Path,
+) -> None:
+    pipeline = _pipeline_sqlite(tmp_path)
+    manifest_calls: list[object] = []
+
+    def record_manifest(manifest) -> None:  # type: ignore[no-untyped-def]
+        manifest_calls.append(manifest)
+
+    pipeline._write_surreal_direct_manifest = record_manifest  # type: ignore[method-assign]
+    doc_a = _document("doc:a", "Doc A")
+    provider = FixtureApplicationSourceProvider(
+        ApplicationSourceDescription(
+            namespace="fixture",
+            source_kind="document",
+            display_name="Fixture",
+        ),
+        [
+            _change(doc_a, 1, "alpha body"),
+            _change(doc_a, 2, "beta body"),
+        ],
+    )
+
+    result = pipeline.ingest_application_source(provider, limit=10)
+
+    assert result.chunks_indexed == 2
+    assert manifest_calls == []
+
+
 def test_purge_application_source_removes_checkpoint_fingerprints_and_vectors(
     tmp_path: Path,
 ) -> None:
-    pipeline = _pipeline(tmp_path)
+    pipeline = _pipeline_sqlite(tmp_path)
     doc_a = _document("doc:a", "Doc A")
     provider = FixtureApplicationSourceProvider(
         ApplicationSourceDescription(

@@ -4,7 +4,13 @@ import inspect
 from datetime import UTC, datetime
 from pathlib import Path
 
-from dotmd.core.models import Chunk, ChunkProvenance, SourceDocument
+from dotmd.core.models import (
+    ApplicationSourceChange,
+    Chunk,
+    ChunkProvenance,
+    SourceDocument,
+    SourceUnit,
+)
 from dotmd.ingestion.surreal_delta_sync import (
     FakeSurrealDeltaWriter,
     SurrealDeltaCheckpointCandidate,
@@ -13,7 +19,9 @@ from dotmd.ingestion.surreal_delta_sync import (
     run_surreal_delta_sync,
 )
 from dotmd.ingestion.surreal_direct_sink import (
+    SurrealApplicationSourceWrite,
     SurrealDirectFileWrite,
+    build_surreal_application_source_manifest,
     build_surreal_direct_manifest,
 )
 
@@ -33,6 +41,53 @@ def _source_document() -> SourceDocument:
         metadata_fingerprint="metadata-alpha",
         metadata_json={"tags": ["alpha", "beta"]},
         file_path=Path("/notes/alpha.md"),
+    )
+
+
+def _application_source_document(document_ref: str, title: str) -> SourceDocument:
+    return SourceDocument(
+        namespace="fixture",
+        document_ref=document_ref,
+        ref=f"fixture:{document_ref}",
+        title=title,
+        source_uri=f"fixture://{document_ref}",
+        media_type="text/plain",
+        parser_name="fixture-parser",
+        document_type="page",
+        updated_at=datetime(2026, 6, 19, 12, 0, tzinfo=UTC),
+        content_fingerprint=f"{document_ref}:content",
+        metadata_fingerprint=f"{document_ref}:meta",
+        metadata_json={"tags": [title.lower()]},
+    )
+
+
+def _application_source_unit(
+    document: SourceDocument,
+    index: int,
+    text: str,
+) -> SourceUnit:
+    return SourceUnit(
+        namespace=document.namespace,
+        document_ref=document.document_ref,
+        unit_ref=f"{document.document_ref}:unit:{index}",
+        unit_type="paragraph",
+        text=text,
+        order_key=f"{index:020d}",
+        fingerprint=f"{document.document_ref}:unit:{index}:fingerprint",
+        updated_at=datetime(2026, 6, 19, 12, 0, tzinfo=UTC),
+        metadata_json={"speaker": f"speaker-{index}"},
+        chunking_hints={},
+    )
+
+
+def _application_source_change(
+    document: SourceDocument,
+    index: int,
+    text: str,
+) -> ApplicationSourceChange:
+    return ApplicationSourceChange(
+        document=document,
+        unit=_application_source_unit(document, index, text),
     )
 
 
@@ -82,6 +137,92 @@ def _write_fixture() -> SurrealDirectFileWrite:
         text_hashes={
             "chunk-alpha-0": "hash-alpha-0",
             "chunk-alpha-1": "hash-alpha-1",
+        },
+        chunk_strategy="contextual_512_50",
+        embedding_model="multilingual_e5_large",
+    )
+
+
+def _application_write_fixture() -> SurrealApplicationSourceWrite:
+    doc_a = _application_source_document("doc:a", "Alpha")
+    doc_b = _application_source_document("doc:b", "Beta")
+    changes = [
+        _application_source_change(doc_a, 1, "alpha one"),
+        _application_source_change(doc_a, 2, "alpha two"),
+        _application_source_change(doc_b, 1, "beta one"),
+    ]
+    chunks = [
+        Chunk(
+            chunk_id="chunk-alpha-1",
+            file_paths=[],
+            heading_hierarchy=["Alpha"],
+            level=1,
+            text="alpha one",
+            chunk_index=0,
+            provenance=ChunkProvenance(
+                namespace=doc_a.namespace,
+                document_ref=doc_a.document_ref,
+                ref="fixture:doc:a:unit:1",
+                source_unit_refs=[changes[0].unit.unit_ref],
+                chunk_strategy="contextual_512_50",
+                parser_name=doc_a.parser_name,
+            ),
+        ),
+        Chunk(
+            chunk_id="chunk-alpha-2",
+            file_paths=[],
+            heading_hierarchy=["Alpha"],
+            level=1,
+            text="alpha two",
+            chunk_index=1,
+            provenance=ChunkProvenance(
+                namespace=doc_a.namespace,
+                document_ref=doc_a.document_ref,
+                ref="fixture:doc:a:unit:2",
+                source_unit_refs=[changes[1].unit.unit_ref],
+                chunk_strategy="contextual_512_50",
+                parser_name=doc_a.parser_name,
+            ),
+        ),
+        Chunk(
+            chunk_id="chunk-beta-1",
+            file_paths=[],
+            heading_hierarchy=["Beta"],
+            level=1,
+            text="beta one",
+            chunk_index=0,
+            provenance=ChunkProvenance(
+                namespace=doc_b.namespace,
+                document_ref=doc_b.document_ref,
+                ref="fixture:doc:b:unit:1",
+                source_unit_refs=[changes[2].unit.unit_ref],
+                chunk_strategy="contextual_512_50",
+                parser_name=doc_b.parser_name,
+            ),
+        ),
+    ]
+    return SurrealApplicationSourceWrite(
+        changes=changes,
+        indexed_changes=changes,
+        chunks=chunks,
+        e_text_vectors=[
+            [0.1, 0.2, 0.3],
+            [0.4, 0.5, 0.6],
+            [0.7, 0.8, 0.9],
+        ],
+        e_meta_by_source_key={
+            (doc_a.namespace, doc_a.document_ref): [1.1, 1.2, 1.3],
+            (doc_b.namespace, doc_b.document_ref): [2.1, 2.2, 2.3],
+        },
+        e_fused_vectors=[
+            [3.1, 3.2, 3.3],
+            [3.4, 3.5, 3.6],
+            [3.7, 3.8, 3.9],
+        ],
+        text_hashes={
+            "chunk-alpha-1": "hash-alpha-1",
+            "chunk-alpha-2": "hash-alpha-2",
+            "chunk-beta-1": "hash-beta-1",
         },
         chunk_strategy="contextual_512_50",
         embedding_model="multilingual_e5_large",
@@ -196,6 +337,103 @@ def test_direct_sink_builds_direct_manifest_rows_from_in_memory_models() -> None
     assert [row.row["vector"] for row in manifest.embeddings.rows] == [
         [0.1, 0.2, 0.3],
         [0.4, 0.5, 0.6],
+    ]
+
+
+def test_application_source_direct_sink_builds_source_rows_and_vector_components() -> None:
+    write = _application_write_fixture()
+
+    manifest = build_surreal_application_source_manifest(
+        write,
+        source_selection=SurrealDeltaSourceSelection(
+            source_name="fixture",
+            table_name="source_units",
+            cursor="offset:3",
+        ),
+        checkpoint_candidate=SurrealDeltaCheckpointCandidate(
+            cursor="offset:3",
+            watermark="watermark:fixture",
+        ),
+    )
+
+    assert [row.ref for row in manifest.documents.rows] == ["fixture:doc:a", "fixture:doc:b"]
+    assert [row.ref for row in manifest.source_units.rows] == [
+        "fixture\x1fdoc:a\x1fdoc:a:unit:1",
+        "fixture\x1fdoc:a\x1fdoc:a:unit:2",
+        "fixture\x1fdoc:b\x1fdoc:b:unit:1",
+    ]
+    assert [row.row["fingerprint"] for row in manifest.source_units.rows] == [
+        "doc:a:unit:1:fingerprint",
+        "doc:a:unit:2:fingerprint",
+        "doc:b:unit:1:fingerprint",
+    ]
+
+    assert [row.ref for row in manifest.chunks.rows] == [
+        "fixture:doc:a:unit:1",
+        "fixture:doc:a:unit:2",
+        "fixture:doc:b:unit:1",
+    ]
+    assert [row.row["source_unit_refs"] for row in manifest.chunks.rows] == [
+        [write.changes[0].unit.unit_ref],
+        [write.changes[1].unit.unit_ref],
+        [write.changes[2].unit.unit_ref],
+    ]
+
+    assert [row.ref for row in manifest.provenance.rows] == [
+        "chunk-alpha-1\x1ffixture\x1fdoc:a",
+        "chunk-alpha-2\x1ffixture\x1fdoc:a",
+        "chunk-beta-1\x1ffixture\x1fdoc:b",
+    ]
+    assert [row.row["source_unit_refs"] for row in manifest.provenance.rows] == [
+        [write.changes[0].unit.unit_ref],
+        [write.changes[1].unit.unit_ref],
+        [write.changes[2].unit.unit_ref],
+    ]
+
+    assert [row.ref for row in manifest.resource_bindings.rows] == [
+        "fixture\x1fdoc:a",
+        "fixture\x1fdoc:b",
+    ]
+    assert [row.row["active"] for row in manifest.resource_bindings.rows] == [True, True]
+
+    assert [row.ref for row in manifest.embeddings.rows] == [
+        "contextual_512_50\x1fmultilingual_e5_large\x1fchunk-alpha-1",
+        "contextual_512_50\x1fmultilingual_e5_large\x1fchunk-alpha-2",
+        "contextual_512_50\x1fmultilingual_e5_large\x1fchunk-beta-1",
+    ]
+    assert [row.row["text_hash"] for row in manifest.embeddings.rows] == [
+        "hash-alpha-1",
+        "hash-alpha-2",
+        "hash-beta-1",
+    ]
+
+    assert [row.ref for row in manifest.vector_components.rows] == [
+        "contextual_512_50\x1fmultilingual_e5_large\x1fchunk-alpha-1\x1ftext",
+        "contextual_512_50\x1fmultilingual_e5_large\x1fchunk-alpha-2\x1ftext",
+        "contextual_512_50\x1fmultilingual_e5_large\x1fchunk-beta-1\x1ftext",
+        "contextual_512_50\x1fmultilingual_e5_large\x1ffixture:doc:a\x1fmeta",
+        "contextual_512_50\x1fmultilingual_e5_large\x1ffixture:doc:b\x1fmeta",
+    ]
+    assert [row.row["component"] for row in manifest.vector_components.rows] == [
+        "text",
+        "text",
+        "text",
+        "meta",
+        "meta",
+    ]
+    assert [row.row["chunk_id"] for row in manifest.vector_components.rows] == [
+        "chunk-alpha-1",
+        "chunk-alpha-2",
+        "chunk-beta-1",
+        "fixture:doc:a",
+        "fixture:doc:b",
+    ]
+    assert [row.row["embedding"] for row in manifest.vector_components.rows] == [
+        [0.1, 0.2, 0.3],
+        [0.4, 0.5, 0.6],
+        [0.7, 0.8, 0.9],
+        [1.1, 1.2, 1.3],
+        [2.1, 2.2, 2.3],
     ]
 
 

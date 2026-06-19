@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from dotmd.core.models import Chunk, SourceDocument
+from dotmd.core.models import ApplicationSourceChange, Chunk, SourceDocument, SourceUnit
 from dotmd.ingestion.surreal_delta_sync import (
     SurrealDeltaChange,
     SurrealDeltaCheckpointCandidate,
@@ -24,6 +24,21 @@ class SurrealDirectFileWrite:
     source_document: SourceDocument
     chunks: Sequence[Chunk]
     embeddings: Sequence[Sequence[float]]
+    text_hashes: Mapping[str, str]
+    chunk_strategy: str
+    embedding_model: str
+
+
+@dataclass(frozen=True, slots=True)
+class SurrealApplicationSourceWrite:
+    """In-memory application-source slice used to build a Surreal delta manifest."""
+
+    changes: Sequence[ApplicationSourceChange]
+    indexed_changes: Sequence[ApplicationSourceChange]
+    chunks: Sequence[Chunk]
+    e_text_vectors: Sequence[Sequence[float]]
+    e_meta_by_source_key: Mapping[tuple[str, str], Sequence[float]]
+    e_fused_vectors: Sequence[Sequence[float]]
     text_hashes: Mapping[str, str]
     chunk_strategy: str
     embedding_model: str
@@ -70,6 +85,31 @@ def _document_change(source_document: SourceDocument) -> SurrealDeltaChange:
     )
 
 
+def _source_unit_change(source_unit: SourceUnit) -> SurrealDeltaChange:
+    ref = _stable_composite_ref(
+        source_unit.namespace,
+        source_unit.document_ref,
+        source_unit.unit_ref,
+    )
+    return SurrealDeltaChange(
+        ref=ref,
+        table="source_units",
+        row={
+            "namespace": source_unit.namespace,
+            "document_ref": source_unit.document_ref,
+            "unit_ref": source_unit.unit_ref,
+            "ref": ref,
+            "unit_type": source_unit.unit_type,
+            "text": source_unit.text,
+            "order_key": source_unit.order_key,
+            "fingerprint": source_unit.fingerprint,
+            "updated_at": source_unit.updated_at,
+            "metadata": dict(source_unit.metadata_json),
+            "chunking_hints": dict(source_unit.chunking_hints),
+        },
+    )
+
+
 def _chunk_change(
     *,
     source_document: SourceDocument,
@@ -101,6 +141,71 @@ def _chunk_change(
             "file_paths": _chunk_file_paths(chunk, source_document),
             "file_bindings": [],
             "source_unit_refs": source_unit_refs,
+            "metadata": {},
+        },
+    )
+
+
+def _application_chunk_change(
+    *,
+    source_document: SourceDocument,
+    chunk: Chunk,
+    chunk_strategy: str,
+) -> SurrealDeltaChange:
+    provenance_ref = (
+        chunk.provenance.ref
+        if chunk.provenance is not None and chunk.provenance.ref
+        else chunk.chunk_id
+    )
+    source_unit_refs = (
+        list(chunk.provenance.source_unit_refs) if chunk.provenance is not None else []
+    )
+    return SurrealDeltaChange(
+        ref=provenance_ref,
+        table="chunks",
+        row={
+            "chunk_id": chunk.chunk_id,
+            "original_chunk_id": chunk.chunk_id,
+            "chunk_strategy": chunk_strategy,
+            "heading_hierarchy": list(chunk.heading_hierarchy),
+            "level": chunk.level,
+            "document_ref": source_document.document_ref,
+            "ref": provenance_ref,
+            "title": _chunk_title(chunk, source_document),
+            "tags_text": _chunk_tags_text(source_document),
+            "text": chunk.text,
+            "file_paths": _chunk_file_paths(chunk, source_document),
+            "file_bindings": [],
+            "source_unit_refs": source_unit_refs,
+            "metadata": {},
+        },
+    )
+
+
+def _application_provenance_change(
+    *,
+    source_document: SourceDocument,
+    chunk: Chunk,
+    chunk_strategy: str,
+) -> SurrealDeltaChange:
+    provenance = chunk.provenance
+    namespace = provenance.namespace if provenance is not None else source_document.namespace
+    source_unit_refs = (
+        list(provenance.source_unit_refs) if provenance is not None else []
+    )
+    parser_name = provenance.parser_name if provenance is not None else source_document.parser_name
+    provenance_id = _stable_composite_ref(chunk.chunk_id, namespace, source_document.document_ref)
+    return SurrealDeltaChange(
+        ref=provenance_id,
+        table="provenance",
+        row={
+            "chunk_id": chunk.chunk_id,
+            "provenance_id": provenance_id,
+            "namespace": namespace,
+            "document_ref": source_document.document_ref,
+            "chunk_strategy": provenance.chunk_strategy if provenance is not None else chunk_strategy,
+            "source_unit_refs": source_unit_refs,
+            "parser_name": parser_name,
             "metadata": {},
         },
     )
@@ -186,6 +291,30 @@ def _resource_binding_change(source_document: SourceDocument) -> SurrealDeltaCha
     )
 
 
+def _vector_component_change(
+    *,
+    owner_id: str,
+    component: str,
+    embedding: Sequence[float],
+    chunk_strategy: str,
+    embedding_model: str,
+    metadata: Mapping[str, object] | None = None,
+) -> SurrealDeltaChange:
+    component_ref = _stable_composite_ref(chunk_strategy, embedding_model, owner_id, component)
+    return SurrealDeltaChange(
+        ref=component_ref,
+        table="vector_components",
+        row={
+            "chunk_strategy": chunk_strategy,
+            "embedding_model": embedding_model,
+            "chunk_id": owner_id,
+            "component": component,
+            "embedding": list(embedding),
+            "metadata": dict(metadata or {}),
+        },
+    )
+
+
 def _embedding_change(
     *,
     chunk: Chunk,
@@ -210,6 +339,124 @@ def _embedding_change(
             "vector": list(embedding),
             "metadata": {},
         },
+    )
+
+
+def build_surreal_application_source_manifest(
+    write: SurrealApplicationSourceWrite,
+    *,
+    source_selection: SurrealDeltaSourceSelection,
+    checkpoint_candidate: SurrealDeltaCheckpointCandidate,
+    created_at: datetime | None = None,
+) -> SurrealDeltaManifest:
+    """Build a direct Surreal delta manifest from application-source state."""
+
+    if len(write.chunks) != len(write.e_text_vectors) or len(write.chunks) != len(write.e_fused_vectors):
+        raise ValueError("chunks, e_text_vectors, and e_fused_vectors must be aligned")
+    if len(write.indexed_changes) != len(write.chunks):
+        raise ValueError("indexed_changes and chunks must be aligned")
+
+    documents_by_ref: dict[str, SourceDocument] = {}
+    source_units = sorted(
+        (_source_unit_change(change.unit) for change in write.changes),
+        key=lambda change: change.ref,
+    )
+    for change in write.changes:
+        documents_by_ref.setdefault(change.document.ref, change.document)
+
+    document_changes = [
+        _document_change(documents_by_ref[ref]) for ref in sorted(documents_by_ref)
+    ]
+    resource_binding_changes = [
+        _resource_binding_change(documents_by_ref[ref])
+        for ref in sorted(documents_by_ref)
+    ]
+
+    chunk_changes: list[SurrealDeltaChange] = []
+    provenance_changes: list[SurrealDeltaChange] = []
+    embedding_changes: list[SurrealDeltaChange] = []
+    vector_component_changes: list[SurrealDeltaChange] = []
+
+    for change, chunk, e_text, e_fused in zip(
+        write.indexed_changes,
+        write.chunks,
+        write.e_text_vectors,
+        write.e_fused_vectors,
+        strict=True,
+    ):
+        source_document = change.document
+        chunk_changes.append(
+            _application_chunk_change(
+                source_document=source_document,
+                chunk=chunk,
+                chunk_strategy=write.chunk_strategy,
+            )
+        )
+        provenance_changes.append(
+            _application_provenance_change(
+                source_document=source_document,
+                chunk=chunk,
+                chunk_strategy=write.chunk_strategy,
+            )
+        )
+        embedding_changes.append(
+            _embedding_change(
+                chunk=chunk,
+                embedding=e_fused,
+                chunk_strategy=write.chunk_strategy,
+                embedding_model=write.embedding_model,
+                text_hashes=write.text_hashes,
+            )
+        )
+        vector_component_changes.append(
+            _vector_component_change(
+                owner_id=chunk.chunk_id,
+                component="text",
+                embedding=e_text,
+                chunk_strategy=write.chunk_strategy,
+                embedding_model=write.embedding_model,
+            )
+        )
+
+    for ref in sorted(documents_by_ref):
+        source_document = documents_by_ref[ref]
+        meta_vector = write.e_meta_by_source_key.get((source_document.namespace, source_document.document_ref))
+        if meta_vector is None:
+            continue
+        vector_component_changes.append(
+            _vector_component_change(
+                owner_id=source_document.ref,
+                component="meta",
+                embedding=meta_vector,
+                chunk_strategy=write.chunk_strategy,
+                embedding_model=write.embedding_model,
+                metadata={
+                    "namespace": source_document.namespace,
+                    "document_ref": source_document.document_ref,
+                },
+            )
+        )
+
+    chunk_changes.sort(key=lambda change: change.ref)
+    provenance_changes.sort(key=lambda change: change.ref)
+    embedding_changes.sort(key=lambda change: change.ref)
+    vector_component_changes.sort(key=lambda change: change.ref)
+
+    return build_surreal_delta_manifest(
+        source_selection=source_selection,
+        checkpoint_candidate=checkpoint_candidate,
+        documents=SurrealDeltaSection(rows=document_changes),
+        source_units=SurrealDeltaSection(rows=source_units),
+        chunks=SurrealDeltaSection(rows=chunk_changes),
+        chunk_file_bindings=SurrealDeltaSection(),
+        provenance=SurrealDeltaSection(rows=provenance_changes),
+        resource_bindings=SurrealDeltaSection(rows=resource_binding_changes),
+        fingerprints=SurrealDeltaSection(),
+        embeddings=SurrealDeltaSection(rows=embedding_changes),
+        vector_components=SurrealDeltaSection(rows=vector_component_changes),
+        graph=SurrealDeltaSection(),
+        feedback=SurrealDeltaSection(),
+        created_at=created_at,
     )
 
 
