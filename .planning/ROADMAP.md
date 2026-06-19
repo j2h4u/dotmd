@@ -307,7 +307,7 @@ Success criteria:
   reindex/re-embedding.
 - [x] Failure/retry behavior is idempotent and instrumented with progress/ETA
   for operations expected to exceed 120 seconds.
-- [ ] Production cutover criteria are updated with write-path evidence.
+- [x] Production cutover criteria are updated with write-path evidence.
 
 Plans:
 
@@ -331,6 +331,8 @@ Progress:
 - [x] Normal `search_backend='surreal'` ingest/metadata-only refresh now skips
   local sqlite-vec and FTS5 writes while preserving SQLite metadata/source
   lifecycle, bindings, fingerprints, and `VecComponentStore` reuse.
+- [x] Manual reindex paths in Surreal mode now no-op instead of mutating
+  local sqlite-vec and FTS5 stores.
 - [x] Product decision recorded: proceed with direct SurrealDB writes, not a
   bounded hybrid runtime.
 - [ ] Surreal-backed API/CLI/prod smoke for direct-written changes remains
@@ -404,7 +406,7 @@ after SurrealDB cutover is accepted.
 | 43. Shadow run and quality gate | 3/3 | Complete | 2026-06-16 |
 | 44. Standalone quality gate and cutover decision | 1/1 | Complete — NO-GO | 2026-06-19 |
 | 45. Standalone SurrealDB runtime wiring and smoke | v1.8 | In Progress | — |
-| 46. Legacy stack removal | v1.8 | Planned | — |
+| 46. SurrealDB write path and trickle cutover | v1.8 | In Progress | — |
 
 ### Backlog 999.2: Pipeline parallelism — overlap GLiNER and TEI across files
 

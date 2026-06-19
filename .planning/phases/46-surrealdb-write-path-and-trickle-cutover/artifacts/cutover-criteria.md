@@ -15,12 +15,14 @@ write-path evidence landed in Phase 46. It does not approve cutover.
 - Direct writes are visible to `SurrealFTSSearchEngine`.
 - Direct writes are visible through `DotMDService` keyword search.
 - Normal Surreal ingest skips local sqlite-vec and FTS writes.
-- The focused gate passed: `82 passed`, with `ruff` clean.
+- Manual reindex paths in Surreal mode now skip legacy sqlite-vec and FTS5
+  writes instead of mutating local legacy stores.
+- The focused gate passed: `85 passed`, with `ruff` clean.
 
 Reference:
 
 - `46-01-SUMMARY.md` records the direct-write smoke, service-level visibility,
-  and the normal-ingest sqlite-vec/FTS skip decision.
+  the normal-ingest sqlite-vec/FTS skip decision, and the manual reindex guard.
 
 ## Remaining Cutover Gates
 
@@ -48,6 +50,8 @@ Reference:
 - Cutover criteria artifact commit: `acfb513`
 - Phase 46 summary commit chain includes `41409a3`, which skips local
   sqlite-vec and FTS writes for the normal Surreal ingest path.
+- Commit `06e8179` guards manual reindex paths in Surreal mode so they no-op
+  instead of mutating sqlite-vec or FTS5.
 
 ## Status
 

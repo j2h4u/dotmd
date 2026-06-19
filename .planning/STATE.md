@@ -27,8 +27,10 @@ focused smokes now prove direct Surreal writes reach FTS and
 `DotMDService.search` keyword visibility. Commit `41409a3` quarantined local
 sqlite-vec and FTS5 writes for the normal Surreal ingest/metadata-only refresh
 path while keeping SQLite metadata/source lifecycle, bindings, fingerprints,
-and `VecComponentStore` reuse. The product decision is to cut over directly
-instead of building a long-lived old-stack hybrid sync.
+and `VecComponentStore` reuse. Commit `06e8179` now guards manual reindex
+paths in Surreal mode so legacy sqlite-vec/FTS5 stores are not mutated there.
+The product decision is to cut over directly instead of building a long-lived
+old-stack hybrid sync.
 
 ## Current Milestone
 
@@ -309,9 +311,9 @@ was moved under `.planning/notes/completed-backlog/`.
 ### Blockers/Concerns
 
 Active cutover blocker: Phase 45 proved standalone SurrealDB runtime retrieval
-for CLI/API/MCP, but `search_backend=surreal` is retrieval-only. Trickle remains
-on the existing SQLite/sqlite-vec/FalkorDB write path until Surreal-native writes
-are implemented or explicitly deferred as a product decision.
+for CLI/API/MCP, and Phase 46 now guards manual reindex paths in Surreal mode.
+Production/API/CLI/prod smoke and the cutover criteria still need to be updated
+before approval.
 
 ### Quick Tasks Completed
 
@@ -329,13 +331,14 @@ are implemented or explicitly deferred as a product decision.
 
 Phase: 46-surrealdb-write-path-and-trickle-cutover
 Plan: 46-01 in progress
-Status: Direct SurrealDB write path is implemented at smoke level; readback and cutover remain
-Last activity: 2026-06-19 -- direct SurrealDB cutover decision recorded
+Status: Direct SurrealDB write path and manual reindex guards are implemented at smoke level; readback and cutover remain
+Last activity: 2026-06-19 -- Surreal mode manual reindex guard recorded
 
 ## Operator Next Steps
 
 - Direct SurrealDB ingest/write sink for trickle/indexing is implemented at
   focused-test/smoke level.
+- Manual reindex paths in Surreal mode now skip legacy sqlite-vec/FTS5 writes.
 - Prove one changed markdown file writes directly to SurrealDB and is visible
   through Surreal-backed search without SQLite as the daily authoritative store.
 - Update cutover criteria with the write-path evidence, then remove/quarantine
