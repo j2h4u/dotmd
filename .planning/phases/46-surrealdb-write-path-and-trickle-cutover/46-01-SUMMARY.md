@@ -36,6 +36,27 @@ focused direct-write and service-level visibility smokes on the Surreal sink:
   DB.
 - safe local temporary `surrealkv://` public-entrypoint smokes for API, CLI,
   and MCP direct-written visibility are done.
+- orchestrator validation also passed with focused devtools and shadow-run
+  checks:
+  - `67 passed in 1.08s` for the devtools runner gate
+  - phase 43 shadow bundle verify-only passed with explicit required args
+  - artifact summary still reports `passed=true`, `regression=0`, and no
+    unresolved blockers or unclear items
+- live read-only state remains on the old stack, with `dotmd` healthy,
+  `surrealdb/surrealdb:v3.1.4` running, and `dotmd status --verbose` reporting
+  1098 files, 149880 chunks, 233348 entities, 592448 edges, graph=`falkordb`
+  and `/health` returning `ok`.
+- keyword smoke still finds the same SurrealDB document in both the old-stack
+  live child and the Surreal child-process override path without requiring a
+  container restart.
+- the hybrid old-stack smoke path is still too slow for rerank-on production
+  use: semantic/graph smoke took about 100s, TEI one-query encode logged
+  `93.7s`, and Falkor graph enrichment timed out before results returned.
+  Phase 46 therefore proceeds with rerank off / no-rerank cutover smoke, while
+  rerank-on optimization remains follow-up work rather than a blocker.
+- Gmail federated search still logs OAuth 400 in both old-stack and Surreal
+  child-process search; treat that as a separate federated-source issue, not a
+  SurrealDB cutover blocker unless Gmail is made part of the acceptance scope.
 - commit `06e8179` guards manual reindex paths in Surreal mode:
   `IndexingPipeline.reindex_vectors()`, `reindex_fts5()`, and
   `DotMDService.reindex('all')` now return `0`/skip without mutating the local

@@ -21,9 +21,16 @@ write-path evidence landed in Phase 46. It does not approve cutover.
   writes instead of mutating local legacy stores.
 - Destructive admin/public purge methods fail fast in Surreal mode, and
   `_purge_file`/`purge_orphaned_files` stay tombstone-only.
+- Phase 46 reranker decision is now explicit: cutover proceeds with rerank off
+  / no-rerank; rerank-on latency optimization is follow-up work, not a Phase 46
+  blocker.
 - The focused gate passed: `85 passed`, with `ruff` clean.
 - Expanded orchestrator validation passed: `94 passed, 1 warning`, with `ruff`
   clean.
+- Devtools runner gate passed: `67 passed in 1.08s`.
+- Phase 43 shadow bundle verify-only passed with explicit required args.
+- Artifact summary still reports `passed=true`, `regression=0`, and no
+  unresolved blockers or unclear items.
 
 Reference:
 
@@ -42,7 +49,9 @@ Reference:
   or `index --force` while the container runs.
 - Old-stack remaining dependencies outside normal ingest must be removed,
   quarantined, or marked non-authoritative.
-- Reranker latency must be decided: rerank off accepted, or rerank on fixed.
+- Reranker latency is not a blocker for Phase 46 cutover acceptance now that
+  rerank off / no-rerank is the accepted path; rerank-on optimization is
+  follow-up work.
 - Rollback/restore checkpoint must be updated from Phase 44 to the standalone
   Surreal deployment.
 

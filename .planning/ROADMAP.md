@@ -308,6 +308,8 @@ Success criteria:
 - [x] Failure/retry behavior is idempotent and instrumented with progress/ETA
   for operations expected to exceed 120 seconds.
 - [x] Production cutover criteria are updated with write-path evidence.
+- [x] Reranker gate is recorded as rerank off / no-rerank for Phase 46;
+  rerank-on latency work is follow-up, not a blocker.
 
 Plans:
 
@@ -345,7 +347,8 @@ Progress:
   write-path evidence before approval.
 - [ ] Remaining old-stack dependencies outside the normal Surreal ingest path
   still need to be removed, quarantined, or explicitly marked non-authoritative.
-- [ ] Reranker latency decision still needs to be settled for cutover.
+- [x] Reranker latency decision is settled for Phase 46 cutover: proceed with
+  rerank off / no-rerank; rerank-on optimization is follow-up work.
 
 ### Phase 47: Legacy stack removal
 

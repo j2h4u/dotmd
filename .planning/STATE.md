@@ -42,9 +42,10 @@ old-stack hybrid sync.
 Phase: 46-surrealdb-write-path-and-trickle-cutover
 Status: Plan 46-01 in progress; direct Surreal write path selected, with
 public-entrypoint visibility and tombstone-only purge/orphan fencing recorded
+and rerank-off cutover policy documented
 Last activity: 2026-06-19
 
-Progress: [█████████-] Phase 46 write safety and visibility evidence complete; production cutover criteria/update work next
+Progress: [█████████-] Phase 46 write safety, visibility, and rerank-off policy evidence complete; production cutover criteria/update work next
 
 ## Deferred Items
 
