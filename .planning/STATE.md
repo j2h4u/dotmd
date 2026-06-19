@@ -24,8 +24,11 @@ See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 **Current focus:** Phase 46 direct SurrealDB write path. Runtime retrieval works
 through SurrealDB, idempotent Surreal delta-apply machinery is verified, and
 focused smokes now prove direct Surreal writes reach FTS and
-`DotMDService.search` keyword visibility. The product decision is to cut over
-directly instead of building a long-lived old-stack hybrid sync.
+`DotMDService.search` keyword visibility. Commit `41409a3` quarantined local
+sqlite-vec and FTS5 writes for the normal Surreal ingest/metadata-only refresh
+path while keeping SQLite metadata/source lifecycle, bindings, fingerprints,
+and `VecComponentStore` reuse. The product decision is to cut over directly
+instead of building a long-lived old-stack hybrid sync.
 
 ## Current Milestone
 
@@ -336,7 +339,8 @@ Last activity: 2026-06-19 -- direct SurrealDB cutover decision recorded
 - Prove one changed markdown file writes directly to SurrealDB and is visible
   through Surreal-backed search without SQLite as the daily authoritative store.
 - Update cutover criteria with the write-path evidence, then remove/quarantine
-  old-stack writes or mark them non-authoritative.
+  remaining old-stack writes outside the normal Surreal ingest path or mark
+  them non-authoritative.
 - Revisit reranker-on latency before any production cutover approval.
 
 ## Session

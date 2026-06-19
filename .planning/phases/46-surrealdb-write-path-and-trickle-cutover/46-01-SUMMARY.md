@@ -34,6 +34,10 @@ focused direct-write and service-level visibility smokes on the Surreal sink:
 - direct Surreal write -> `DotMDService.search(... mode=SearchMode.KEYWORD,
   rerank=False, expand=False)` visibility smoke against a temporary SurrealKV
   DB.
+- commit `41409a3` now skips local sqlite-vec and FTS5 writes for the normal
+  `search_backend='surreal'` ingest and metadata-only refresh path while still
+  keeping SQLite source metadata, bindings, fingerprints, and
+  `VecComponentStore` in place for metadata-only reuse and change detection.
 
 ## Evidence
 
@@ -82,6 +86,12 @@ bindings=1, embeddings=1, files=1, sections=1, tags=1, relations=2. That
 confirms the direct pipeline -> Surreal writer path, native relation inserts,
 and deterministic int `vector_rowid`.
 
+Commit `41409a3` narrows the normal Surreal ingest path further by quarantining
+local sqlite-vec and FTS5 writes there, but it intentionally leaves the local
+SQLite metadata/source lifecycle, bindings, fingerprints, and
+`VecComponentStore` cache in place. Broader reindex helpers and any
+application-source residual vector logic were not changed in that commit.
+
 ## Direction Change
 
 The product decision is direct cutover to SurrealDB, not a bounded hybrid
@@ -96,8 +106,9 @@ Phase 46 is not complete. Remaining work:
 - prove Surreal-backed search sees changed direct-written results through the
   service/API/CLI path at cutover scope;
 - update production cutover criteria with the write-path evidence;
-- remove or quarantine old-stack write dependencies, or mark them explicitly
-  non-authoritative, before production cutover;
+- remove or quarantine any remaining old-stack write dependencies outside the
+  normal Surreal ingest path, or mark them explicitly non-authoritative, before
+  production cutover;
 - decide the production deploy/runbook for the Surreal-backed write path.
 
 ## Current Decision

@@ -328,14 +328,17 @@ Progress:
 - [x] Direct Surreal writes are visible through
   `DotMDService.search(... mode=SearchMode.KEYWORD, rerank=False, expand=False)`
   in focused smoke coverage.
+- [x] Normal `search_backend='surreal'` ingest/metadata-only refresh now skips
+  local sqlite-vec and FTS5 writes while preserving SQLite metadata/source
+  lifecycle, bindings, fingerprints, and `VecComponentStore` reuse.
 - [x] Product decision recorded: proceed with direct SurrealDB writes, not a
   bounded hybrid runtime.
 - [ ] Surreal-backed API/CLI/prod smoke for direct-written changes remains
   before cutover validation.
 - [ ] Production cutover criteria and runbook need to be updated with the
   write-path evidence before approval.
-- [ ] Old-stack write dependencies still need to be removed, quarantined, or
-  explicitly marked non-authoritative.
+- [ ] Remaining old-stack dependencies outside the normal Surreal ingest path
+  still need to be removed, quarantined, or explicitly marked non-authoritative.
 - [ ] Reranker latency decision still needs to be settled for cutover.
 
 ### Phase 47: Legacy stack removal
