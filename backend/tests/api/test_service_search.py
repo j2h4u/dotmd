@@ -6,7 +6,7 @@ import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -1584,28 +1584,52 @@ class TestServiceWarmup:
 class TestSearchApiRerankerSurfaces:
     """FastAPI exposes reranker selection and comparison diagnostics."""
 
-    def test_search_endpoint_accepts_reranker_name(self) -> None:
+    def test_search_endpoint_awaits_async_service_path(self) -> None:
         from dotmd.api import server
-        from dotmd.core.models import SearchResponse
+        from dotmd.core.models import SearchCandidate, SearchMode, SearchResponse
 
+        candidate = SearchCandidate(
+            ref="filesystem:/mnt/test.md#0",
+            namespace="filesystem",
+            descriptor_key="filesystem-mnt",
+            source_kind="markdown",
+            retrieval_kind="semantic",
+            snippet="test snippet",
+            fused_score=0.9,
+            can_read=True,
+            can_materialize=False,
+        )
         service = MagicMock()
-        service.search.return_value = SearchResponse(candidates=[], source_status=[])
+        service.search = MagicMock(side_effect=AssertionError("search() should not be called"))
+        service.search_async = AsyncMock(
+            return_value=SearchResponse(candidates=[candidate], source_status=[])
+        )
         server._service = service
         client = TestClient(server.app)
 
         response = client.get("/search?q=test&reranker=msmarco-minilm")
 
         assert response.status_code == 200
-        service.search.assert_called_once()
-        assert service.search.call_args.kwargs["reranker_name"] == "msmarco-minilm"
+        service.search.assert_not_called()
+        service.search_async.assert_awaited_once_with(
+            query="test",
+            top_k=10,
+            mode=SearchMode.HYBRID,
+            rerank=True,
+            expand=True,
+            reranker_name="msmarco-minilm",
+        )
+        payload = response.json()
+        assert payload["count"] == 1
+        assert payload["results"][0]["ref"] == "filesystem:/mnt/test.md#0"
 
     def test_search_endpoint_unknown_reranker_returns_400(self) -> None:
         from dotmd.api import server
 
         service = MagicMock()
-        service.search.side_effect = ValueError(
+        service.search_async = AsyncMock(side_effect=ValueError(
             "Unknown reranker 'missing'; available: mmarco-minilm"
-        )
+        ))
         server._service = service
         client = TestClient(server.app)
 

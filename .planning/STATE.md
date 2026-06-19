@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: SurrealDB-Native Storage Cutover
 status: executing
-stopped_at: Executing 45-01-PLAN.md runtime wiring and smoke
+stopped_at: Phase 45 runtime smoke complete; Surreal write-path/trickle remains cutover blocker
 last_updated: "2026-06-19T00:00:00+06:00"
 last_activity: 2026-06-19
 progress:
@@ -21,18 +21,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 45 standalone SurrealDB runtime wiring before any
-cutover retry.
+**Current focus:** Post-Phase 45 cutover decision: runtime retrieval works
+through SurrealDB, but writes/trickle are still old-stack-only.
 
 ## Current Milestone
 
 **v1.8 — SurrealDB-Native Storage Cutover**
 
 Phase: 45-standalone-surreal-runtime-wiring
-Status: Plan 45-01 in progress; first service-level runtime wiring commit is pushed
+Status: Plan 45-01 complete; runtime retrieval smoke passed for CLI/API/MCP
 Last activity: 2026-06-19
 
-Progress: [███████---] Phase 44 cutover no-go closed; Phase 45 runtime wiring in progress
+Progress: [████████--] Phase 45 runtime retrieval smoke complete; write-path cutover remains
 
 ## Deferred Items
 
@@ -302,9 +302,10 @@ was moved under `.planning/notes/completed-backlog/`.
 
 ### Blockers/Concerns
 
-Active cutover blocker: Phase 45 must prove the standalone SurrealDB runtime
-surface. Service-level Surreal retrieval wiring exists in commit `b8b4d2f`, but
-controlled MCP/API/CLI smoke and the trickle write-path decision are still open.
+Active cutover blocker: Phase 45 proved standalone SurrealDB runtime retrieval
+for CLI/API/MCP, but `search_backend=surreal` is retrieval-only. Trickle remains
+on the existing SQLite/sqlite-vec/FalkorDB write path until Surreal-native writes
+are implemented or explicitly deferred as a product decision.
 
 ### Quick Tasks Completed
 
@@ -321,15 +322,15 @@ controlled MCP/API/CLI smoke and the trickle write-path decision are still open.
 ## Current Position
 
 Phase: 45-standalone-surreal-runtime-wiring
-Plan: 45-01 in progress
-Status: Cutover NO-GO until runtime smoke and trickle decision pass
-Last activity: 2026-06-19 -- service-level Surreal retrieval wiring committed
+Plan: 45-01 complete
+Status: Runtime retrieval smoke passed; cutover still blocked on write-path decision/support
+Last activity: 2026-06-19 -- CLI/API/MCP Surreal retrieval smoke passed and API async search bug fixed
 
 ## Operator Next Steps
 
-- Run controlled standalone SurrealDB runtime smoke without cutting over
-  production traffic.
-- Record MCP/API/CLI smoke evidence and the trickle write-path decision.
+- Decide whether the next phase implements Surreal-native writes/trickle or
+  explicitly accepts a bounded hybrid transition.
+- Revisit reranker-on latency before any production cutover approval.
 
 ## Session
 

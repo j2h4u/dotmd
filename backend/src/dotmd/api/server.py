@@ -153,7 +153,7 @@ async def search(
 ) -> SearchResponse:
     """Search the indexed knowledgebase."""
     try:
-        results = _get_service().search(
+        results = await _get_service().search_async(
             query=q,
             top_k=top_k,
             mode=mode,

@@ -274,16 +274,22 @@ Decision:
 **Goal:** Make standalone SurrealDB a real runtime search backend and prove the
 MCP/API/CLI smoke surface before retrying production cutover.
 **Depends on:** Phase 44
-**Plans:** 1/1 plan in progress
+**Plans:** 1/1 plan complete
 
 - [x] Add config-gated service startup wiring for standalone SurrealDB retrieval.
-- [ ] Run controlled Surreal-backed service smoke without cutting over production.
-- [ ] Record MCP/API/CLI smoke evidence or concrete blockers.
-- [ ] Record explicit trickle write-path decision before cutover retry.
+- [x] Run controlled Surreal-backed service smoke without cutting over production.
+- [x] Record MCP/API/CLI smoke evidence or concrete blockers.
+- [x] Record explicit trickle write-path decision before cutover retry.
 
 Plans:
 
-- [ ] 45-01-PLAN.md - Standalone SurrealDB runtime wiring, controlled smoke, and trickle decision.
+- [x] 45-01-PLAN.md - Standalone SurrealDB runtime wiring, controlled smoke, and trickle decision.
+
+Decision:
+
+- [x] Runtime retrieval works through CLI/API/MCP with `search_backend=surreal`.
+- [x] Trickle remains old-stack-only; Surreal-native writes are deferred and
+  remain a cutover blocker.
 
 ### Phase 46: Legacy stack removal
 
