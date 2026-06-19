@@ -257,21 +257,52 @@ class FalkorDBGraphStore:
         production graph contains broad File and hub entity edges, so search
         enrichment must use a bounded Section → Entity/Tag → Section query.
         """
-        result = self._graph.ro_query(
-            "MATCH (:Section {id: $id})-[r1:REL]->(mid:Node)<-[r2:REL]-(s:Section) "
-            "WHERE (mid:Entity OR mid:Tag) "
-            "AND r1.rel_type IN ['MENTIONS', 'HAS_TAG'] "
-            "AND r2.rel_type IN ['MENTIONS', 'HAS_TAG'] "
-            "RETURN DISTINCT s.id, r2.rel_type, coalesce(r2.weight, 1.0)",
-            params={"id": chunk_id},
+        return self._related_sections_from_result(
+            self._graph.ro_query(
+                "MATCH (:Section {id: $id})-[r1:REL]->(mid:Node)<-[r2:REL]-(s:Section) "
+                "WHERE (mid:Entity OR mid:Tag) "
+                "AND r1.rel_type IN ['MENTIONS', 'HAS_TAG'] "
+                "AND r2.rel_type IN ['MENTIONS', 'HAS_TAG'] "
+                "RETURN DISTINCT s.id, r2.rel_type, coalesce(r2.weight, 1.0)",
+                params={"id": chunk_id},
+            ),
+            chunk_id=chunk_id,
         )
+
+    def get_related_sections_for_seeds(
+        self,
+        chunk_ids: list[str],
+    ) -> list[tuple[str, str, float]]:
+        """Return related sections for multiple seed chunks in one graph query."""
+        if not chunk_ids:
+            return []
+        return self._related_sections_from_result(
+            self._graph.ro_query(
+                "UNWIND $ids AS seed_id "
+                "MATCH (seed:Section {id: seed_id})-[r1:REL]->(mid:Node)<-[r2:REL]-(s:Section) "
+                "WHERE (mid:Entity OR mid:Tag) "
+                "AND r1.rel_type IN ['MENTIONS', 'HAS_TAG'] "
+                "AND r2.rel_type IN ['MENTIONS', 'HAS_TAG'] "
+                "AND s.id <> seed_id "
+                "RETURN s.id, r2.rel_type, coalesce(r2.weight, 1.0)",
+                params={"ids": chunk_ids},
+            )
+        )
+
+    def _related_sections_from_result(
+        self,
+        result: object,
+        *,
+        chunk_id: str | None = None,
+    ) -> list[tuple[str, str, float]]:
         related: list[tuple[str, str, float]] = []
-        for row in result.result_set:
+        for row in getattr(result, "result_set", []):
             nid = str(row[0])
-            if nid != chunk_id:
-                relation = str(row[1]) if len(row) > 1 else ""
-                weight = float(row[2]) if len(row) > 2 and row[2] is not None else 1.0
-                related.append((nid, relation, weight))
+            if chunk_id is not None and nid == chunk_id:
+                continue
+            relation = str(row[1]) if len(row) > 1 else ""
+            weight = float(row[2]) if len(row) > 2 and row[2] is not None else 1.0
+            related.append((nid, relation, weight))
         return related
 
     # -- housekeeping -------------------------------------------------------

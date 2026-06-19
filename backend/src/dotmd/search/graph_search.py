@@ -31,6 +31,8 @@ class GraphSearchEngine:
         A metadata store satisfying :class:`MetadataStoreProtocol`.
     """
 
+    MAX_SEED_CHUNK_IDS = 8
+
     def __init__(
         self,
         graph_store: GraphStoreProtocol,
@@ -51,8 +53,8 @@ class GraphSearchEngine:
     ) -> list[tuple[str, float]]:
         """Traverse the graph from *seed_chunk_ids* and score neighbours.
 
-        For each seed chunk the engine calls
-        :meth:`GraphStoreProtocol.get_neighbors` with ``max_hops=2``.
+        The engine prefers a single batched graph lookup when the backend
+        exposes one, otherwise it falls back to bounded per-seed lookups.
         Every discovered node is scored using:
 
         .. code-block:: text
@@ -71,7 +73,8 @@ class GraphSearchEngine:
             Maximum number of results to return.
         seed_chunk_ids:
             Starting chunk IDs for graph traversal.  If ``None`` or
-            empty, an empty list is returned immediately.
+            empty, an empty list is returned immediately. Only a bounded,
+            de-duplicated prefix of the seed list is used for enrichment.
 
         Returns
         -------
@@ -84,15 +87,13 @@ class GraphSearchEngine:
 
         # Aggregate scores: chunk_id -> cumulative graph score
         aggregated_scores: dict[str, float] = defaultdict(float)
-        seed_set = set(seed_chunk_ids)
+        seed_ids = self._bounded_seed_chunk_ids(seed_chunk_ids, top_k)
+        seed_set = set(seed_ids)
 
-        for seed_id in seed_chunk_ids:
-            # Entity/tag-mediated chunk discovery:
-            # Section -> shared Entity/Tag -> Section.
-            neighbors = self._graph_store.get_related_sections(seed_id)
-            for node_id, _rel, weight in neighbors:
-                if node_id != seed_id:
-                    aggregated_scores[node_id] += weight
+        neighbors = self._collect_related_sections(seed_ids)
+        for node_id, _rel, weight in neighbors:
+            if node_id not in seed_set:
+                aggregated_scores[node_id] += weight
 
         # Exclude the seed chunks themselves so the fusion layer does not
         # double-count results already present from another engine.
@@ -118,3 +119,56 @@ class GraphSearchEngine:
         )
 
         return sorted_results[:top_k]
+
+    def _bounded_seed_chunk_ids(
+        self,
+        seed_chunk_ids: list[str],
+        top_k: int,
+    ) -> list[str]:
+        """Return a de-duplicated, bounded seed list for graph enrichment."""
+        seed_limit = min(max(top_k, 0), self.MAX_SEED_CHUNK_IDS)
+        if seed_limit <= 0:
+            return []
+
+        bounded: list[str] = []
+        seen: set[str] = set()
+        for seed_id in seed_chunk_ids:
+            if seed_id in seen:
+                continue
+            seen.add(seed_id)
+            bounded.append(seed_id)
+            if len(bounded) >= seed_limit:
+                break
+        return bounded
+
+    def _collect_related_sections(
+        self,
+        seed_chunk_ids: list[str],
+    ) -> list[tuple[str, str, float]]:
+        """Collect graph-enrichment neighbors using the best available path."""
+        if not seed_chunk_ids:
+            return []
+
+        batch_getter = getattr(self._graph_store, "get_related_sections_for_seeds", None)
+        if callable(batch_getter):
+            try:
+                return list(batch_getter(seed_chunk_ids))
+            except Exception:
+                logger.warning(
+                    "graph enrichment batch query failed; continuing without enrichment",
+                    exc_info=True,
+                )
+                return []
+
+        related: list[tuple[str, str, float]] = []
+        for seed_id in seed_chunk_ids:
+            try:
+                neighbors = self._graph_store.get_related_sections(seed_id)
+            except Exception:
+                logger.warning(
+                    "graph enrichment seed query failed; skipping seed",
+                    exc_info=True,
+                )
+                continue
+            related.extend(neighbors)
+        return related

@@ -42,3 +42,26 @@ def test_get_related_sections_uses_bounded_section_entity_section_query() -> Non
     assert "TAGGED" not in graph.query_text
     assert graph.params == {"id": "chunk-1"}
     assert neighbors == [("chunk-2", "MENTIONS", 0.7)]
+
+
+def test_get_related_sections_for_seeds_uses_a_single_bounded_batch_query() -> None:
+    """Batch enrichment must stay on one query and keep explicit graph labels."""
+    store = FalkorDBGraphStore.__new__(FalkorDBGraphStore)
+    graph = _FakeGraph(
+        [
+            ["chunk-2", "MENTIONS", 0.7],
+            ["chunk-3", "HAS_TAG", 0.4],
+        ]
+    )
+    store.__dict__["_graph"] = graph
+
+    neighbors = store.get_related_sections_for_seeds(["chunk-1", "chunk-2"])
+
+    assert graph.query_text.startswith("UNWIND $ids AS seed_id MATCH (seed:Section {id: seed_id})")
+    assert "mid:Node" in graph.query_text
+    assert "(mid:Entity OR mid:Tag)" in graph.query_text
+    assert "r1.rel_type IN ['MENTIONS', 'HAS_TAG']" in graph.query_text
+    assert "r2.rel_type IN ['MENTIONS', 'HAS_TAG']" in graph.query_text
+    assert "s.id <> seed_id" in graph.query_text
+    assert graph.params == {"ids": ["chunk-1", "chunk-2"]}
+    assert neighbors == [("chunk-2", "MENTIONS", 0.7), ("chunk-3", "HAS_TAG", 0.4)]
