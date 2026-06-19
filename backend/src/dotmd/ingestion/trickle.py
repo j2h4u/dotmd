@@ -342,18 +342,17 @@ class TrickleIndexer:
         # Purge deleted files (in tracker but no longer on disk / now excluded)
         if diff.deleted:
             logger.info("Purging %d deleted/excluded files from index", len(diff.deleted))
-            if self._settings.search_backend == "surreal":
-                logger.info("Purge skipped in Surreal mode; local legacy artifacts are retained")
-            else:
-                for path_str in diff.deleted:
-                    try:
-                        await asyncio.to_thread(self._pipeline_instance._purge_file, path_str)
-                    except Exception:
-                        logger.exception("Failed to purge %s", path_str)
-                logger.info(
-                    "Purge complete: %d files removed from all stores",
-                    len(diff.deleted),
-                )
+            for path_str in diff.deleted:
+                try:
+                    await asyncio.to_thread(self._pipeline_instance._purge_file, path_str)
+                    if self._settings.search_backend != "surreal":
+                        self._needs_vacuum = True
+                except Exception:
+                    logger.exception("Failed to purge %s", path_str)
+            logger.info(
+                "Purge complete: %d files processed",
+                len(diff.deleted),
+            )
 
         self._state.total_files = len(unindexed)
         n_queued = len(diff.new) + len(diff.modified)
@@ -482,27 +481,22 @@ class TrickleIndexer:
 
                     # File deleted — purge from all stores
                     if not file_path.exists():
-                        if self._settings.search_backend == "surreal":
+                        try:
+                            await asyncio.to_thread(
+                                self._pipeline_instance._purge_file,
+                                path_str,
+                            )
                             logger.info(
-                                "Watch: skipped legacy purge for %s in Surreal mode",
+                                "Watch: purged deleted %s",
                                 Path(path_str).name,
                             )
-                        else:
-                            try:
-                                await asyncio.to_thread(
-                                    self._pipeline_instance._purge_file,
-                                    path_str,
-                                )
-                                logger.info(
-                                    "Watch: purged deleted %s",
-                                    Path(path_str).name,
-                                )
+                            if self._settings.search_backend != "surreal":
                                 self._needs_vacuum = True
-                            except Exception:
-                                logger.exception(
-                                    "Watch: failed to purge %s",
-                                    path_str,
-                                )
+                        except Exception:
+                            logger.exception(
+                                "Watch: failed to purge %s",
+                                path_str,
+                            )
                         continue
 
                     if not file_path.is_file():

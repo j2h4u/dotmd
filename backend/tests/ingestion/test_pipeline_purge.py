@@ -760,6 +760,26 @@ class TestSurrealFilesystemLifecycle:
         _add_chunk_provenance(db_path, strategy, orphan_chunk_id, file_path)
         _add_chunk_provenance(db_path, strategy, shared_chunk_id, file_path)
 
+        conn = sqlite3.connect(str(db_path))
+        counts_before = {
+            "chunks": conn.execute(f"SELECT COUNT(*) FROM chunks_{strategy}").fetchone()[0],
+            "chunk_file_paths": conn.execute(
+                f"SELECT COUNT(*) FROM chunk_file_paths_{strategy}"
+            ).fetchone()[0],
+            "chunks_fts": conn.execute(f"SELECT COUNT(*) FROM chunks_fts_{strategy}").fetchone()[0],
+            "vec_meta": conn.execute(f"SELECT COUNT(*) FROM vec_meta_{strategy}_{MODEL}").fetchone()[0],
+            "source_documents": conn.execute(
+                "SELECT COUNT(*) FROM source_documents"
+            ).fetchone()[0],
+            "resource_bindings": conn.execute(
+                "SELECT COUNT(*) FROM resource_bindings"
+            ).fetchone()[0],
+            "chunk_source_provenance": conn.execute(
+                f"SELECT COUNT(*) FROM chunk_source_provenance_{strategy}"
+            ).fetchone()[0],
+        }
+        conn.close()
+
         pipeline = _get_pipeline_with_backend(db_path, search_backend="surreal")
         captured_manifests: list[object] = []
 
@@ -798,6 +818,27 @@ class TestSurrealFilesystemLifecycle:
         assert [
             row.tombstone.previous_row["embedding_model"] for row in manifest.embeddings.rows
         ] == [MODEL]
+
+        conn = sqlite3.connect(str(db_path))
+        counts_after = {
+            "chunks": conn.execute(f"SELECT COUNT(*) FROM chunks_{strategy}").fetchone()[0],
+            "chunk_file_paths": conn.execute(
+                f"SELECT COUNT(*) FROM chunk_file_paths_{strategy}"
+            ).fetchone()[0],
+            "chunks_fts": conn.execute(f"SELECT COUNT(*) FROM chunks_fts_{strategy}").fetchone()[0],
+            "vec_meta": conn.execute(f"SELECT COUNT(*) FROM vec_meta_{strategy}_{MODEL}").fetchone()[0],
+            "source_documents": conn.execute(
+                "SELECT COUNT(*) FROM source_documents"
+            ).fetchone()[0],
+            "resource_bindings": conn.execute(
+                "SELECT COUNT(*) FROM resource_bindings"
+            ).fetchone()[0],
+            "chunk_source_provenance": conn.execute(
+                f"SELECT COUNT(*) FROM chunk_source_provenance_{strategy}"
+            ).fetchone()[0],
+        }
+        conn.close()
+        assert counts_after == counts_before
 
         result = run_surreal_delta_sync(
             manifest,

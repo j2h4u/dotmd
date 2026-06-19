@@ -3672,7 +3672,6 @@ class IndexingPipeline:
             needs.  This method uses the holder-aware path: delete_chunks_from_graph
             (orphan chunk_ids only) + delete_file_node (File node only).
         """
-        self._raise_if_surreal_local_destructive("_purge_file")
         if self._settings.search_backend == "surreal":
             direct_manifest = self._filesystem_surreal_tombstone_manifest(
                 file_path,
@@ -3681,6 +3680,7 @@ class IndexingPipeline:
             )
             if direct_manifest is not None:
                 self._write_surreal_direct_manifest(direct_manifest)
+            return
 
         conn = self._conn
 

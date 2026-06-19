@@ -300,7 +300,6 @@ def _snapshot_counts(conn: sqlite3.Connection, tables: list[str]) -> dict[str, i
         ("drop_chunks", ()),
         ("clear", ()),
         ("purge_orphaned_files", ()),
-        ("_purge_file", ("/notes/orphan.md",)),
     ],
 )
 def test_surreal_pipeline_destructive_methods_refuse_and_preserve_local_tables(
@@ -354,11 +353,12 @@ async def test_surreal_trickle_skips_startup_orphan_cleanup(
 
 
 @pytest.mark.asyncio
-async def test_surreal_trickle_skips_deleted_file_purge_in_backlog(
+async def test_surreal_trickle_calls_deleted_file_purge_in_backlog(
     tmp_path: Path,
 ) -> None:
     settings = _surreal_settings(tmp_path)
     indexer = TrickleIndexer(settings)
+    purge_mock = Mock(return_value=None)
     indexer._pipeline = SimpleNamespace(
         file_tracker=SimpleNamespace(
             diff=lambda all_files: SimpleNamespace(
@@ -368,7 +368,7 @@ async def test_surreal_trickle_skips_deleted_file_purge_in_backlog(
                 unchanged=[],
             )
         ),
-        _purge_file=Mock(side_effect=AssertionError("should not be called")),
+        _purge_file=purge_mock,
     )
 
     from dotmd.ingestion import reader as reader_module
@@ -376,4 +376,5 @@ async def test_surreal_trickle_skips_deleted_file_purge_in_backlog(
     with patch.object(reader_module, "discover_files_multi", return_value=[]):
         await indexer._process_backlog(asyncio.Event())
 
-    assert indexer._pipeline._purge_file.call_count == 0
+    assert purge_mock.call_count == 1
+    assert purge_mock.call_args.args == ("/notes/orphan.md",)
