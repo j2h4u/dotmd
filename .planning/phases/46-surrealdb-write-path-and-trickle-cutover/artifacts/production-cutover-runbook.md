@@ -23,6 +23,12 @@ remaining action points only. It does not claim production cutover is complete.
   logged `93.7s`, Gmail OAuth refresh returns 400, and Falkor graph enrichment
   needed bounding/batching fixes.
 
+Verify production health from inside the container:
+
+```bash
+docker exec dotmd curl -fsS http://127.0.0.1:8080/health
+```
+
 ## Rollback bundle before restart
 
 Record or snapshot all of the following before any production restart:
@@ -60,18 +66,17 @@ Do not print secrets.
 
 Run these checks in order:
 
-1. Health/status.
-2. CLI/API/MCP search with no rerank and no expand, or with `rerank=false`
-   and `expand=false`.
-3. MCP read/drill using a search-returned ref, because API/CLI read endpoints
-   are not present.
-4. Controlled trickle edit smoke.
-5. Optional controlled delete/tombstone smoke.
+1. Health from inside the container:
+   `docker exec dotmd curl -fsS http://127.0.0.1:8080/health`
+2. MCP stdio smoke:
+   `cd backend && uv run python -m devtools.mcp_client.cli script --file devtools/mcp_client/smoke.json --timeout 120 -- docker exec -i dotmd dotmd mcp`
+3. Controlled trickle edit smoke.
+4. Optional controlled delete/tombstone smoke.
 
 ## Stop or rollback if any of these fail
 
 - Health fails.
-- Surreal search is empty or wrong for the controlled smoke.
+- MCP stdio smoke fails or the search hit is wrong for the controlled smoke.
 - Trickle update is missing.
 - Tombstone delete is missing.
 - Repeated query latency is unacceptable even with no-rerank enabled.

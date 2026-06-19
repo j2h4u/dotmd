@@ -13,21 +13,20 @@ uv run python -m devtools.mcp_client.cli list-tools -- docker exec -i dotmd dotm
 
 ```bash
 uv run python -m devtools.mcp_client.cli call-tool \
-  --name Search \
-  --arguments '{"query":"dotmd architecture","top_k":3}' \
+  --name search \
+  --arguments '{"query":"SurrealDB вектора graph","top_k":5}' \
   --timeout 60 \
   -- docker exec -i dotmd dotmd mcp
 ```
 
 ```bash
-uv run python -m devtools.mcp_client.cli call-tool --name GetStatus --arguments '{}' \
+uv run python -m devtools.mcp_client.cli call-tool --name read --arguments '{"ref":"filesystem:/mnt/..."}' \
   -- docker exec -i dotmd dotmd mcp
 ```
 
 ## Smoke Test
 
-End-to-end check of all 4 tools + schema invariants (PascalCase names,
-`anyOf`/null collapsed on `SubmitFeedback` optional params):
+End-to-end check of all 4 lowercase tools plus schema invariants:
 
 ```bash
 uv run python -m devtools.mcp_client.cli script \
@@ -36,9 +35,11 @@ uv run python -m devtools.mcp_client.cli script \
   -- docker exec -i dotmd dotmd mcp
 ```
 
-The smoke step that calls `Search` triggers cold-start of TEI + GLiNER + the
-cross-encoder reranker on first run, which can take 15-20 s.  Subsequent
-calls are fast (~hundreds of ms).
+For live cutover validation, pair this with `docker exec dotmd curl -fsS http://127.0.0.1:8080/health`.
+
+The smoke step that calls `search` triggers cold-start of TEI + GLiNER + the
+cross-encoder reranker on first run, which can take 15-20 s. Subsequent calls
+are fast (~hundreds of ms).
 
 ## Script Format
 
@@ -48,8 +49,8 @@ calls are fast (~hundreds of ms).
     {"action": "list_tools"},
     {
       "action": "call_tool",
-      "name": "GetStatus",
-      "arguments": {}
+      "name": "search",
+      "arguments": {"query": "SurrealDB вектора graph", "top_k": 5}
     }
   ]
 }

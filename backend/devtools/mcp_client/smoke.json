@@ -1,20 +1,22 @@
 {
   "steps": [
     {
-      "_comment": "All 4 tools registered with PascalCase names + correct schemas",
+      "_comment": "All 4 lowercase tools are registered with the current schemas",
       "action": "list_tools",
       "expect": {
-        "tool_names_include": ["Search", "Drill", "GetStatus", "SubmitFeedback"],
+        "tool_names_include": ["search", "read", "drill", "feedback"],
         "tool_expectations": {
-          "Search": {
+          "search": {
             "inputSchema.properties.query.type": "string",
             "inputSchema.properties.top_k.type": "integer",
-            "inputSchema.properties.top_k.default": 10
+            "inputSchema.properties.top_k.default": 10,
+            "inputSchema.properties.federated.type": "boolean",
+            "inputSchema.properties.federated.default": false
           },
-          "Drill": {
-            "inputSchema.properties.file_path.type": "string"
+          "drill": {
+            "inputSchema.properties.ref.type": "string"
           },
-          "SubmitFeedback": {
+          "feedback": {
             "inputSchema.properties.message.type": "string",
             "inputSchema.properties.message.minLength": 1,
             "inputSchema.properties.message.maxLength": 10000,
@@ -27,23 +29,13 @@
       }
     },
     {
-      "_comment": "Status returns non-zero file count — index is alive",
+      "_comment": "search returns ranked hits for the SurrealDB vector/graph query",
       "action": "call_tool",
-      "name": "GetStatus",
-      "arguments": {},
+      "name": "search",
+      "arguments": {"query": "SurrealDB вектора graph", "top_k": 5},
       "expect": {
         "is_error": false,
-        "content_text_not_contains": ["error", "Error", "failed"]
-      }
-    },
-    {
-      "_comment": "Search returns ranked hits for a known query",
-      "action": "call_tool",
-      "name": "Search",
-      "arguments": {"query": "dotmd architecture sqlite-vec", "top_k": 3},
-      "expect": {
-        "is_error": false,
-        "content_text_contains": ["score", "heading"]
+        "content_text_contains": ["SurrealDB", "vectors", "graphs"]
       }
     }
   ]

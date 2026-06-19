@@ -28,7 +28,7 @@ exact operator procedure lives here:
 
 - Rollback bundle captured before restart.
 - DotMD env switch applied and production container restarted once.
-- Production/live smoke passed.
+- Production/live smoke passed via internal `/health` and the MCP stdio smoke.
 - Controlled trickle edit/delete smoke passed.
 - Stop and rollback conditions are clear and tested.
 - Phase 47 deletion happens only after soak.
