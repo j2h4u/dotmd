@@ -423,6 +423,68 @@ def test_classify_surreal_migration_report_blocks_false_success_paths() -> None:
     assert any("phase checkpoint" in blocker.lower() for blocker in classified.unresolved_blockers)
 
 
+def test_classify_surreal_migration_report_allows_verified_remote_apply_without_restore() -> None:
+    from dotmd.ingestion.migrate_surreal import (  # type: ignore[import-not-found]
+        SurrealMigrationMode,
+        SurrealMigrationPhaseCheckpoint,
+        SurrealMigrationPhaseName,
+        SurrealMigrationReport,
+        SurrealOverwritePolicy,
+        SurrealTargetMode,
+    )
+
+    report = SurrealMigrationReport(
+        schema_version="41.1.0",
+        mode=SurrealMigrationMode.APPLY,
+        status="verified",
+        target_mode=SurrealTargetMode.REMOTE_SERVICE,
+        overwrite_policy=SurrealOverwritePolicy.REFUSE,
+        target_url="http://127.0.0.1:8000",
+        target_namespace="dotmd",
+        target_database="production",
+        source_capture_manifest=None,
+        expected_counts={"documents": 2},
+        actual_counts={"documents": 2},
+        phase_checkpoints=[
+            SurrealMigrationPhaseCheckpoint(
+                phase_name=SurrealMigrationPhaseName.DOCUMENTS,
+                planned_count=2,
+                applied_count=2,
+                verified_count=2,
+                status="applied",
+            )
+        ],
+        embedding_reuse_verified=True,
+        committed_success=True,
+        partial_writes_present=False,
+        last_successful_phase=SurrealMigrationPhaseName.DOCUMENTS,
+    )
+    restore_manifest = SurrealRestoreManifest(
+        source_target="http://127.0.0.1:8000",
+        backup_path="",
+        restore_path="",
+        method="remote-service",
+        cli_available=False,
+        cli_path=None,
+        expected_counts=SurrealImportCounts(documents=2),
+        restored_counts=SurrealImportCounts(),
+        smoke_passed=False,
+        rehearsal_target=None,
+        restore_status="not_verified",
+        verified=False,
+        notes=["Remote-service restore is handled by service backup policy."],
+    )
+
+    classified = classify_surreal_migration_report(
+        report,
+        restore_manifest=restore_manifest,
+        no_recompute_verified=True,
+    )
+
+    assert classified.report_status == "verified"
+    assert not classified.unresolved_blockers
+
+
 def test_write_surreal_migration_evidence_reports_preserves_non_ascii_and_redacts_samples(
     tmp_path: Path,
 ) -> None:

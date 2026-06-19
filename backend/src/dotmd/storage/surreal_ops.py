@@ -602,7 +602,8 @@ def classify_surreal_migration_report(
     )
     failed_phase = getattr(getattr(migration_report, "failed_phase", None), "value", None)
 
-    if mode_value == "apply" and not restore_manifest.verified:
+    restore_required_for_apply = mode_value == "apply" and target_mode_value != "remote_service"
+    if restore_required_for_apply and not restore_manifest.verified:
         blockers.append("Restore evidence is required after apply before success can be claimed.")
     if partial_writes_present and not restore_manifest.verified:
         blockers.append("Partial writes are present without verified restore or recovery evidence.")
