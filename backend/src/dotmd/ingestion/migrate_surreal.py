@@ -83,6 +83,8 @@ DEFERRED_EMBEDDING_INDEX_NAMES = tuple(
 )
 HNSW_EMBEDDING_INDEX_NAME = "embeddings_vector_hnsw"
 _INDEX_PROGRESS_HEARTBEAT_SECONDS = 30.0
+_INDEX_RETRY_ATTEMPTS = 3
+_INDEX_RETRY_DELAY_SECONDS = 30.0
 _DEFAULT_MIGRATION_HTTP_QUERY_TIMEOUT_SECONDS = 1800.0
 
 
@@ -2084,6 +2086,11 @@ def _is_already_exists_error(exc: BaseException) -> bool:
     return "already exists" in str(exc).lower()
 
 
+def _is_retryable_surreal_transaction_conflict(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return "transaction conflict" in message and "can be retried" in message
+
+
 def _define_index_idempotently(
     connection: SurrealConnection,
     statement: str,
@@ -2093,17 +2100,33 @@ def _define_index_idempotently(
     progress_path: Path | None,
     applied_count: int,
 ) -> None:
-    try:
-        _query_with_progress_heartbeat(
-            connection,
-            statement,
-            report=report,
-            checkpoint=checkpoint,
-            progress_path=progress_path,
-            applied_count=applied_count,
-        )
-    except Exception as exc:
-        if not _is_already_exists_error(exc):
+    for attempt in range(1, _INDEX_RETRY_ATTEMPTS + 1):
+        try:
+            _query_with_progress_heartbeat(
+                connection,
+                statement,
+                report=report,
+                checkpoint=checkpoint,
+                progress_path=progress_path,
+                applied_count=applied_count,
+            )
+            return
+        except Exception as exc:
+            if _is_already_exists_error(exc):
+                return
+            if (
+                attempt < _INDEX_RETRY_ATTEMPTS
+                and _is_retryable_surreal_transaction_conflict(exc)
+            ):
+                checkpoint.error = str(exc)
+                _write_progress_snapshot(
+                    progress_path,
+                    report=report,
+                    checkpoint=checkpoint,
+                    applied_count=applied_count,
+                )
+                time.sleep(_INDEX_RETRY_DELAY_SECONDS)
+                continue
             raise
 
 
