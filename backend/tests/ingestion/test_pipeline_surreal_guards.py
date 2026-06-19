@@ -299,7 +299,6 @@ def _snapshot_counts(conn: sqlite3.Connection, tables: list[str]) -> dict[str, i
         ("drop_vectors", ()),
         ("drop_chunks", ()),
         ("clear", ()),
-        ("purge_orphaned_files", ()),
     ],
 )
 def test_surreal_pipeline_destructive_methods_refuse_and_preserve_local_tables(
@@ -323,7 +322,7 @@ def test_surreal_pipeline_destructive_methods_refuse_and_preserve_local_tables(
 
 
 @pytest.mark.asyncio
-async def test_surreal_trickle_skips_startup_orphan_cleanup(
+async def test_surreal_trickle_runs_startup_orphan_cleanup(
     tmp_path: Path,
 ) -> None:
     pipeline = _surreal_pipeline(tmp_path)
@@ -341,7 +340,7 @@ async def test_surreal_trickle_skips_startup_orphan_cleanup(
         )
     ]
 
-    purge_mock = Mock(side_effect=AssertionError("should not be called"))
+    purge_mock = Mock(return_value=(0, 0, 0))
     pipeline.purge_orphaned_files = purge_mock  # type: ignore[method-assign]
 
     from dotmd.ingestion import reader as reader_module
@@ -349,7 +348,8 @@ async def test_surreal_trickle_skips_startup_orphan_cleanup(
     with patch.object(reader_module, "discover_files_multi", return_value=discovered):
         await indexer._startup_checks()
 
-    assert purge_mock.call_count == 0
+    assert purge_mock.call_count == 1
+    assert purge_mock.call_args.args == ({str(present_file)},)
 
 
 @pytest.mark.asyncio

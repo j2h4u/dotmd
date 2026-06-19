@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from dotmd.ingestion.surreal_delta_sync import (
     FakeSurrealDeltaWriter,
@@ -319,6 +319,19 @@ class TestOrphanSweepSurreal:
             ),
         )
         conn.commit()
+        counts_before = {
+            "chunks": conn.execute(f"SELECT COUNT(*) FROM chunks_{strategy}").fetchone()[0],
+            "chunk_file_paths": conn.execute(
+                f"SELECT COUNT(*) FROM chunk_file_paths_{strategy}"
+            ).fetchone()[0],
+            "vec_meta": conn.execute(f"SELECT COUNT(*) FROM vec_meta_{strategy}_{MODEL}").fetchone()[0],
+            "source_documents": conn.execute(
+                "SELECT COUNT(*) FROM source_documents"
+            ).fetchone()[0],
+            "resource_bindings": conn.execute(
+                "SELECT COUNT(*) FROM resource_bindings"
+            ).fetchone()[0],
+        }
         conn.close()
 
         pipeline = _get_pipeline_with_backend(db_path, search_backend="surreal")
@@ -327,6 +340,9 @@ class TestOrphanSweepSurreal:
         def record_manifest(manifest) -> None:  # type: ignore[no-untyped-def]
             captured_manifests.append(manifest)
 
+        pipeline._deactivate_filesystem_binding = Mock(  # type: ignore[method-assign]
+            side_effect=AssertionError("should not be called")
+        )
         pipeline._write_surreal_direct_manifest = record_manifest  # type: ignore[method-assign]
         pipeline.purge_orphaned_files()
 
@@ -340,6 +356,23 @@ class TestOrphanSweepSurreal:
         assert manifest.chunk_file_bindings.rows == []
         assert manifest.provenance.rows == []
         assert manifest.embeddings.rows == []
+
+        conn = sqlite3.connect(str(db_path))
+        counts_after = {
+            "chunks": conn.execute(f"SELECT COUNT(*) FROM chunks_{strategy}").fetchone()[0],
+            "chunk_file_paths": conn.execute(
+                f"SELECT COUNT(*) FROM chunk_file_paths_{strategy}"
+            ).fetchone()[0],
+            "vec_meta": conn.execute(f"SELECT COUNT(*) FROM vec_meta_{strategy}_{MODEL}").fetchone()[0],
+            "source_documents": conn.execute(
+                "SELECT COUNT(*) FROM source_documents"
+            ).fetchone()[0],
+            "resource_bindings": conn.execute(
+                "SELECT COUNT(*) FROM resource_bindings"
+            ).fetchone()[0],
+        }
+        conn.close()
+        assert counts_after == counts_before
 
         result = run_surreal_delta_sync(
             manifest,

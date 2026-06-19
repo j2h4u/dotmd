@@ -288,25 +288,21 @@ class TrickleIndexer:
                 len(discovered_paths),
             )
 
-            if self._settings.search_backend == "surreal":
+            files_rm, chunks_rm, vecs_rm = await asyncio.to_thread(
+                self._pipeline_instance.purge_orphaned_files,
+                discovered_paths,
+            )
+            if files_rm:
                 logger.info(
-                    "Orphan cleanup: skipping local purge in Surreal mode"
+                    "Orphan cleanup: removed %d files (%d chunks, %d vectors)",
+                    files_rm,
+                    chunks_rm,
+                    vecs_rm,
                 )
-            else:
-                files_rm, chunks_rm, vecs_rm = await asyncio.to_thread(
-                    self._pipeline_instance.purge_orphaned_files,
-                    discovered_paths,
-                )
-                if files_rm:
-                    logger.info(
-                        "Orphan cleanup: removed %d files (%d chunks, %d vectors)",
-                        files_rm,
-                        chunks_rm,
-                        vecs_rm,
-                    )
+                if self._settings.search_backend != "surreal":
                     self._needs_vacuum = True
-                else:
-                    logger.info("Orphan cleanup: no orphans found")
+            else:
+                logger.info("Orphan cleanup: no orphans found")
         except Exception:
             logger.exception("Orphan cleanup failed — continuing anyway")
 

@@ -3806,7 +3806,6 @@ class IndexingPipeline:
         (chunks/vectors counters are 0 — _purge_file is the authoritative
         accounting point; callers care about files_removed only).
         """
-        self._raise_if_surreal_local_destructive("purge_orphaned_files")
         # Collect all file_paths from M2M tables across all strategies.
         strategies = self._present_strategies(self._conn)
         stored_paths: set[str] = set()
@@ -3842,9 +3841,19 @@ class IndexingPipeline:
             return 0, 0, 0
 
         files_removed = 0
+        surreal_mode = self._settings.search_backend == "surreal"
         for file_path in sorted(orphan_paths):
             try:
-                self._deactivate_filesystem_binding(file_path)
+                if surreal_mode:
+                    direct_manifest = self._filesystem_surreal_tombstone_manifest(
+                        file_path,
+                        reason="file_missing",
+                        include_chunk_tombstones=False,
+                    )
+                    if direct_manifest is not None:
+                        self._write_surreal_direct_manifest(direct_manifest)
+                else:
+                    self._deactivate_filesystem_binding(file_path)
                 files_removed += 1
             except Exception:
                 logger.exception(
