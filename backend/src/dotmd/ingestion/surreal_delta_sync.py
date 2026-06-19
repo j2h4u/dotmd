@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, ClassVar, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -511,8 +511,98 @@ class SurrealDeltaStoreWriter:
     checkpoint_namespace: str = "phase46_delta"
     target_size_bytes: int | None = None
 
+    _TABLE_ALIASES: ClassVar[dict[str, str]] = {
+        "source_documents": "documents",
+        "source_unit_fingerprints": "source_units",
+        "chunk_provenance": "provenance",
+        "resource_bindings": "bindings",
+    }
+
+    def _normalize_table_name(self, table: str) -> str:
+        return self._TABLE_ALIASES.get(table, table)
+
     def _record_id(self, table: str, raw_identifier: str) -> Any:
-        return self.codec.encode(table, raw_identifier)
+        return self.codec.encode(self._normalize_table_name(table), raw_identifier)
+
+    @staticmethod
+    def _stable_composite_ref(*parts: object) -> str:
+        return "\x1f".join(str(part) for part in parts)
+
+    def _document_raw_identifier(self, change: SurrealDeltaChange) -> str:
+        row = change.row
+        return str(row.get("ref") or change.ref)
+
+    def _source_unit_raw_identifier(self, change: SurrealDeltaChange) -> str:
+        row = change.row
+        if row.get("ref") is not None:
+            return str(row["ref"])
+        if all(part is not None for part in (row.get("namespace"), row.get("document_ref"), row.get("unit_ref"))):
+            return self._stable_composite_ref(row["namespace"], row["document_ref"], row["unit_ref"])
+        return str(change.ref)
+
+    def _chunk_raw_identifier(self, change: SurrealDeltaChange) -> str:
+        row = change.row
+        if row.get("chunk_id") is not None:
+            return str(row["chunk_id"])
+        if row.get("original_chunk_id") is not None:
+            return str(row["original_chunk_id"])
+        return str(change.ref)
+
+    def _chunk_file_binding_raw_identifier(self, change: SurrealDeltaChange) -> str:
+        row = change.row
+        if row.get("binding_id") is not None:
+            return str(row["binding_id"])
+        if all(part is not None for part in (row.get("chunk_id"), row.get("file_path"), row.get("chunk_index"))):
+            return self._stable_composite_ref(row["chunk_id"], row["file_path"], row["chunk_index"])
+        return str(change.ref)
+
+    def _provenance_raw_identifier(self, change: SurrealDeltaChange) -> str:
+        row = change.row
+        if row.get("provenance_id") is not None:
+            return str(row["provenance_id"])
+        if all(part is not None for part in (row.get("chunk_id"), row.get("namespace"), row.get("document_ref"))):
+            return self._stable_composite_ref(row["chunk_id"], row["namespace"], row["document_ref"])
+        return str(change.ref)
+
+    def _binding_raw_identifier(self, change: SurrealDeltaChange) -> str:
+        row = change.row
+        if row.get("namespace") is not None and row.get("resource_ref") is not None:
+            return self._stable_composite_ref(row["namespace"], row["resource_ref"])
+        return str(change.ref)
+
+    def _fingerprint_raw_identifier(self, change: SurrealDeltaChange) -> str:
+        row = change.row
+        if row.get("fingerprint_id") is not None:
+            return str(row["fingerprint_id"])
+        return str(change.ref)
+
+    def _embedding_raw_identifier(self, change: SurrealDeltaChange) -> str:
+        row = change.row
+        if all(
+            part is not None for part in (row.get("chunk_strategy"), row.get("embedding_model"), row.get("chunk_id"))
+        ):
+            return self._stable_composite_ref(
+                row["chunk_strategy"], row["embedding_model"], row["chunk_id"]
+            )
+        return str(change.ref)
+
+    def _vector_component_raw_identifier(self, change: SurrealDeltaChange) -> str:
+        row = change.row
+        owner = row.get("chunk_id") or row.get("entity_id")
+        if all(part is not None for part in (row.get("chunk_strategy"), row.get("embedding_model"), owner, row.get("component"))):
+            return self._stable_composite_ref(
+                row["chunk_strategy"],
+                row["embedding_model"],
+                owner,
+                row["component"],
+            )
+        return str(change.ref)
+
+    def _feedback_raw_identifier(self, change: SurrealDeltaChange) -> str:
+        row = change.row
+        if row.get("original_feedback_id") is not None:
+            return str(row["original_feedback_id"])
+        return str(change.ref)
 
     def _existing_row(self, record_id: Any) -> dict[str, Any] | None:
         select = getattr(self.connection, "select", None)
@@ -535,6 +625,7 @@ class SurrealDeltaStoreWriter:
         return left_payload == right_payload
 
     def _upsert_point(self, table: str, raw_identifier: str, payload: dict[str, Any]) -> int:
+        table = self._normalize_table_name(table)
         record_id = self._record_id(table, raw_identifier)
         existing = self._existing_row(record_id)
         prepared = dict(payload)
@@ -566,7 +657,9 @@ class SurrealDeltaStoreWriter:
         applied = 0
         for change in rows:
             tombstone = change.tombstone
-            table = tombstone.table if tombstone is not None else change.table
+            table = self._normalize_table_name(
+                tombstone.table if tombstone is not None else change.table
+            )
             ref = tombstone.ref if tombstone is not None else change.ref
             record_id = self._record_id(table, ref)
             if self._existing_row(record_id) is None:
@@ -579,7 +672,7 @@ class SurrealDeltaStoreWriter:
         applied = 0
         for change in rows:
             row = dict(change.row)
-            raw_identifier = str(change.ref)
+            raw_identifier = self._document_raw_identifier(change)
             row.setdefault("ref", raw_identifier)
             if ":" in raw_identifier:
                 namespace, document_ref = raw_identifier.split(":", 1)
@@ -593,7 +686,7 @@ class SurrealDeltaStoreWriter:
         applied = 0
         for change in rows:
             row = dict(change.row)
-            raw_identifier = str(change.ref)
+            raw_identifier = self._source_unit_raw_identifier(change)
             row.setdefault("ref", raw_identifier)
             row.setdefault("metadata", {})
             applied += self._upsert_point("source_units", raw_identifier, row)
@@ -603,7 +696,7 @@ class SurrealDeltaStoreWriter:
         applied = 0
         for change in rows:
             row = dict(change.row)
-            raw_identifier = str(change.ref)
+            raw_identifier = self._chunk_raw_identifier(change)
             row.setdefault("chunk_id", row.get("chunk_id") or raw_identifier)
             row.setdefault("original_chunk_id", row.get("original_chunk_id") or row["chunk_id"])
             row.setdefault("ref", raw_identifier)
@@ -615,7 +708,7 @@ class SurrealDeltaStoreWriter:
         applied = 0
         for change in rows:
             row = dict(change.row)
-            raw_identifier = str(change.ref)
+            raw_identifier = self._chunk_file_binding_raw_identifier(change)
             row.setdefault("binding_id", raw_identifier)
             row.setdefault("metadata", {})
             applied += self._upsert_point("chunk_file_bindings", raw_identifier, row)
@@ -625,7 +718,7 @@ class SurrealDeltaStoreWriter:
         applied = 0
         for change in rows:
             row = dict(change.row)
-            raw_identifier = str(change.ref)
+            raw_identifier = self._provenance_raw_identifier(change)
             row.setdefault("provenance_id", raw_identifier)
             row.setdefault("source_unit_refs", [])
             row.setdefault("metadata", {})
@@ -636,7 +729,7 @@ class SurrealDeltaStoreWriter:
         applied = 0
         for change in rows:
             row = dict(change.row)
-            raw_identifier = str(change.ref)
+            raw_identifier = self._binding_raw_identifier(change)
             row.setdefault("ref", raw_identifier)
             row.setdefault("resource_ref", row.get("resource_ref") or row.get("document_ref"))
             row.setdefault("metadata", {})
@@ -647,7 +740,7 @@ class SurrealDeltaStoreWriter:
         applied = 0
         for change in rows:
             row = dict(change.row)
-            raw_identifier = str(change.ref)
+            raw_identifier = self._fingerprint_raw_identifier(change)
             row.setdefault("fingerprint_id", raw_identifier)
             row.setdefault("metadata", {})
             applied += self._upsert_point("fingerprints", raw_identifier, row)
@@ -657,7 +750,7 @@ class SurrealDeltaStoreWriter:
         applied = 0
         for change in rows:
             row = dict(change.row)
-            raw_identifier = str(change.ref)
+            raw_identifier = self._embedding_raw_identifier(change)
             row.setdefault("metadata", {})
             row.setdefault("vector_rowid", None)
             applied += self._upsert_point("embeddings", raw_identifier, row)
@@ -667,7 +760,7 @@ class SurrealDeltaStoreWriter:
         applied = 0
         for change in rows:
             row = dict(change.row)
-            raw_identifier = str(change.ref)
+            raw_identifier = self._vector_component_raw_identifier(change)
             row.setdefault("metadata", {})
             applied += self._upsert_point("vector_components", raw_identifier, row)
         return applied
@@ -681,7 +774,7 @@ class SurrealDeltaStoreWriter:
         applied = 0
         for change in rows:
             row = dict(change.row)
-            raw_identifier = str(change.ref)
+            raw_identifier = self._feedback_raw_identifier(change)
             row.setdefault("original_feedback_id", raw_identifier)
             row.setdefault("metadata", {})
             applied += self._upsert_point("feedback", raw_identifier, row)

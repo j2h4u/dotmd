@@ -778,7 +778,7 @@ def test_surreal_delta_store_writer_uses_point_ops_and_is_idempotent() -> None:
     assert connection.tables["unrelated"] == {"unrelated:keep": {"id": "unrelated:keep", "marker": "keep"}}
 
 
-def test_surreal_delta_store_writer_deletes_only_exact_tombstone_rows() -> None:
+def test_surreal_delta_store_writer_normalizes_source_document_tombstone_alias() -> None:
     connection = _FakeSurrealConnection()
     writer = SurrealDeltaStoreWriter(connection=connection)
     exact_ref = "filesystem:/notes/deleted.md"
@@ -791,9 +791,13 @@ def test_surreal_delta_store_writer_deletes_only_exact_tombstone_rows() -> None:
     }
     tombstone = SurrealDeltaChange(
         ref=exact_ref,
-        table="documents",
+        table="source_documents",
         change_type=SurrealDeltaChangeType.TOMBSTONE,
-        tombstone=SurrealDeltaTombstone(ref=exact_ref, table="documents", previous_row={"ref": exact_ref}),
+        tombstone=SurrealDeltaTombstone(
+            ref=exact_ref,
+            table="source_documents",
+            previous_row={"ref": exact_ref},
+        ),
     )
 
     applied = writer.delete_tombstones([tombstone])
@@ -801,6 +805,96 @@ def test_surreal_delta_store_writer_deletes_only_exact_tombstone_rows() -> None:
     assert applied == 1
     assert exact_id not in connection.tables["documents"]
     assert sibling_id in connection.tables["documents"]
+
+
+def test_surreal_delta_store_writer_updates_bootstrap_rows_in_place() -> None:
+    connection = _FakeSurrealConnection()
+    writer = SurrealDeltaStoreWriter(connection=connection)
+
+    chunk_id = "chunk-1"
+    chunk_record_id = str(writer.codec.encode("chunks", chunk_id))
+    embedding_id = str(
+        writer.codec.encode("embeddings", "contextual_512_50\x1fmultilingual_e5_large\x1fchunk-1")
+    )
+    binding_id = str(writer.codec.encode("bindings", "filesystem\x1f/notes/changed.md"))
+    connection.tables["chunks"] = {
+        chunk_record_id: {
+            "id": chunk_record_id,
+            "chunk_id": chunk_id,
+            "original_chunk_id": chunk_id,
+            "ref": "filesystem:/notes/changed.md#old",
+            "text": "old text",
+        }
+    }
+    connection.tables["embeddings"] = {
+        embedding_id: {
+            "id": embedding_id,
+            "chunk_strategy": "contextual_512_50",
+            "embedding_model": "multilingual_e5_large",
+            "chunk_id": chunk_id,
+            "ref": "filesystem:/notes/changed.md#embedding",
+            "vector": [0.1, 0.2],
+        }
+    }
+    connection.tables["bindings"] = {
+        binding_id: {
+            "id": binding_id,
+            "namespace": "filesystem",
+            "resource_ref": "/notes/changed.md",
+            "ref": "filesystem:/notes/changed.md#stale",
+            "active": False,
+        }
+    }
+
+    chunk_changes = [
+        SurrealDeltaChange(
+            ref="filesystem:/notes/changed.md#chunk-1",
+            table="chunks",
+            row={
+                "chunk_id": chunk_id,
+                "original_chunk_id": chunk_id,
+                "ref": "filesystem:/notes/changed.md#chunk-1",
+                "text": "new text",
+            },
+        )
+    ]
+    embedding_changes = [
+        SurrealDeltaChange(
+            ref="filesystem:/notes/changed.md#embedding",
+            table="embeddings",
+            row={
+                "chunk_strategy": "contextual_512_50",
+                "embedding_model": "multilingual_e5_large",
+                "chunk_id": chunk_id,
+                "ref": "filesystem:/notes/changed.md#embedding",
+                "vector": [0.9, 0.8],
+            },
+        )
+    ]
+    binding_changes = [
+        SurrealDeltaChange(
+            ref="filesystem:/notes/changed.md#binding",
+            table="resource_bindings",
+            row={
+                "namespace": "filesystem",
+                "resource_ref": "/notes/changed.md",
+                "document_ref": "/notes/changed.md",
+                "ref": "filesystem:/notes/changed.md#binding",
+                "active": True,
+            },
+        )
+    ]
+
+    assert writer.write_chunks(chunk_changes) == 1
+    assert writer.write_embeddings(embedding_changes) == 1
+    assert writer.write_resource_bindings(binding_changes) == 1
+
+    assert set(connection.tables["chunks"]) == {chunk_record_id}
+    assert connection.tables["chunks"][chunk_record_id]["text"] == "new text"
+    assert set(connection.tables["embeddings"]) == {embedding_id}
+    assert connection.tables["embeddings"][embedding_id]["vector"] == [0.9, 0.8]
+    assert set(connection.tables["bindings"]) == {binding_id}
+    assert connection.tables["bindings"][binding_id]["active"] is True
 
 
 def test_surreal_delta_store_writer_rejects_non_deferred_graph_rows() -> None:
