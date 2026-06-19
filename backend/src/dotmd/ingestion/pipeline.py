@@ -73,6 +73,17 @@ from dotmd.ingestion.source_lifecycle import (
     source_runtime_factory_from_settings,
 )
 from dotmd.ingestion.source_provider import ApplicationSourceProviderProtocol
+from dotmd.ingestion.surreal_delta_sync import (
+    SurrealDeltaCheckpointCandidate,
+    SurrealDeltaManifest,
+    SurrealDeltaSourceSelection,
+    SurrealDeltaSyncState,
+    run_surreal_delta_sync,
+)
+from dotmd.ingestion.surreal_direct_sink import (
+    SurrealDirectFileWrite,
+    build_surreal_direct_manifest,
+)
 from dotmd.search.fts5 import FTS5SearchEngine
 from dotmd.search.semantic import SemanticSearchEngine
 from dotmd.storage.base import GraphStoreProtocol, VectorStoreProtocol
@@ -380,6 +391,11 @@ class IndexingPipeline:
         else:
             self._embedding_cache.update_model_sentinel()
         _write_pipeline_init_progress("pipeline:embedding_cache", "applied")
+
+        # Transitional direct-Surreal seam for bulk filesystem ingest.
+        # This stays disabled unless a writer is injected by tests or future wiring.
+        self._surreal_direct_writer: Any | None = None
+        self._surreal_direct_sync_state = SurrealDeltaSyncState()
 
         # Startup integrity checks can delete vector and graph state. They must
         # be an explicit repair action, never a side effect of service startup.
@@ -2432,6 +2448,10 @@ class IndexingPipeline:
         t0 = time.perf_counter()
         self._metadata_store.save_chunks(chunks)
         source_documents = [self._source_document_for_file_info(file_info) for file_info in files]
+        source_documents_by_path = {
+            str(file_info.path): source_document
+            for file_info, source_document in zip(files, source_documents, strict=False)
+        }
         self._persist_chunk_source_provenance(chunks, source_documents)
         logger.info(
             "[%s] metadata_save: %d chunks (%.2fs)", run_id, len(chunks), time.perf_counter() - t0
@@ -2478,6 +2498,34 @@ class IndexingPipeline:
             all_text_hashes.update(text_hashes)
             chunk_order.extend(file_chunks)
 
+            source_document = source_documents_by_path.get(fp)
+            if source_document is None:
+                continue
+            direct_write = SurrealDirectFileWrite(
+                source_document=source_document,
+                chunks=tuple(file_chunks),
+                embeddings=tuple(e_fused),
+                text_hashes=dict(text_hashes),
+                chunk_strategy=self._strategy,
+                embedding_model=self._settings.embedding_model,
+            )
+            direct_manifest = build_surreal_direct_manifest(
+                direct_write,
+                source_selection=SurrealDeltaSourceSelection(
+                    source_name=source_document.namespace,
+                    table_name="source_documents",
+                    changed_at=source_document.updated_at,
+                    cursor=source_document.ref,
+                ),
+                checkpoint_candidate=SurrealDeltaCheckpointCandidate(
+                    cursor=source_document.ref,
+                    watermark=source_document.content_fingerprint,
+                    source_time=source_document.updated_at,
+                ),
+                created_at=source_document.updated_at,
+            )
+            self._write_surreal_direct_manifest(direct_manifest)
+
         t_embed = time.perf_counter() - t0
         logger.info(
             "[%s] embed: %d chunks (%.1fs, %.0f chunks/s)",
@@ -2511,6 +2559,25 @@ class IndexingPipeline:
                 conn=self._conn,
             )
         self._conn.commit()
+
+    def _write_surreal_direct_manifest(self, manifest: SurrealDeltaManifest) -> None:
+        """Apply a direct Surreal manifest when a writer is configured.
+
+        Transitional no-op: bulk filesystem ingest can call this seam before
+        direct Surreal wiring exists in the pipeline. Tests may monkeypatch the
+        method or inject a writer to observe the manifest.
+        """
+        writer = self._surreal_direct_writer
+        if writer is None:
+            logger.debug(
+                "surreal_direct_manifest skipped: no direct writer configured"
+            )
+            return
+        run_surreal_delta_sync(
+            manifest,
+            writer,
+            state=self._surreal_direct_sync_state,
+        )
 
     def _build_file_meta_from_fileinfo(
         self,

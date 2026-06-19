@@ -16,6 +16,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from dotmd.core.models import Chunk, ChunkProvenance, DocKind, FileInfo, SourceDocument
+
 
 def _write_md(path: pathlib.Path, title: str, tags: list, body: str) -> None:
     tags_yaml = "\n".join(f"  - {t}" for t in tags) if tags else ""
@@ -73,6 +75,25 @@ def _make_pipeline_tracking_inputs(settings):
     mock_engine.get_tei_model_id = MagicMock(return_value="test-model")
     pipeline._semantic_engine = mock_engine
     return pipeline, call_log
+
+
+def _direct_source_document(file_info: FileInfo) -> SourceDocument:
+    resolved = file_info.path.resolve()
+    return SourceDocument(
+        namespace="filesystem",
+        document_ref=str(resolved),
+        ref=f"filesystem:{resolved}",
+        title=file_info.title,
+        source_uri=str(file_info.path),
+        media_type="text/markdown",
+        parser_name="markdown",
+        document_type=file_info.kind,
+        updated_at=file_info.last_modified,
+        content_fingerprint="content-fingerprint",
+        metadata_fingerprint="metadata-fingerprint",
+        metadata_json={"tags": file_info.frontmatter.get("tags", [])},
+        file_path=file_info.path,
+    )
 
 
 # ── Bulk-path chunk-to-file fusion pairing ────────────────────────────────────
@@ -149,6 +170,146 @@ def test_bulk_path_chunks_stored_with_correct_etext(pipeline_settings, tmp_path)
         "_save_and_embed_chunks() must store e_meta component in VecComponentStore. "
         "Got 0 meta entries."
     )
+
+
+def test_bulk_path_calls_direct_surreal_sink_with_in_memory_rows(
+    pipeline_settings, tmp_path, monkeypatch
+):
+    """_save_and_embed_chunks() must hand the direct sink in-memory bulk rows.
+
+    The seam is the only thing this test exercises. SQLite reread helpers are
+    patched to fail so the manifest cannot be assembled from persisted rows.
+    """
+    from dotmd.ingestion.pipeline import IndexingPipeline
+
+    file_path = pipeline_settings.data_dir / "direct.md"
+    _write_md(file_path, "Direct Doc", ["direct"], "Bulk direct sink body.")
+
+    pipeline = IndexingPipeline(pipeline_settings)
+    file_info = FileInfo(
+        path=file_path,
+        title="Direct Doc",
+        last_modified=datetime(2026, 6, 19, 12, 0, tzinfo=UTC),
+        size_bytes=128,
+        kind=DocKind.DOCUMENT,
+        frontmatter={"tags": ["direct"]},
+    )
+    source_document = _direct_source_document(file_info)
+    chunks = [
+        Chunk(
+            chunk_id="direct-chunk-0",
+            file_paths=[file_path],
+            heading_hierarchy=["Direct Doc", "Overview"],
+            level=2,
+            text="chunk body zero",
+            chunk_index=0,
+            provenance=ChunkProvenance(
+                namespace="filesystem",
+                document_ref=source_document.document_ref,
+                ref=source_document.ref,
+                source_unit_refs=[],
+                chunk_strategy=pipeline._strategy,
+                parser_name="markdown",
+            ),
+        ),
+        Chunk(
+            chunk_id="direct-chunk-1",
+            file_paths=[file_path],
+            heading_hierarchy=["Direct Doc", "Details"],
+            level=2,
+            text="chunk body one",
+            chunk_index=1,
+            provenance=ChunkProvenance(
+                namespace="filesystem",
+                document_ref=source_document.document_ref,
+                ref=source_document.ref,
+                source_unit_refs=[],
+                chunk_strategy=pipeline._strategy,
+                parser_name="markdown",
+            ),
+        ),
+    ]
+
+    captured: list[Any] = []
+
+    monkeypatch.setattr(
+        pipeline,
+        "_source_document_for_file_info",
+        lambda _file_info: source_document,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_embed_chunks",
+        lambda _chunks: (
+            [[0.1, 0.1], [0.2, 0.2]],
+            {"direct-chunk-0": "hash-0", "direct-chunk-1": "hash-1"},
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_embed_meta_component",
+        lambda _file_info: [1.0, 1.0],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_fuse_vectors",
+        lambda e_text, e_meta, _weights: [e_text[0] + e_meta[0], e_text[1] + e_meta[1]],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_write_surreal_direct_manifest",
+        lambda manifest: captured.append(manifest),
+    )
+    monkeypatch.setattr(
+        pipeline._metadata_store,
+        "get_chunk_ids_by_file",
+        lambda *_args, **_kwargs: pytest.fail("chunk reread helper must not be used"),
+    )
+    monkeypatch.setattr(
+        pipeline._metadata_store,
+        "get_chunks",
+        lambda *_args, **_kwargs: pytest.fail("chunk reread helper must not be used"),
+    )
+    monkeypatch.setattr(pipeline._metadata_store, "save_chunks", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        pipeline,
+        "_persist_chunk_source_provenance",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        pipeline._vector_store,
+        "add_chunks",
+        MagicMock(),
+    )
+    monkeypatch.setattr(
+        pipeline._keyword_engine,
+        "add_chunks",
+        MagicMock(),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_upsert_active_filesystem_binding",
+        lambda *_args, **_kwargs: None,
+    )
+
+    pipeline._save_and_embed_chunks(chunks, [file_info], run_id="test-direct-sink")
+
+    assert len(captured) == 1
+    manifest = captured[0]
+    assert [row.ref for row in manifest.documents.rows] == [source_document.ref]
+    assert [row.row["document_ref"] for row in manifest.documents.rows] == [
+        source_document.document_ref
+    ]
+    assert [row.row["title"] for row in manifest.chunks.rows] == ["Overview", "Details"]
+    assert [row.row["chunk_id"] for row in manifest.embeddings.rows] == [
+        "direct-chunk-0",
+        "direct-chunk-1",
+    ]
+    assert [row.row["text_hash"] for row in manifest.embeddings.rows] == ["hash-0", "hash-1"]
+    assert [row.row["vector"] for row in manifest.embeddings.rows] == [
+        [1.1, 1.1],
+        [1.2, 1.2],
+    ]
 
 
 def test_meta_entity_id_normalizes_path(pipeline_settings):
