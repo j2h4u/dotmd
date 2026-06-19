@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 from dotmd.feedback import FeedbackStore
 from dotmd.storage.surreal_inventory import (
@@ -12,6 +13,29 @@ from dotmd.storage.surreal_inventory import (
     collect_sqlite_inventory,
     copy_sqlite_snapshot,
 )
+
+
+class _FakeSurrealClient:
+    calls: list[tuple[str, Any]]
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+        self.calls = []
+
+    def connect(self) -> None:
+        self.calls.append(("connect", None))
+
+    def use(self, namespace: str, database: str) -> None:
+        self.calls.append(("use", (namespace, database)))
+
+    def signin(self, credentials: dict[str, str]) -> None:
+        self.calls.append(("signin", credentials))
+
+    def authenticate(self, token: str) -> None:
+        self.calls.append(("authenticate", token))
+
+    def close(self) -> None:
+        self.calls.append(("close", None))
 
 
 def _create_inventory_fixture(db_path: Path) -> None:
@@ -477,6 +501,67 @@ def test_define_dotmd_surreal_schema_declares_required_record_shapes_and_schema_
     assert not any(
         "DEFINE TABLE documents SCHEMALESS" in statement for statement in schema["statements"]
     )
+
+
+def test_surreal_connection_signs_in_after_namespace_selection(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from dotmd.storage import surreal as surreal_module
+    from dotmd.storage.surreal import SurrealConnection, SurrealStoreConfig
+
+    clients: list[_FakeSurrealClient] = []
+
+    def fake_surreal(url: str) -> _FakeSurrealClient:
+        client = _FakeSurrealClient(url)
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(surreal_module, "Surreal", fake_surreal)
+
+    connection = SurrealConnection(
+        SurrealStoreConfig(
+            url="http://surrealdb:8000",
+            namespace="dotmd",
+            database="phase43",
+            username="root",
+            password="secret",
+        )
+    )
+
+    assert clients[0].calls == [
+        ("connect", None),
+        ("use", ("dotmd", "phase43")),
+        ("signin", {"username": "root", "password": "secret"}),
+    ]
+    connection.close()
+
+
+def test_surreal_connection_authenticates_token_after_namespace_selection(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from dotmd.storage import surreal as surreal_module
+    from dotmd.storage.surreal import SurrealConnection, SurrealStoreConfig
+
+    clients: list[_FakeSurrealClient] = []
+
+    def fake_surreal(url: str) -> _FakeSurrealClient:
+        client = _FakeSurrealClient(url)
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(surreal_module, "Surreal", fake_surreal)
+
+    connection = SurrealConnection(
+        SurrealStoreConfig(
+            url="http://surrealdb:8000",
+            namespace="dotmd",
+            database="phase43",
+            access_token="token",
+        )
+    )
+
+    assert clients[0].calls == [
+        ("connect", None),
+        ("use", ("dotmd", "phase43")),
+        ("authenticate", "token"),
+    ]
+    connection.close()
 
 
 def test_surreal_stores_expose_existing_protocol_method_names(tmp_path: Path) -> None:

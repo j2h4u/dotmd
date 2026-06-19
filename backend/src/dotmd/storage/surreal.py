@@ -44,6 +44,9 @@ class SurrealStoreConfig:
     url: str
     namespace: str = "dotmd"
     database: str = "phase38_import"
+    username: str | None = None
+    password: str | None = None
+    access_token: str | None = None
 
 
 class SurrealRecordIdCodec:
@@ -125,6 +128,10 @@ class SurrealConnection:
         if connect is not None:
             connect()
         self._db.use(config.namespace, config.database)
+        if config.username and config.password:
+            self._db.signin({"username": config.username, "password": config.password})
+        if config.access_token:
+            self._db.authenticate(config.access_token)
 
     def __enter__(self) -> SurrealConnection:
         return self

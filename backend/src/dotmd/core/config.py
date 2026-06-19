@@ -37,6 +37,10 @@ DEFAULT_POLL_INTERVAL_SECONDS = 3600.0
 DEFAULT_GRAPH_MAX_HOPS = 2
 DEFAULT_RERANKER_MIN_LENGTH = 50
 DEFAULT_RERANKER_LENGTH_PENALTY = True
+DEFAULT_SURREAL_URL = "http://127.0.0.1:8000"
+DEFAULT_SURREAL_NAMESPACE = "dotmd"
+DEFAULT_SURREAL_HNSW_EF = 40
+DEFAULT_SURREAL_EMBEDDING_SHARD_COUNT = 1
 RUNTIME_DATA_DIR = Path("/mnt")
 RUNTIME_INDEX_DIR = Path("/dotmd-index")
 
@@ -185,6 +189,7 @@ class Settings(BaseSettings):
         return v
 
     # Search
+    search_backend: Literal["sqlite", "surreal"] = "sqlite"
     default_top_k: int = DEFAULT_DEFAULT_TOP_K
     fusion_k: int = DEFAULT_FUSION_K
     rerank_pool_size: int = DEFAULT_RERANK_POOL_SIZE
@@ -208,6 +213,17 @@ class Settings(BaseSettings):
     # FalkorDB connection URL (Redis protocol).
     falkordb_url: str = DEFAULT_FALKORDB_URL
     falkordb_graph_name: str = DEFAULT_FALKORDB_GRAPH_NAME
+
+    # Standalone SurrealDB search runtime.
+    surreal_retrieval_url: str = DEFAULT_SURREAL_URL
+    surreal_retrieval_namespace: str = DEFAULT_SURREAL_NAMESPACE
+    surreal_retrieval_database: str | None = None
+    surreal_retrieval_username: str | None = None
+    surreal_retrieval_password: str | None = None
+    surreal_retrieval_access_token: str | None = None
+    surreal_retrieval_embedding_dimension: int | None = None
+    surreal_retrieval_hnsw_ef: int = DEFAULT_SURREAL_HNSW_EF
+    surreal_retrieval_embedding_shard_count: int = DEFAULT_SURREAL_EMBEDDING_SHARD_COUNT
 
     # Base URL for OAuth 2.0 endpoints served by FastMCP.
     # Must be the full Tailscale-facing URL including path prefix
@@ -349,6 +365,43 @@ class Settings(BaseSettings):
             errors.append("indexing_paths must contain absolute paths for runtime startup")
         if not self.embedding_url:
             errors.append("embedding_url must not be empty for runtime startup")
+        if self.search_backend == "surreal":
+            if not self.surreal_retrieval_url:
+                errors.append("surreal_retrieval_url must be set for Surreal search runtime")
+            if not self.surreal_retrieval_namespace:
+                errors.append(
+                    "surreal_retrieval_namespace must be set for Surreal search runtime"
+                )
+            if not self.surreal_retrieval_database:
+                errors.append(
+                    "surreal_retrieval_database must be set for Surreal search runtime"
+                )
+            if self.surreal_retrieval_embedding_dimension is None:
+                errors.append(
+                    "surreal_retrieval_embedding_dimension must be set for "
+                    "Surreal search runtime"
+                )
+            has_username = bool(self.surreal_retrieval_username)
+            has_password = bool(self.surreal_retrieval_password)
+            if has_username != has_password:
+                errors.append(
+                    "surreal_retrieval_username and surreal_retrieval_password "
+                    "must be set together"
+                )
+            if (has_username or has_password) and self.surreal_retrieval_access_token:
+                errors.append(
+                    "surreal_retrieval_access_token must not be combined with "
+                    "username/password auth"
+                )
+            if self.surreal_retrieval_hnsw_ef < 1:
+                errors.append(
+                    "surreal_retrieval_hnsw_ef must be >= 1 for Surreal search runtime"
+                )
+            if self.surreal_retrieval_embedding_shard_count < 1:
+                errors.append(
+                    "surreal_retrieval_embedding_shard_count must be >= 1 for "
+                    "Surreal search runtime"
+                )
 
         identity_fields = {
             "embedding_model": self.embedding_model,

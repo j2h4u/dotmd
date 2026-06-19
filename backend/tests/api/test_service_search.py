@@ -1282,6 +1282,77 @@ class TestCompareRerankers:
 
 
 class TestSurrealHybridOverrides:
+    def test_surreal_search_backend_replaces_runtime_retrieval_engines(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from dotmd.api.service import DotMDService
+        from dotmd.core.config import Settings
+        from dotmd.core.models import SearchMode
+
+        semantic = _RecordingSearchEngine([("semantic-hit", 0.91)])
+        keyword = _RecordingSearchEngine([("keyword-hit", 0.72)])
+        graph_direct = _RecordingSearchEngine([("graph-hit", 1.0)])
+        connection = MagicMock()
+        connection.raw = MagicMock()
+
+        settings = Settings(
+            index_dir=tmp_path,
+            embedding_url="http://localhost:8088",
+            search_backend="surreal",
+            surreal_retrieval_url="http://surrealdb:8000",
+            surreal_retrieval_database="phase43_refresh_20260618g",
+            surreal_retrieval_username="root",
+            surreal_retrieval_password="root",
+            surreal_retrieval_embedding_dimension=1024,
+            surreal_retrieval_hnsw_ef=80,
+            telegram_daemon_socket=None,
+        )
+
+        with (
+            patch("dotmd.storage.surreal.SurrealConnection", return_value=connection) as conn_cls,
+            patch(
+                "dotmd.search.surreal_native.build_surreal_native_engine_overrides",
+                return_value={
+                    "semantic": semantic,
+                    "keyword": keyword,
+                    "graph_direct": graph_direct,
+                },
+            ) as build_overrides,
+        ):
+            service = DotMDService(settings)
+
+        conn_cls.assert_called_once()
+        config = conn_cls.call_args.args[0]
+        assert config.url == "http://surrealdb:8000"
+        assert config.namespace == "dotmd"
+        assert config.database == "phase43_refresh_20260618g"
+        assert config.username == "root"
+        assert config.password == "root"
+        build_overrides.assert_called_once_with(
+            connection,
+            settings,
+            embedding_dimension=1024,
+            hnsw_ef=80,
+            embedding_shard_count=1,
+        )
+        assert service._semantic_engine is semantic
+        assert service._keyword_engine is keyword
+        assert service._graph_direct_engine is graph_direct
+
+        with patch("dotmd.api.service.fuse_results", return_value=[("semantic-hit", 0.9)]):
+            pool = service._collect_candidate_pool(
+                search_query="expanded query",
+                original_query="raw query",
+                mode=SearchMode.HYBRID,
+                pool_size=3,
+            )
+
+        assert semantic.calls == [("expanded query", 3)]
+        assert keyword.calls == [("expanded query", 3)]
+        assert graph_direct.calls == [("raw query", 3)]
+        assert "graph" not in pool["engine_results"]
+
     def test_collect_candidate_pool_uses_engine_overrides_and_existing_fusion(
         self,
         tmp_path: Path,

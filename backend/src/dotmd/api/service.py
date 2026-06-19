@@ -166,6 +166,18 @@ class GraphEnrichmentEngineProtocol(Protocol):
         ...
 
 
+class _DisabledGraphEnrichmentEngine:
+    """Explicitly disable seed-based graph expansion for backends without it."""
+
+    def search(
+        self,
+        query: str,
+        top_k: int = 10,
+        seed_chunk_ids: list[str] | None = None,
+    ) -> list[tuple[str, float]]:
+        return []
+
+
 def _parse_telegram_message_ref(ref: str) -> tuple[str, str]:
     """Parse a public Telegram message ref into document and unit refs."""
     if not ref.startswith(TELEGRAM_REF_PREFIX):
@@ -303,6 +315,9 @@ class DotMDService:
         self._graph_direct_engine = GraphDirectEngine(
             self._pipeline.graph_store,
         )
+        self._surreal_connection: Any | None = None
+        if self._settings.search_backend == "surreal":
+            self._configure_surreal_search_backend()
         _write_service_init_progress("service:keyword_graph_engines", "applied")
 
         # Load acronym dictionary if available
@@ -386,6 +401,45 @@ class DotMDService:
             if isinstance(bundle, SourceRuntimeBundle) and bundle.supports_federated_search:
                 self._lifecycle_bundles[namespace] = bundle
 
+    def _configure_surreal_search_backend(self) -> None:
+        """Replace local retrieval engines with standalone SurrealDB engines."""
+        from dotmd.search.surreal_native import build_surreal_native_engine_overrides
+        from dotmd.storage.surreal import SurrealConnection, SurrealStoreConfig
+
+        if not self._settings.surreal_retrieval_database:
+            raise ValueError(
+                "surreal_retrieval_database must be set when search_backend='surreal'"
+            )
+        if self._settings.surreal_retrieval_embedding_dimension is None:
+            raise ValueError(
+                "surreal_retrieval_embedding_dimension must be set "
+                "when search_backend='surreal'"
+            )
+
+        connection = SurrealConnection(
+            SurrealStoreConfig(
+                url=self._settings.surreal_retrieval_url,
+                namespace=self._settings.surreal_retrieval_namespace,
+                database=self._settings.surreal_retrieval_database,
+                username=self._settings.surreal_retrieval_username,
+                password=self._settings.surreal_retrieval_password,
+                access_token=self._settings.surreal_retrieval_access_token,
+            )
+        )
+
+        overrides = build_surreal_native_engine_overrides(
+            connection,
+            self._settings,
+            embedding_dimension=self._settings.surreal_retrieval_embedding_dimension,
+            hnsw_ef=self._settings.surreal_retrieval_hnsw_ef,
+            embedding_shard_count=self._settings.surreal_retrieval_embedding_shard_count,
+        )
+        self._surreal_connection = connection
+        self._semantic_engine = overrides["semantic"]
+        self._keyword_engine = overrides["keyword"]
+        self._graph_direct_engine = overrides["graph_direct"]
+        self._graph_engine = _DisabledGraphEnrichmentEngine()
+
     def close(self) -> None:
         """Shut down service resources cleanly.
 
@@ -396,6 +450,11 @@ class DotMDService:
             self._local_executor.shutdown(wait=True)
         except (RuntimeError, OSError):
             logger.warning("local_executor shutdown failed", exc_info=True)
+        if self._surreal_connection is not None:
+            try:
+                self._surreal_connection.close()
+            except (RuntimeError, OSError):
+                logger.warning("surreal connection close failed", exc_info=True)
 
     # ------------------------------------------------------------------
     # Public API
@@ -416,8 +475,10 @@ class DotMDService:
                 "reranker warmup failed; search will fall back to fused ranking",
                 exc_info=True,
             )
-        self._keyword_engine.load_index()
-        self._graph_direct_engine.load_catalog()
+        if hasattr(self._keyword_engine, "load_index"):
+            self._keyword_engine.load_index()
+        if hasattr(self._graph_direct_engine, "load_catalog"):
+            self._graph_direct_engine.load_catalog()
         self._check_embedding_model()
         logger.info("Models ready")
 
