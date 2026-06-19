@@ -344,6 +344,16 @@ def test_surreal_delta_store_writer_smoke_embedded_local_updates_and_deletes_in_
             "checkpoints": _scan_by_id(connection, "checkpoints"),
         }
 
+        fresh_state = SurrealDeltaSyncState()
+        _fresh = run_surreal_delta_sync(manifest, writer, state=fresh_state, batch_size=2)
+        fresh_snapshot = {
+            "documents": _scan_by_id(connection, "documents"),
+            "chunks": _scan_by_id(connection, "chunks"),
+            "bindings": _scan_by_id(connection, "bindings"),
+            "embeddings": _scan_by_id(connection, "embeddings"),
+            "checkpoints": _scan_by_id(connection, "checkpoints"),
+        }
+
     assert second.applied_counts.get("tombstones", 0) == 0
     assert second.applied_counts.get("documents", 0) == 0
     assert second.applied_counts.get("chunks", 0) == 0
@@ -354,3 +364,16 @@ def test_surreal_delta_store_writer_smoke_embedded_local_updates_and_deletes_in_
         set(second.skipped_phases)
     )
     assert second_snapshot == first_snapshot
+
+    assert set(fresh_snapshot["documents"]) == set(first_snapshot["documents"])
+    assert set(fresh_snapshot["chunks"]) == set(first_snapshot["chunks"])
+    assert set(fresh_snapshot["bindings"]) == set(first_snapshot["bindings"])
+    assert set(fresh_snapshot["embeddings"]) == set(first_snapshot["embeddings"])
+    assert set(fresh_snapshot["checkpoints"]) == set(first_snapshot["checkpoints"])
+    assert fresh_snapshot["documents"][seed_ids["document"]] == first_snapshot["documents"][seed_ids["document"]]
+    assert fresh_snapshot["chunks"][seed_ids["chunk"]] == first_snapshot["chunks"][seed_ids["chunk"]]
+    assert fresh_snapshot["bindings"][seed_ids["binding"]] == first_snapshot["bindings"][seed_ids["binding"]]
+    assert fresh_snapshot["embeddings"][seed_ids["embedding"]] == first_snapshot["embeddings"][seed_ids["embedding"]]
+    assert fresh_snapshot["documents"][unrelated_ids["document"]] == first_snapshot["documents"][unrelated_ids["document"]]
+    assert fresh_snapshot["chunks"][unrelated_ids["chunk"]] == first_snapshot["chunks"][unrelated_ids["chunk"]]
+    assert fresh_snapshot["embeddings"][unrelated_ids["embedding"]] == first_snapshot["embeddings"][unrelated_ids["embedding"]]
