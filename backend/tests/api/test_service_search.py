@@ -158,6 +158,85 @@ class TestSearchRespectsTopK:
         assert kwargs["rerank"] is True
 
 
+class TestFederatedSearchOptIn:
+    """Federated providers only run when explicitly requested."""
+
+    def test_default_search_does_not_call_federated_provider(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = _get_service(tmp_path)
+
+        from dotmd.core.models import SearchCandidate
+        from tests.search.conftest import make_federated_bundle
+
+        local_candidate = SearchCandidate(
+            ref="filesystem:/mnt/local.md#0",
+            namespace="filesystem",
+            descriptor_key="filesystem-mnt",
+            source_kind="markdown",
+            retrieval_kind="semantic",
+            snippet="local snippet",
+            fused_score=0.9,
+            can_read=True,
+        )
+        provider = MagicMock()
+        provider.search_native.return_value = []
+        bundle = make_federated_bundle(name="telegram", provider=provider)
+        service._lifecycle_bundles["telegram"] = bundle
+
+        with patch.object(service, "_execute_search", return_value=[local_candidate]):
+            response = service.search("test query", rerank=False, expand=False)
+
+        provider.search_native.assert_not_called()
+        assert response.candidates == [local_candidate]
+
+    def test_include_federated_search_calls_federated_provider(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = _get_service(tmp_path)
+
+        from dotmd.core.models import SearchCandidate
+        from tests.search.conftest import make_federated_bundle
+
+        local_candidate = SearchCandidate(
+            ref="filesystem:/mnt/local.md#0",
+            namespace="filesystem",
+            descriptor_key="filesystem-mnt",
+            source_kind="markdown",
+            retrieval_kind="semantic",
+            snippet="local snippet",
+            fused_score=0.9,
+            can_read=True,
+        )
+        federated_candidate = SearchCandidate(
+            ref="telegram:result:0",
+            namespace="telegram",
+            descriptor_key="telegram",
+            source_kind="test",
+            retrieval_kind="telegram:fts",
+            snippet="federated snippet",
+            fused_score=0.0,
+            can_read=False,
+        )
+        provider = MagicMock()
+        provider.search_native.return_value = [federated_candidate]
+        bundle = make_federated_bundle(name="telegram", provider=provider)
+        service._lifecycle_bundles["telegram"] = bundle
+
+        with patch.object(service, "_execute_search", return_value=[local_candidate]):
+            response = service.search(
+                "test query",
+                rerank=False,
+                expand=False,
+                include_federated=True,
+            )
+
+        provider.search_native.assert_called_once_with("test query", limit=10)
+        assert any(candidate.ref == federated_candidate.ref for candidate in response.candidates)
+
+
 def _source_document(file_path: Path, *, namespace: str = "filesystem"):
     from dotmd.core.models import SourceDocument
 
@@ -1618,10 +1697,35 @@ class TestSearchApiRerankerSurfaces:
             rerank=True,
             expand=True,
             reranker_name="msmarco-minilm",
+            include_federated=False,
         )
         payload = response.json()
         assert payload["count"] == 1
         assert payload["results"][0]["ref"] == "filesystem:/mnt/test.md#0"
+
+    def test_search_endpoint_includes_federated_when_requested(self) -> None:
+        from dotmd.api import server
+        from dotmd.core.models import SearchMode, SearchResponse
+
+        service = MagicMock()
+        service.search = MagicMock(side_effect=AssertionError("search() should not be called"))
+        service.search_async = AsyncMock(return_value=SearchResponse(candidates=[], source_status=[]))
+        server._service = service
+        client = TestClient(server.app)
+
+        response = client.get("/search?q=test&federated=true")
+
+        assert response.status_code == 200
+        service.search.assert_not_called()
+        service.search_async.assert_awaited_once_with(
+            query="test",
+            top_k=10,
+            mode=SearchMode.HYBRID,
+            rerank=True,
+            expand=True,
+            reranker_name=None,
+            include_federated=True,
+        )
 
     def test_search_endpoint_unknown_reranker_returns_400(self) -> None:
         from dotmd.api import server

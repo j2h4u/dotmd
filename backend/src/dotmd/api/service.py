@@ -581,6 +581,7 @@ class DotMDService:
         rerank: bool = True,
         expand: bool = True,
         reranker_name: str | None = None,
+        include_federated: bool = False,
     ) -> SearchResponse:
         """Search the index and return ranked results.
 
@@ -607,6 +608,9 @@ class DotMDService:
         reranker_name:
             Optional stable reranker name to use for this request. When
             omitted, the configured default is used.
+        include_federated:
+            If True, federated provider bundles are queried in addition to the
+            local index. Defaults to False for local-only search.
 
         Returns
         -------
@@ -635,6 +639,7 @@ class DotMDService:
                     rerank=rerank,
                     expand=expand,
                     reranker_name=reranker_name,
+                    include_federated=include_federated,
                 )
             )
 
@@ -651,8 +656,9 @@ class DotMDService:
         rerank: bool = True,
         expand: bool = True,
         reranker_name: str | None = None,
+        include_federated: bool = False,
     ) -> SearchResponse:
-        """Async search with federated fan-out support (Phase 34 Plan 02).
+        """Async search with optional federated fan-out support (Phase 34 Plan 02).
 
         Per D-ASYNC-CANONICAL: This is the canonical async entry point.
         The sync search() method raises if called inside a running event loop.
@@ -671,6 +677,9 @@ class DotMDService:
             If True, query is expanded via QueryExpander before engine calls.
         reranker_name:
             Optional stable reranker name. Omitted uses configured default.
+        include_federated:
+            If True, federated provider bundles are queried alongside the local
+            engines. Defaults to False for local-only search.
 
         Returns
         -------
@@ -708,16 +717,6 @@ class DotMDService:
 
             loop = asyncio.get_running_loop()
 
-            from dotmd.search.federated import fanout_federated, outcomes_to_source_status
-
-            engine_calls: dict[str, Any] = {
-                self._federated_engine_name(bundle): (
-                    lambda b=bundle: b.provider.search_native(expanded_query, limit=top_k)
-                )
-                for bundle in self._lifecycle_bundles.values()
-                if bundle.supports_federated_search
-            }
-
             local_coro = loop.run_in_executor(
                 self._local_executor,
                 lambda: self._execute_search(
@@ -731,22 +730,39 @@ class DotMDService:
                 ),
             )
 
-            if engine_calls:
-                local_candidates, fed_outcomes = await asyncio.gather(
-                    local_coro,
-                    fanout_federated(
-                        engine_calls,
-                        timeout=self._settings.federated_timeout_seconds,
-                    ),
-                )
-                fed_candidates = [c for outcome in fed_outcomes for c in outcome.candidates]
-                all_candidates = _merge_with_federated_quota(
-                    local_candidates,
-                    fed_candidates,
-                    top_k,
-                    self._settings.federated_result_quota,
-                )
-                fed_status = outcomes_to_source_status(fed_outcomes)
+            if include_federated:
+                from dotmd.search.federated import fanout_federated, outcomes_to_source_status
+
+                engine_calls: dict[str, Any] = {
+                    self._federated_engine_name(bundle): (
+                        lambda b=bundle: b.provider.search_native(expanded_query, limit=top_k)
+                    )
+                    for bundle in self._lifecycle_bundles.values()
+                    if bundle.supports_federated_search
+                }
+
+                if engine_calls:
+                    local_candidates, fed_outcomes = await asyncio.gather(
+                        local_coro,
+                        fanout_federated(
+                            engine_calls,
+                            timeout=self._settings.federated_timeout_seconds,
+                        ),
+                    )
+                    fed_candidates = [c for outcome in fed_outcomes for c in outcome.candidates]
+                    all_candidates = _merge_with_federated_quota(
+                        local_candidates,
+                        fed_candidates,
+                        top_k,
+                        self._settings.federated_result_quota,
+                    )
+                    fed_status = outcomes_to_source_status(fed_outcomes)
+                else:
+                    local_candidates = await local_coro
+                    all_candidates = sorted(
+                        local_candidates, key=lambda c: c.fused_score, reverse=True
+                    )[:top_k]
+                    fed_status = []
             else:
                 local_candidates = await local_coro
                 all_candidates = sorted(

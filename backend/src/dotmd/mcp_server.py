@@ -664,6 +664,10 @@ def create_app() -> Starlette:
 async def search(
     query: Annotated[str, Field(description="Natural-language search query.")],
     top_k: Annotated[int, Field(description="Maximum results to return.", ge=1, le=100)] = 10,
+    federated: Annotated[
+        bool,
+        Field(description="Include federated providers in the search."),
+    ] = False,
 ) -> SearchResponse:
     """Search the indexed markdown knowledgebase and return ranked chunks.
 
@@ -686,7 +690,11 @@ async def search(
         # Per D-ASYNC-CANONICAL (cycle-2 HIGH-5): call search_async directly.
         # MCP tools already run inside the event loop; search_async is the
         # canonical async entry point.
-        response = await service.search_async(query, top_k=top_k)
+        response = await service.search_async(
+            query,
+            top_k=top_k,
+            include_federated=federated,
+        )
         # response is already a SearchResponse; format candidates for MCP output
         formatted_candidates = [_format_result(r) for r in response.candidates]
         return SearchResponse(candidates=formatted_candidates, source_status=response.source_status)

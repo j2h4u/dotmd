@@ -1,8 +1,8 @@
 """GAP-04 (T-34-14) and GAP-05 (T-34-15): Phase 34 behavioral gaps.
 
-GAP-04: service.search() end-to-end fan-out includes tg:fts engine in
-        source_status when Telegram lifecycle bundle has FEDERATED_SEARCH
-        capability and search_native.
+GAP-04: service.search(include_federated=True) end-to-end fan-out includes
+        tg:fts engine in source_status when Telegram lifecycle bundle has
+        FEDERATED_SEARCH capability and search_native.
 
 GAP-05: can_materialize=False for every Phase 34 SearchCandidate; manual
         sweep + assertion test.
@@ -23,13 +23,12 @@ def _get_service(tmp_path: Path):  # type: ignore[no-untyped-def]
 
 
 def test_telegram_federated_engine_participates(tmp_path: Path) -> None:
-    """T-34-14: service.search() includes tg:fts in source_status when Telegram
-    lifecycle bundle has FEDERATED_SEARCH capability and search_native method.
+    """T-34-14: service.search(include_federated=True) includes tg:fts in
+    source_status when Telegram lifecycle bundle has FEDERATED_SEARCH
+    capability and search_native method.
 
-    Requirement: the fan-out must always-on (D-08) include any bundle whose
-    descriptor declares FEDERATED_SEARCH and whose provider has search_native.
     The source_status in the returned SearchResponse must contain an entry
-    with name="tg:fts" regardless of whether it returned candidates.
+    with name="tg:fts" when federated search is explicitly enabled.
     """
     from dotmd.core.models import SearchCandidate, SearchResponse
     from tests.search.conftest import StubFederatedProvider, make_federated_bundle
@@ -59,7 +58,12 @@ def test_telegram_federated_engine_participates(tmp_path: Path) -> None:
 
     # Stub _execute_search so local engines don't need a real index
     with patch.object(service, "_execute_search", return_value=[]):
-        response = service.search("kantine", rerank=False, expand=False)
+        response = service.search(
+            "kantine",
+            rerank=False,
+            expand=False,
+            include_federated=True,
+        )
 
     assert isinstance(response, SearchResponse)
 

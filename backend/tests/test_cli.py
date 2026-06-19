@@ -33,6 +33,26 @@ def test_search_accepts_reranker_option(tmp_path: Path) -> None:
     assert search.call_args.kwargs["reranker_name"] == "msmarco-minilm"
 
 
+def test_search_accepts_federated_option(tmp_path: Path) -> None:
+    with patch(
+        "dotmd.api.service.DotMDService.search",
+        return_value=SearchResponse(),
+    ) as search:
+        result = CliRunner().invoke(
+            main,
+            [
+                "--index-dir",
+                str(tmp_path),
+                "search",
+                "test query",
+                "--federated",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert search.call_args.kwargs["include_federated"] is True
+
+
 def test_search_unknown_reranker_is_click_error(tmp_path: Path) -> None:
     with patch(
         "dotmd.api.service.DotMDService.search",

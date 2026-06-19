@@ -149,6 +149,7 @@ async def search(
     mode: SearchMode = Query(SearchMode.HYBRID),
     rerank: bool = Query(True),
     expand: bool = Query(True),
+    federated: bool = Query(False, description="Include federated providers in the search."),
     reranker: str | None = Query(None, description="Reranker name to use"),
 ) -> SearchResponse:
     """Search the indexed knowledgebase."""
@@ -160,6 +161,7 @@ async def search(
             rerank=rerank,
             expand=expand,
             reranker_name=reranker,
+            include_federated=federated,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

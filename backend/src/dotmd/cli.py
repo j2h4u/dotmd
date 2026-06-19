@@ -117,6 +117,11 @@ def index(
 )
 @click.option("--no-rerank", is_flag=True, help="Skip cross-encoder reranking.")
 @click.option("--no-expand", is_flag=True, help="Skip query expansion.")
+@click.option(
+    "--federated",
+    is_flag=True,
+    help="Include federated providers in the search.",
+)
 @click.option("--reranker", default=None, help="Reranker name to use.")
 @click.pass_context
 def search(
@@ -126,6 +131,7 @@ def search(
     mode: str,
     no_rerank: bool,
     no_expand: bool,
+    federated: bool,
     reranker: str | None,
 ) -> None:
     """Search the indexed knowledgebase."""
@@ -138,6 +144,7 @@ def search(
             rerank=not no_rerank,
             expand=not no_expand,
             reranker_name=reranker,
+            include_federated=federated,
         )
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc

@@ -69,7 +69,37 @@ class TestSearchRefContract:
         assert payload["ref"] == "filesystem:/mnt/test.md"
         assert "file_paths" not in payload
         assert "file_path" not in payload
-        service.search_async.assert_awaited_once_with("test", top_k=1)
+        service.search_async.assert_awaited_once_with("test", top_k=1, include_federated=False)
+
+    def test_tool_call_can_include_federated_search(self) -> None:
+        mcp = _import_mcp()
+        stub_result = SearchCandidate(
+            ref="filesystem:/mnt/test.md",
+            namespace="filesystem",
+            descriptor_key="filesystem",
+            source_kind="local_filesystem",
+            retrieval_kind="local",
+            heading_path="# Test",
+            snippet="test snippet",
+            fused_score=0.9,
+            can_read=True,
+            chunk_id="a" * 64,
+        )
+        service = MagicMock()
+        service.search_async = AsyncMock(return_value=SearchResponse(candidates=[stub_result]))
+        previous_service = mcp._service
+        mcp._service = service
+        try:
+            _content, structured_raw = asyncio.run(
+                mcp.mcp.call_tool("search", {"query": "test", "top_k": 1, "federated": True})
+            )
+        finally:
+            mcp._service = previous_service
+
+        structured = cast(dict[str, Any], structured_raw)
+        payload = cast(dict[str, Any], structured["candidates"][0])
+        assert payload["ref"] == "filesystem:/mnt/test.md"
+        service.search_async.assert_awaited_once_with("test", top_k=1, include_federated=True)
 
 
 class TestReadToolRefContract:
