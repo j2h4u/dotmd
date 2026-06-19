@@ -1,1 +1,0 @@
-DEFINE INDEX embeddings_hnsw_idx ON TABLE embeddings COLUMNS embedding HNSW DIMENSION 1024 TYPE F32 DIST COSINE EFC 64;

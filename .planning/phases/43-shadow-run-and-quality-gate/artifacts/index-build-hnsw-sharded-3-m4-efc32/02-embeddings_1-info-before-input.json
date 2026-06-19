@@ -1,8 +1,0 @@
-{
-  "operation": "info_embeddings",
-  "runtime_env": {},
-  "table_name": "embeddings_1",
-  "target_database": "phase43_shadow",
-  "target_namespace": "dotmd",
-  "target_url": "surrealkv:///home/j2h4u/.cache/dotmd/phase43-target/phase43-fresh.surreal.db"
-}

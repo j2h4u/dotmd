@@ -1,9 +1,0 @@
-{
-  "index_name": "embeddings_strategy_chunk_model_idx",
-  "operation": "define_index",
-  "statement": "DEFINE INDEX embeddings_strategy_chunk_model_idx ON TABLE embeddings COLUMNS chunk_strategy, chunk_id, embedding_model UNIQUE;",
-  "statement_hash": "62ce806d42db5ae7e9f89b4c7bb638ff45f14724e7539109e50232e64f32b4b3",
-  "target_database": "phase43_shadow",
-  "target_namespace": "dotmd",
-  "target_url": "surrealkv:///home/j2h4u/.cache/dotmd/phase43-target/phase43-fresh.surreal.db"
-}

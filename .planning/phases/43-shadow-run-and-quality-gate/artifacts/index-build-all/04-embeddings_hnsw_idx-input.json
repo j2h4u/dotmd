@@ -1,9 +1,0 @@
-{
-  "index_name": "embeddings_hnsw_idx",
-  "operation": "define_index",
-  "statement": "DEFINE INDEX embeddings_hnsw_idx ON TABLE embeddings COLUMNS embedding HNSW DIMENSION 1024 DIST COSINE EFC 64;",
-  "statement_hash": "5ca87f3f0cc4cdec10d6d5cd2e97cd0118c53ae0624a576a6b01b7f21449f0a5",
-  "target_database": "phase43_shadow",
-  "target_namespace": "dotmd",
-  "target_url": "surrealkv:///home/j2h4u/.cache/dotmd/phase43-target/phase43-fresh.surreal.db"
-}
