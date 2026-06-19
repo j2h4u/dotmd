@@ -19,45 +19,35 @@ class FakeSurrealConnection:
         self.statements.append((statement, variables))
         if self.error is not None:
             raise self.error
-        if statement.startswith("EXPLAIN FULL SELECT chunk_id, search::score(0)"):
-            return [{"plan": {"index": "chunks_title_fts"}}]
-        if statement.startswith("EXPLAIN FULL SELECT chunk_id, search::score(1)"):
-            return [{"plan": {"index": "chunks_text_fts"}}]
-        if "WITH INDEX chunks_title_fts" in statement:
+        if statement.startswith("EXPLAIN FULL SELECT chunk_id, "):
+            return [{"plan": {"indexes": ["chunks_title_fts", "chunks_text_fts"]}}]
+        if "WITH INDEX chunks_title_fts, chunks_text_fts" in statement:
             assert statement == (
-                "SELECT chunk_id, search::score(0) AS score FROM chunks "
-                "WITH INDEX chunks_title_fts WHERE chunk_strategy = $chunk_strategy "
-                "AND title @0@ $query ORDER BY score DESC LIMIT $limit TIMEOUT 7s;"
+                "SELECT chunk_id, "
+                "(search::score(0) * $title_boost) + "
+                "(search::score(1) * $text_boost) AS score "
+                "FROM chunks WITH INDEX chunks_title_fts, chunks_text_fts "
+                "WHERE chunk_strategy = $chunk_strategy "
+                "AND (title @0@ $query OR text @1@ $query) "
+                "ORDER BY score DESC, chunk_id ASC LIMIT $limit TIMEOUT 7s;"
             )
             assert variables == {
                 "query": self.expected_query,
                 "limit": self.expected_limit,
                 "chunk_strategy": "contextual_512_50",
+                "title_boost": 5.0,
+                "text_boost": 1.0,
             }
             return [
-                {"chunk_id": "chunk-a", "score": 0.9},
-                {"chunk_id": "chunk-b", "score": 0.4},
-                {"chunk_id": "chunk-dup", "score": 0.3},
-            ]
-        if "WITH INDEX chunks_text_fts" in statement:
-            assert statement == (
-                "SELECT chunk_id, search::score(1) AS score FROM chunks "
-                "WITH INDEX chunks_text_fts WHERE chunk_strategy = $chunk_strategy "
-                "AND text @1@ $query ORDER BY score DESC LIMIT $limit TIMEOUT 7s;"
-            )
-            assert variables == {
-                "query": self.expected_query,
-                "limit": self.expected_limit,
-                "chunk_strategy": "contextual_512_50",
-            }
-            return [
-                {"chunk_id": "chunk-dup", "score": 0.6},
+                {"chunk_id": "chunk-a", "score": 4.5},
+                {"chunk_id": "chunk-dup", "score": 2.1},
+                {"chunk_id": "chunk-b", "score": 2.0},
                 {"chunk_id": "chunk-c", "score": 0.2},
             ]
         raise AssertionError(f"unexpected statement: {statement}")
 
 
-def test_surreal_fts_search_uses_title_and_text_queries_with_weighting_and_dedup() -> None:
+def test_surreal_fts_search_uses_one_query_with_weighting_and_dedup() -> None:
     connection = FakeSurrealConnection()
     engine = SurrealFTSSearchEngine(
         connection,
@@ -72,10 +62,16 @@ def test_surreal_fts_search_uses_title_and_text_queries_with_weighting_and_dedup
         ("chunk-b", pytest.approx(2.0)),
         ("chunk-c", pytest.approx(0.2)),
     ]
-    assert len(connection.statements) == 2
-    assert all(
-        not statement.startswith("EXPLAIN FULL") for statement, _ in connection.statements
-    )
+    assert len(connection.statements) == 1
+    statement, variables = connection.statements[0]
+    assert statement.startswith("SELECT chunk_id, (search::score(0) * $title_boost)")
+    assert variables == {
+        "query": "Alpha beta",
+        "limit": 4,
+        "chunk_strategy": "contextual_512_50",
+        "title_boost": 5.0,
+        "text_boost": 1.0,
+    }
 
 
 def test_surreal_fts_search_returns_empty_for_blank_query() -> None:
@@ -105,7 +101,6 @@ def test_surreal_fts_search_can_emit_explain_queries() -> None:
         ("chunk-a", pytest.approx(4.5)),
         ("chunk-dup", pytest.approx(2.1)),
     ]
-    assert connection.statements[0][0].startswith("EXPLAIN FULL SELECT chunk_id")
-    assert connection.statements[1][0].startswith("SELECT chunk_id")
-    assert connection.statements[2][0].startswith("EXPLAIN FULL SELECT chunk_id")
-    assert connection.statements[3][0].startswith("SELECT chunk_id")
+    assert len(connection.statements) == 2
+    assert connection.statements[0][0].startswith("EXPLAIN FULL SELECT chunk_id, ")
+    assert connection.statements[1][0].startswith("SELECT chunk_id, ")

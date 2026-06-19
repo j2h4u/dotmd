@@ -86,22 +86,7 @@ class SurrealFTSSearchEngine:
             return []
 
         try:
-            title_rows = self._run_query(
-                index_name=_TITLE_INDEX,
-                field_name="title",
-                match_ref=_TITLE_REF,
-                score_ref=_TITLE_REF,
-                query=sanitized,
-                top_k=top_k,
-            )
-            text_rows = self._run_query(
-                index_name=_TEXT_INDEX,
-                field_name="text",
-                match_ref=_TEXT_REF,
-                score_ref=_TEXT_REF,
-                query=sanitized,
-                top_k=top_k,
-            )
+            rows = self._run_query(query=sanitized, top_k=top_k)
         except (RuntimeError, SurrealError, TypeError, ValueError, AttributeError) as exc:
             logger.warning(
                 "Surreal keyword search failed: query_len=%d error_type=%s",
@@ -110,62 +95,45 @@ class SurrealFTSSearchEngine:
             )
             return []
 
-        fused: dict[str, float] = {}
-        for chunk_id, score in title_rows:
-            fused[chunk_id] = fused.get(chunk_id, 0.0) + score * self._search_config.title_boost
-        for chunk_id, score in text_rows:
-            fused[chunk_id] = fused.get(chunk_id, 0.0) + score * self._search_config.text_boost
-
-        return sorted(fused.items(), key=lambda item: (-item[1], item[0]))[:top_k]
+        return _rows_to_ranked_pairs(rows)[:top_k]
 
     def _run_query(
         self,
         *,
-        index_name: str,
-        field_name: str,
-        match_ref: int,
-        score_ref: int,
         query: str,
         top_k: int,
-    ) -> list[tuple[str, float]]:
+    ) -> Any:
         statement = _build_fulltext_statement(
-            index_name=index_name,
-            field_name=field_name,
-            match_ref=match_ref,
-            score_ref=score_ref,
             timeout_seconds=self._search_config.bounded_timeout_seconds(),
         )
         variables = {"query": query, "limit": top_k, "chunk_strategy": self._chunk_strategy}
+        variables["title_boost"] = self._search_config.title_boost
+        variables["text_boost"] = self._search_config.text_boost
 
         if self._search_config.explain:
             self._connection.query(f"EXPLAIN FULL {statement}", variables)
 
-        rows = self._connection.query(statement, variables)
-        return _rows_to_ranked_pairs(rows)
+        return self._connection.query(statement, variables)
 
 
 def _build_fulltext_statement(
     *,
-    index_name: str,
-    field_name: str,
-    match_ref: int,
-    score_ref: int,
     timeout_seconds: int,
 ) -> str:
     return (
-        f"SELECT chunk_id, search::score({score_ref}) AS score "
-        f"FROM {_CHUNK_TABLE} WITH INDEX {index_name} "
-        f"WHERE chunk_strategy = $chunk_strategy AND {field_name} @{match_ref}@ $query "
-        f"ORDER BY score DESC LIMIT $limit TIMEOUT {timeout_seconds}s;"
+        "SELECT chunk_id, "
+        f"(search::score({_TITLE_REF}) * $title_boost) + "
+        f"(search::score({_TEXT_REF}) * $text_boost) AS score "
+        f"FROM {_CHUNK_TABLE} WITH INDEX {_TITLE_INDEX}, {_TEXT_INDEX} "
+        f"WHERE chunk_strategy = $chunk_strategy "
+        f"AND (title @{_TITLE_REF}@ $query OR text @{_TEXT_REF}@ $query) "
+        f"ORDER BY score DESC, chunk_id ASC LIMIT $limit TIMEOUT {timeout_seconds}s;"
     )
 
 
 def _rows_to_ranked_pairs(rows: Any) -> list[tuple[str, float]]:
-    if not isinstance(rows, list):
-        return []
-
     ranked: list[tuple[str, float]] = []
-    for row in rows:
+    for row in _iter_result_rows(rows):
         if not isinstance(row, dict):
             continue
         chunk_id = row.get("chunk_id")
@@ -173,4 +141,20 @@ def _rows_to_ranked_pairs(rows: Any) -> list[tuple[str, float]]:
         if not isinstance(chunk_id, str) or not isinstance(score, (int, float)):
             continue
         ranked.append((chunk_id, float(score)))
+    ranked.sort(key=lambda item: (-item[1], item[0]))
     return ranked
+
+
+def _iter_result_rows(rows: Any) -> list[Any]:
+    if isinstance(rows, dict):
+        return [rows]
+    if not isinstance(rows, list):
+        return []
+
+    flattened: list[Any] = []
+    for row in rows:
+        if isinstance(row, list):
+            flattened.extend(row)
+        else:
+            flattened.append(row)
+    return flattened

@@ -25,6 +25,7 @@ def _engine_class():
 class _FakeFTSConnection:
     title_rows: list[dict[str, object]] = field(default_factory=list)
     text_rows: list[dict[str, object]] = field(default_factory=list)
+    combined_rows: list[dict[str, object]] | None = None
     error: Exception | None = None
     calls: list[tuple[str, dict[str, object] | None]] = field(default_factory=list)
 
@@ -36,12 +37,17 @@ class _FakeFTSConnection:
         self.calls.append((statement, variables))
         if self.error is not None:
             raise self.error
-        if "WITH INDEX chunks_title_fts" in statement:
-            return list(self.title_rows)
-        if "WITH INDEX chunks_text_fts" in statement:
-            return list(self.text_rows)
-        if statement.startswith("EXPLAIN FULL"):
-            return [{"plan": {"index": "chunks_title_fts"}}]
+        if statement.startswith("EXPLAIN FULL SELECT chunk_id, "):
+            return [{"plan": {"indexes": ["chunks_title_fts", "chunks_text_fts"]}}]
+        if "WITH INDEX chunks_title_fts, chunks_text_fts" in statement:
+            if self.combined_rows is not None:
+                return list(self.combined_rows)
+            return [
+                {"chunk_id": "chunk-a", "score": 4.5},
+                {"chunk_id": "chunk-dup", "score": 2.1},
+                {"chunk_id": "chunk-b", "score": 2.0},
+                {"chunk_id": "chunk-c", "score": 0.2},
+            ]
         return []
 
 
@@ -53,17 +59,8 @@ def test_search_returns_empty_for_blank_or_punctuation_queries_without_hitting_s
     assert engine.search("!!! ???", top_k=5) == []
 
 
-def test_search_uses_title_and_text_queries_with_bound_query_variables() -> None:
+def test_search_uses_one_query_with_bound_query_variables() -> None:
     connection = _FakeFTSConnection(
-        title_rows=[
-            {"chunk_id": "chunk-a", "score": 0.9},
-            {"chunk_id": "chunk-b", "score": 0.4},
-            {"chunk_id": "chunk-dup", "score": 0.3},
-        ],
-        text_rows=[
-            {"chunk_id": "chunk-dup", "score": 0.6},
-            {"chunk_id": "chunk-c", "score": 0.2},
-        ],
     )
     engine = _engine_class()(connection)
 
@@ -75,34 +72,29 @@ def test_search_uses_title_and_text_queries_with_bound_query_variables() -> None
         ("chunk-b", 2.0),
         ("chunk-c", 0.2),
     ]
-    assert len(connection.calls) == 2
+    assert len(connection.calls) == 1
 
-    title_statement, title_variables = connection.calls[0]
-    text_statement, text_variables = connection.calls[1]
-    assert "SELECT chunk_id" in title_statement
-    assert "FROM chunks" in title_statement
-    assert "WITH INDEX chunks_title_fts" in title_statement
-    assert "chunk_strategy = $chunk_strategy" in title_statement
-    assert "title @0@ $query" in title_statement
-    assert "ORDER BY score DESC" in title_statement
-    assert title_variables == {
+    statement, variables = connection.calls[0]
+    assert statement == (
+        "SELECT chunk_id, "
+        "(search::score(0) * $title_boost) + "
+        "(search::score(1) * $text_boost) AS score "
+        "FROM chunks WITH INDEX chunks_title_fts, chunks_text_fts "
+        "WHERE chunk_strategy = $chunk_strategy "
+        "AND (title @0@ $query OR text @1@ $query) "
+        "ORDER BY score DESC, chunk_id ASC LIMIT $limit TIMEOUT 5s;"
+    )
+    assert variables == {
         "query": "surreal retrieval quoted",
         "chunk_strategy": "contextual_512_50",
         "limit": 7,
+        "title_boost": 5.0,
+        "text_boost": 1.0,
     }
-
-    assert "WITH INDEX chunks_text_fts" in text_statement
-    assert "chunk_strategy = $chunk_strategy" in text_statement
-    assert "text @1@ $query" in text_statement
-    assert text_variables == title_variables
-    assert "surreal: retrieval!!!" not in title_statement
-    assert "surreal: retrieval!!!" not in text_statement
 
 
 def test_search_filters_to_configured_chunk_strategy() -> None:
-    connection = _FakeFTSConnection(
-        title_rows=[{"chunk_id": "chunk-active", "score": 1.0}],
-    )
+    connection = _FakeFTSConnection(combined_rows=[{"chunk_id": "chunk-active", "score": 5.0}])
     engine = _engine_class()(connection, chunk_strategy="heading_512_50")
 
     assert engine.search("surreal retrieval", top_k=3) == [("chunk-active", 5.0)]
