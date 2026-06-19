@@ -19,6 +19,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from dotmd.ingestion.pipeline import _model_to_table_suffix
 from dotmd.storage.surreal import (
     SurrealConnection,
     SurrealFeedbackStore,
@@ -32,7 +33,10 @@ from dotmd.storage.surreal_ops import (
     SurrealEmbeddedSafetyReport,
     assert_embedded_safety_gate_passed,
 )
-from dotmd.storage.surreal_schema import SURREAL_SCHEMA_VERSION
+from dotmd.storage.surreal_schema import (
+    SURREAL_SCHEMA_VERSION,
+    build_surreal_embedding_hnsw_index_statement,
+)
 
 _SAFE_TABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SQLITE_INTERNAL_PREFIXES = ("sqlite_",)
@@ -280,6 +284,39 @@ def _discover_chunk_strategies(known_tables: set[str]) -> list[str]:
     )
 
 
+def _runtime_embedding_model() -> str | None:
+    model_name = os.getenv("DOTMD_EMBEDDING_MODEL")
+    if model_name is None:
+        return None
+    model_name = model_name.strip()
+    return model_name or None
+
+
+def _resolve_vector_dataset_embedding_model(
+    *,
+    config_table: str,
+    model_key: str,
+    vec_config: dict[str, str],
+) -> str:
+    model_name = vec_config.get("model")
+    if model_name not in (None, ""):
+        return str(model_name)
+
+    runtime_model = _runtime_embedding_model()
+    if runtime_model is None:
+        raise ValueError(
+            f"{config_table} is missing required 'model' key for model_key={model_key!r}"
+        )
+
+    runtime_model_key = _model_to_table_suffix(runtime_model).removeprefix("_")
+    if runtime_model_key != model_key:
+        raise ValueError(
+            f"{config_table} is missing required 'model' key for model_key={model_key!r}; "
+            f"DOTMD_EMBEDDING_MODEL={runtime_model!r} resolves to {runtime_model_key!r}"
+        )
+    return runtime_model
+
+
 def _discover_vector_datasets(
     conn: sqlite3.Connection,
     known_tables: set[str],
@@ -312,7 +349,11 @@ def _discover_vector_datasets(
             _SqliteVectorDataset(
                 chunk_strategy=strategy,
                 model_key=model_key,
-                embedding_model=str(vec_config["model"]),
+                embedding_model=_resolve_vector_dataset_embedding_model(
+                    config_table=config_table,
+                    model_key=model_key,
+                    vec_config=vec_config,
+                ),
                 vector_dimension=int(vec_config["dim"]) if "dim" in vec_config else None,
                 meta_table=meta_table,
                 vec_table=vec_table,
@@ -977,10 +1018,14 @@ def load_graph_rows_for_surreal(graph_export_path: Path) -> dict[str, Any]:
         }
         for row in rows.get("entities", [])
     ]
-    relations = [
-        {
+    relations_by_id: dict[str, dict[str, Any]] = {}
+    for row in rows.get("relations", []):
+        relation_id = str(row["relation_id"])
+        relations_by_id.setdefault(
+            relation_id,
+            {
             "schema_version": SURREAL_SCHEMA_VERSION,
-            "relation_id": str(row["relation_id"]),
+            "relation_id": relation_id,
             "rel_type": str(row.get("relation_type") or row.get("rel_type")),
             "relation_type": str(row.get("relation_type") or row.get("rel_type")),
             "weight": float(row.get("weight", 1.0)),
@@ -992,9 +1037,9 @@ def load_graph_rows_for_surreal(graph_export_path: Path) -> dict[str, Any]:
             else "entities",
             "properties": dict(row.get("properties", {})),
             "metadata": {},
-        }
-        for row in rows.get("relations", [])
-    ]
+            },
+        )
+    relations = list(relations_by_id.values())
     return {
         "inventory": dict(payload.get("inventory", {})),
         "exported_at": payload.get("exported_at"),
@@ -1269,10 +1314,16 @@ def _connection_for_target(
 
 def _count_target_rows(connection: SurrealConnection) -> dict[str, int]:
     def count(table_name: str) -> int:
-        rows = _query_surreal_rows(
-            connection,
-            f"SELECT count() AS count FROM {table_name} GROUP ALL;",
-        )
+        try:
+            rows = _query_surreal_rows(
+                connection,
+                f"SELECT count() AS count FROM {table_name} GROUP ALL;",
+            )
+        except Exception as exc:
+            message = str(exc)
+            if f"The table '{table_name}' does not exist" in message:
+                return 0
+            raise
         if not rows:
             return 0
         raw_count = rows[0].get("count")
@@ -1500,6 +1551,26 @@ def _write_verification_progress(
     checkpoint.applied_count = applied_count
     checkpoint.verified_count = applied_count if status == "applied" else 0
     checkpoint.error = error
+    _write_progress_snapshot(progress_path, report=report, checkpoint=checkpoint)
+
+
+def _write_source_capture_step_progress(
+    progress_path: Path | None,
+    *,
+    report: SurrealMigrationReport,
+    applied_count: int,
+    planned_count: int,
+    status: str = "running",
+    error: str | None = None,
+) -> None:
+    checkpoint = SurrealMigrationPhaseCheckpoint(
+        SurrealMigrationPhaseName.SOURCE_CAPTURE,
+        planned_count=max(1, planned_count),
+        applied_count=applied_count,
+        verified_count=applied_count if status == "applied" else 0,
+        status=status,
+        error=error,
+    )
     _write_progress_snapshot(progress_path, report=report, checkpoint=checkpoint)
 
 
@@ -1935,17 +2006,22 @@ def _relax_embedding_schema_for_bulk_load(connection: SurrealConnection) -> None
     connection.query("ALTER TABLE embeddings SCHEMALESS;")
 
 
-def _rebuild_retrieval_indexes(connection: SurrealConnection) -> int:
+def _rebuild_retrieval_indexes(
+    connection: SurrealConnection,
+    *,
+    embedding_dimension: int,
+) -> int:
     applied = 0
     for _index_name, statement in _DEFERRED_EMBEDDING_INDEX_DEFINITIONS:
         connection.query(statement)
         applied += 1
-    try:
-        connection.query(f"REBUILD INDEX {HNSW_EMBEDDING_INDEX_NAME} ON TABLE embeddings;")
-    except Exception as exc:
-        if "does not exist" in str(exc):
-            return applied
-        raise
+    connection.query(
+        build_surreal_embedding_hnsw_index_statement(
+            table_name="embeddings",
+            index_name=HNSW_EMBEDDING_INDEX_NAME,
+            embedding_dimension=embedding_dimension,
+        )
+    )
     return applied + 1
 
 
@@ -2023,26 +2099,27 @@ def _write_index_phase(
                 checkpoint=checkpoint,
                 applied_count=applied_count,
             )
-        try:
-            _query_with_progress_heartbeat(
-                connection,
-                f"REBUILD INDEX {HNSW_EMBEDDING_INDEX_NAME} ON TABLE embeddings;",
-                report=report,
-                checkpoint=checkpoint,
-                progress_path=progress_path,
-                applied_count=applied_count,
-            )
-        except Exception as exc:
-            if "does not exist" not in str(exc):
-                raise
-        else:
-            applied_count += 1
-            _write_progress_snapshot(
-                progress_path,
-                report=report,
-                checkpoint=checkpoint,
-                applied_count=applied_count,
-            )
+        if report.expected_vector_dimension is None:
+            raise ValueError("expected_vector_dimension is required to define embeddings HNSW index")
+        _query_with_progress_heartbeat(
+            connection,
+            build_surreal_embedding_hnsw_index_statement(
+                table_name="embeddings",
+                index_name=HNSW_EMBEDDING_INDEX_NAME,
+                embedding_dimension=report.expected_vector_dimension,
+            ),
+            report=report,
+            checkpoint=checkpoint,
+            progress_path=progress_path,
+            applied_count=applied_count,
+        )
+        applied_count += 1
+        _write_progress_snapshot(
+            progress_path,
+            report=report,
+            checkpoint=checkpoint,
+            applied_count=applied_count,
+        )
     except Exception as exc:
         checkpoint.status = "failed"
         checkpoint.error = str(exc)
@@ -2063,7 +2140,7 @@ def _write_index_phase(
     report.deferred_indexes_status = "built"
     report.deferred_indexes_expected = list(DEFERRED_EMBEDDING_INDEX_NAMES)
     report.deferred_indexes_present = list(DEFERRED_EMBEDDING_INDEX_NAMES)
-    report.hnsw_rebuild_status = "rebuilt" if applied_count > len(DEFERRED_EMBEDDING_INDEX_NAMES) else "not_present"
+    report.hnsw_rebuild_status = "built" if applied_count > len(DEFERRED_EMBEDDING_INDEX_NAMES) else "not_present"
     _write_progress_snapshot(progress_path, report=report, checkpoint=checkpoint)
 
 
@@ -2093,6 +2170,7 @@ def verify_surreal_migration_target(
         mode=SurrealMigrationMode.VERIFY,
         overwrite_policy=overwrite_policy,
     )
+    report.recompute_guard_status = "passed"
     graph_rows = load_graph_rows_for_surreal(Path(graph_export_path))
     feedback_rows = load_feedback_rows_for_surreal(Path(feedback_export_path))
     with _connection_for_target(
@@ -2232,6 +2310,25 @@ def run_surreal_migration(
             errors=input_errors,
         )
 
+    source_capture_steps = 6
+    resume_phase_names: set[str] = set()
+    if not resume_from_progress:
+        progress_report = _empty_report(
+            mode=mode,
+            target_mode=target_mode,
+            overwrite_policy=overwrite_policy,
+            target_url=target_url,
+            target_namespace=target_namespace,
+            target_database=target_database,
+            status="source_capture",
+            errors=[],
+        )
+        _write_source_capture_step_progress(
+            progress_path,
+            report=progress_report,
+            applied_count=0,
+            planned_count=source_capture_steps,
+        )
     try:
         manifest = build_surreal_migration_manifest(
             sqlite_snapshot_path=Path(sqlite_snapshot_path),
@@ -2255,6 +2352,17 @@ def run_surreal_migration(
         )
 
     report = _report_from_manifest(manifest, mode=mode, overwrite_policy=overwrite_policy)
+    resume_phase_names = _load_resume_phase_names(
+        progress_path,
+        report=report,
+        enabled=resume_from_progress,
+    )
+    _write_source_capture_step_progress(
+        progress_path,
+        report=report,
+        applied_count=1,
+        planned_count=source_capture_steps,
+    )
 
     if requested_recompute_steps:
         report.status = "recompute_blocked"
@@ -2297,8 +2405,26 @@ def run_surreal_migration(
         Path(sqlite_snapshot_path),
         include_vectors=False,
     )
+    _write_source_capture_step_progress(
+        progress_path,
+        report=report,
+        applied_count=2,
+        planned_count=source_capture_steps,
+    )
     graph_rows = load_graph_rows_for_surreal(Path(graph_export_path))
+    _write_source_capture_step_progress(
+        progress_path,
+        report=report,
+        applied_count=3,
+        planned_count=source_capture_steps,
+    )
     feedback_rows = load_feedback_rows_for_surreal(Path(feedback_export_path))
+    _write_source_capture_step_progress(
+        progress_path,
+        report=report,
+        applied_count=4,
+        planned_count=source_capture_steps,
+    )
 
     if target_mode is SurrealTargetMode.EMBEDDED_LOCAL:
         if gate_report_path is None:
@@ -2315,6 +2441,12 @@ def run_surreal_migration(
             report.errors.append(str(exc))
             return report
         report.gate_status = "passed"
+    _write_source_capture_step_progress(
+        progress_path,
+        report=report,
+        applied_count=5,
+        planned_count=source_capture_steps,
+    )
 
     schema_info = _inspect_target(
         report,
@@ -2322,10 +2454,12 @@ def run_surreal_migration(
         target_namespace=target_namespace,
         target_database=target_database,
     )
-    resume_phase_names = _load_resume_phase_names(
+    _write_source_capture_step_progress(
         progress_path,
         report=report,
-        enabled=resume_from_progress,
+        applied_count=6,
+        planned_count=source_capture_steps,
+        status="applied",
     )
     if (
         "SCHEMALESS" in schema_info.get("table_modes", "")

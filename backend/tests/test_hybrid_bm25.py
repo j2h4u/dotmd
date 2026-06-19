@@ -192,6 +192,32 @@ class TestRerankCandidatePool:
         assert "graph" in pool["engine_results"]
         assert pool["engine_results"]["graph"] == [("gx1", 0.6), ("s1", 0.4)]
 
+    def test_collect_candidate_pool_treats_graph_enrichment_errors_as_nonfatal(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Graph enrichment is additive; backend timeouts must not fail search."""
+        service = _make_service(tmp_path)
+
+        service._semantic_engine = MagicMock()
+        service._semantic_engine.search.return_value = [("s1", 0.9)]
+        service._keyword_engine = MagicMock()
+        service._keyword_engine.search.return_value = []
+        service._graph_direct_engine = MagicMock()
+        service._graph_direct_engine.search.return_value = []
+        service._graph_engine = MagicMock()
+        service._graph_engine.search.side_effect = Exception("query timed out")
+
+        pool = service._collect_candidate_pool(
+            search_query="expanded query",
+            original_query="original query",
+            mode="hybrid",
+            pool_size=10,
+        )
+
+        assert pool["fused"]
+        assert "graph" not in pool["engine_results"]
+
     def test_collect_candidate_pool_calls_each_engine_once(self, tmp_path: Path) -> None:
         """One search request collects candidates from each engine exactly once."""
         service = _make_service(tmp_path)

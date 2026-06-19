@@ -275,7 +275,6 @@ def validate_shadow_metric_bundle(bundle: ShadowMetricBundle) -> dict[str, objec
         "recommendation_gate",
         "missing",
         "record_counts",
-        "hnsw_build_seconds",
         "surrealkv_file_size_bytes",
         "query_latency_p50_ms",
         "query_latency_p95_ms",
@@ -285,6 +284,10 @@ def validate_shadow_metric_bundle(bundle: ShadowMetricBundle) -> dict[str, objec
     for key in required_scalars:
         if payload.get(key) is None:
             raise ValueError(f"{key} is required")
+    if payload.get("hnsw_build_seconds") is None:
+        missing = payload.get("missing")
+        if payload.get("passed") is not False or not isinstance(missing, list | tuple) or "HNSW build time" not in missing:
+            raise ValueError("hnsw_build_seconds is required unless HNSW build time is marked missing")
 
     raw_memory = bundle.memory
     if raw_memory is None or not isinstance(raw_memory, Mapping):
@@ -307,7 +310,9 @@ def validate_shadow_metric_bundle(bundle: ShadowMetricBundle) -> dict[str, objec
         "recommendation_gate": bundle.recommendation_gate,
         "missing": list(bundle.missing or ()),
         "record_counts": dict(bundle.record_counts or {}),
-        "hnsw_build_seconds": float(bundle.hnsw_build_seconds),
+        "hnsw_build_seconds": None
+        if bundle.hnsw_build_seconds is None
+        else float(bundle.hnsw_build_seconds),
         "surrealkv_file_size_bytes": int(bundle.surrealkv_file_size_bytes),
         "query_latency_p50_ms": float(bundle.query_latency_p50_ms),
         "query_latency_p95_ms": float(bundle.query_latency_p95_ms),

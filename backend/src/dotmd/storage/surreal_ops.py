@@ -136,6 +136,10 @@ class SurrealMigrationEvidenceReport:
     unresolved_blockers: list[str]
     recommendation: str
     report_status: str
+    deferred_indexes_status: str = "not_evaluated"
+    deferred_indexes_expected: list[str] = field(default_factory=list)
+    deferred_indexes_present: list[str] = field(default_factory=list)
+    hnsw_rebuild_status: str = "not_evaluated"
     report_samples: dict[str, list[str]] = field(default_factory=dict)
 
 
@@ -649,6 +653,14 @@ def classify_surreal_migration_report(
         partial_writes_present=partial_writes_present,
         last_successful_phase=last_successful_phase,
         failed_phase=failed_phase,
+        deferred_indexes_status=str(
+            getattr(migration_report, "deferred_indexes_status", "not_evaluated")
+        ),
+        deferred_indexes_expected=list(
+            getattr(migration_report, "deferred_indexes_expected", [])
+        ),
+        deferred_indexes_present=list(getattr(migration_report, "deferred_indexes_present", [])),
+        hnsw_rebuild_status=str(getattr(migration_report, "hnsw_rebuild_status", "not_evaluated")),
         unresolved_blockers=blockers,
         recommendation=recommendation,
         report_status=report_status,
@@ -723,6 +735,16 @@ def write_surreal_migration_evidence_reports(
     lines.append(f"- no_recompute_verified: {str(evidence.no_recompute_verified).lower()}")
     lines.append(f"- restore_status: {evidence.restore_manifest.restore_status}")
     lines.append(f"- rollback_evidence: {evidence.rollback_evidence or 'not recorded'}")
+    lines.append(f"- deferred_indexes_status: {evidence.deferred_indexes_status}")
+    lines.append(f"- hnsw_rebuild_status: {evidence.hnsw_rebuild_status}")
+    lines.append(
+        "- deferred_indexes_expected: "
+        + (", ".join(evidence.deferred_indexes_expected) if evidence.deferred_indexes_expected else "none")
+    )
+    lines.append(
+        "- deferred_indexes_present: "
+        + (", ".join(evidence.deferred_indexes_present) if evidence.deferred_indexes_present else "none")
+    )
     if evidence.cheap_invariants:
         lines.append("- cheap_invariants:")
         lines.extend(f"  - {item}" for item in evidence.cheap_invariants)

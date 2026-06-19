@@ -89,6 +89,22 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _write_pipeline_init_progress(step: str, status: str, error: str | None = None) -> None:
+    progress_path = os.environ.get("DOTMD_INIT_PROGRESS_PATH", "").strip()
+    if not progress_path:
+        return
+    payload = {
+        "schema_version": "dotmd-init-progress-v1",
+        "step": step,
+        "status": status,
+        "error": error,
+        "updated_at": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    }
+    path = Path(progress_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 @_dataclass
 class _ExtractionBundle:
     """Grouped extraction results from all extractors."""
@@ -200,6 +216,7 @@ class IndexingPipeline:
         # -- Unified SQLite connection ----------------------------------------
         # ONE connection shared by metadata store, vec store, FTS5, and
         # file trackers.  sqlite-vec extension loaded once here.
+        _write_pipeline_init_progress("pipeline:sqlite_connect", "running")
         self._conn = sqlite3.connect(
             str(settings.index_db_path),
             check_same_thread=False,
@@ -209,8 +226,10 @@ class IndexingPipeline:
         self._conn.enable_load_extension(True)
         sqlite_vec.load(self._conn)
         self._conn.enable_load_extension(False)
+        _write_pipeline_init_progress("pipeline:sqlite_connect", "applied")
 
         # -- Strategy + model table name derivation ---------------------------
+        _write_pipeline_init_progress("pipeline:table_names", "running")
         strategy = re.sub(r"[^a-z0-9_]", "_", str(settings.chunk_strategy).lower())
         model_suffix = _model_to_table_suffix(settings.embedding_model)
 
@@ -222,8 +241,10 @@ class IndexingPipeline:
         vec_table = f"vec_chunks_{strategy}{model_suffix}"
         chunk_fp_table = f"chunk_fingerprints_{strategy}"
         meta_fp_table = f"meta_fingerprints_{strategy}{model_suffix}"
+        _write_pipeline_init_progress("pipeline:table_names", "applied")
 
         # -- storage backends --------------------------------------------------
+        _write_pipeline_init_progress("pipeline:metadata_store", "running")
         self._metadata_store = SQLiteMetadataStore(
             conn=self._conn,
             table_name=self._chunks_table,
@@ -235,15 +256,20 @@ class IndexingPipeline:
             settings,
             self._metadata_store,
         )
+        _write_pipeline_init_progress("pipeline:metadata_store", "applied")
 
         from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
 
+        _write_pipeline_init_progress("pipeline:vector_store", "running")
         self._vector_store: VectorStoreProtocol = SQLiteVecVectorStore(
             conn=self._conn,
             table_name=vec_table,
         )
+        _write_pipeline_init_progress("pipeline:vector_store", "applied")
 
+        _write_pipeline_init_progress("pipeline:graph_store", "running")
         self._graph_store = _create_graph_store(settings)
+        _write_pipeline_init_progress("pipeline:graph_store", "applied")
 
         # -- Two file trackers with different checksum formulas -----------------
         # ADR: Two-fingerprint architecture for granular change detection.
@@ -251,6 +277,7 @@ class IndexingPipeline:
         # meta_tracker: hash(title + tags) → detects metadata-only changes →
         #   1 TEI call (e_meta) + local fusion recompute (no body re-embed)
         # This prevents 26hr full reindex when only tags/title change.
+        _write_pipeline_init_progress("pipeline:file_trackers", "running")
         self._chunk_tracker = FileTracker(
             self._conn,
             table_name=chunk_fp_table,
@@ -261,21 +288,25 @@ class IndexingPipeline:
             table_name=meta_fp_table,
             checksum_fn=meta_checksum,
         )
+        _write_pipeline_init_progress("pipeline:file_trackers", "applied")
 
         # -- VecComponentStore: raw per-component embedding BLOBs ---------------
         # Stores e_text (per chunk_id) and e_meta (per canonical file path)
         # for the dual-encoder architecture. Authoritative e_text source for
         # the metadata-only fast path and weight-change recompute.
+        _write_pipeline_init_progress("pipeline:vec_components", "running")
         vec_components_table = f"vec_components_{strategy}{model_suffix}"
         self._vec_components = VecComponentStore(
             conn=self._conn,
             table_name=vec_components_table,
         )
+        _write_pipeline_init_progress("pipeline:vec_components", "applied")
 
         # -- search_log table --------------------------------------------------
         # Shared log for all (strategy, model) combos — no suffix needed.
         # mode/reranked columns included for Phase 999.15/999.16 calibration use.
         # reranked is INTEGER (0/1) — SQLite has no native BOOLEAN type.
+        _write_pipeline_init_progress("pipeline:search_log", "running")
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS search_log (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -292,8 +323,10 @@ class IndexingPipeline:
         # trimming and potential future covering indexes.
         self._conn.execute("CREATE INDEX IF NOT EXISTS search_log_id_idx ON search_log(id)")
         self._conn.commit()
+        _write_pipeline_init_progress("pipeline:search_log", "applied")
 
         # -- search engines (used for encoding during indexing) ----------------
+        _write_pipeline_init_progress("pipeline:search_engines", "running")
         self._semantic_engine = SemanticSearchEngine(
             self._vector_store,
             settings.embedding_model,
@@ -305,8 +338,10 @@ class IndexingPipeline:
             self._conn,
             table_name=self._fts_table,
         )
+        _write_pipeline_init_progress("pipeline:search_engines", "applied")
 
         # -- extractors --------------------------------------------------------
+        _write_pipeline_init_progress("pipeline:extractors", "running")
         self._structural_extractor = StructuralExtractor()
         self._keyterm_extractor = KeyTermExtractor()
         self._extraction_cache: ExtractionCache | None = None
@@ -333,19 +368,24 @@ class IndexingPipeline:
                 threshold=0.5,
                 extraction_cache=self._extraction_cache,
             )
+        _write_pipeline_init_progress("pipeline:extractors", "applied")
 
         # Global embedding cache — keyed on (text_hash, model_name).
         # Survives file moves; invalidated automatically on embedding model change.
+        _write_pipeline_init_progress("pipeline:embedding_cache", "running")
         self._embedding_cache = EmbeddingCache(self._conn, settings.embedding_model)
         if self._embedding_cache.should_invalidate():
             logger.info("Embedding model changed — clearing embedding_cache")
             self._embedding_cache.clear()
         else:
             self._embedding_cache.update_model_sentinel()
+        _write_pipeline_init_progress("pipeline:embedding_cache", "applied")
 
         # Startup integrity checks (order matters: schema wipe first, then weights)
+        _write_pipeline_init_progress("pipeline:startup_checks", "running")
         self._check_schema_version()  # Must run first (may wipe state)
         self._check_weights_changed()  # Runs after schema check (uses intact state)
+        _write_pipeline_init_progress("pipeline:startup_checks", "applied")
 
     # ------------------------------------------------------------------
     # Search logging

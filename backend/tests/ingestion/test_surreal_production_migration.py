@@ -206,6 +206,56 @@ def test_streaming_embedding_rows_normalize_missing_text_hash(tmp_path: Path) ->
     assert "embedding" not in materialized["embeddings"][0]
 
 
+def test_missing_vec_config_model_uses_matching_runtime_embedding_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dotmd.ingestion.migrate_surreal import (  # type: ignore[import-not-found]
+        load_sqlite_rows_for_surreal,
+    )
+
+    inputs = _build_inputs(tmp_path)
+    with sqlite3.connect(inputs["sqlite_snapshot_path"]) as conn:
+        conn.execute(
+            "DELETE FROM vec_config_contextual_512_50_multilingual_e5_large WHERE key = 'model'"
+        )
+
+    monkeypatch.setenv("DOTMD_EMBEDDING_MODEL", "intfloat/multilingual-e5-large")
+
+    rows = load_sqlite_rows_for_surreal(inputs["sqlite_snapshot_path"])
+
+    assert rows["embedding_model"] == "intfloat/multilingual-e5-large"
+    assert {row["embedding_model"] for row in rows["embeddings"]} == {
+        "intfloat/multilingual-e5-large",
+    }
+
+
+def test_missing_vec_config_model_with_mismatching_runtime_embedding_model_raises_value_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dotmd.ingestion.migrate_surreal import (  # type: ignore[import-not-found]
+        load_sqlite_rows_for_surreal,
+    )
+
+    inputs = _build_inputs(tmp_path)
+    with sqlite3.connect(inputs["sqlite_snapshot_path"]) as conn:
+        conn.execute(
+            "DELETE FROM vec_config_contextual_512_50_multilingual_e5_large WHERE key = 'model'"
+        )
+
+    monkeypatch.setenv("DOTMD_EMBEDDING_MODEL", "vendor/other-model")
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"vec_config_contextual_512_50_multilingual_e5_large is missing required 'model' "
+            r"key for model_key='multilingual_e5_large'"
+        ),
+    ):
+        load_sqlite_rows_for_surreal(inputs["sqlite_snapshot_path"])
+
+
 def test_migration_discovers_multiple_chunk_strategy_model_pairs(tmp_path: Path) -> None:
     from dotmd.ingestion.migrate_surreal import (  # type: ignore[import-not-found]
         SurrealTargetMode,

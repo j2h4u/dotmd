@@ -221,7 +221,6 @@ def test_guardrails_reject_zero_baseline_field(
     ("override_key", "override_value", "match"),
     [
         ("passed", None, "passed"),
-        ("hnsw_build_seconds", None, "hnsw_build_seconds"),
         ("surrealkv_file_size_bytes", None, "surrealkv_file_size_bytes"),
         ("query_latency_p95_ms", None, "query_latency_p95_ms"),
         ("record_counts", None, "record_counts"),
@@ -238,6 +237,26 @@ def test_validation_rejects_missing_required_fields(
 
     with pytest.raises(ValueError, match=match):
         module.validate_shadow_metric_bundle(bundle)
+
+
+def test_validation_allows_missing_hnsw_build_time_only_as_failed_scale_evidence() -> None:
+    module = _module()
+    bundle = _make_bundle(
+        overrides={
+            "passed": False,
+            "failure_category": "fail: unavailable scale evidence",
+            "recommendation_gate": "fail",
+            "missing": ("HNSW build time",),
+            "hnsw_build_seconds": None,
+        }
+    )
+
+    payload = module.validate_shadow_metric_bundle(bundle)
+
+    assert payload["passed"] is False
+    assert payload["recommendation_gate"] == "fail"
+    assert payload["missing"] == ["HNSW build time"]
+    assert payload["hnsw_build_seconds"] is None
 
 
 def test_capture_starts_tracemalloc_so_heap_is_nonzero() -> None:

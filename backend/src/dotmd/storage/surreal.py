@@ -121,7 +121,9 @@ class SurrealConnection:
     def __init__(self, config: SurrealStoreConfig) -> None:
         self.config = config
         self._db = cast(Any, Surreal(config.url))
-        self._db.connect()
+        connect = getattr(self._db, "connect", None)
+        if connect is not None:
+            connect()
         self._db.use(config.namespace, config.database)
 
     def __enter__(self) -> SurrealConnection:
@@ -135,7 +137,11 @@ class SurrealConnection:
         return self._db
 
     def close(self) -> None:
-        self._db.close()
+        try:
+            self._db.close()
+        except NotImplementedError:
+            # The blocking HTTP client in surrealdb-py 2.x has no close hook.
+            return
 
     def query(self, statement: str, variables: dict[str, Any] | None = None) -> Any:
         return self._db.query(statement, variables)
@@ -168,7 +174,12 @@ class SurrealConnection:
         return self._db.delete(record)
 
     def select(self, record: RecordID | str) -> Any:
-        selected = self._db.select(record)
+        try:
+            selected = self._db.select(record)
+        except Exception as exc:
+            if "does not exist" in str(exc):
+                return {}
+            raise
         if isinstance(record, RecordID):
             if isinstance(selected, list):
                 return selected[0] if selected else {}
@@ -176,7 +187,12 @@ class SurrealConnection:
         return selected
 
     def scan_table(self, table_name: str) -> list[dict[str, Any]]:
-        selected = self._db.select(table_name)
+        try:
+            selected = self._db.select(table_name)
+        except Exception as exc:
+            if f"The table '{table_name}' does not exist" in str(exc):
+                return []
+            raise
         if not isinstance(selected, list):
             return []
         return [dict(row) for row in selected if isinstance(row, dict)]

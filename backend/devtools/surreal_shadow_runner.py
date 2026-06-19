@@ -1123,13 +1123,19 @@ def _write_source_capture_output(
 
 
 def _build_candidate_connection(config: ShadowRunConfig) -> SurrealConnection:
-    return SurrealConnection(
+    connection = SurrealConnection(
         SurrealStoreConfig(
             url=config.target_url,
             namespace=config.target_namespace,
             database=config.target_database,
         )
     )
+    surreal_user = os.environ.get("SURREAL_USER", "").strip()
+    surreal_pass = os.environ.get("SURREAL_PASS", "").strip()
+    if surreal_user and surreal_pass:
+        connection.raw.signin({"username": surreal_user, "password": surreal_pass})
+        connection.raw.use(config.target_namespace, config.target_database)
+    return connection
 
 
 def _write_stripped_acceptance_rows(rows: tuple[dict[str, str], ...]) -> Path | None:

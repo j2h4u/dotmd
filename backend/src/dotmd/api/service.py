@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sqlite3
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -49,6 +50,22 @@ logger = logging.getLogger(__name__)
 
 ACTIVE_FILTER_OVERFETCH_FACTOR = 5
 TELEGRAM_REF_PREFIX = "telegram:"
+
+
+def _write_service_init_progress(step: str, status: str, error: str | None = None) -> None:
+    progress_path = os.environ.get("DOTMD_INIT_PROGRESS_PATH", "").strip()
+    if not progress_path:
+        return
+    payload = {
+        "schema_version": "dotmd-init-progress-v1",
+        "step": step,
+        "status": status,
+        "error": error,
+        "updated_at": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    }
+    path = Path(progress_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _search_mode_log_label(mode: SearchMode | str) -> str:
@@ -261,9 +278,12 @@ class DotMDService:
         self._settings = settings or load_settings()
 
         # Indexing pipeline (also creates storage backends and extractors).
+        _write_service_init_progress("service:pipeline", "running")
         self._pipeline = IndexingPipeline(self._settings)
+        _write_service_init_progress("service:pipeline", "applied")
 
         # Search engines -- reuse stores and shared connection from pipeline.
+        _write_service_init_progress("service:semantic_engine", "running")
         self._semantic_engine = SemanticSearchEngine(
             self._pipeline.vector_store,
             self._settings.embedding_model,
@@ -273,6 +293,8 @@ class DotMDService:
             use_prefix=self._settings.needs_embedding_prefix,
             query_instruction=self._settings.query_instruction,
         )
+        _write_service_init_progress("service:semantic_engine", "applied")
+        _write_service_init_progress("service:keyword_graph_engines", "running")
         self._keyword_engine = self._pipeline.keyword_engine
         self._graph_engine = GraphSearchEngine(
             self._pipeline.graph_store,
@@ -281,28 +303,37 @@ class DotMDService:
         self._graph_direct_engine = GraphDirectEngine(
             self._pipeline.graph_store,
         )
+        _write_service_init_progress("service:keyword_graph_engines", "applied")
 
         # Load acronym dictionary if available
+        _write_service_init_progress("service:acronyms", "running")
         acronym_dict = self._load_acronyms()
+        _write_service_init_progress("service:acronyms", "applied")
 
         # Query expansion and reranking.
+        _write_service_init_progress("service:query_reranker", "running")
         self._query_expander = QueryExpander(
             acronym_dict=acronym_dict,
         )
         self._reranker_factory = RerankerFactory(self._settings)
+        _write_service_init_progress("service:query_reranker", "applied")
 
         # Background trickle indexer
+        _write_service_init_progress("service:trickle_sources", "running")
         self._trickle_indexer = TrickleIndexer(self._settings, self._pipeline)
         self._source_provenance_ready_strategies: set[str] = set()
         self._source_runtime_factory: SourceRuntimeFactory = self._pipeline.source_runtime_factory
         self._telegram_provider = self._build_telegram_provider()
+        _write_service_init_progress("service:trickle_sources", "applied")
 
         # Federated fan-out infrastructure (cycle-2 HIGH-6, cycle-4 HIGH)
         # Build lifecycle bundles once at init; per-source failures are recorded
         # and surfaced as persistent SourceStatus entries (D-08).
+        _write_service_init_progress("service:federated_bundles", "running")
         self._lifecycle_bundles: dict[str, Any] = {}
         self._lifecycle_init_errors: dict[str, str] = {}
         self._build_federated_bundles()
+        _write_service_init_progress("service:federated_bundles", "applied")
 
         # Dedicated single-worker executor for local search sequence (cycle-4 HIGH).
         # Cross-request mutual exclusion: max_workers=1 forces concurrent
@@ -313,6 +344,7 @@ class DotMDService:
             max_workers=1,
             thread_name_prefix="dotmd-local-search",
         )
+        _write_service_init_progress("service:complete", "applied")
 
     def _build_telegram_provider(self) -> ApplicationSourceProviderProtocol | None:
         """Build the optional Telegram provider from the source lifecycle."""
@@ -1418,7 +1450,7 @@ class DotMDService:
                     top_k=pool_size,
                     seed_chunk_ids=seed_ids,
                 )
-            except (RuntimeError, ValueError):
+            except Exception:
                 logger.warning(
                     "graph enrichment failed; continuing with primary fused results",
                     exc_info=True,

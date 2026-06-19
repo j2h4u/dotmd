@@ -989,6 +989,7 @@ def test_list_phase_progress_is_written_per_batch(tmp_path: Path) -> None:
         target_database="phase43",
         source_capture_manifest=None,
         phase_checkpoints=[checkpoint],
+        expected_vector_dimension=1024,
     )
     batch_lengths: list[int] = []
 
@@ -1035,6 +1036,7 @@ def test_index_phase_progress_is_written_per_index_step(tmp_path: Path) -> None:
         target_database="phase43",
         source_capture_manifest=None,
         phase_checkpoints=[checkpoint],
+        expected_vector_dimension=1024,
     )
     queries: list[str] = []
 
@@ -1052,7 +1054,10 @@ def test_index_phase_progress_is_written_per_index_step(tmp_path: Path) -> None:
 
     progress_payload = json.loads(progress_path.read_text(encoding="utf-8"))
     assert len(queries) == 4
-    assert queries[-1] == "REBUILD INDEX embeddings_vector_hnsw ON TABLE embeddings;"
+    assert queries[-1] == (
+        "DEFINE INDEX embeddings_vector_hnsw ON TABLE embeddings FIELDS vector "
+        "HNSW DIMENSION 1024 DIST COSINE TYPE F32 EFC 40 M 12;"
+    )
     assert progress_payload["current_phase"] == "indexes"
     assert progress_payload["current_phase_applied_count"] == 4
     assert progress_payload["current_phase_percent"] == 100.0

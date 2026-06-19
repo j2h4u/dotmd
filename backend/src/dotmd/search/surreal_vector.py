@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from surrealdb import SurrealError
@@ -31,6 +35,23 @@ WHERE chunk_strategy = $chunk_strategy
   AND embedding_model = $embedding_model
 LIMIT 25;
 """.strip()
+
+
+def _write_vector_progress(suffix: str, status: str, error: str | None = None) -> None:
+    progress_path = os.environ.get("DOTMD_SEARCH_PROGRESS_PATH", "").strip()
+    progress_prefix = os.environ.get("DOTMD_SEARCH_PROGRESS_PREFIX", "").strip()
+    if not progress_path or not progress_prefix:
+        return
+    payload = {
+        "schema_version": "dotmd-search-progress-v1",
+        "step": f"{progress_prefix}:{suffix}",
+        "status": status,
+        "error": error,
+        "updated_at": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    }
+    path = Path(progress_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 class _SurrealQueryConnection(Protocol):
@@ -227,16 +248,24 @@ LIMIT $limit;
         if not query.strip():
             return []
 
+        _write_vector_progress("bounds", "running")
         self._validate_request_bounds(top_k)
+        _write_vector_progress("bounds", "applied")
+        _write_vector_progress("preconditions", "running")
         if not self._ensure_retrieval_preconditions():
+            _write_vector_progress("preconditions", "failed", "retrieval preconditions failed")
             return []
+        _write_vector_progress("preconditions", "applied")
 
         encoded_query = self._normalize_query_text(query)
+        _write_vector_progress("encode", "running")
         query_embedding = self.encode(encoded_query)
+        _write_vector_progress("encode", "applied")
 
         try:
             rows = []
             for table_name in self._embedding_tables:
+                _write_vector_progress(f"query:{table_name}", "running")
                 rows.extend(
                     self._connection.query(
                         self._build_search_statement(table_name=table_name, top_k=top_k),
@@ -248,7 +277,9 @@ LIMIT $limit;
                         },
                     )
                 )
+                _write_vector_progress(f"query:{table_name}", "applied")
         except (RuntimeError, SurrealError) as exc:
+            _write_vector_progress("query", "failed", str(exc))
             logger.warning(
                 "Surreal vector search failed: query_len=%d error_type=%s",
                 len(query),
