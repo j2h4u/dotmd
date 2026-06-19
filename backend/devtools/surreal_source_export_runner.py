@@ -27,7 +27,8 @@ except ModuleNotFoundError:  # pragma: no cover - import fallback for direct tes
     from dotmd.feedback import FeedbackStore
     from dotmd.storage.falkordb_graph import FalkorDBGraphStore
 
-GRAPH_EXPORT_PAGE_SIZE = 5_000
+DEFAULT_GRAPH_EXPORT_PAGE_SIZE = 5_000
+DEFAULT_GRAPH_QUERY_TIMEOUT_MS = 120_000
 
 
 @dataclass(slots=True, frozen=True)
@@ -39,6 +40,8 @@ class SurrealSourceExportRunnerConfig:
     index_dir: Path | None = None
     feedback_db: Path | None = None
     progress_interval_seconds: float = 5.0
+    graph_page_size: int = DEFAULT_GRAPH_EXPORT_PAGE_SIZE
+    graph_query_timeout_ms: int = DEFAULT_GRAPH_QUERY_TIMEOUT_MS
 
 
 @dataclass(slots=True, frozen=True)
@@ -126,6 +129,8 @@ def _page_query(
     params: dict[str, Any] | None,
     expected_total: int,
     category_label: str,
+    page_size: int,
+    query_timeout_ms: int,
 ) -> list[Any]:
     rows: list[Any] = []
     skip = 0
@@ -134,7 +139,8 @@ def _page_query(
         page_rows = _query_result_rows(
             graph.ro_query(
                 statement,
-                params={**(params or {}), "skip": skip, "limit": GRAPH_EXPORT_PAGE_SIZE},
+                params={**(params or {}), "skip": skip, "limit": page_size},
+                timeout=query_timeout_ms,
             )
         )
         rows.extend(page_rows)
@@ -142,9 +148,9 @@ def _page_query(
         _progress(
             f"graph export: {category_label} page {page} applied {len(rows)}/{expected_total}"
         )
-        if len(page_rows) < GRAPH_EXPORT_PAGE_SIZE:
+        if len(page_rows) < page_size:
             break
-        skip += GRAPH_EXPORT_PAGE_SIZE
+        skip += page_size
     if len(rows) != expected_total:
         raise RuntimeError(
             f"graph export: {category_label} count mismatch: expected {expected_total}, got {len(rows)}"
@@ -155,7 +161,12 @@ def _page_query(
     return rows
 
 
-def _read_graph_rows(graph_store: FalkorDBGraphStore) -> dict[str, list[dict[str, Any]]]:
+def _read_graph_rows(
+    graph_store: FalkorDBGraphStore,
+    *,
+    page_size: int = DEFAULT_GRAPH_EXPORT_PAGE_SIZE,
+    query_timeout_ms: int = DEFAULT_GRAPH_QUERY_TIMEOUT_MS,
+) -> dict[str, list[dict[str, Any]]]:
     graph = graph_store._graph
 
     _progress("graph export: reading File nodes")
@@ -167,6 +178,8 @@ def _read_graph_rows(graph_store: FalkorDBGraphStore) -> dict[str, list[dict[str
         params=None,
         expected_total=file_count,
         category_label="File nodes",
+        page_size=page_size,
+        query_timeout_ms=query_timeout_ms,
     )
 
     _progress("graph export: reading Section nodes")
@@ -178,6 +191,8 @@ def _read_graph_rows(graph_store: FalkorDBGraphStore) -> dict[str, list[dict[str
         params=None,
         expected_total=section_count,
         category_label="Section nodes",
+        page_size=page_size,
+        query_timeout_ms=query_timeout_ms,
     )
 
     _progress("graph export: reading Tag nodes")
@@ -189,6 +204,8 @@ def _read_graph_rows(graph_store: FalkorDBGraphStore) -> dict[str, list[dict[str
         params=None,
         expected_total=tag_count,
         category_label="Tag nodes",
+        page_size=page_size,
+        query_timeout_ms=query_timeout_ms,
     )
 
     _progress("graph export: reading Entity nodes")
@@ -200,6 +217,8 @@ def _read_graph_rows(graph_store: FalkorDBGraphStore) -> dict[str, list[dict[str
         params=None,
         expected_total=entity_count,
         category_label="Entity nodes",
+        page_size=page_size,
+        query_timeout_ms=query_timeout_ms,
     )
 
     _progress("graph export: reading Section NER links")
@@ -218,6 +237,8 @@ def _read_graph_rows(graph_store: FalkorDBGraphStore) -> dict[str, list[dict[str
         params=None,
         expected_total=section_ner_count,
         category_label="Section NER links",
+        page_size=page_size,
+        query_timeout_ms=query_timeout_ms,
     )
 
     section_ner_entities: dict[str, list[str]] = {}
@@ -243,6 +264,8 @@ def _read_graph_rows(graph_store: FalkorDBGraphStore) -> dict[str, list[dict[str
         params=None,
         expected_total=relation_count,
         category_label="relations",
+        page_size=page_size,
+        query_timeout_ms=query_timeout_ms,
     )
 
     nodes: list[dict[str, Any]] = []
@@ -536,8 +559,17 @@ def _feedback_store_path(config: SurrealSourceExportRunnerConfig) -> Path:
 
 
 def run_export_command(config: SurrealSourceExportRunnerConfig) -> SurrealSourceExportRunnerResult:
+    if config.graph_page_size < 1:
+        raise ValueError("graph_page_size must be positive")
+    if config.graph_query_timeout_ms < 1:
+        raise ValueError("graph_query_timeout_ms must be positive")
+
     graph_store = FalkorDBGraphStore(url=config.falkordb_url, graph_name=config.graph_name)
-    graph_data = _read_graph_rows(graph_store)
+    graph_data = _read_graph_rows(
+        graph_store,
+        page_size=config.graph_page_size,
+        query_timeout_ms=config.graph_query_timeout_ms,
+    )
     graph_rows = _transform_graph_rows(
         graph_data,
         progress_interval_seconds=config.progress_interval_seconds,
@@ -598,6 +630,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=5.0,
         help="Print progress after this many seconds while transforming rows.",
     )
+    parser.add_argument(
+        "--graph-page-size",
+        type=int,
+        default=DEFAULT_GRAPH_EXPORT_PAGE_SIZE,
+        help="Rows to read from FalkorDB per graph export page.",
+    )
+    parser.add_argument(
+        "--graph-query-timeout-ms",
+        type=int,
+        default=DEFAULT_GRAPH_QUERY_TIMEOUT_MS,
+        help="FalkorDB read-only query timeout for each graph export page.",
+    )
     return parser
 
 
@@ -614,6 +658,8 @@ def main(argv: list[str] | None = None) -> int:
             index_dir=args.index_dir,
             feedback_db=args.feedback_db,
             progress_interval_seconds=args.progress_interval_seconds,
+            graph_page_size=args.graph_page_size,
+            graph_query_timeout_ms=args.graph_query_timeout_ms,
         )
     )
     return 0

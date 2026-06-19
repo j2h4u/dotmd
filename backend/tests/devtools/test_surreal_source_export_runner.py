@@ -51,7 +51,7 @@ class _FakeGraph:
         counts: dict[str, int],
         rows: dict[str, list[object]],
     ) -> None:
-        self.calls: list[tuple[str, dict[str, object] | None]] = []
+        self.calls: list[tuple[str, dict[str, object] | None, int | None]] = []
         self.counts = counts
         self.rows = rows
 
@@ -60,8 +60,13 @@ class _FakeGraph:
         limit = int((params or {}).get("limit", 0) or 0)
         return self.rows[category][skip : skip + limit]
 
-    def ro_query(self, statement: str, params: dict[str, object] | None = None) -> _FakeQueryResult:
-        self.calls.append((statement, params))
+    def ro_query(
+        self,
+        statement: str,
+        params: dict[str, object] | None = None,
+        timeout: int | None = None,
+    ) -> _FakeQueryResult:
+        self.calls.append((statement, params, timeout))
         if statement == "MATCH (n:File) RETURN count(n)":
             return _FakeQueryResult([(self.counts["File"],)])
         if statement == "MATCH (n:File) RETURN n ORDER BY n.id SKIP $skip LIMIT $limit":
@@ -249,7 +254,6 @@ def test_run_export_command_writes_paged_graph_and_feedback_payloads(
     monkeypatch.setattr(runner, "FalkorDBGraphStore", _FakeGraphStore)
     monkeypatch.setattr(runner, "FeedbackStore", _FakeFeedbackStore)
     monkeypatch.setattr(runner, "_progress", progress_messages.append)
-    monkeypatch.setattr(runner, "GRAPH_EXPORT_PAGE_SIZE", 2)
 
     result = runner.run_export_command(
         runner.SurrealSourceExportRunnerConfig(
@@ -259,6 +263,8 @@ def test_run_export_command_writes_paged_graph_and_feedback_payloads(
             graph_name="dotmd",
             index_dir=tmp_path,
             progress_interval_seconds=9999.0,
+            graph_page_size=2,
+            graph_query_timeout_ms=12345,
         )
     )
 
@@ -268,6 +274,8 @@ def test_run_export_command_writes_paged_graph_and_feedback_payloads(
     assert result.exit_code == 0
     assert result.graph_output == graph_output
     assert result.feedback_output == feedback_output
+    fake_graph = _FakeGraphStore.last_instance._graph
+    assert any(call[2] == 12345 for call in fake_graph.calls)
     assert graph_payload["rows"]["files"] == [
         {
             "id": "file-a",
@@ -484,12 +492,14 @@ def test_run_export_command_writes_paged_graph_and_feedback_payloads(
     assert any(
         statement == "MATCH (n:File) RETURN n ORDER BY n.id SKIP $skip LIMIT $limit"
         and params == {"skip": 0, "limit": 2}
-        for statement, params in calls
+        and timeout == 12345
+        for statement, params, timeout in calls
     )
     assert any(
         statement == "MATCH (n:File) RETURN n ORDER BY n.id SKIP $skip LIMIT $limit"
         and params == {"skip": 2, "limit": 2}
-        for statement, params in calls
+        and timeout == 12345
+        for statement, params, timeout in calls
     )
 
 
@@ -521,7 +531,6 @@ def test_run_export_command_raises_when_paged_graph_rows_are_truncated(
     }
     monkeypatch.setattr(runner, "FalkorDBGraphStore", _FakeGraphStore)
     monkeypatch.setattr(runner, "FeedbackStore", _FakeFeedbackStore)
-    monkeypatch.setattr(runner, "GRAPH_EXPORT_PAGE_SIZE", 2)
 
     with pytest.raises(RuntimeError, match="File nodes count mismatch: expected 3, got 2"):
         runner.run_export_command(
@@ -532,6 +541,7 @@ def test_run_export_command_raises_when_paged_graph_rows_are_truncated(
                 graph_name="dotmd",
                 index_dir=tmp_path,
                 progress_interval_seconds=9999.0,
+                graph_page_size=2,
             )
         )
 
