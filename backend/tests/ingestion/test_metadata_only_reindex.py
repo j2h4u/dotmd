@@ -207,6 +207,41 @@ def test_metadata_only_reindex_exactly_one_tei_call(pipeline_settings):
     )
 
 
+def test_surreal_backend_initializes_without_falkor_graph_store(
+    surreal_pipeline_settings, monkeypatch
+):
+    from dotmd.ingestion import pipeline as pipeline_module
+    from dotmd.ingestion.pipeline import IndexingPipeline
+
+    class FakeConnection:
+        def close(self) -> None:
+            pass
+
+    class FakeWriter:
+        def __init__(self) -> None:
+            self.connection = FakeConnection()
+
+    monkeypatch.setattr(
+        pipeline_module,
+        "_create_surreal_direct_writer",
+        lambda _settings: FakeWriter(),
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "_create_graph_store",
+        lambda *_args, **_kwargs: pytest.fail("Falkor graph store factory must not run"),
+    )
+    monkeypatch.setattr(
+        "dotmd.storage.falkordb_graph.FalkorDBGraphStore",
+        lambda *_args, **_kwargs: pytest.fail("FalkorDBGraphStore must not be constructed"),
+    )
+
+    pipeline = IndexingPipeline(surreal_pipeline_settings)
+
+    assert pipeline._graph_store.node_count() == 0
+    assert pipeline._graph_store.get_graph_data() == {"nodes": [], "edges": []}
+
+
 def test_index_file_embed_routes_surreal_manifests_with_complete_text_hashes(
     surreal_pipeline_settings, monkeypatch
 ):

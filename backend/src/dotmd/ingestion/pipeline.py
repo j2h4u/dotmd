@@ -202,6 +202,92 @@ def _create_graph_store(settings: Settings) -> GraphStoreProtocol:
     )
 
 
+class _NoopGraphStore:
+    """Disabled graph store used when Surreal is the authoritative backend."""
+
+    def add_file_node(self, file_path: str, title: str) -> None:
+        return None
+
+    def add_section_node(
+        self,
+        chunk_id: str,
+        heading: str,
+        level: int,
+        file_path: str,
+        text_preview: str,
+    ) -> None:
+        return None
+
+    def add_entity_node(self, name: str, entity_type: str, source: str) -> None:
+        return None
+
+    def add_tag_node(self, name: str) -> None:
+        return None
+
+    def add_edge(
+        self,
+        source_id: str,
+        target_id: str,
+        relation_type: str,
+        weight: float = 1.0,
+    ) -> None:
+        return None
+
+    def get_related_sections(self, chunk_id: str) -> list[tuple[str, str, float]]:
+        return []
+
+    def get_all_entity_names(self) -> list[str]:
+        return []
+
+    def get_chunks_by_entity(self, entity_name: str) -> list[str]:
+        return []
+
+    def get_entities_by_file(self, file_path: str) -> list[str]:
+        return []
+
+    def batch_add_section_nodes(self, sections: list[dict]) -> None:
+        return None
+
+    def batch_add_entity_nodes(self, entities: list[dict]) -> None:
+        return None
+
+    def batch_add_tag_nodes(self, tags: list[str]) -> None:
+        return None
+
+    def batch_add_file_nodes(self, files: list[dict]) -> None:
+        return None
+
+    def batch_add_edges(self, edges: list[dict]) -> None:
+        return None
+
+    def delete_all(self) -> None:
+        return None
+
+    def delete_file_subgraph(self, file_path: str) -> None:
+        return None
+
+    def delete_chunks_from_graph(self, chunk_ids: list[str]) -> None:
+        return None
+
+    def delete_file_node(self, file_path: str) -> None:
+        return None
+
+    def delete_frontmatter_edges(self, file_path: str) -> None:
+        return None
+
+    def node_count(self) -> int:
+        return 0
+
+    def edge_count(self) -> int:
+        return 0
+
+    def delete_isolated_nodes(self) -> int:
+        return 0
+
+    def get_graph_data(self) -> dict:
+        return {"nodes": [], "edges": []}
+
+
 def _create_surreal_direct_writer(settings: Settings) -> Any:
     """Instantiate the direct Surreal delta writer for standalone ingest."""
     from dotmd.ingestion.surreal_delta_sync import SurrealDeltaStoreWriter
@@ -330,7 +416,10 @@ class IndexingPipeline:
         _write_pipeline_init_progress("pipeline:vector_store", "applied")
 
         _write_pipeline_init_progress("pipeline:graph_store", "running")
-        self._graph_store = _create_graph_store(settings)
+        if settings.search_backend == "surreal":
+            self._graph_store = _NoopGraphStore()
+        else:
+            self._graph_store = _create_graph_store(settings)
         _write_pipeline_init_progress("pipeline:graph_store", "applied")
 
         # -- Two file trackers with different checksum formulas -----------------
