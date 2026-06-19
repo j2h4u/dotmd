@@ -14,6 +14,7 @@ from dotmd.ingestion.surreal_delta_sync import (
     SurrealDeltaScope,
     SurrealDeltaSection,
     SurrealDeltaSourceSelection,
+    SurrealDeltaStoreWriter,
     SurrealDeltaSyncState,
     SurrealDeltaTombstone,
     build_surreal_delta_manifest,
@@ -695,3 +696,123 @@ def test_incremental_sync_reports_percent_elapsed_target_size_and_eta_for_long_r
     assert any(snapshot.elapsed_seconds >= 120 for snapshot in snapshots)
     assert eta_snapshots, "expected at least one ETA-bearing progress snapshot"
     assert all(snapshot.eta.startswith("ETA ~") for snapshot in eta_snapshots)
+
+
+class _FakeSurrealConnection:
+    def __init__(self) -> None:
+        self.tables: dict[str, dict[str, dict[str, object]]] = {}
+        self.calls: list[tuple[str, str, str]] = []
+
+    @staticmethod
+    def _table_name(record: object) -> str:
+        return str(record).split(":", 1)[0]
+
+    @staticmethod
+    def _record_key(record: object) -> str:
+        return str(record)
+
+    def select(self, record: object) -> dict[str, object]:
+        table = self._table_name(record)
+        key = self._record_key(record)
+        return dict(self.tables.get(table, {}).get(key, {}))
+
+    def upsert(self, record: object, data: dict[str, object]) -> None:
+        table = self._table_name(record)
+        key = self._record_key(record)
+        self.calls.append(("upsert", table, key))
+        stored = dict(data)
+        stored["id"] = key
+        self.tables.setdefault(table, {})[key] = stored
+
+    def delete(self, record: object) -> None:
+        table = self._table_name(record)
+        key = self._record_key(record)
+        self.calls.append(("delete", table, key))
+        self.tables.get(table, {}).pop(key, None)
+
+    def delete_all_from_table(self, table_name: str) -> int:
+        raise AssertionError(f"bulk delete is not allowed for {table_name}")
+
+    def insert_rows(self, table_name: str, rows: list[dict[str, object]], *, batch_size: int = 1000) -> object:
+        raise AssertionError(f"bulk insert is not allowed for {table_name}")
+
+
+def test_surreal_delta_store_writer_uses_point_ops_and_is_idempotent() -> None:
+    manifest = _sync_manifest(graph_deferred=True)
+    connection = _FakeSurrealConnection()
+    connection.tables["unrelated"] = {
+        "unrelated:keep": {"id": "unrelated:keep", "marker": "keep"}
+    }
+    writer = SurrealDeltaStoreWriter(connection=connection)
+
+    first_state = SurrealDeltaSyncState()
+    first = run_surreal_delta_sync(manifest, writer, state=first_state, batch_size=2)
+    first_snapshot = {
+        table: {key: dict(row) for key, row in rows.items()}
+        for table, rows in connection.tables.items()
+    }
+
+    assert first.progress.checkpoint_applied is True
+    assert connection.tables["unrelated"] == {"unrelated:keep": {"id": "unrelated:keep", "marker": "keep"}}
+    assert all(call[0] != "delete_all" for call in connection.calls)
+    assert all(call[0] != "insert_rows" for call in connection.calls)
+
+    second_state = SurrealDeltaSyncState()
+    second = run_surreal_delta_sync(manifest, writer, state=second_state, batch_size=2)
+
+    assert second.applied_counts == {
+        "tombstones": 0,
+        "documents": 0,
+        "source_units": 0,
+        "chunks": 0,
+        "chunk_file_bindings": 0,
+        "provenance": 0,
+        "resource_bindings": 0,
+        "fingerprints": 0,
+        "embeddings": 0,
+        "vector_components": 0,
+        "feedback": 0,
+        "checkpoint_candidate": 0,
+    }
+    assert connection.tables == first_snapshot
+    assert connection.tables["unrelated"] == {"unrelated:keep": {"id": "unrelated:keep", "marker": "keep"}}
+
+
+def test_surreal_delta_store_writer_deletes_only_exact_tombstone_rows() -> None:
+    connection = _FakeSurrealConnection()
+    writer = SurrealDeltaStoreWriter(connection=connection)
+    exact_ref = "filesystem:/notes/deleted.md"
+    sibling_ref = "filesystem:/notes/deleted.md.backup"
+    exact_id = str(writer.codec.encode("documents", exact_ref))
+    sibling_id = str(writer.codec.encode("documents", sibling_ref))
+    connection.tables["documents"] = {
+        exact_id: {"id": exact_id, "ref": exact_ref, "title": "Deleted"},
+        sibling_id: {"id": sibling_id, "ref": sibling_ref, "title": "Sibling"},
+    }
+    tombstone = SurrealDeltaChange(
+        ref=exact_ref,
+        table="documents",
+        change_type=SurrealDeltaChangeType.TOMBSTONE,
+        tombstone=SurrealDeltaTombstone(ref=exact_ref, table="documents", previous_row={"ref": exact_ref}),
+    )
+
+    applied = writer.delete_tombstones([tombstone])
+
+    assert applied == 1
+    assert exact_id not in connection.tables["documents"]
+    assert sibling_id in connection.tables["documents"]
+
+
+def test_surreal_delta_store_writer_rejects_non_deferred_graph_rows() -> None:
+    writer = SurrealDeltaStoreWriter(connection=_FakeSurrealConnection())
+
+    with pytest.raises(NotImplementedError, match="graph rows are deferred"):
+        writer.write_graph(
+            [
+                SurrealDeltaChange(
+                    ref="graph-1",
+                    table="graph_nodes",
+                    row={"node_id": "graph-1", "label": "Graph"},
+                )
+            ]
+        )

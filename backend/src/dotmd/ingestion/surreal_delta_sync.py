@@ -11,6 +11,9 @@ from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from dotmd.storage.surreal import SurrealConnection, SurrealRecordIdCodec
+from dotmd.storage.surreal_schema import SURREAL_SCHEMA_VERSION
+
 DELTA_MANIFEST_SCHEMA_VERSION = "phase46_delta_manifest_v1"
 
 
@@ -497,6 +500,205 @@ class SurrealDeltaWriterProtocol(Protocol):
 
     def write_checkpoint_candidate(self, candidate: SurrealDeltaCheckpointCandidate) -> int:
         ...
+
+
+@dataclass(slots=True)
+class SurrealDeltaStoreWriter:
+    """Incremental Surreal writer that uses point upserts and exact deletes only."""
+
+    connection: SurrealConnection | Any
+    codec: SurrealRecordIdCodec = field(default_factory=SurrealRecordIdCodec)
+    checkpoint_namespace: str = "phase46_delta"
+    target_size_bytes: int | None = None
+
+    def _record_id(self, table: str, raw_identifier: str) -> Any:
+        return self.codec.encode(table, raw_identifier)
+
+    def _existing_row(self, record_id: Any) -> dict[str, Any] | None:
+        select = getattr(self.connection, "select", None)
+        if select is None:
+            return None
+        existing = select(record_id)
+        if isinstance(existing, list):
+            existing = existing[0] if existing else None
+        if not isinstance(existing, dict) or not existing:
+            return None
+        return dict(existing)
+
+    def _same_row(self, left: dict[str, Any] | None, right: dict[str, Any]) -> bool:
+        if left is None:
+            return False
+        left_payload = dict(left)
+        left_payload.pop("id", None)
+        right_payload = dict(right)
+        right_payload.pop("id", None)
+        return left_payload == right_payload
+
+    def _upsert_point(self, table: str, raw_identifier: str, payload: dict[str, Any]) -> int:
+        record_id = self._record_id(table, raw_identifier)
+        existing = self._existing_row(record_id)
+        prepared = dict(payload)
+        prepared.setdefault("schema_version", SURREAL_SCHEMA_VERSION)
+        if table in {"documents", "source_units", "provenance", "chunk_file_bindings", "bindings", "fingerprints", "embeddings", "vector_components", "feedback", "chunks"}:
+            prepared.setdefault("metadata", {})
+        if table == "chunks":
+            prepared.setdefault("file_paths", [])
+            prepared.setdefault("file_bindings", [])
+            prepared.setdefault("source_unit_refs", [])
+        if table == "bindings":
+            prepared.setdefault("resource_ref", prepared.get("document_ref"))
+        if table == "provenance":
+            prepared.setdefault("source_unit_refs", [])
+        if table == "embeddings":
+            prepared.setdefault("vector_rowid", None)
+            prepared.setdefault("vector", [])
+        if table == "vector_components":
+            prepared.setdefault("embedding", [])
+        if table == "feedback":
+            prepared.setdefault("original_feedback_id", raw_identifier)
+            prepared.setdefault("submitted_at", None)
+        if self._same_row(existing, prepared):
+            return 0
+        self.connection.upsert(record_id, prepared)
+        return 1
+
+    def delete_tombstones(self, rows: Sequence[SurrealDeltaChange]) -> int:
+        applied = 0
+        for change in rows:
+            tombstone = change.tombstone
+            table = tombstone.table if tombstone is not None else change.table
+            ref = tombstone.ref if tombstone is not None else change.ref
+            record_id = self._record_id(table, ref)
+            if self._existing_row(record_id) is None:
+                continue
+            self.connection.delete(record_id)
+            applied += 1
+        return applied
+
+    def write_documents(self, rows: Sequence[SurrealDeltaChange]) -> int:
+        applied = 0
+        for change in rows:
+            row = dict(change.row)
+            raw_identifier = str(change.ref)
+            row.setdefault("ref", raw_identifier)
+            if ":" in raw_identifier:
+                namespace, document_ref = raw_identifier.split(":", 1)
+                row.setdefault("namespace", namespace)
+                row.setdefault("document_ref", document_ref)
+            row.setdefault("metadata", {})
+            applied += self._upsert_point("documents", raw_identifier, row)
+        return applied
+
+    def write_source_units(self, rows: Sequence[SurrealDeltaChange]) -> int:
+        applied = 0
+        for change in rows:
+            row = dict(change.row)
+            raw_identifier = str(change.ref)
+            row.setdefault("ref", raw_identifier)
+            row.setdefault("metadata", {})
+            applied += self._upsert_point("source_units", raw_identifier, row)
+        return applied
+
+    def write_chunks(self, rows: Sequence[SurrealDeltaChange]) -> int:
+        applied = 0
+        for change in rows:
+            row = dict(change.row)
+            raw_identifier = str(change.ref)
+            row.setdefault("chunk_id", row.get("chunk_id") or raw_identifier)
+            row.setdefault("original_chunk_id", row.get("original_chunk_id") or row["chunk_id"])
+            row.setdefault("ref", raw_identifier)
+            row.setdefault("metadata", {})
+            applied += self._upsert_point("chunks", raw_identifier, row)
+        return applied
+
+    def write_chunk_file_bindings(self, rows: Sequence[SurrealDeltaChange]) -> int:
+        applied = 0
+        for change in rows:
+            row = dict(change.row)
+            raw_identifier = str(change.ref)
+            row.setdefault("binding_id", raw_identifier)
+            row.setdefault("metadata", {})
+            applied += self._upsert_point("chunk_file_bindings", raw_identifier, row)
+        return applied
+
+    def write_provenance(self, rows: Sequence[SurrealDeltaChange]) -> int:
+        applied = 0
+        for change in rows:
+            row = dict(change.row)
+            raw_identifier = str(change.ref)
+            row.setdefault("provenance_id", raw_identifier)
+            row.setdefault("source_unit_refs", [])
+            row.setdefault("metadata", {})
+            applied += self._upsert_point("provenance", raw_identifier, row)
+        return applied
+
+    def write_resource_bindings(self, rows: Sequence[SurrealDeltaChange]) -> int:
+        applied = 0
+        for change in rows:
+            row = dict(change.row)
+            raw_identifier = str(change.ref)
+            row.setdefault("ref", raw_identifier)
+            row.setdefault("resource_ref", row.get("resource_ref") or row.get("document_ref"))
+            row.setdefault("metadata", {})
+            applied += self._upsert_point("bindings", raw_identifier, row)
+        return applied
+
+    def write_fingerprints(self, rows: Sequence[SurrealDeltaChange]) -> int:
+        applied = 0
+        for change in rows:
+            row = dict(change.row)
+            raw_identifier = str(change.ref)
+            row.setdefault("fingerprint_id", raw_identifier)
+            row.setdefault("metadata", {})
+            applied += self._upsert_point("fingerprints", raw_identifier, row)
+        return applied
+
+    def write_embeddings(self, rows: Sequence[SurrealDeltaChange]) -> int:
+        applied = 0
+        for change in rows:
+            row = dict(change.row)
+            raw_identifier = str(change.ref)
+            row.setdefault("metadata", {})
+            row.setdefault("vector_rowid", None)
+            applied += self._upsert_point("embeddings", raw_identifier, row)
+        return applied
+
+    def write_vector_components(self, rows: Sequence[SurrealDeltaChange]) -> int:
+        applied = 0
+        for change in rows:
+            row = dict(change.row)
+            raw_identifier = str(change.ref)
+            row.setdefault("metadata", {})
+            applied += self._upsert_point("vector_components", raw_identifier, row)
+        return applied
+
+    def write_graph(self, rows: Sequence[SurrealDeltaChange]) -> int:
+        if rows:
+            raise NotImplementedError("graph rows are deferred in this phase 46 slice")
+        return 0
+
+    def write_feedback(self, rows: Sequence[SurrealDeltaChange]) -> int:
+        applied = 0
+        for change in rows:
+            row = dict(change.row)
+            raw_identifier = str(change.ref)
+            row.setdefault("original_feedback_id", raw_identifier)
+            row.setdefault("metadata", {})
+            applied += self._upsert_point("feedback", raw_identifier, row)
+        return applied
+
+    def write_checkpoint_candidate(self, candidate: SurrealDeltaCheckpointCandidate) -> int:
+        payload = {
+            "namespace": self.checkpoint_namespace,
+            "checkpoint_cursor": candidate.cursor,
+            "last_success_at": candidate.source_time,
+            "last_error": None,
+            "metadata": {
+                "watermark": candidate.watermark,
+                "advanced": candidate.advanced,
+            },
+        }
+        return self._upsert_point("checkpoints", self.checkpoint_namespace, payload)
 
 
 @dataclass(slots=True)
