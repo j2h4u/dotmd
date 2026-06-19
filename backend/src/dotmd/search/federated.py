@@ -6,7 +6,7 @@ search with local-sequential + federated-parallel execution.
 Key architectural decisions:
 - D-06: Per-engine weights remain; fusion is rank-only
 - D-07: Federated candidates (chunk_id is None) skip reranking
-- D-08: Always-on fan-out; lifecycle build failures → persistent SourceStatus
+- D-08: Optional explicit fan-out; lifecycle build failures → persistent SourceStatus
 - D-09: Per-source soft timeout (3-5s) for federated only; local engines sequential
 - D-12: No fail-fast; errors are soft-skips
 - D-OUTCOME-SPLIT: LocalEngineOutcome vs FederatedEngineOutcome (cycle-2 HIGH-3)

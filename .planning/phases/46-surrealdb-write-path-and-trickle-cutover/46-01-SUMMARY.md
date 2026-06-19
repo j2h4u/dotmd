@@ -65,6 +65,9 @@ focused direct-write and service-level visibility smokes on the Surreal sink:
 - live Surreal child-process keyword smoke after `fb15e14` passed in `2.139s`
   against database `phase43_refresh_20260618g` and returned the expected
   SurrealDB document without requiring a production container restart.
+- normal cutover smoke stays local-only by default; federated search is an
+  explicit opt-in via `include_federated`, `--federated`, the API `federated`
+  query param, and the MCP `federated` argument.
 - Gmail federated search still logs OAuth 400 in both old-stack and Surreal
   child-process search; treat that as a separate federated-source issue, not a
   SurrealDB cutover blocker unless Gmail is made part of the acceptance scope.
