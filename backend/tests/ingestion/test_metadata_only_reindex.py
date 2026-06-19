@@ -116,6 +116,22 @@ def pipeline_settings(tmp_path):
     )
 
 
+@pytest.fixture
+def surreal_pipeline_settings(pipeline_settings):
+    return pipeline_settings.model_copy(
+        update={
+            "search_backend": "surreal",
+            "surreal_retrieval_url": "http://surrealdb:8000",
+            "surreal_retrieval_namespace": "dotmd",
+            "surreal_retrieval_database": "phase46_direct_ingest",
+            "surreal_retrieval_username": "root",
+            "surreal_retrieval_password": "root",
+            "surreal_retrieval_access_token": None,
+            "surreal_retrieval_embedding_dimension": 768,
+        }
+    )
+
+
 def test_metadata_only_reindex_exactly_one_tei_call(pipeline_settings):
     """After initial index, a tag-only change triggers exactly 1 encode_batch call.
 
@@ -187,6 +203,160 @@ def test_metadata_only_reindex_exactly_one_tei_call(pipeline_settings):
         f"The single encode_batch call MUST encode exactly 1 text (the meta string title+tags). "
         f"Got {len(encode_calls[0])} texts: {encode_calls[0]}"
     )
+
+
+def test_index_file_embed_routes_surreal_manifests_with_complete_text_hashes(
+    surreal_pipeline_settings, monkeypatch
+):
+    from blake3 import blake3
+
+    from dotmd.core.models import Chunk, ChunkProvenance
+    from dotmd.ingestion import pipeline as pipeline_module
+    from dotmd.ingestion.pipeline import IndexingPipeline
+    from dotmd.ingestion.reader import file_info_from_path
+
+    doc = surreal_pipeline_settings.data_dir / "surreal.md"
+    _write_md(doc, "Initial Title", ["alpha"], "Shared body text.")
+
+    class FakeConnection:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    class FakeWriter:
+        def __init__(self) -> None:
+            self.connection = FakeConnection()
+
+    run_calls: list[tuple[object, object, object]] = []
+
+    monkeypatch.setattr(
+        pipeline_module,
+        "_create_surreal_direct_writer",
+        lambda _settings: FakeWriter(),
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "run_surreal_delta_sync",
+        lambda manifest, writer, state: run_calls.append((manifest, writer, state)),
+    )
+
+    pipeline = IndexingPipeline(surreal_pipeline_settings)
+    assert pipeline._surreal_direct_writer is not None
+    assert pipeline._surreal_direct_writer.connection.closed is False
+
+    file_info = file_info_from_path(doc)
+    assert file_info is not None
+    chunks = [
+        Chunk(
+            chunk_id="surreal-chunk-0",
+            file_paths=[doc],
+            heading_hierarchy=["Initial Title", "Overview"],
+            level=2,
+            text="shared body zero",
+            chunk_index=0,
+            provenance=ChunkProvenance(
+                namespace="filesystem",
+                document_ref=str(doc.resolve()),
+                ref=f"filesystem:{doc.resolve()}",
+                source_unit_refs=[],
+                chunk_strategy=pipeline._strategy,
+                parser_name="markdown",
+            ),
+        ),
+        Chunk(
+            chunk_id="surreal-chunk-1",
+            file_paths=[doc],
+            heading_hierarchy=["Initial Title", "Details"],
+            level=2,
+            text="shared body one",
+            chunk_index=1,
+            provenance=ChunkProvenance(
+                namespace="filesystem",
+                document_ref=str(doc.resolve()),
+                ref=f"filesystem:{doc.resolve()}",
+                source_unit_refs=[],
+                chunk_strategy=pipeline._strategy,
+                parser_name="markdown",
+            ),
+        ),
+    ]
+
+    monkeypatch.setattr(
+        pipeline,
+        "_embed_chunks",
+        lambda _chunks: (
+            [[0.1, 0.2], [0.3, 0.4]],
+            {
+                "surreal-chunk-0": blake3(b"shared body zero").hexdigest(),
+                "surreal-chunk-1": blake3(b"shared body one").hexdigest(),
+            },
+        ),
+    )
+    monkeypatch.setattr(pipeline, "_embed_meta_component", lambda _file_info: [1.0, 1.0])
+    monkeypatch.setattr(
+        pipeline,
+        "_fuse_vectors",
+        lambda e_text, e_meta, _weights: [e_text[0] + e_meta[0], e_text[1] + e_meta[1]],
+    )
+
+    pipeline._index_file_embed(
+        file_info,
+        chunks,
+        body_changed=True,
+        metadata_changed=True,
+    )
+
+    assert len(run_calls) == 1
+    first_manifest = run_calls[0][0]
+    assert [row.row["chunk_id"] for row in first_manifest.embeddings.rows] == [
+        "surreal-chunk-0",
+        "surreal-chunk-1",
+    ]
+    assert [row.row["text_hash"] for row in first_manifest.embeddings.rows] == [
+        blake3(b"shared body zero").hexdigest(),
+        blake3(b"shared body one").hexdigest(),
+    ]
+    assert [[round(value, 6) for value in row.row["vector"]] for row in first_manifest.embeddings.rows] == [
+        [1.1, 1.2],
+        [1.3, 1.4],
+    ]
+
+    _write_md(doc, "Updated Title", ["alpha", "beta"], "Shared body text.")
+    updated_file_info = file_info_from_path(doc)
+    assert updated_file_info is not None
+
+    monkeypatch.setattr(
+        pipeline,
+        "_embed_chunks",
+        lambda *_args, **_kwargs: pytest.fail("metadata-only cached path must not re-embed"),
+    )
+
+    pipeline._index_file_embed(
+        updated_file_info,
+        chunks,
+        body_changed=False,
+        metadata_changed=True,
+    )
+
+    assert len(run_calls) == 2
+    second_manifest = run_calls[1][0]
+    assert [row.row["chunk_id"] for row in second_manifest.embeddings.rows] == [
+        "surreal-chunk-0",
+        "surreal-chunk-1",
+    ]
+    assert [row.row["text_hash"] for row in second_manifest.embeddings.rows] == [
+        blake3(b"shared body zero").hexdigest(),
+        blake3(b"shared body one").hexdigest(),
+    ]
+    assert [[round(value, 6) for value in row.row["vector"]] for row in second_manifest.embeddings.rows] == [
+        [1.1, 1.2],
+        [1.3, 1.4],
+    ]
+
+    pipeline.close()
+    assert pipeline._surreal_direct_writer.connection.closed is True
 
 
 def test_body_change_triggers_full_reembedding(pipeline_settings):

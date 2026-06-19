@@ -450,6 +450,12 @@ class DotMDService:
             self._local_executor.shutdown(wait=True)
         except (RuntimeError, OSError):
             logger.warning("local_executor shutdown failed", exc_info=True)
+        pipeline_close = getattr(self._pipeline, "close", None)
+        if callable(pipeline_close):
+            try:
+                pipeline_close()
+            except (RuntimeError, OSError):
+                logger.warning("pipeline close failed", exc_info=True)
         if self._surreal_connection is not None:
             try:
                 self._surreal_connection.close()

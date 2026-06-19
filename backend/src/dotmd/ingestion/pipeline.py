@@ -436,7 +436,7 @@ class IndexingPipeline:
             self._embedding_cache.update_model_sentinel()
         _write_pipeline_init_progress("pipeline:embedding_cache", "applied")
 
-        # Transitional direct-Surreal seam for bulk filesystem ingest.
+        # Direct Surreal writer for standalone filesystem ingest.
         # Enabled only for the standalone Surreal search backend.
         self._surreal_direct_writer: Any | None = (
             _create_surreal_direct_writer(settings) if settings.search_backend == "surreal" else None
@@ -1827,6 +1827,21 @@ class IndexingPipeline:
         raw = [w_text * a + w_meta * b for a, b in zip(e_text_norm, e_meta_norm, strict=False)]
         return self._normalize_vector(raw)
 
+    @staticmethod
+    def _chunk_text_hash(chunk: Chunk) -> str:
+        return blake3.blake3(chunk.text.encode()).hexdigest()
+
+    def _complete_chunk_text_hashes(
+        self,
+        chunks: list[Chunk],
+        text_hashes: dict[str, str],
+    ) -> dict[str, str]:
+        """Fill any missing chunk text hashes from in-memory chunk bodies."""
+        return {
+            chunk.chunk_id: text_hashes.get(chunk.chunk_id) or self._chunk_text_hash(chunk)
+            for chunk in chunks
+        }
+
     def _embed_meta_component(self, file_info: FileInfo) -> list[float]:
         """Encode title+tags for a file into e_meta. 1 TEI call per file.
 
@@ -1963,6 +1978,35 @@ class IndexingPipeline:
                 self._fuse_vectors(e_text_map[c.chunk_id], e_meta, weights) for c in chunks
             ]
 
+        text_hashes = self._complete_chunk_text_hashes(chunks, text_hashes)
+        source_document = self._source_document_for_file_info(file_info)
+
+        if self._settings.search_backend == "surreal":
+            direct_write = SurrealDirectFileWrite(
+                source_document=source_document,
+                chunks=tuple(chunks),
+                embeddings=tuple(e_fused_vectors),
+                text_hashes=dict(text_hashes),
+                chunk_strategy=self._strategy,
+                embedding_model=self._settings.embedding_model,
+            )
+            direct_manifest = build_surreal_direct_manifest(
+                direct_write,
+                source_selection=SurrealDeltaSourceSelection(
+                    source_name=source_document.namespace,
+                    table_name="source_documents",
+                    changed_at=source_document.updated_at,
+                    cursor=source_document.ref,
+                ),
+                checkpoint_candidate=SurrealDeltaCheckpointCandidate(
+                    cursor=source_document.ref,
+                    watermark=source_document.content_fingerprint,
+                    source_time=source_document.updated_at,
+                ),
+                created_at=source_document.updated_at,
+            )
+            self._write_surreal_direct_manifest(direct_manifest)
+
         # ── WRITE PHASE ───────────────────────────────────────────────────────────────
         # Each store call owns its own commit. Cross-store atomicity is not achievable
         # here because SQLiteVecVectorStore.add_chunks() commits internally — wrapping
@@ -1991,9 +2035,8 @@ class IndexingPipeline:
             chunks,
             e_fused_vectors,
             overwrite=False,
-            text_hashes=text_hashes or None,
+            text_hashes=text_hashes,
         )
-        source_document = self._source_document_for_file_info(file_info)
         self._metadata_store.upsert_source_document(
             source_document,
             conn=self._conn,
@@ -2020,6 +2063,19 @@ class IndexingPipeline:
                 len(chunks),
                 weights,
             )
+
+    def close(self) -> None:
+        """Release pipeline-owned resources."""
+        writer = self._surreal_direct_writer
+        if writer is None:
+            return
+        connection = getattr(writer, "connection", None)
+        if connection is None:
+            return
+        try:
+            connection.close()
+        except (RuntimeError, OSError):
+            logger.warning("surreal direct writer close failed", exc_info=True)
 
     # ------------------------------------------------------------------
     # Granular reindex (rebuild one store from metadata chunks)
