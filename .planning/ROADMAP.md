@@ -11,7 +11,7 @@
 - [x] **v1.5 Telegram Source Adapter** — Phases 27-31 (shipped 2026-05-08)
 - [x] **v1.6 Unified Source Architecture** — Phases 32-37 (shipped 2026-05-13)
 - [x] **v1.7 Storage Simplification** — Phase 38 (shipped 2026-06-12)
-- 🚧 **v1.8 SurrealDB-Native Storage Cutover** — Phases 39-45 (active)
+- 🚧 **v1.8 SurrealDB-Native Storage Cutover** — Phases 39-46 (active)
 
 <details>
 <summary>v1.1 Incremental Indexing (Phases 1-3) — SHIPPED 2026-03-26</summary>
@@ -136,7 +136,7 @@ See: `.planning/milestones/v1.7-ROADMAP.md`
 
 </details>
 
-## v1.8 SurrealDB-Native Storage Cutover (Phases 39-45) — ACTIVE
+## v1.8 SurrealDB-Native Storage Cutover (Phases 39-46) — ACTIVE
 
 Goal: Replace the current SQLite/sqlite-vec/FTS5 + FalkorDB storage/retrieval
 stack with one SurrealDB-native persistence and retrieval architecture,
@@ -267,13 +267,29 @@ Decision:
 - [x] NO-GO: do not cut production over yet. Runtime wiring for standalone
   SurrealDB is missing for MCP/API/CLI/trickle, and reranker-on latency is not
   production-ready.
-- [ ] Add a follow-up runtime-wiring phase before retrying cutover.
+- [x] Add a follow-up runtime-wiring phase before retrying cutover.
 
-### Phase 45: Legacy stack removal
+### Phase 45: Standalone SurrealDB runtime wiring and smoke
+
+**Goal:** Make standalone SurrealDB a real runtime search backend and prove the
+MCP/API/CLI smoke surface before retrying production cutover.
+**Depends on:** Phase 44
+**Plans:** 1/1 plan in progress
+
+- [x] Add config-gated service startup wiring for standalone SurrealDB retrieval.
+- [ ] Run controlled Surreal-backed service smoke without cutting over production.
+- [ ] Record MCP/API/CLI smoke evidence or concrete blockers.
+- [ ] Record explicit trickle write-path decision before cutover retry.
+
+Plans:
+
+- [ ] 45-01-PLAN.md - Standalone SurrealDB runtime wiring, controlled smoke, and trickle decision.
+
+### Phase 46: Legacy stack removal
 
 **Goal:** Delete the old SQLite/sqlite-vec/FTS5, FalkorDB, and LadybugDB stack
 after SurrealDB cutover is accepted.
-**Depends on:** Phase 44
+**Depends on:** Accepted cutover retry after Phase 45
 **Plans:** TBD
 
 - [ ] Delete SQLite/sqlite-vec/FTS5, FalkorDB, and LadybugDB storage/retrieval
@@ -331,7 +347,8 @@ after SurrealDB cutover is accepted.
 | 42. Surreal-native retrieval implementation | 4/4 | Complete    | 2026-06-14 |
 | 43. Shadow run and quality gate | 3/3 | Complete | 2026-06-16 |
 | 44. Standalone quality gate and cutover decision | 1/1 | Complete — NO-GO | 2026-06-19 |
-| 45. Legacy stack removal | v1.8 | Planned | — |
+| 45. Standalone SurrealDB runtime wiring and smoke | v1.8 | In Progress | — |
+| 46. Legacy stack removal | v1.8 | Planned | — |
 
 ### Backlog 999.2: Pipeline parallelism — overlap GLiNER and TEI across files
 

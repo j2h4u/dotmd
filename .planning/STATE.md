@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: SurrealDB-Native Storage Cutover
-status: planning
-stopped_at: Completed 44-01-PLAN.md with NO-GO cutover decision
+status: executing
+stopped_at: Executing 45-01-PLAN.md runtime wiring and smoke
 last_updated: "2026-06-19T00:00:00+06:00"
 last_activity: 2026-06-19
 progress:
-  total_phases: 14
+  total_phases: 15
   completed_phases: 7
-  total_plans: 18
+  total_plans: 19
   completed_plans: 18
-  percent: 50
+  percent: 47
 ---
 
 # GSD State
@@ -21,18 +21,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Follow-up runtime wiring before any standalone SurrealDB
+**Current focus:** Phase 45 standalone SurrealDB runtime wiring before any
 cutover retry.
 
 ## Current Milestone
 
 **v1.8 — SurrealDB-Native Storage Cutover**
 
-Phase: follow-up needed
-Status: Phase 44 completed with NO-GO; standalone runtime wiring is missing
+Phase: 45-standalone-surreal-runtime-wiring
+Status: Plan 45-01 in progress; first service-level runtime wiring commit is pushed
 Last activity: 2026-06-19
 
-Progress: [█████████-] 100% of planned v1.8 phases evaluated; cutover blocked before Phase 45
+Progress: [███████---] Phase 44 cutover no-go closed; Phase 45 runtime wiring in progress
 
 ## Deferred Items
 
@@ -302,10 +302,9 @@ was moved under `.planning/notes/completed-backlog/`.
 
 ### Blockers/Concerns
 
-Active cutover blocker: Phase 44 completed with a NO-GO decision. The
-standalone SurrealDB candidate exists, but MCP/API/CLI/trickle are not wired to
-run against standalone SurrealDB as the production runtime, and reranker-on
-latency remains too high for cutover.
+Active cutover blocker: Phase 45 must prove the standalone SurrealDB runtime
+surface. Service-level Surreal retrieval wiring exists in commit `b8b4d2f`, but
+controlled MCP/API/CLI smoke and the trickle write-path decision are still open.
 
 ### Quick Tasks Completed
 
@@ -321,18 +320,19 @@ latency remains too high for cutover.
 
 ## Current Position
 
-Phase: follow-up runtime wiring — NEEDED
-Plan: Phase 44 1 of 1 complete
-Status: Cutover NO-GO until standalone runtime wiring exists
-Last activity: 2026-06-19 -- Phase 44 no-go decision recorded
+Phase: 45-standalone-surreal-runtime-wiring
+Plan: 45-01 in progress
+Status: Cutover NO-GO until runtime smoke and trickle decision pass
+Last activity: 2026-06-19 -- service-level Surreal retrieval wiring committed
 
 ## Operator Next Steps
 
-- Plan and execute standalone SurrealDB runtime wiring, then retry the Phase 44
-  smoke matrix.
+- Run controlled standalone SurrealDB runtime smoke without cutting over
+  production traffic.
+- Record MCP/API/CLI smoke evidence and the trickle write-path decision.
 
 ## Session
 
 **Last session:** 2026-06-19T00:00:00+06:00
-**Stopped at:** Completed 44-01-PLAN.md with NO-GO cutover decision
+**Stopped at:** Executing 45-01-PLAN.md runtime wiring and smoke
 **Resume file:** None

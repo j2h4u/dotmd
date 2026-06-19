@@ -207,6 +207,7 @@ class Settings(BaseSettings):
     # Trickle indexer settings
     poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS
     profile_indexing: bool = False  # DOTMD_PROFILE_INDEXING=true → per-phase timing in logs
+    allow_destructive_startup_repair: bool = False
 
     # Graph
     graph_max_hops: int = DEFAULT_GRAPH_MAX_HOPS

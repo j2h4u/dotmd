@@ -381,10 +381,17 @@ class IndexingPipeline:
             self._embedding_cache.update_model_sentinel()
         _write_pipeline_init_progress("pipeline:embedding_cache", "applied")
 
-        # Startup integrity checks (order matters: schema wipe first, then weights)
+        # Startup integrity checks can delete vector and graph state. They must
+        # be an explicit repair action, never a side effect of service startup.
         _write_pipeline_init_progress("pipeline:startup_checks", "running")
-        self._check_schema_version()  # Must run first (may wipe state)
-        self._check_weights_changed()  # Runs after schema check (uses intact state)
+        if settings.allow_destructive_startup_repair:
+            self._check_schema_version()  # Must run first (may wipe state)
+            self._check_weights_changed()  # Runs after schema check (uses intact state)
+        else:
+            logger.info(
+                "Skipping destructive startup repair checks; "
+                "set DOTMD_ALLOW_DESTRUCTIVE_STARTUP_REPAIR=true to run them"
+            )
         _write_pipeline_init_progress("pipeline:startup_checks", "applied")
 
     # ------------------------------------------------------------------

@@ -67,6 +67,44 @@ def _make_pipeline_with_mock_encode(settings):
     return pipeline, call_log
 
 
+@pytest.mark.real_schema_check
+def test_pipeline_init_skips_destructive_startup_repair_by_default(
+    minimal_settings,
+    monkeypatch,
+) -> None:
+    """Pipeline construction must not wipe graph/vector state by default."""
+    from dotmd.ingestion.pipeline import IndexingPipeline
+
+    schema_check = MagicMock()
+    weights_check = MagicMock()
+    monkeypatch.setattr(IndexingPipeline, "_check_schema_version", schema_check)
+    monkeypatch.setattr(IndexingPipeline, "_check_weights_changed", weights_check)
+
+    IndexingPipeline(minimal_settings)
+
+    schema_check.assert_not_called()
+    weights_check.assert_not_called()
+
+
+@pytest.mark.real_schema_check
+def test_pipeline_init_runs_destructive_startup_repair_only_when_enabled(
+    minimal_settings,
+    monkeypatch,
+) -> None:
+    from dotmd.ingestion.pipeline import IndexingPipeline
+
+    schema_check = MagicMock()
+    weights_check = MagicMock()
+    monkeypatch.setattr(IndexingPipeline, "_check_schema_version", schema_check)
+    monkeypatch.setattr(IndexingPipeline, "_check_weights_changed", weights_check)
+
+    minimal_settings.allow_destructive_startup_repair = True
+    IndexingPipeline(minimal_settings)
+
+    schema_check.assert_called_once_with()
+    weights_check.assert_called_once_with()
+
+
 # ── CONCERN-01 regression: _embed_chunks returns e_text, not e_fused ─────────
 
 
