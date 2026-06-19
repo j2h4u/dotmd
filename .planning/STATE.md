@@ -21,19 +21,20 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 46 SurrealDB write-path/trickle cutover strategy.
-Runtime retrieval works through SurrealDB, but writes/trickle are still
-old-stack-only.
+**Current focus:** Phase 46 SurrealDB changed-file smoke and trickle boundary
+decision. Runtime retrieval works through SurrealDB, and the incremental sync
+core is implemented and verified against temporary SurrealKV storage; production
+trickle is still old-stack-only.
 
 ## Current Milestone
 
 **v1.8 — SurrealDB-Native Storage Cutover**
 
 Phase: 46-surrealdb-write-path-and-trickle-cutover
-Status: Plan 46-01 drafted; ready for execution
+Status: Plan 46-01 in progress; incremental sync core verified
 Last activity: 2026-06-19
 
-Progress: [████████--] Phase 45 runtime retrieval smoke complete; Phase 46 write-path planning next
+Progress: [█████████-] Phase 46 incremental sync core and disposable SurrealKV smoke complete; changed-file smoke and trickle decision next
 
 ## Deferred Items
 
@@ -323,18 +324,21 @@ are implemented or explicitly deferred as a product decision.
 ## Current Position
 
 Phase: 46-surrealdb-write-path-and-trickle-cutover
-Plan: 46-01 planned
-Status: Ready to execute incremental Surreal sync/write-path phase
-Last activity: 2026-06-19 -- Phase 46 plan drafted
+Plan: 46-01 in progress
+Status: Incremental Surreal sync core verified; changed-file smoke remains
+Last activity: 2026-06-19 -- Phase 46 manifest, runner, writer, and disposable SurrealKV smoke completed
 
 ## Operator Next Steps
 
-- Execute Phase 46 Plan 01: build and prove an idempotent incremental Surreal
-  sync path before any legacy-stack removal.
+- Execute the remaining Phase 46 Plan 01 smoke: derive a real changed-file
+  delta from old-stack rows, apply it to SurrealDB without full reindex/re-embed,
+  and verify Surreal-backed search sees the update.
+- Record the trickle boundary decision: bounded hybrid sync versus direct
+  Surreal ingest sink.
 - Revisit reranker-on latency before any production cutover approval.
 
 ## Session
 
 **Last session:** 2026-06-19T00:00:00+06:00
-**Stopped at:** Executing 45-01-PLAN.md runtime wiring and smoke
+**Stopped at:** Executing 46-01-PLAN.md changed-file smoke and trickle decision
 **Resume file:** None

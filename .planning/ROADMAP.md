@@ -298,20 +298,28 @@ cutover: either make trickle/index writes update standalone SurrealDB directly,
 or explicitly accept a bounded hybrid transition where old-stack writes remain
 authoritative while SurrealDB is refreshed through a controlled sync path.
 **Depends on:** Phase 45
-**Plans:** 1/1 plan planned
+**Plans:** 1/1 plan in progress
 
 Success criteria:
 
 - [ ] Trickle/index writes have an explicit SurrealDB strategy: direct write,
   controlled sync, or documented hybrid transition.
 - [ ] Daily update behavior is proven without full reindex/re-embedding.
-- [ ] Failure/retry behavior is idempotent and instrumented with progress/ETA
+- [x] Failure/retry behavior is idempotent and instrumented with progress/ETA
   for operations expected to exceed 120 seconds.
 - [ ] Production cutover criteria are updated with write-path evidence.
 
 Plans:
 
 - [ ] 46-01-PLAN.md - SurrealDB write-path/trickle cutover strategy, implementation, and smoke.
+
+Progress:
+
+- [x] Delta manifest, sync runner, row builder, and safe point-upsert writer implemented.
+- [x] Fake-connection and temporary `surrealkv://` tests prove idempotent replay,
+  stable bootstrap IDs, exact tombstones, unrelated-row preservation, and no
+  bulk delete/insert paths.
+- [ ] Real changed-file daily-update smoke remains before cutover decision.
 
 ### Phase 47: Legacy stack removal
 
