@@ -21,18 +21,19 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Post-Phase 45 cutover decision: runtime retrieval works
-through SurrealDB, but writes/trickle are still old-stack-only.
+**Current focus:** Phase 46 SurrealDB write-path/trickle cutover strategy.
+Runtime retrieval works through SurrealDB, but writes/trickle are still
+old-stack-only.
 
 ## Current Milestone
 
 **v1.8 — SurrealDB-Native Storage Cutover**
 
-Phase: 45-standalone-surreal-runtime-wiring
-Status: Plan 45-01 complete; runtime retrieval smoke passed for CLI/API/MCP
+Phase: 46-surrealdb-write-path-and-trickle-cutover
+Status: Plan 46-01 drafted; ready for execution
 Last activity: 2026-06-19
 
-Progress: [████████--] Phase 45 runtime retrieval smoke complete; write-path cutover remains
+Progress: [████████--] Phase 45 runtime retrieval smoke complete; Phase 46 write-path planning next
 
 ## Deferred Items
 
@@ -321,15 +322,15 @@ are implemented or explicitly deferred as a product decision.
 
 ## Current Position
 
-Phase: 45-standalone-surreal-runtime-wiring
-Plan: 45-01 complete
-Status: Runtime retrieval smoke passed; cutover still blocked on write-path decision/support
-Last activity: 2026-06-19 -- CLI/API/MCP Surreal retrieval smoke passed and API async search bug fixed
+Phase: 46-surrealdb-write-path-and-trickle-cutover
+Plan: 46-01 planned
+Status: Ready to execute incremental Surreal sync/write-path phase
+Last activity: 2026-06-19 -- Phase 46 plan drafted
 
 ## Operator Next Steps
 
-- Decide whether the next phase implements Surreal-native writes/trickle or
-  explicitly accepts a bounded hybrid transition.
+- Execute Phase 46 Plan 01: build and prove an idempotent incremental Surreal
+  sync path before any legacy-stack removal.
 - Revisit reranker-on latency before any production cutover approval.
 
 ## Session

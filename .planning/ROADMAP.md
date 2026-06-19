@@ -291,11 +291,33 @@ Decision:
 - [x] Trickle remains old-stack-only; Surreal-native writes are deferred and
   remain a cutover blocker.
 
-### Phase 46: Legacy stack removal
+### Phase 46: SurrealDB write path and trickle cutover
+
+**Goal:** Decide and implement the write-path boundary needed for production
+cutover: either make trickle/index writes update standalone SurrealDB directly,
+or explicitly accept a bounded hybrid transition where old-stack writes remain
+authoritative while SurrealDB is refreshed through a controlled sync path.
+**Depends on:** Phase 45
+**Plans:** 1/1 plan planned
+
+Success criteria:
+
+- [ ] Trickle/index writes have an explicit SurrealDB strategy: direct write,
+  controlled sync, or documented hybrid transition.
+- [ ] Daily update behavior is proven without full reindex/re-embedding.
+- [ ] Failure/retry behavior is idempotent and instrumented with progress/ETA
+  for operations expected to exceed 120 seconds.
+- [ ] Production cutover criteria are updated with write-path evidence.
+
+Plans:
+
+- [ ] 46-01-PLAN.md - SurrealDB write-path/trickle cutover strategy, implementation, and smoke.
+
+### Phase 47: Legacy stack removal
 
 **Goal:** Delete the old SQLite/sqlite-vec/FTS5, FalkorDB, and LadybugDB stack
 after SurrealDB cutover is accepted.
-**Depends on:** Accepted cutover retry after Phase 45
+**Depends on:** Accepted cutover retry after Phase 46
 **Plans:** TBD
 
 - [ ] Delete SQLite/sqlite-vec/FTS5, FalkorDB, and LadybugDB storage/retrieval
