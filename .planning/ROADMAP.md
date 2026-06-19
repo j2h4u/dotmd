@@ -337,7 +337,7 @@ Progress:
   bounded hybrid runtime.
 - [ ] Surreal-backed API/CLI/prod smoke for direct-written changes remains
   before cutover validation.
-- [ ] Production cutover criteria and runbook need to be updated with the
+- [ ] Runbook and deploy approval still need to be updated with the
   write-path evidence before approval.
 - [ ] Remaining old-stack dependencies outside the normal Surreal ingest path
   still need to be removed, quarantined, or explicitly marked non-authoritative.
