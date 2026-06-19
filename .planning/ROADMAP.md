@@ -223,40 +223,44 @@ Plans:
 
 ### Phase 43: Shadow run and quality gate
 
-**Goal:** Compare the old stack and SurrealDB stack on production-derived data
-and classify every material difference.
+**Goal:** Compare the old stack and standalone SurrealDB candidate on
+production-derived data, classify every material difference, and close the
+phase as a migration/shadow-run spike rather than a production cutover.
 **Depends on:** Phase 40, Phase 41, and Phase 42
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans executed
 
-- [ ] Run old stack and Surreal stack side by side on production-derived data.
-- [ ] Record search quality, latency, index build time, store size, and memory
+- [x] Run old stack and standalone SurrealDB side by side on production-derived data.
+- [x] Record search quality, latency, index build time, store size, and memory
   evidence.
 
-- [ ] Resolve every regression or explicitly accept the new semantics.
+- [x] Resolve every regression or explicitly accept the new semantics.
 
 Plans:
 
 - [x] 43-01-PLAN.md - Shadow metric contract, memory evidence, and scale-gate validation.
 - [x] 43-02-PLAN.md - Manifest-bound shadow-run runner, explicit Surreal override capture, and operator runbook.
-- [ ] 43-03-PLAN.md - Bounded production-derived evidence bundle and semantic-difference acceptance ledger.
+- [x] 43-03-PLAN.md - Bounded production-derived evidence bundle and semantic-difference acceptance ledger.
 
-### Phase 44: Production cutover
+### Phase 44: Standalone quality gate and cutover decision
 
-**Goal:** Switch live dotMD runtime to SurrealDB as the single
-storage/retrieval backend after quality acceptance.
+**Goal:** Decide whether the standalone SurrealDB candidate is ready for
+production cutover after Phase 43 evidence, with embedded SurrealKV rejected
+for production because HNSW creation on the production-derived embeddings
+table hits the segment-size blocker.
 **Depends on:** Phase 43
-**Plans:** TBD
+**Plans:** 1 plan drafted
 
-- [ ] Switch dotMD runtime to SurrealDB as the single storage/retrieval backend.
-- [ ] Complete the instrumented deferred-index post-step on the candidate target:
-  build the unique embedding invariant index, record `INFO FOR TABLE embeddings`
-  before/after, and decide/build the remaining secondary/HNSW rebuild steps with
-  heartbeat evidence.
-- [ ] Resolve the SurrealKV HNSW blocker: embedded SurrealKV currently fails
-  HNSW creation on the production-derived embeddings table with
-  `Record is too large to fit in a segment`.
+- [ ] Review standalone SurrealDB quality, deferred indexes, and rollout risk.
+- [ ] Keep the embedded SurrealKV path rejected for production until the HNSW
+  segment-size blocker is removed.
+- [ ] Decide whether to cut over live dotMD runtime to standalone SurrealDB or
+  hold the migration.
 - [ ] Verify MCP/API/CLI/trickle behavior against live production surfaces.
 - [ ] Keep rollback operationally available only until the cutover is accepted.
+
+Plans:
+
+- [ ] 44-01-PLAN.md - Standalone SurrealDB final quality gate, smoke matrix, cutover/no-go decision, and rollback boundary.
 
 ### Phase 45: Legacy stack removal
 
@@ -318,8 +322,8 @@ after SurrealDB cutover is accepted.
 | 40. Evaluation harness and golden queries | 1/1 | Complete    | 2026-06-13 |
 | 41. Production-grade Surreal schema and import | v1.8 | Complete | 2026-06-14 |
 | 42. Surreal-native retrieval implementation | 4/4 | Complete    | 2026-06-14 |
-| 43. Shadow run and quality gate | 2/3 | In Progress|  |
-| 44. Production cutover | v1.8 | Planned | — |
+| 43. Shadow run and quality gate | 3/3 | Complete | 2026-06-16 |
+| 44. Standalone quality gate and cutover decision | 0/1 | Planned | — |
 | 45. Legacy stack removal | v1.8 | Planned | — |
 
 ### Backlog 999.2: Pipeline parallelism — overlap GLiNER and TEI across files

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: SurrealDB-Native Storage Cutover
 status: planning
-stopped_at: Completed 43-01-PLAN.md
-last_updated: "2026-06-16T07:28:07.094Z"
-last_activity: 2026-06-16
+stopped_at: Completed 43-03-PLAN.md; Phase 44 standalone quality gate planned
+last_updated: "2026-06-19T00:00:00+06:00"
+last_activity: 2026-06-19
 progress:
   total_phases: 14
-  completed_phases: 5
-  total_plans: 17
-  completed_plans: 16
-  percent: 36
+  completed_phases: 6
+  total_plans: 18
+  completed_plans: 17
+  percent: 43
 ---
 
 # GSD State
@@ -21,17 +21,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 43 execution — 43-01 complete; 43-02 next
+**Current focus:** Phase 44 planning — Phase 43 complete; standalone SurrealDB
+quality gate and cutover decision next.
 
 ## Current Milestone
 
 **v1.8 — SurrealDB-Native Storage Cutover**
 
-Phase: 43
-Status: Phase 42 complete; Phase 43 planning is next
-Last activity: 2026-06-16
+Phase: 44
+Status: Phase 43 complete; Phase 44 planning is next
+Last activity: 2026-06-19
 
-Progress: [███████---] 71% (5/7 phases complete; Phase 43 is next; phases 44-45 remain to be planned)
+Progress: [████████--] 86% (6/7 v1.8 phases complete; Phase 44 is planned; Phase 45 remains after accepted cutover)
 
 ## Deferred Items
 
@@ -301,9 +302,10 @@ was moved under `.planning/notes/completed-backlog/`.
 
 ### Blockers/Concerns
 
-No active phase blocker. Phase 38 completed the v1.7 storage simplification
-spike and rejected Embedded SurrealDB as a single replacement backend because
-retrieval parity failed on hybrid/RRF behavior.
+No active Phase 43 blocker. Phase 43 completed the migration/shadow-run spike,
+rejected embedded SurrealKV as the production path because HNSW hits the
+segment-size blocker, and left standalone SurrealDB as the active Phase 44
+candidate.
 
 ### Quick Tasks Completed
 
@@ -315,21 +317,21 @@ retrieval parity failed on hybrid/RRF behavior.
 | 260510-0nb | Adaptive slot quota for federated search merge — ensures tg:fts candidates appear in results despite heterogeneous score spaces | 2026-05-10 | 654cdf1 | [260510-0nb-adaptive-slot-quota-for-federated-search](./quick/260510-0nb-adaptive-slot-quota-for-federated-search/) |
 
 ---
-*Last updated: 2026-06-12*
+*Last updated: 2026-06-19*
 
 ## Current Position
 
-Phase: 43 (shadow-run-and-quality-gate) — READY FOR PLANNING
-Plan: 2 of 3 complete
-Status: Ready to execute
-Last activity: 2026-06-14 -- Phase 42 verified and completed
+Phase: 44 (standalone quality gate and cutover decision) — PLANNED
+Plan: 0 of 1 complete
+Status: Ready to execute Phase 44 quality gate
+Last activity: 2026-06-19 -- Phase 43 closed and Phase 44 plan drafted
 
 ## Operator Next Steps
 
-- Plan Phase 43 shadow run and quality gate.
+- Execute Phase 44 standalone SurrealDB quality gate and cutover decision.
 
 ## Session
 
-**Last session:** 2026-06-16T07:26:54.793Z
-**Stopped at:** Completed 43-01-PLAN.md
+**Last session:** 2026-06-19T00:00:00+06:00
+**Stopped at:** Completed 43-03-PLAN.md; Phase 44 plan drafted
 **Resume file:** None

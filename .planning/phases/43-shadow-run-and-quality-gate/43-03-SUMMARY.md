@@ -9,7 +9,7 @@ requires:
   - phase: 43-shadow-run-and-quality-gate
     provides: "Plan 43-02 shadow-run runner, manifest inputs, and quality-gate artifact contract"
 provides:
-  - "Verified production-derived SurrealKV migration target in local cache"
+  - "Verified production-derived standalone SurrealDB migration target in local cache"
   - "Idempotent/resumable migration fixes for fingerprints, graph replacement, entity defaults, and expanded graph counts"
   - "Progress telemetry covering source_capture, migration phases, verification, restore_rehearsal, and reporting"
   - "Completed shadow-run result artifacts with accepted non-regression unclear rows"
@@ -33,7 +33,7 @@ key-files:
 key-decisions:
   - "Plan 43-03 is complete after producing baseline/candidate/diff/metric artifacts and passing verify-only."
   - "Keep migrated embeddings table SCHEMALESS after bulk load because Surreal schemafull validation over large vector records failed with a segment-size internal error."
-  - "Use the verified cache-local SurrealKV target as migration evidence, while keeping large DB artifacts out of .planning."
+  - "Use the verified cache-local standalone SurrealDB target as migration evidence, while keeping large DB artifacts out of .planning."
 patterns-established:
   - "Long migration/rehearsal runs must expose named progress phases before expensive work starts."
   - "Restore rehearsal can use validated fallback copy evidence when the Surreal CLI is unavailable."
@@ -49,7 +49,7 @@ status: complete
 
 # Phase 43 Plan 03: Migration Evidence and Instrumentation Summary
 
-**Verified the production-derived Surreal migration target, fixed the opaque/idempotency failures, and produced the shadow-run quality artifacts**
+**Verified the production-derived Surreal migration target, closed Phase 43 as a shadow-run spike, and left standalone SurrealDB as the active candidate**
 
 ## Performance
 
@@ -61,7 +61,7 @@ status: complete
 
 ## Accomplishments
 
-- Produced a verified embedded-local SurrealKV migration target:
+- Produced a verified standalone SurrealDB migration target:
   `/home/j2h4u/.cache/dotmd/phase43-target/phase43-fresh.surreal.db`
   (`3.5G` after cleanup; deferred secondary indexes are not built in the main apply).
 - Final migration evidence report is verified:
@@ -131,7 +131,7 @@ Cache-local evidence, intentionally not committed to `.planning`:
 - `/home/j2h4u/.cache/dotmd/phase43-source/index.db` - source SQLite snapshot (`2.4G`)
 - `/home/j2h4u/.cache/dotmd/phase43-source/graph-export.json` - graph export (`121M`)
 - `/home/j2h4u/.cache/dotmd/phase43-source/feedback-export.json` - feedback export
-- `/home/j2h4u/.cache/dotmd/phase43-target/phase43-fresh.surreal.db` - verified SurrealKV target (`3.5G`)
+- `/home/j2h4u/.cache/dotmd/phase43-target/phase43-fresh.surreal.db` - verified standalone SurrealDB target (`3.5G`)
 - `/home/j2h4u/.cache/dotmd/phase43-target/report.md` - verified evidence report
 - `/home/j2h4u/.cache/dotmd/phase43-target/progress.json` - final progress chain
 - `/home/j2h4u/.cache/dotmd/phase43-target/restore-manifest.json` - fallback restore verification
@@ -205,7 +205,7 @@ Repo-local artifacts produced or updated for Plan 43-03:
 
 **Total deviations:** 1 material deviation.
 **Impact on plan:** Phase 43 shadow evidence is complete; production cutover
-still needs an explicit deferred-index post-step and performance decision.
+waits on the standalone quality gate and cutover decision in Phase 44.
 
 ## Issues Encountered
 
@@ -222,83 +222,33 @@ still needs an explicit deferred-index post-step and performance decision.
   from relations; this made a good target look blocked until expected-count
   logic matched writer behavior.
 
-## User Setup Required
+## Status
 
-None for the migration evidence target.
-
-Do not proceed to production cutover from this summary alone. The deferred-index
-post-step is now partially complete and has one material blocker:
-
-1. `embeddings_strategy_chunk_model_idx`,
-   `embeddings_strategy_model_idx`, and `embeddings_text_hash_idx` are present
-   on the correct candidate database (`phase43_shadow`). Evidence lives in
-   `artifacts/index-build-all/`.
-2. Five orphan `vec_meta` rows had no vector payload and were incorrectly
-   migrated as zero-length vectors. They were removed from the candidate target;
-   future migration code now skips orphan embedding metadata rows. Evidence:
-   `artifacts/invalid-embedding-repair.md`.
-3. HNSW remains blocked on the embedded SurrealKV target. After invalid vector
-   repair, `DEFINE INDEX embeddings_hnsw_idx ... HNSW DIMENSION 1024 ...` ran
-   for `2316.793s` and failed with `Record is too large to fit in a segment.
-   Increase max segment size`. SurrealDB docs confirm HNSW defaults to `TYPE
-   F64`; repo DDL now explicitly uses `TYPE F32`. A follow-up `TYPE F32`
-   HNSW-only retry on the same embedded SurrealKV target still failed with the
-   same error after `3179.091s`; evidence lives in
-   `artifacts/index-build-hnsw-f32/`. A later retry with
-   `SURREAL_SURREALKV_MAX_SEGMENT_SIZE=1073741824` also failed with the same
-   error after `2400.030s`; evidence lives in
-   `artifacts/index-build-hnsw-f32-segment-1g/`. The 1 GiB retry was
-   instrumented with runtime-env capture plus SurrealKV file/clog snapshots;
-   target size stayed at `3863932302` bytes and did not show runaway growth
-   during the failed build.
-4. Candidate preflight passes after the repair with `expected_embedding_count`
-   set to the valid-vector count `149796`; see `artifacts/preflight-progress.json`.
-5. Shadow scale metrics must no longer pass when HNSW build evidence is absent:
-   local code now records missing HNSW build time as failed scale evidence
-   instead of pretending `hnsw_build_seconds=0.0`.
+Phase 43 is complete as a migration and shadow-run spike. The embedded
+SurrealKV path is rejected for production because HNSW creation on the
+production-derived embeddings table still fails on the segment-size limit.
+Standalone SurrealDB remains the active candidate for Phase 44, which should
+make the cutover decision based on the remaining quality-gate evidence.
 
 ## Next Phase Readiness
 
-Phase 44 is not ready yet.
+Phase 44 is the standalone quality gate and cutover decision.
 
 Ready:
 
-- A verified SurrealKV candidate target exists.
-- The migration runner is substantially safer, resumable, and instrumented.
-- Restore rehearsal evidence is green.
 - Shadow-run quality artifacts exist and verify-only passes.
+- The migration runner is resumable and instrumented.
+- Restore rehearsal evidence is green.
 - Real baseline/candidate timing evidence exists.
-- The three deferred secondary embedding indexes are present on the candidate
-  target.
-- Native retrieval DDL now defines `embeddings_hnsw_idx` as `TYPE F32`.
+- The candidate target is the standalone SurrealDB path, not the embedded
+  SurrealKV production path.
 
-Blocked / next action points:
+Decision:
 
-1. Do not keep retrying HNSW on embedded SurrealKV by blindly increasing
-   `SURREAL_SURREALKV_MAX_SEGMENT_SIZE`; 1 GiB still fails with the same
-   transaction-log segment error.
-2. Instrument or inspect the internal HNSW index-record/write shape before the
-   next expensive retry. The current runner records external file growth, but
-   SurrealDB does not expose the exact failing record size in the error.
-3. Evaluate whether lowering HNSW graph size (`M`, `M0`, `EFC`) materially
-   reduces the single transaction record enough to fit SurrealKV, or whether
-   Surreal HNSW on embedded SurrealKV is not viable for this corpus.
-4. If current SurrealDB runtime supports `DISKANN`, treat it as a separate
-   spike, not a silent fallback. It may be a better fit for large corpora, but
-   it changes the retrieval profile and version requirements.
-5. Keep sqlite-vec only as the baseline/evaluator while this blocker is open;
-   do not reintroduce it as runtime compatibility fallback.
-- Invalid zero-length embedding records were repaired; valid embedding count is
-  now `149796`.
-
-Not ready:
-
-- HNSW index creation is blocked on embedded SurrealKV segment-size limits.
-  Phase 44 must either change the Surreal storage configuration/backend, change
-  the vector retrieval design, or explicitly proceed without Surreal HNSW after
-  a separate quality/performance decision.
-- Stale `preflight-failure.md` was removed after passing preflight and
-  shadow-run artifacts were produced.
+- Embedded SurrealKV is rejected for production until the HNSW segment-size
+  blocker is removed.
+- Phase 44 should decide whether standalone SurrealDB is ready for live
+  cutover.
 
 ## Self-Check: PASSED
 
