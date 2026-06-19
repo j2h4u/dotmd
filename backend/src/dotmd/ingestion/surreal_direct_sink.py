@@ -174,7 +174,7 @@ def _resource_binding_change(source_document: SourceDocument) -> SurrealDeltaCha
             "namespace": source_document.namespace,
             "resource_ref": source_document.document_ref,
             "document_ref": source_document.document_ref,
-            "ref": binding_ref,
+            "ref": source_document.ref,
             "active": True,
             "bound_at": source_document.updated_at,
             "unbound_at": None,

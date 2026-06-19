@@ -181,7 +181,8 @@ def test_direct_sink_builds_direct_manifest_rows_from_in_memory_models() -> None
     assert [row.ref for row in manifest.resource_bindings.rows] == [
         "filesystem\x1f/notes/alpha.md",
     ]
-    assert manifest.resource_bindings.rows[0].row["ref"] == "filesystem\x1f/notes/alpha.md"
+    assert manifest.resource_bindings.rows[0].ref == "filesystem\x1f/notes/alpha.md"
+    assert manifest.resource_bindings.rows[0].row["ref"] == "filesystem:/notes/alpha.md"
     assert manifest.resource_bindings.rows[0].row["resource_ref"] == "/notes/alpha.md"
 
     assert [row.ref for row in manifest.embeddings.rows] == [
