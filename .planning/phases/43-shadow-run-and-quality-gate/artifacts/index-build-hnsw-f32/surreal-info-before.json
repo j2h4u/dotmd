@@ -1,0 +1,39 @@
+{
+  "elapsed_seconds": 59.271,
+  "finished_at": "2026-06-16T22:38:15Z",
+  "index_name": null,
+  "info": {
+    "id": "bdacd991-9896-4c6c-a937-8015d07c953c",
+    "result": [
+      {
+        "result": {
+          "events": {},
+          "fields": {
+            "chunk_id": "DEFINE FIELD chunk_id ON embeddings TYPE string PERMISSIONS FULL",
+            "chunk_strategy": "DEFINE FIELD chunk_strategy ON embeddings TYPE string PERMISSIONS FULL",
+            "embedding": "DEFINE FIELD embedding ON embeddings TYPE option<array<float>> PERMISSIONS FULL",
+            "embedding[*]": "DEFINE FIELD embedding[*] ON embeddings TYPE float PERMISSIONS FULL",
+            "embedding_model": "DEFINE FIELD embedding_model ON embeddings TYPE string PERMISSIONS FULL",
+            "metadata": "DEFINE FIELD metadata ON embeddings TYPE option<object> PERMISSIONS FULL",
+            "schema_version": "DEFINE FIELD schema_version ON embeddings TYPE string PERMISSIONS FULL",
+            "text_hash": "DEFINE FIELD text_hash ON embeddings TYPE string PERMISSIONS FULL",
+            "vector_rowid": "DEFINE FIELD vector_rowid ON embeddings TYPE int PERMISSIONS FULL"
+          },
+          "indexes": {
+            "embeddings_strategy_chunk_model_idx": "DEFINE INDEX embeddings_strategy_chunk_model_idx ON embeddings FIELDS chunk_strategy, chunk_id, embedding_model UNIQUE",
+            "embeddings_strategy_model_idx": "DEFINE INDEX embeddings_strategy_model_idx ON embeddings FIELDS chunk_strategy, embedding_model",
+            "embeddings_text_hash_idx": "DEFINE INDEX embeddings_text_hash_idx ON embeddings FIELDS text_hash"
+          },
+          "lives": {},
+          "tables": {}
+        },
+        "status": "OK",
+        "time": "4.11826ms"
+      }
+    ]
+  },
+  "operation": "info_embeddings",
+  "started_at": "2026-06-16T22:37:16Z",
+  "statement_hash": null,
+  "status": "applied"
+}

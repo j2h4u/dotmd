@@ -1,0 +1,11 @@
+{
+  "elapsed_seconds": 2316.793,
+  "error": "The query was not executed due to a failed transaction. There was a problem with a datastore transaction: Log error: Record is too large to fit in a segment. Increase max segment size",
+  "error_type": "InternalError",
+  "finished_at": "2026-06-16T21:31:25Z",
+  "index_name": "embeddings_hnsw_idx",
+  "operation": "define_index",
+  "started_at": "2026-06-16T20:52:48Z",
+  "statement_hash": "5ca87f3f0cc4cdec10d6d5cd2e97cd0118c53ae0624a576a6b01b7f21449f0a5",
+  "status": "failed"
+}

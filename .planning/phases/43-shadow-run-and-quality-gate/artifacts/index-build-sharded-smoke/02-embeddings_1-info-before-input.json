@@ -1,0 +1,8 @@
+{
+  "operation": "info_embeddings",
+  "runtime_env": {},
+  "table_name": "embeddings_1",
+  "target_database": "sharded_smoke",
+  "target_namespace": "dotmd_test",
+  "target_url": "surrealkv:///tmp/dotmd-sharded-index-smoke.surreal.db"
+}

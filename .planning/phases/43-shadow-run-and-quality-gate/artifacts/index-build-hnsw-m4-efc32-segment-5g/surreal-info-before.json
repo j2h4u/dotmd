@@ -1,0 +1,14 @@
+{
+  "elapsed_seconds": 0.356,
+  "error": "Failed to create datastore: There was a problem with the underlying datastore: Segment size is too small for compaction, must be >= max_segment_size",
+  "error_type": "RuntimeError",
+  "finished_at": "2026-06-17T12:07:13Z",
+  "index_name": null,
+  "operation": "info_embeddings",
+  "runtime_env": {
+    "SURREAL_SURREALKV_MAX_SEGMENT_SIZE": "5368709120"
+  },
+  "started_at": "2026-06-17T12:07:13Z",
+  "statement_hash": null,
+  "status": "failed"
+}

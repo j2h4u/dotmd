@@ -1,0 +1,2 @@
+DEFINE INDEX embeddings_0_hnsw_idx ON TABLE embeddings_0 COLUMNS embedding HNSW DIMENSION 3 TYPE F32 DIST COSINE M 4 EFC 16;
+DEFINE INDEX embeddings_1_hnsw_idx ON TABLE embeddings_1 COLUMNS embedding HNSW DIMENSION 3 TYPE F32 DIST COSINE M 4 EFC 16;

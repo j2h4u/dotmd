@@ -1,0 +1,32 @@
+{
+  "expected_indexes": [
+    "embeddings_hnsw_idx"
+  ],
+  "finished_at": "2026-06-17T08:15:32Z",
+  "present_indexes": [],
+  "results": [
+    {
+      "elapsed_seconds": 2400.03,
+      "error": "The query was not executed due to a failed transaction. There was a problem with a datastore transaction: Log error: Record is too large to fit in a segment. Increase max segment size",
+      "error_type": "InternalError",
+      "finished_at": "2026-06-17T08:09:33Z",
+      "index_name": "embeddings_hnsw_idx",
+      "operation": "define_index",
+      "runtime_env": {
+        "SURREAL_SURREALKV_MAX_SEGMENT_SIZE": "1073741824"
+      },
+      "started_at": "2026-06-17T07:29:32Z",
+      "statement_hash": "afec2c6013860299b481844ba4edf50665291ddf3f5f2f6dc187e8d301994cdb",
+      "status": "failed",
+      "stderr": ""
+    }
+  ],
+  "runtime_env": {
+    "SURREAL_SURREALKV_MAX_SEGMENT_SIZE": "1073741824"
+  },
+  "status": "blocked",
+  "target_database": "phase43_shadow",
+  "target_namespace": "dotmd",
+  "target_size_bytes": 3863932302,
+  "target_url": "surrealkv:///home/j2h4u/.cache/dotmd/phase43-target/phase43-fresh.surreal.db"
+}

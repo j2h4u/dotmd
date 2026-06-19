@@ -1,0 +1,9 @@
+{
+  "index_name": "embeddings_text_hash_idx",
+  "operation": "define_index",
+  "statement": "DEFINE INDEX embeddings_text_hash_idx ON TABLE embeddings COLUMNS text_hash;",
+  "statement_hash": "1f3314913e2599fa1010aaf31b7e1cdba8b6636dea6b0cc0ed4f5431a45a8183",
+  "target_database": "phase43_shadow",
+  "target_namespace": "dotmd",
+  "target_url": "surrealkv:///home/j2h4u/.cache/dotmd/phase43-target/phase43-fresh.surreal.db"
+}

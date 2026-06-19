@@ -1,0 +1,11 @@
+{
+  "index_name": "embeddings_1_hnsw_idx",
+  "operation": "define_index",
+  "runtime_env": {},
+  "statement": "DEFINE INDEX embeddings_1_hnsw_idx ON TABLE embeddings_1 COLUMNS embedding HNSW DIMENSION 3 TYPE F32 DIST COSINE M 4 EFC 16;",
+  "statement_hash": "ff7224a4b9dcca924e1099d9eab23361ec25076b0b7dc50ca99af1d685b67cc0",
+  "table_name": "embeddings_1",
+  "target_database": "sharded_smoke",
+  "target_namespace": "dotmd_test",
+  "target_url": "surrealkv:///tmp/dotmd-sharded-index-smoke.surreal.db"
+}

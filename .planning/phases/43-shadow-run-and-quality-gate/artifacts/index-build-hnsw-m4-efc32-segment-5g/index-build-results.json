@@ -1,0 +1,34 @@
+{
+  "expected_indexes": [
+    "embeddings_hnsw_idx"
+  ],
+  "finished_at": "2026-06-17T12:08:12Z",
+  "present_indexes": [],
+  "results": [
+    {
+      "captured_at": "2026-06-17T12:07:13Z",
+      "elapsed_seconds": 0.356,
+      "error": "Failed to create datastore: There was a problem with the underlying datastore: Segment size is too small for compaction, must be >= max_segment_size",
+      "error_type": "RuntimeError",
+      "finished_at": "2026-06-17T12:07:13Z",
+      "index_name": null,
+      "operation": "info_embeddings",
+      "runtime_env": {
+        "SURREAL_SURREALKV_MAX_SEGMENT_SIZE": "5368709120"
+      },
+      "started_at": "2026-06-17T12:07:13Z",
+      "statement_hash": null,
+      "status": "failed",
+      "stderr": "",
+      "table": "embeddings"
+    }
+  ],
+  "runtime_env": {
+    "SURREAL_SURREALKV_MAX_SEGMENT_SIZE": "5368709120"
+  },
+  "status": "blocked",
+  "target_database": "phase43_shadow",
+  "target_namespace": "dotmd",
+  "target_size_bytes": 3863932302,
+  "target_url": "surrealkv:///home/j2h4u/.cache/dotmd/phase43-target/phase43-fresh.surreal.db"
+}

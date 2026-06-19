@@ -1,0 +1,27 @@
+{
+  "created_at": "2026-06-17T12:30:07Z",
+  "embedding_shard_count": 2,
+  "heartbeat_seconds": 2.0,
+  "index_mode": "hnsw",
+  "runtime_env": {},
+  "steps": [
+    {
+      "name": "embeddings_0_hnsw_idx",
+      "required": true,
+      "statement": "DEFINE INDEX embeddings_0_hnsw_idx ON TABLE embeddings_0 COLUMNS embedding HNSW DIMENSION 3 TYPE F32 DIST COSINE M 4 EFC 16;",
+      "statement_hash": "e62e813d4c18c4f972058f8805fc031e46e4d6c1871408cd0fc172e920aad579",
+      "table_name": "embeddings_0"
+    },
+    {
+      "name": "embeddings_1_hnsw_idx",
+      "required": true,
+      "statement": "DEFINE INDEX embeddings_1_hnsw_idx ON TABLE embeddings_1 COLUMNS embedding HNSW DIMENSION 3 TYPE F32 DIST COSINE M 4 EFC 16;",
+      "statement_hash": "ff7224a4b9dcca924e1099d9eab23361ec25076b0b7dc50ca99af1d685b67cc0",
+      "table_name": "embeddings_1"
+    }
+  ],
+  "target_database": "sharded_smoke",
+  "target_namespace": "dotmd_test",
+  "target_url": "surrealkv:///tmp/dotmd-sharded-index-smoke.surreal.db",
+  "timeout_seconds": 60.0
+}

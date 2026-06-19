@@ -1,0 +1,27 @@
+{
+  "elapsed_seconds": 69.339,
+  "finished_at": "2026-06-17T13:03:43Z",
+  "index_name": null,
+  "info": {
+    "id": "b47d2aad-8200-4d04-b670-7a7fd2cda130",
+    "result": [
+      {
+        "result": {
+          "events": {},
+          "fields": {},
+          "indexes": {},
+          "lives": {},
+          "tables": {}
+        },
+        "status": "OK",
+        "time": "3.389959ms"
+      }
+    ]
+  },
+  "operation": "info_embeddings",
+  "runtime_env": {},
+  "started_at": "2026-06-17T13:02:34Z",
+  "statement_hash": null,
+  "status": "applied",
+  "table_name": "embeddings_0"
+}

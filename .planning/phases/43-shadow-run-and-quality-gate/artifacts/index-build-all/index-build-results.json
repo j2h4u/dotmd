@@ -1,0 +1,54 @@
+{
+  "expected_indexes": [
+    "embeddings_strategy_chunk_model_idx",
+    "embeddings_strategy_model_idx",
+    "embeddings_text_hash_idx",
+    "embeddings_hnsw_idx"
+  ],
+  "finished_at": "2026-06-16T21:35:49Z",
+  "present_indexes": [
+    "embeddings_strategy_chunk_model_idx",
+    "embeddings_strategy_model_idx",
+    "embeddings_text_hash_idx"
+  ],
+  "results": [
+    {
+      "elapsed_seconds": 0.0,
+      "finished_at": "2026-06-16T20:52:48Z",
+      "index_name": "embeddings_strategy_chunk_model_idx",
+      "statement_hash": "62ce806d42db5ae7e9f89b4c7bb638ff45f14724e7539109e50232e64f32b4b3",
+      "status": "already_present"
+    },
+    {
+      "elapsed_seconds": 0.0,
+      "finished_at": "2026-06-16T20:52:48Z",
+      "index_name": "embeddings_strategy_model_idx",
+      "statement_hash": "9fb9d7916a8ec776c4d30e61d70495073de3b401b84420bf6385671022014d8a",
+      "status": "already_present"
+    },
+    {
+      "elapsed_seconds": 0.0,
+      "finished_at": "2026-06-16T20:52:48Z",
+      "index_name": "embeddings_text_hash_idx",
+      "statement_hash": "1f3314913e2599fa1010aaf31b7e1cdba8b6636dea6b0cc0ed4f5431a45a8183",
+      "status": "already_present"
+    },
+    {
+      "elapsed_seconds": 2316.793,
+      "error": "The query was not executed due to a failed transaction. There was a problem with a datastore transaction: Log error: Record is too large to fit in a segment. Increase max segment size",
+      "error_type": "InternalError",
+      "finished_at": "2026-06-16T21:31:25Z",
+      "index_name": "embeddings_hnsw_idx",
+      "operation": "define_index",
+      "started_at": "2026-06-16T20:52:48Z",
+      "statement_hash": "5ca87f3f0cc4cdec10d6d5cd2e97cd0118c53ae0624a576a6b01b7f21449f0a5",
+      "status": "failed",
+      "stderr": ""
+    }
+  ],
+  "status": "blocked",
+  "target_database": "phase43_shadow",
+  "target_namespace": "dotmd",
+  "target_size_bytes": 3863932204,
+  "target_url": "surrealkv:///home/j2h4u/.cache/dotmd/phase43-target/phase43-fresh.surreal.db"
+}

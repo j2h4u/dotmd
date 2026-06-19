@@ -1,0 +1,29 @@
+{
+  "elapsed_seconds": 88.772,
+  "finished_at": "2026-06-17T13:41:04Z",
+  "index_name": null,
+  "info": {
+    "id": "9298899a-f223-4544-b2c7-cb17fb74ae1d",
+    "result": [
+      {
+        "result": {
+          "events": {},
+          "fields": {},
+          "indexes": {
+            "embeddings_2_hnsw_idx": "DEFINE INDEX embeddings_2_hnsw_idx ON embeddings_2 FIELDS embedding HNSW DIMENSION 1024 DIST COSINE TYPE F32 EFC 32 M 4 M0 8 LM 0.7213475204444817f"
+          },
+          "lives": {},
+          "tables": {}
+        },
+        "status": "OK",
+        "time": "14.593201ms"
+      }
+    ]
+  },
+  "operation": "info_embeddings",
+  "runtime_env": {},
+  "started_at": "2026-06-17T13:39:36Z",
+  "statement_hash": null,
+  "status": "applied",
+  "table_name": "embeddings_2"
+}

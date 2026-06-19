@@ -181,25 +181,31 @@ Repo-local artifacts produced or updated for Plan 43-03:
 - Large migration artifacts belong under `/home/j2h4u/.cache/dotmd/`, not under
   `.planning/`, to avoid turning planning docs into multi-GB database storage.
 - Phase 43 cannot advance to production cutover solely on this evidence because
-  deferred retrieval indexes still need an explicit post-step decision before
-  production cutover performance testing.
+  deferred embedding indexes still need an explicit post-step before production
+  cutover readiness. Expert-panel review classified
+  `embeddings_strategy_chunk_model_idx` as a correctness guard, not merely a
+  performance index, because it enforces one embedding per
+  `(chunk_strategy, chunk_id, embedding_model)`.
 
 ## Deviations from Plan
 
-### Deferred retrieval indexes
+### Deferred embedding indexes
 
-- **Planned:** Build deferred Surreal retrieval indexes as part of migration apply.
+- **Planned:** Build deferred Surreal embedding indexes as part of migration apply.
 - **Actual:** The main apply now skips deferred secondary index construction by
   default because Surreal `DEFINE INDEX` on the migrated embeddings table is not
   internally progress-observable and violated the 120-second no-output rule.
-- **Impact:** Data migration and shadow quality evidence are complete; retrieval
-  index build remains a separate explicit post-step before production cutover.
+- **Impact:** Data migration and shadow quality evidence are complete; the
+  deferred index build remains a separate explicit post-step before production
+  cutover. `embeddings_strategy_chunk_model_idx` is a cutover correctness gate;
+  `embeddings_strategy_model_idx` and `embeddings_text_hash_idx` are currently
+  performance/operability gates.
 
 ---
 
 **Total deviations:** 1 material deviation.
 **Impact on plan:** Phase 43 shadow evidence is complete; production cutover
-still needs an explicit deferred-index build/performance decision.
+still needs an explicit deferred-index post-step and performance decision.
 
 ## Issues Encountered
 
@@ -220,8 +226,36 @@ still needs an explicit deferred-index build/performance decision.
 
 None for the migration evidence target.
 
-Do not proceed to production cutover from this summary alone. The remaining
-cutover prerequisite is an explicit deferred-index build/performance decision.
+Do not proceed to production cutover from this summary alone. The deferred-index
+post-step is now partially complete and has one material blocker:
+
+1. `embeddings_strategy_chunk_model_idx`,
+   `embeddings_strategy_model_idx`, and `embeddings_text_hash_idx` are present
+   on the correct candidate database (`phase43_shadow`). Evidence lives in
+   `artifacts/index-build-all/`.
+2. Five orphan `vec_meta` rows had no vector payload and were incorrectly
+   migrated as zero-length vectors. They were removed from the candidate target;
+   future migration code now skips orphan embedding metadata rows. Evidence:
+   `artifacts/invalid-embedding-repair.md`.
+3. HNSW remains blocked on the embedded SurrealKV target. After invalid vector
+   repair, `DEFINE INDEX embeddings_hnsw_idx ... HNSW DIMENSION 1024 ...` ran
+   for `2316.793s` and failed with `Record is too large to fit in a segment.
+   Increase max segment size`. SurrealDB docs confirm HNSW defaults to `TYPE
+   F64`; repo DDL now explicitly uses `TYPE F32`. A follow-up `TYPE F32`
+   HNSW-only retry on the same embedded SurrealKV target still failed with the
+   same error after `3179.091s`; evidence lives in
+   `artifacts/index-build-hnsw-f32/`. A later retry with
+   `SURREAL_SURREALKV_MAX_SEGMENT_SIZE=1073741824` also failed with the same
+   error after `2400.030s`; evidence lives in
+   `artifacts/index-build-hnsw-f32-segment-1g/`. The 1 GiB retry was
+   instrumented with runtime-env capture plus SurrealKV file/clog snapshots;
+   target size stayed at `3863932302` bytes and did not show runaway growth
+   during the failed build.
+4. Candidate preflight passes after the repair with `expected_embedding_count`
+   set to the valid-vector count `149796`; see `artifacts/preflight-progress.json`.
+5. Shadow scale metrics must no longer pass when HNSW build evidence is absent:
+   local code now records missing HNSW build time as failed scale evidence
+   instead of pretending `hnsw_build_seconds=0.0`.
 
 ## Next Phase Readiness
 
@@ -234,11 +268,35 @@ Ready:
 - Restore rehearsal evidence is green.
 - Shadow-run quality artifacts exist and verify-only passes.
 - Real baseline/candidate timing evidence exists.
+- The three deferred secondary embedding indexes are present on the candidate
+  target.
+- Native retrieval DDL now defines `embeddings_hnsw_idx` as `TYPE F32`.
+
+Blocked / next action points:
+
+1. Do not keep retrying HNSW on embedded SurrealKV by blindly increasing
+   `SURREAL_SURREALKV_MAX_SEGMENT_SIZE`; 1 GiB still fails with the same
+   transaction-log segment error.
+2. Instrument or inspect the internal HNSW index-record/write shape before the
+   next expensive retry. The current runner records external file growth, but
+   SurrealDB does not expose the exact failing record size in the error.
+3. Evaluate whether lowering HNSW graph size (`M`, `M0`, `EFC`) materially
+   reduces the single transaction record enough to fit SurrealKV, or whether
+   Surreal HNSW on embedded SurrealKV is not viable for this corpus.
+4. If current SurrealDB runtime supports `DISKANN`, treat it as a separate
+   spike, not a silent fallback. It may be a better fit for large corpora, but
+   it changes the retrieval profile and version requirements.
+5. Keep sqlite-vec only as the baseline/evaluator while this blocker is open;
+   do not reintroduce it as runtime compatibility fallback.
+- Invalid zero-length embedding records were repaired; valid embedding count is
+  now `149796`.
 
 Not ready:
 
-- Deferred Surreal retrieval indexes were intentionally not built in the main
-  apply.
+- HNSW index creation is blocked on embedded SurrealKV segment-size limits.
+  Phase 44 must either change the Surreal storage configuration/backend, change
+  the vector retrieval design, or explicitly proceed without Surreal HNSW after
+  a separate quality/performance decision.
 - Stale `preflight-failure.md` was removed after passing preflight and
   shadow-run artifacts were produced.
 

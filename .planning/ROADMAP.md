@@ -248,6 +248,13 @@ storage/retrieval backend after quality acceptance.
 **Plans:** TBD
 
 - [ ] Switch dotMD runtime to SurrealDB as the single storage/retrieval backend.
+- [ ] Complete the instrumented deferred-index post-step on the candidate target:
+  build the unique embedding invariant index, record `INFO FOR TABLE embeddings`
+  before/after, and decide/build the remaining secondary/HNSW rebuild steps with
+  heartbeat evidence.
+- [ ] Resolve the SurrealKV HNSW blocker: embedded SurrealKV currently fails
+  HNSW creation on the production-derived embeddings table with
+  `Record is too large to fit in a segment`.
 - [ ] Verify MCP/API/CLI/trickle behavior against live production surfaces.
 - [ ] Keep rollback operationally available only until the cutover is accepted.
 

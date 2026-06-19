@@ -1,0 +1,11 @@
+{
+  "elapsed_seconds": 429.322,
+  "finished_at": "2026-06-17T13:24:45Z",
+  "index_name": "embeddings_1_hnsw_idx",
+  "operation": "define_index",
+  "runtime_env": {},
+  "started_at": "2026-06-17T13:17:35Z",
+  "statement_hash": "2270c07c639ee29b04dc62674f0d99f66cf8bac53e3febd55c22d6b71f464fec",
+  "status": "applied",
+  "table_name": "embeddings_1"
+}
