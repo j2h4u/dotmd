@@ -756,3 +756,51 @@ def test_remote_target_connection_rejects_conflicting_surreal_auth_env(
             target_namespace="dotmd",
             target_database="production",
         )
+
+
+def test_resume_target_inspection_can_skip_large_row_counts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dotmd.ingestion import migrate_surreal as migrate_module  # type: ignore[import-not-found]
+
+    class FakeConnection:
+        def __init__(self, _config):  # type: ignore[no-untyped-def]
+            pass
+
+        def __enter__(self):  # type: ignore[no-untyped-def]
+            return self
+
+        def __exit__(self, *_args):  # type: ignore[no-untyped-def]
+            return None
+
+        def inspect_schema(self):  # type: ignore[no-untyped-def]
+            return {"schema_version": "42.1.0", "table_modes": {"embeddings": "SCHEMAFULL"}}
+
+    def fail_count_rows(_connection):  # type: ignore[no-untyped-def]
+        raise AssertionError("row counts should be skipped during resume inspection")
+
+    report = migrate_module.SurrealMigrationReport(
+        schema_version="42.1.0",
+        mode=migrate_module.SurrealMigrationMode.APPLY,
+        status="apply",
+        target_mode=migrate_module.SurrealTargetMode.REMOTE_SERVICE,
+        overwrite_policy=migrate_module.SurrealOverwritePolicy.REFUSE,
+        target_url="http://127.0.0.1:8000",
+        target_namespace="dotmd",
+        target_database="production",
+        source_capture_manifest=None,
+    )
+    monkeypatch.setattr(migrate_module, "SurrealConnection", FakeConnection)
+    monkeypatch.setattr(migrate_module, "_count_target_rows", fail_count_rows)
+
+    schema_info = migrate_module._inspect_target(
+        report,
+        target_url="http://127.0.0.1:8000",
+        target_namespace="dotmd",
+        target_database="production",
+        count_rows=False,
+    )
+
+    assert report.target_pre_counts == {}
+    assert report.target_inspection_performed is True
+    assert schema_info["schema_version"] == "42.1.0"

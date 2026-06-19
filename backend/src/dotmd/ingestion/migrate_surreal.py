@@ -1624,13 +1624,15 @@ def _inspect_target(
     target_url: str,
     target_namespace: str,
     target_database: str,
+    count_rows: bool = True,
 ) -> dict[str, str]:
     with _connection_for_target(
         target_url=target_url,
         target_namespace=target_namespace,
         target_database=target_database,
     ) as connection:
-        report.target_pre_counts = _count_target_rows(connection)
+        if count_rows:
+            report.target_pre_counts = _count_target_rows(connection)
         report.target_inspection_performed = True
         schema_info = connection.inspect_schema()
     return {
@@ -2494,6 +2496,7 @@ def run_surreal_migration(
         target_url=target_url,
         target_namespace=target_namespace,
         target_database=target_database,
+        count_rows=not bool(resume_phase_names),
     )
     _write_source_capture_step_progress(
         progress_path,
