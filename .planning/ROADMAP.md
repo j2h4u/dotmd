@@ -248,19 +248,26 @@ production cutover after Phase 43 evidence, with embedded SurrealKV rejected
 for production because HNSW creation on the production-derived embeddings
 table hits the segment-size blocker.
 **Depends on:** Phase 43
-**Plans:** 1 plan drafted
+**Plans:** 1/1 plan executed
 
-- [ ] Review standalone SurrealDB quality, deferred indexes, and rollout risk.
-- [ ] Keep the embedded SurrealKV path rejected for production until the HNSW
+- [x] Review standalone SurrealDB quality, deferred indexes, and rollout risk.
+- [x] Keep the embedded SurrealKV path rejected for production until the HNSW
   segment-size blocker is removed.
-- [ ] Decide whether to cut over live dotMD runtime to standalone SurrealDB or
+- [x] Decide whether to cut over live dotMD runtime to standalone SurrealDB or
   hold the migration.
-- [ ] Verify MCP/API/CLI/trickle behavior against live production surfaces.
-- [ ] Keep rollback operationally available only until the cutover is accepted.
+- [x] Verify MCP/API/CLI/trickle behavior against live production surfaces.
+- [x] Keep rollback operationally available only until the cutover is accepted.
 
 Plans:
 
-- [ ] 44-01-PLAN.md - Standalone SurrealDB final quality gate, smoke matrix, cutover/no-go decision, and rollback boundary.
+- [x] 44-01-PLAN.md - Standalone SurrealDB final quality gate, smoke matrix, cutover/no-go decision, and rollback boundary.
+
+Decision:
+
+- [x] NO-GO: do not cut production over yet. Runtime wiring for standalone
+  SurrealDB is missing for MCP/API/CLI/trickle, and reranker-on latency is not
+  production-ready.
+- [ ] Add a follow-up runtime-wiring phase before retrying cutover.
 
 ### Phase 45: Legacy stack removal
 
@@ -323,7 +330,7 @@ after SurrealDB cutover is accepted.
 | 41. Production-grade Surreal schema and import | v1.8 | Complete | 2026-06-14 |
 | 42. Surreal-native retrieval implementation | 4/4 | Complete    | 2026-06-14 |
 | 43. Shadow run and quality gate | 3/3 | Complete | 2026-06-16 |
-| 44. Standalone quality gate and cutover decision | 0/1 | Planned | — |
+| 44. Standalone quality gate and cutover decision | 1/1 | Complete — NO-GO | 2026-06-19 |
 | 45. Legacy stack removal | v1.8 | Planned | — |
 
 ### Backlog 999.2: Pipeline parallelism — overlap GLiNER and TEI across files

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: SurrealDB-Native Storage Cutover
 status: planning
-stopped_at: Completed 43-03-PLAN.md; Phase 44 standalone quality gate planned
+stopped_at: Completed 44-01-PLAN.md with NO-GO cutover decision
 last_updated: "2026-06-19T00:00:00+06:00"
 last_activity: 2026-06-19
 progress:
   total_phases: 14
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 18
-  completed_plans: 17
-  percent: 43
+  completed_plans: 18
+  percent: 50
 ---
 
 # GSD State
@@ -21,18 +21,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 44 planning — Phase 43 complete; standalone SurrealDB
-quality gate and cutover decision next.
+**Current focus:** Follow-up runtime wiring before any standalone SurrealDB
+cutover retry.
 
 ## Current Milestone
 
 **v1.8 — SurrealDB-Native Storage Cutover**
 
-Phase: 44
-Status: Phase 43 complete; Phase 44 planning is next
+Phase: follow-up needed
+Status: Phase 44 completed with NO-GO; standalone runtime wiring is missing
 Last activity: 2026-06-19
 
-Progress: [████████--] 86% (6/7 v1.8 phases complete; Phase 44 is planned; Phase 45 remains after accepted cutover)
+Progress: [█████████-] 100% of planned v1.8 phases evaluated; cutover blocked before Phase 45
 
 ## Deferred Items
 
@@ -302,10 +302,10 @@ was moved under `.planning/notes/completed-backlog/`.
 
 ### Blockers/Concerns
 
-No active Phase 43 blocker. Phase 43 completed the migration/shadow-run spike,
-rejected embedded SurrealKV as the production path because HNSW hits the
-segment-size blocker, and left standalone SurrealDB as the active Phase 44
-candidate.
+Active cutover blocker: Phase 44 completed with a NO-GO decision. The
+standalone SurrealDB candidate exists, but MCP/API/CLI/trickle are not wired to
+run against standalone SurrealDB as the production runtime, and reranker-on
+latency remains too high for cutover.
 
 ### Quick Tasks Completed
 
@@ -321,17 +321,18 @@ candidate.
 
 ## Current Position
 
-Phase: 44 (standalone quality gate and cutover decision) — PLANNED
-Plan: 0 of 1 complete
-Status: Ready to execute Phase 44 quality gate
-Last activity: 2026-06-19 -- Phase 43 closed and Phase 44 plan drafted
+Phase: follow-up runtime wiring — NEEDED
+Plan: Phase 44 1 of 1 complete
+Status: Cutover NO-GO until standalone runtime wiring exists
+Last activity: 2026-06-19 -- Phase 44 no-go decision recorded
 
 ## Operator Next Steps
 
-- Execute Phase 44 standalone SurrealDB quality gate and cutover decision.
+- Plan and execute standalone SurrealDB runtime wiring, then retry the Phase 44
+  smoke matrix.
 
 ## Session
 
 **Last session:** 2026-06-19T00:00:00+06:00
-**Stopped at:** Completed 43-03-PLAN.md; Phase 44 plan drafted
+**Stopped at:** Completed 44-01-PLAN.md with NO-GO cutover decision
 **Resume file:** None
