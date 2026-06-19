@@ -25,30 +25,49 @@ def _engine_class():
 class _FakeFTSConnection:
     title_rows: list[dict[str, object]] = field(default_factory=list)
     text_rows: list[dict[str, object]] = field(default_factory=list)
-    combined_rows: list[dict[str, object]] | None = None
     error: Exception | None = None
-    calls: list[tuple[str, dict[str, object] | None]] = field(default_factory=list)
+    query_calls: list[tuple[str, dict[str, object] | None]] = field(default_factory=list)
+    query_raw_calls: list[tuple[str, dict[str, object] | None]] = field(default_factory=list)
 
     def query(
         self,
         statement: str,
         variables: dict[str, object] | None = None,
     ) -> list[dict[str, object]]:
-        self.calls.append((statement, variables))
+        self.query_calls.append((statement, variables))
         if self.error is not None:
             raise self.error
-        if statement.startswith("EXPLAIN FULL SELECT chunk_id, "):
+        if statement.startswith("EXPLAIN FULL SELECT chunk_id, search::score(0) AS score "):
             return [{"plan": {"indexes": ["chunks_title_fts", "chunks_text_fts"]}}]
-        if "WITH INDEX chunks_title_fts, chunks_text_fts" in statement:
-            if self.combined_rows is not None:
-                return list(self.combined_rows)
-            return [
-                {"chunk_id": "chunk-a", "score": 4.5},
-                {"chunk_id": "chunk-dup", "score": 2.1},
-                {"chunk_id": "chunk-b", "score": 2.0},
-                {"chunk_id": "chunk-c", "score": 0.2},
-            ]
-        return []
+        raise AssertionError(f"unexpected query: {statement}")
+
+    def query_raw(
+        self,
+        statement: str,
+        variables: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        self.query_raw_calls.append((statement, variables))
+        if self.error is not None:
+            raise self.error
+        if statement == (
+            "SELECT chunk_id, search::score(0) AS score "
+            "FROM chunks WITH INDEX chunks_title_fts "
+            "WHERE chunk_strategy = $chunk_strategy "
+            "AND title @0@ $query "
+            "ORDER BY score DESC LIMIT $limit TIMEOUT 5s; "
+            "SELECT chunk_id, search::score(1) AS score "
+            "FROM chunks WITH INDEX chunks_text_fts "
+            "WHERE chunk_strategy = $chunk_strategy "
+            "AND text @1@ $query "
+            "ORDER BY score DESC LIMIT $limit TIMEOUT 5s;"
+        ):
+            return {
+                "result": [
+                    {"result": list(self.title_rows), "status": "OK", "time": "1ms"},
+                    {"result": list(self.text_rows), "status": "OK", "time": "1ms"},
+                ]
+            }
+        raise AssertionError(f"unexpected raw statement: {statement}")
 
 
 def test_search_returns_empty_for_blank_or_punctuation_queries_without_hitting_surreal() -> None:
@@ -59,8 +78,16 @@ def test_search_returns_empty_for_blank_or_punctuation_queries_without_hitting_s
     assert engine.search("!!! ???", top_k=5) == []
 
 
-def test_search_uses_one_query_with_bound_query_variables() -> None:
+def test_search_uses_one_query_raw_roundtrip_with_bound_query_variables() -> None:
     connection = _FakeFTSConnection(
+        title_rows=[
+            {"chunk_id": "chunk-a", "score": 0.9},
+            {"chunk_id": "chunk-dup", "score": 0.2},
+        ],
+        text_rows=[
+            {"chunk_id": "chunk-dup", "score": 0.4},
+            {"chunk_id": "chunk-b", "score": 0.3},
+        ],
     )
     engine = _engine_class()(connection)
 
@@ -68,38 +95,42 @@ def test_search_uses_one_query_with_bound_query_variables() -> None:
 
     assert results == [
         ("chunk-a", 4.5),
-        ("chunk-dup", 2.1),
-        ("chunk-b", 2.0),
-        ("chunk-c", 0.2),
+        ("chunk-dup", 1.4),
+        ("chunk-b", 0.3),
     ]
-    assert len(connection.calls) == 1
+    assert len(connection.query_calls) == 0
+    assert len(connection.query_raw_calls) == 1
 
-    statement, variables = connection.calls[0]
+    statement, variables = connection.query_raw_calls[0]
     assert statement == (
-        "SELECT chunk_id, "
-        "(search::score(0) * $title_boost) + "
-        "(search::score(1) * $text_boost) AS score "
-        "FROM chunks WITH INDEX chunks_title_fts, chunks_text_fts "
+        "SELECT chunk_id, search::score(0) AS score "
+        "FROM chunks WITH INDEX chunks_title_fts "
         "WHERE chunk_strategy = $chunk_strategy "
-        "AND (title @0@ $query OR text @1@ $query) "
-        "ORDER BY score DESC, chunk_id ASC LIMIT $limit TIMEOUT 5s;"
+        "AND title @0@ $query "
+        "ORDER BY score DESC LIMIT $limit TIMEOUT 5s; "
+        "SELECT chunk_id, search::score(1) AS score "
+        "FROM chunks WITH INDEX chunks_text_fts "
+        "WHERE chunk_strategy = $chunk_strategy "
+        "AND text @1@ $query "
+        "ORDER BY score DESC LIMIT $limit TIMEOUT 5s;"
     )
     assert variables == {
         "query": "surreal retrieval quoted",
         "chunk_strategy": "contextual_512_50",
         "limit": 7,
-        "title_boost": 5.0,
-        "text_boost": 1.0,
     }
 
 
 def test_search_filters_to_configured_chunk_strategy() -> None:
-    connection = _FakeFTSConnection(combined_rows=[{"chunk_id": "chunk-active", "score": 5.0}])
+    connection = _FakeFTSConnection(
+        title_rows=[{"chunk_id": "chunk-active", "score": 1.0}],
+        text_rows=[],
+    )
     engine = _engine_class()(connection, chunk_strategy="heading_512_50")
 
     assert engine.search("surreal retrieval", top_k=3) == [("chunk-active", 5.0)]
 
-    _statement, variables = connection.calls[0]
+    _statement, variables = connection.query_raw_calls[0]
     assert variables is not None
     assert variables["chunk_strategy"] == "heading_512_50"
 
@@ -112,7 +143,7 @@ def test_search_logs_and_returns_empty_on_surreal_errors(caplog: pytest.LogCaptu
         results = engine.search("surreal retrieval", top_k=3)
 
     assert results == []
-    assert len(connection.calls) == 1
+    assert len(connection.query_raw_calls) == 1
     assert "query_len=17" in caplog.text
     assert "error_type=RuntimeError" in caplog.text
 
