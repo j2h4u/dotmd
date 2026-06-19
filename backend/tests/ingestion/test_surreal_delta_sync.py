@@ -730,6 +730,9 @@ class _FakeSurrealConnection:
         self.calls.append(("delete", table, key))
         self.tables.get(table, {}).pop(key, None)
 
+    def scan_table(self, table_name: str) -> list[dict[str, object]]:
+        return [dict(row) for row in self.tables.get(table_name, {}).values()]
+
     def delete_all_from_table(self, table_name: str) -> int:
         raise AssertionError(f"bulk delete is not allowed for {table_name}")
 
@@ -992,6 +995,7 @@ def test_surreal_delta_store_writer_updates_bootstrap_rows_in_place() -> None:
     assert connection.tables["chunks"][chunk_record_id]["text"] == "new text"
     assert set(connection.tables["embeddings"]) == {embedding_id}
     assert connection.tables["embeddings"][embedding_id]["vector"] == [0.9, 0.8]
+    assert isinstance(connection.tables["embeddings"][embedding_id]["vector_rowid"], int)
     assert set(connection.tables["bindings"]) == {binding_id}
     assert connection.tables["bindings"][binding_id]["active"] is True
 
@@ -1090,3 +1094,99 @@ def test_surreal_delta_store_writer_writes_graph_rows_and_is_idempotent() -> Non
         ("upsert", "tags", tag_id),
         ("upsert", "relations", relation_id),
     ]
+
+
+def test_surreal_delta_store_writer_removes_stale_frontmatter_relations_and_keeps_other_edges() -> None:
+    connection = _FakeSurrealConnection()
+    writer = SurrealDeltaStoreWriter(connection=connection)
+
+    file_path = "/notes/meeting.md"
+    stale_tag_id = str(writer.codec.encode("relations", f"{file_path}\x1falpha\x1fHAS_TAG"))
+    stale_participant_id = str(
+        writer.codec.encode("relations", f"{file_path}\x1fCarol\x1fHAS_PARTICIPANT")
+    )
+    other_relation_id = str(writer.codec.encode("relations", f"{file_path}\x1fBob\x1fMENTIONS"))
+    connection.tables["relations"] = {
+        stale_tag_id: {
+            "id": stale_tag_id,
+            "relation_id": f"{file_path}\x1falpha\x1fHAS_TAG",
+            "source_id": file_path,
+            "source_table": "files",
+            "target_id": "alpha",
+            "target_table": "tags",
+            "relation_type": "HAS_TAG",
+            "rel_type": "HAS_TAG",
+        },
+        stale_participant_id: {
+            "id": stale_participant_id,
+            "relation_id": f"{file_path}\x1fCarol\x1fHAS_PARTICIPANT",
+            "source_id": file_path,
+            "source_table": "files",
+            "target_id": "Carol",
+            "target_table": "entities",
+            "relation_type": "HAS_PARTICIPANT",
+            "rel_type": "HAS_PARTICIPANT",
+        },
+        other_relation_id: {
+            "id": other_relation_id,
+            "relation_id": f"{file_path}\x1fBob\x1fMENTIONS",
+            "source_id": file_path,
+            "source_table": "files",
+            "target_id": "Bob",
+            "target_table": "entities",
+            "relation_type": "MENTIONS",
+            "rel_type": "MENTIONS",
+        },
+    }
+
+    changes = [
+        SurrealDeltaChange(
+            ref=file_path,
+            table="files",
+            row={
+                "path": file_path,
+                "title": "Meeting note",
+                "metadata": {},
+            },
+        ),
+        SurrealDeltaChange(
+            ref=f"{file_path}\x1fbeta\x1fHAS_TAG",
+            table="relations",
+            row={
+                "source_id": file_path,
+                "source_table": "files",
+                "target_id": "beta",
+                "target_table": "tags",
+                "relation_type": "HAS_TAG",
+                "rel_type": "HAS_TAG",
+                "weight": 1.0,
+                "properties": {},
+                "metadata": {},
+            },
+        ),
+    ]
+
+    applied = writer.write_graph(changes)
+
+    beta_relation_id = str(writer.codec.encode("relations", f"{file_path}\x1fbeta\x1fHAS_TAG"))
+    current_calls = list(connection.calls)
+    assert applied == 4
+    assert stale_tag_id not in connection.tables["relations"]
+    assert stale_participant_id not in connection.tables["relations"]
+    assert other_relation_id in connection.tables["relations"]
+    assert beta_relation_id in connection.tables["relations"]
+    assert current_calls[:2] == [
+        ("delete", "relations", stale_tag_id),
+        ("delete", "relations", stale_participant_id),
+    ]
+    assert current_calls[2:] == [
+        ("upsert", "files", str(writer.codec.encode("files", file_path))),
+        ("upsert", "relations", beta_relation_id),
+    ]
+    assert connection.tables["relations"][other_relation_id]["relation_type"] == "MENTIONS"
+
+    repeat_calls = len(connection.calls)
+    repeat = writer.write_graph(changes)
+
+    assert repeat == 0
+    assert len(connection.calls) == repeat_calls

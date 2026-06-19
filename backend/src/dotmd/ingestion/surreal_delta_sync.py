@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -31,6 +32,18 @@ def _surreal_writer_allowed_fields() -> dict[str, frozenset[str]]:
 
 
 _SURREAL_WRITER_ALLOWED_FIELDS = _surreal_writer_allowed_fields()
+_FRONTMATTER_RELATION_TYPES = {"HAS_TAG", "HAS_PARTICIPANT"}
+
+
+def _stable_vector_rowid(*parts: object) -> int:
+    """Derive a deterministic positive int suitable for Surreal ``int`` fields."""
+
+    digest = hashlib.blake2b(
+        _stable_composite_ref(*parts).encode("utf-8"),
+        digest_size=8,
+    ).digest()
+    value = int.from_bytes(digest, "big") & ((1 << 63) - 1)
+    return value or 1
 
 
 class SurrealDeltaScope(StrEnum):
@@ -602,6 +615,18 @@ class SurrealDeltaStoreWriter:
             )
         return str(change.ref)
 
+    def _embedding_vector_rowid(self, raw_identifier: str, row: Mapping[str, Any]) -> int:
+        vector_rowid = row.get("vector_rowid")
+        if vector_rowid not in (None, ""):
+            return int(vector_rowid)
+
+        chunk_strategy = row.get("chunk_strategy")
+        embedding_model = row.get("embedding_model")
+        chunk_id = row.get("chunk_id")
+        if all(part is not None for part in (chunk_strategy, embedding_model, chunk_id)):
+            return _stable_vector_rowid(chunk_strategy, embedding_model, chunk_id)
+        return _stable_vector_rowid("embeddings", raw_identifier)
+
     def _vector_component_raw_identifier(self, change: SurrealDeltaChange) -> str:
         row = change.row
         owner = row.get("chunk_id") or row.get("entity_id")
@@ -692,8 +717,22 @@ class SurrealDeltaStoreWriter:
         if table == "provenance":
             prepared.setdefault("source_unit_refs", [])
         if table == "embeddings":
-            prepared.setdefault("vector_rowid", None)
             prepared.setdefault("vector", [])
+            if prepared.get("vector_rowid") in (None, ""):
+                chunk_strategy = prepared.get("chunk_strategy")
+                embedding_model = prepared.get("embedding_model")
+                chunk_id = prepared.get("chunk_id")
+                if all(
+                    part is not None
+                    for part in (chunk_strategy, embedding_model, chunk_id)
+                ):
+                    prepared["vector_rowid"] = _stable_vector_rowid(
+                        chunk_strategy,
+                        embedding_model,
+                        chunk_id,
+                    )
+                else:
+                    prepared["vector_rowid"] = _stable_vector_rowid(table, raw_identifier)
         if table == "vector_components":
             prepared.setdefault("embedding", [])
         if table == "feedback":
@@ -921,7 +960,8 @@ class SurrealDeltaStoreWriter:
             row = dict(change.row)
             raw_identifier = self._embedding_raw_identifier(change)
             row.setdefault("metadata", {})
-            row.setdefault("vector_rowid", None)
+            if row.get("vector_rowid") in (None, ""):
+                row["vector_rowid"] = self._embedding_vector_rowid(raw_identifier, row)
             applied += self._upsert_point("embeddings", raw_identifier, row)
         return applied
 
@@ -935,7 +975,7 @@ class SurrealDeltaStoreWriter:
         return applied
 
     def write_graph(self, rows: Sequence[SurrealDeltaChange]) -> int:
-        applied = 0
+        applied = self._delete_stale_frontmatter_relations(rows)
         for change in rows:
             table = self._normalize_table_name(change.table)
             row = dict(change.row)
@@ -978,6 +1018,60 @@ class SurrealDeltaStoreWriter:
 
             row.setdefault("metadata", {})
             applied += self._upsert_point(table, raw_identifier, row)
+        return applied
+
+    def _delete_stale_frontmatter_relations(self, rows: Sequence[SurrealDeltaChange]) -> int:
+        source_ids: set[str] = set()
+        desired_relation_ids: dict[str, set[str]] = {}
+
+        for change in rows:
+            table = self._normalize_table_name(change.table)
+            row = change.row
+            if table == "files":
+                source_id = self._graph_file_raw_identifier(change)
+                if source_id:
+                    source_ids.add(source_id)
+            elif table == "relations":
+                relation_type = str(row.get("rel_type") or row.get("relation_type") or "")
+                if relation_type not in _FRONTMATTER_RELATION_TYPES:
+                    continue
+                if str(row.get("source_table") or "") != "files":
+                    continue
+                source_id = str(row.get("source_id") or "")
+                target_id = str(row.get("target_id") or "")
+                if not source_id or not target_id:
+                    continue
+                source_ids.add(source_id)
+                desired_relation_ids.setdefault(source_id, set()).add(
+                    self._graph_relation_raw_identifier(change)
+                )
+
+        if not source_ids:
+            return 0
+
+        applied = 0
+        for existing in self.connection.scan_table("relations"):
+            relation_type = str(existing.get("rel_type") or existing.get("relation_type") or "")
+            if relation_type not in _FRONTMATTER_RELATION_TYPES:
+                continue
+            source_id = str(existing.get("source_id") or "")
+            if source_id not in source_ids:
+                continue
+
+            existing_change = SurrealDeltaChange(
+                ref=str(existing.get("relation_id") or existing.get("id") or source_id),
+                table="relations",
+                row=dict(existing),
+            )
+            relation_id = self._graph_relation_raw_identifier(existing_change)
+            if relation_id in desired_relation_ids.get(source_id, set()):
+                continue
+
+            record_id = existing.get("id")
+            if record_id is None:
+                record_id = self._record_id("relations", relation_id)
+            self.connection.delete(record_id)
+            applied += 1
         return applied
 
     def write_feedback(self, rows: Sequence[SurrealDeltaChange]) -> int:

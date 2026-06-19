@@ -23,6 +23,7 @@ from dotmd.ingestion.surreal_delta_sync import (
     SurrealDeltaManifest,
     SurrealDeltaSection,
     SurrealDeltaSourceSelection,
+    _stable_vector_rowid,
     build_surreal_delta_manifest,
 )
 
@@ -345,7 +346,7 @@ def _embedding_change(
             "embedding_model": embedding_model,
             "chunk_id": chunk.chunk_id,
             "text_hash": text_hash,
-            "vector_rowid": None,
+            "vector_rowid": _stable_vector_rowid(chunk_strategy, embedding_model, chunk.chunk_id),
             "vector": list(embedding),
             "metadata": {},
         },

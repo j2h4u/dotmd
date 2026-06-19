@@ -354,6 +354,7 @@ def test_direct_sink_builds_direct_manifest_rows_from_in_memory_models() -> None
         "hash-alpha-0",
         "hash-alpha-1",
     ]
+    assert all(isinstance(row.row["vector_rowid"], int) for row in manifest.embeddings.rows)
     assert [row.row["vector"] for row in manifest.embeddings.rows] == [
         [0.1, 0.2, 0.3],
         [0.4, 0.5, 0.6],
