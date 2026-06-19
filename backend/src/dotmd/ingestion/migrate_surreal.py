@@ -728,7 +728,6 @@ def load_sqlite_rows_for_surreal(
             {
                 "schema_version": SURREAL_SCHEMA_VERSION,
                 "chunk_id": str(row["chunk_id"]),
-                "original_chunk_id": str(row["chunk_id"]),
                 "chunk_strategy": chunk_strategy,
                 "embedding_model": row_embedding_model,
                 "text_hash": _normalize_text_hash(row["text_hash"]),
@@ -882,7 +881,6 @@ def iter_sqlite_embedding_rows_for_surreal(
                 yield {
                     "schema_version": SURREAL_SCHEMA_VERSION,
                     "chunk_id": str(row["chunk_id"]),
-                    "original_chunk_id": str(row["chunk_id"]),
                     "chunk_strategy": dataset.chunk_strategy,
                     "embedding_model": dataset.embedding_model,
                     "text_hash": _normalize_text_hash(row["text_hash"]),

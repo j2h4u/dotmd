@@ -181,6 +181,7 @@ def test_sqlite_rows_can_skip_vectors_for_streaming_apply(tmp_path: Path) -> Non
     assert len(vector_components) == 2
     assert embeddings[0]["vector"]
     assert "embedding" not in embeddings[0]
+    assert "original_chunk_id" not in embeddings[0]
     assert vector_components[0]["embedding"]
 
 
@@ -204,6 +205,8 @@ def test_streaming_embedding_rows_normalize_missing_text_hash(tmp_path: Path) ->
     assert materialized["embeddings"][0]["text_hash"] == ""
     assert "embedding" not in streamed[0]
     assert "embedding" not in materialized["embeddings"][0]
+    assert "original_chunk_id" not in streamed[0]
+    assert "original_chunk_id" not in materialized["embeddings"][0]
 
 
 def test_missing_vec_config_model_uses_matching_runtime_embedding_model(
