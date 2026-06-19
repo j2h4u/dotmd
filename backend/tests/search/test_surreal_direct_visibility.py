@@ -3,6 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+from click.testing import CliRunner
+from fastapi.testclient import TestClient
 from tests.fixtures.surreal_native import apply_surreal_native_retrieval_schema
 
 from dotmd.api.service import DotMDService
@@ -69,6 +72,12 @@ def _index_direct_surreal_fixture(tmp_path: Path) -> tuple[Settings, Path, int, 
     return settings, file_path, vector_count, fts_count
 
 
+def _build_direct_surreal_service(settings: Settings) -> DotMDService:
+    service = DotMDService(settings)
+    service.warmup = MagicMock()  # type: ignore[method-assign]
+    return service
+
+
 def test_direct_surreal_ingest_is_visible_to_surreal_keyword_search(
     tmp_path: Path,
 ) -> None:
@@ -117,3 +126,108 @@ def test_direct_surreal_ingest_is_visible_through_service_keyword_search(
     candidate = response.candidates[0]
     assert candidate.ref.startswith(f"filesystem:{file_path.resolve()}")
     assert "surrealcutoversmoke42" in candidate.snippet
+
+
+def test_direct_surreal_ingest_is_visible_through_api_search_entrypoint(
+    tmp_path: Path,
+) -> None:
+    settings, file_path, _, _ = _index_direct_surreal_fixture(tmp_path)
+    service = _build_direct_surreal_service(settings)
+
+    from dotmd.api import server
+
+    try:
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(server, "load_runtime_settings", lambda: settings)
+            monkeypatch.setattr(server, "DotMDService", lambda _settings: service)
+            with TestClient(server.app) as client:
+                response = client.get(
+                    "/search?q=surrealcutoversmoke42&mode=keyword&rerank=false&expand=false"
+                )
+    finally:
+        service.close()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    assert payload["results"][0]["ref"].startswith(f"filesystem:{file_path.resolve()}")
+    assert "surrealcutoversmoke42" in payload["results"][0]["snippet"]
+
+
+def test_direct_surreal_ingest_is_visible_through_cli_search_entrypoint(
+    tmp_path: Path,
+) -> None:
+    settings, file_path, _, _ = _index_direct_surreal_fixture(tmp_path)
+    service = _build_direct_surreal_service(settings)
+
+    from unittest.mock import patch
+
+    from dotmd.cli import main
+
+    try:
+        with (
+            patch("dotmd.cli.load_settings", return_value=settings),
+            patch("dotmd.cli.DotMDService", return_value=service),
+        ):
+            result = CliRunner().invoke(
+                main,
+                [
+                    "--index-dir",
+                    str(settings.index_dir),
+                    "search",
+                    "surrealcutoversmoke42",
+                    "--mode",
+                    "keyword",
+                    "--no-rerank",
+                    "--no-expand",
+                ],
+            )
+    finally:
+        service.close()
+
+    assert result.exit_code == 0, result.output
+    assert f"filesystem:{file_path.resolve()}" in result.output
+    assert "surrealcutoversmoke42" in result.output
+
+
+def test_direct_surreal_ingest_is_visible_through_mcp_search_tool(
+    tmp_path: Path,
+) -> None:
+    settings, file_path, _, _ = _index_direct_surreal_fixture(tmp_path)
+    service = _build_direct_surreal_service(settings)
+
+    import asyncio
+    from types import SimpleNamespace
+
+    import dotmd.mcp_server as mcp
+
+    reranker = MagicMock()
+    reranker.model_name = "fixture-reranker"
+    reranker.warmup = MagicMock()
+    reranker.rerank = MagicMock(
+        side_effect=lambda *args, **kwargs: [
+            (chunk_id, 1.0 - (index * 0.01))
+            for index, chunk_id in enumerate(args[1][: kwargs.get("top_k", len(args[1]))])
+        ]
+    )
+    service._semantic_engine.search = MagicMock(return_value=[])  # type: ignore[method-assign]
+    service._graph_direct_engine.search = MagicMock(return_value=[])  # type: ignore[method-assign]
+    service._query_expander.expand = MagicMock(  # type: ignore[method-assign]
+        return_value=SimpleNamespace(expanded_text="")
+    )
+    service._reranker_factory.get = MagicMock(return_value=reranker)  # type: ignore[method-assign]
+    previous_service = mcp._service
+    mcp._service = service
+
+    try:
+        _content, structured_raw = asyncio.run(
+            mcp.mcp.call_tool("search", {"query": "surrealcutoversmoke42", "top_k": 5})
+        )
+    finally:
+        mcp._service = previous_service
+        service.close()
+
+    payload = structured_raw if isinstance(structured_raw, dict) else structured_raw.model_dump()
+    assert payload["candidates"]
+    assert payload["candidates"][0]["ref"].startswith(f"filesystem:{file_path.resolve()}")
+    assert "surrealcutoversmoke42" in payload["candidates"][0]["snippet"]
