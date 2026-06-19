@@ -706,3 +706,50 @@ def test_apply_fails_closed_for_recompute_requests_schemaless_targets_and_partia
     assert failed_report.last_successful_phase is not None
     assert failed_report.failed_phase is not None
     assert failed_report.rollback_evidence == "no_automatic_cleanup"
+
+
+def test_remote_target_connection_uses_surreal_auth_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dotmd.ingestion import migrate_surreal as migrate_module  # type: ignore[import-not-found]
+
+    captured = {}
+
+    class FakeConnection:
+        def __init__(self, config):  # type: ignore[no-untyped-def]
+            captured["config"] = config
+
+    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL_USERNAME", "root")
+    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL_PASSWORD", "secret")
+    monkeypatch.setattr(migrate_module, "SurrealConnection", FakeConnection)
+
+    migrate_module._connection_for_target(
+        target_url="http://127.0.0.1:8000",
+        target_namespace="dotmd",
+        target_database="production",
+    )
+
+    config = captured["config"]
+    assert config.url == "http://127.0.0.1:8000"
+    assert config.namespace == "dotmd"
+    assert config.database == "production"
+    assert config.username == "root"
+    assert config.password == "secret"
+    assert config.access_token is None
+
+
+def test_remote_target_connection_rejects_conflicting_surreal_auth_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dotmd.ingestion import migrate_surreal as migrate_module  # type: ignore[import-not-found]
+
+    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL_USERNAME", "root")
+    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL_PASSWORD", "secret")
+    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL_ACCESS_TOKEN", "token")
+
+    with pytest.raises(ValueError, match="must not be combined"):
+        migrate_module._connection_for_target(
+            target_url="http://127.0.0.1:8000",
+            target_namespace="dotmd",
+            target_database="production",
+        )

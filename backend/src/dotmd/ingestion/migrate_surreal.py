@@ -1303,11 +1303,27 @@ def _connection_for_target(
     target_namespace: str,
     target_database: str,
 ) -> SurrealConnection:
+    username = os.environ.get("DOTMD_SURREAL_RETRIEVAL_USERNAME") or None
+    password = os.environ.get("DOTMD_SURREAL_RETRIEVAL_PASSWORD") or None
+    access_token = os.environ.get("DOTMD_SURREAL_RETRIEVAL_ACCESS_TOKEN") or None
+    if bool(username) != bool(password):
+        raise ValueError(
+            "DOTMD_SURREAL_RETRIEVAL_USERNAME and "
+            "DOTMD_SURREAL_RETRIEVAL_PASSWORD must be set together"
+        )
+    if access_token and (username or password):
+        raise ValueError(
+            "DOTMD_SURREAL_RETRIEVAL_ACCESS_TOKEN must not be combined with "
+            "username/password auth"
+        )
     return SurrealConnection(
         SurrealStoreConfig(
             url=target_url,
             namespace=target_namespace,
             database=target_database,
+            username=username,
+            password=password,
+            access_token=access_token,
         )
     )
 
