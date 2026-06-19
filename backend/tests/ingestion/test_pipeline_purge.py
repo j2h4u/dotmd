@@ -18,6 +18,12 @@ from unittest.mock import patch
 
 import pytest
 
+from dotmd.ingestion.surreal_delta_sync import (
+    FakeSurrealDeltaWriter,
+    SurrealDeltaSyncState,
+    run_surreal_delta_sync,
+)
+
 STRATEGIES = ["heading_512_50"]
 MODEL = "multilingual_e5_large"
 
@@ -226,13 +232,33 @@ def _table_exists(db_path: Path, table: str) -> bool:
 
 def _get_pipeline(db_path: Path):  # type: ignore[no-untyped-def]
     """Deferred import of IndexingPipeline — raises ImportError until P3/P4 ships."""
+    return _get_pipeline_with_backend(db_path)
+
+
+def _get_pipeline_with_backend(
+    db_path: Path,
+    *,
+    search_backend: str = "sqlite",
+):  # type: ignore[no-untyped-def]
     from dotmd.core.config import Settings
+    from dotmd.ingestion import pipeline as pipeline_module
     from dotmd.ingestion.pipeline import IndexingPipeline
 
     settings = Settings(
         index_dir=db_path.parent,
         embedding_url="http://localhost:18088",
+        embedding_model=MODEL,
+        search_backend=search_backend,
+        surreal_retrieval_url="http://localhost:8000",
+        surreal_retrieval_database="dotmd",
     )
+    if search_backend == "surreal":
+        with patch.object(
+            pipeline_module,
+            "_create_surreal_direct_writer",
+            return_value=object(),
+        ):
+            return IndexingPipeline(settings)
     return IndexingPipeline(settings)
 
 
@@ -710,3 +736,141 @@ class TestNormalFilesystemUnbind:
         )
 
         assert calls == ["/file_A.md"]
+
+
+class TestSurrealFilesystemLifecycle:
+    def test_purge_file_emits_surreal_tombstones_for_orphans_and_bindings(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        db_path = _build_post_v16_db(tmp_path)
+        strategy = STRATEGIES[0]
+        file_path = "/file_A.md"
+        shared_file_path = "/file_B.md"
+        orphan_chunk_id = "m" * 64
+        shared_chunk_id = "n" * 64
+
+        _insert_chunk(db_path, strategy, orphan_chunk_id, "orphan content")
+        _insert_chunk(db_path, strategy, shared_chunk_id, "shared content")
+        _add_m2m(db_path, strategy, orphan_chunk_id, file_path, chunk_index=0)
+        _add_m2m(db_path, strategy, shared_chunk_id, file_path, chunk_index=1)
+        _add_m2m(db_path, strategy, shared_chunk_id, shared_file_path, chunk_index=0)
+        _add_source_document(db_path, file_path)
+        _add_resource_binding(db_path, file_path)
+        _add_chunk_provenance(db_path, strategy, orphan_chunk_id, file_path)
+        _add_chunk_provenance(db_path, strategy, shared_chunk_id, file_path)
+
+        pipeline = _get_pipeline_with_backend(db_path, search_backend="surreal")
+        captured_manifests: list[object] = []
+
+        def record_manifest(manifest) -> None:  # type: ignore[no-untyped-def]
+            captured_manifests.append(manifest)
+
+        pipeline._write_surreal_direct_manifest = record_manifest  # type: ignore[method-assign]
+        pipeline._purge_file(file_path)
+
+        assert len(captured_manifests) == 1
+        manifest = captured_manifests[0]
+
+        assert [row.change_type.value for row in manifest.documents.rows] == ["tombstone"]
+        assert manifest.documents.rows[0].tombstone.previous_row["document_ref"] == str(
+            Path(file_path).resolve()
+        )
+        assert [row.change_type.value for row in manifest.resource_bindings.rows] == [
+            "tombstone"
+        ]
+        assert manifest.resource_bindings.rows[0].tombstone.previous_row["resource_ref"] == str(
+            Path(file_path).resolve()
+        )
+        assert [row.tombstone.previous_row["binding_id"] for row in manifest.chunk_file_bindings.rows] == [
+            f"{orphan_chunk_id}\x1f{file_path}\x1f0",
+            f"{shared_chunk_id}\x1f{file_path}\x1f1",
+        ]
+        assert [row.tombstone.previous_row["chunk_id"] for row in manifest.chunks.rows] == [
+            orphan_chunk_id,
+        ]
+        assert [row.tombstone.previous_row["chunk_id"] for row in manifest.provenance.rows] == [
+            orphan_chunk_id,
+        ]
+        assert [
+            row.tombstone.previous_row["chunk_strategy"] for row in manifest.embeddings.rows
+        ] == [strategy]
+        assert [
+            row.tombstone.previous_row["embedding_model"] for row in manifest.embeddings.rows
+        ] == [MODEL]
+
+        result = run_surreal_delta_sync(
+            manifest,
+            FakeSurrealDeltaWriter(),
+            state=SurrealDeltaSyncState(),
+            batch_size=50,
+        )
+        assert result.applied_counts["tombstones"] == 7
+
+    def test_deactivate_filesystem_binding_emits_surreal_tombstones(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        db_path = _build_post_v16_db(tmp_path)
+        file_path = "/file_A.md"
+        document_ref = str(Path(file_path).resolve())
+
+        _add_source_document(db_path, file_path)
+        _add_resource_binding(db_path, file_path)
+
+        pipeline = _get_pipeline_with_backend(db_path, search_backend="surreal")
+        captured_manifests: list[object] = []
+
+        def record_manifest(manifest) -> None:  # type: ignore[no-untyped-def]
+            captured_manifests.append(manifest)
+
+        pipeline._write_surreal_direct_manifest = record_manifest  # type: ignore[method-assign]
+        pipeline._deactivate_filesystem_binding(file_path)
+
+        assert len(captured_manifests) == 1
+        manifest = captured_manifests[0]
+        assert [row.change_type.value for row in manifest.documents.rows] == ["tombstone"]
+        assert [row.change_type.value for row in manifest.resource_bindings.rows] == [
+            "tombstone"
+        ]
+        assert manifest.chunks.rows == []
+        assert manifest.chunk_file_bindings.rows == []
+        assert manifest.provenance.rows == []
+        assert manifest.embeddings.rows == []
+
+        result = run_surreal_delta_sync(
+            manifest,
+            FakeSurrealDeltaWriter(),
+            state=SurrealDeltaSyncState(),
+            batch_size=50,
+        )
+        assert result.applied_counts["tombstones"] == 2
+
+        conn = sqlite3.connect(str(db_path))
+        binding_row = conn.execute(
+            "SELECT active, unbound_at FROM resource_bindings "
+            "WHERE namespace = 'filesystem' AND resource_ref = ?",
+            (document_ref,),
+        ).fetchone()
+        conn.close()
+        assert binding_row == (0, binding_row[1])
+
+    def test_sqlite_backend_does_not_emit_surreal_tombstones(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        db_path = _build_post_v16_db(tmp_path)
+        file_path = "/file_A.md"
+        _add_source_document(db_path, file_path)
+        _add_resource_binding(db_path, file_path)
+
+        pipeline = _get_pipeline_with_backend(db_path, search_backend="sqlite")
+        captured_manifests: list[object] = []
+
+        def record_manifest(manifest) -> None:  # type: ignore[no-untyped-def]
+            captured_manifests.append(manifest)
+
+        pipeline._write_surreal_direct_manifest = record_manifest  # type: ignore[method-assign]
+        pipeline._deactivate_filesystem_binding(file_path)
+
+        assert captured_manifests == []

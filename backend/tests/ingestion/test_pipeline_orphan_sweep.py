@@ -11,6 +11,13 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from unittest.mock import patch
+
+from dotmd.ingestion.surreal_delta_sync import (
+    FakeSurrealDeltaWriter,
+    SurrealDeltaSyncState,
+    run_surreal_delta_sync,
+)
 
 MODEL = "multilingual_e5_large"
 
@@ -74,6 +81,33 @@ def _get_pipeline(db_path: Path):  # type: ignore[no-untyped-def]
         index_dir=db_path.parent,
         embedding_url="http://localhost:18088",
     )
+    return IndexingPipeline(settings)
+
+
+def _get_pipeline_with_backend(
+    db_path: Path,
+    *,
+    search_backend: str = "sqlite",
+):  # type: ignore[no-untyped-def]
+    from dotmd.core.config import Settings
+    from dotmd.ingestion import pipeline as pipeline_module
+    from dotmd.ingestion.pipeline import IndexingPipeline
+
+    settings = Settings(
+        index_dir=db_path.parent,
+        embedding_url="http://localhost:18088",
+        embedding_model=MODEL,
+        search_backend=search_backend,
+        surreal_retrieval_url="http://localhost:8000",
+        surreal_retrieval_database="dotmd",
+    )
+    if search_backend == "surreal":
+        with patch.object(
+            pipeline_module,
+            "_create_surreal_direct_writer",
+            return_value=object(),
+        ):
+            return IndexingPipeline(settings)
     return IndexingPipeline(settings)
 
 
@@ -187,3 +221,130 @@ class TestOrphanSweepMultiStrategy:
             assert missing_fp in deactivate_calls, (
                 f"Expected {missing_fp!r} to be deactivated; got: {deactivate_calls!r}"
             )
+
+
+class TestOrphanSweepSurreal:
+    """Missing-file sweep emits Surreal tombstones when the standalone backend is active."""
+
+    def test_orphan_sweep_emits_surreal_tombstones_for_missing_files(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        db_path = _build_m2m_db(tmp_path)
+        strategy = "heading_512_50"
+        chunk_id = "c" * 64
+        missing_file = "/gone/does_not_exist.md"
+        document_ref = str(Path(missing_file).resolve())
+
+        _populate(db_path, strategy, chunk_id, missing_file)
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript(
+            """
+            CREATE TABLE source_documents (
+                namespace TEXT NOT NULL,
+                document_ref TEXT NOT NULL,
+                ref TEXT NOT NULL,
+                source_uri TEXT NOT NULL,
+                file_path TEXT,
+                media_type TEXT NOT NULL,
+                parser_name TEXT NOT NULL,
+                document_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                content_fingerprint TEXT NOT NULL,
+                metadata_fingerprint TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                PRIMARY KEY (namespace, document_ref)
+            );
+            CREATE TABLE resource_bindings (
+                namespace TEXT NOT NULL,
+                resource_ref TEXT NOT NULL,
+                document_ref TEXT NOT NULL,
+                ref TEXT NOT NULL,
+                active INTEGER NOT NULL,
+                bound_at TEXT NOT NULL,
+                unbound_at TEXT,
+                content_fingerprint TEXT NOT NULL,
+                metadata_fingerprint TEXT NOT NULL,
+                source_unit_refs TEXT NOT NULL DEFAULT '[]',
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                PRIMARY KEY (namespace, resource_ref)
+            );
+            """
+        )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO source_documents (
+                namespace, document_ref, ref, source_uri, file_path, media_type,
+                parser_name, document_type, title, updated_at, content_fingerprint,
+                metadata_fingerprint, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "filesystem",
+                document_ref,
+                f"filesystem:{document_ref}",
+                missing_file,
+                missing_file,
+                "text/markdown",
+                "markdown",
+                "document",
+                "Missing file",
+                "2026-06-19T12:00:00+00:00",
+                "content",
+                "metadata",
+                "{}",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO resource_bindings (
+                namespace, resource_ref, document_ref, ref, active, bound_at,
+                unbound_at, content_fingerprint, metadata_fingerprint, source_unit_refs,
+                metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "filesystem",
+                document_ref,
+                document_ref,
+                f"filesystem:{document_ref}",
+                1,
+                "2026-06-19T12:00:00+00:00",
+                None,
+                "content",
+                "metadata",
+                "[]",
+                "{}",
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        pipeline = _get_pipeline_with_backend(db_path, search_backend="surreal")
+        captured_manifests: list[object] = []
+
+        def record_manifest(manifest) -> None:  # type: ignore[no-untyped-def]
+            captured_manifests.append(manifest)
+
+        pipeline._write_surreal_direct_manifest = record_manifest  # type: ignore[method-assign]
+        pipeline.purge_orphaned_files()
+
+        assert len(captured_manifests) == 1
+        manifest = captured_manifests[0]
+        assert [row.change_type.value for row in manifest.documents.rows] == ["tombstone"]
+        assert [row.change_type.value for row in manifest.resource_bindings.rows] == [
+            "tombstone"
+        ]
+        assert manifest.chunks.rows == []
+        assert manifest.chunk_file_bindings.rows == []
+        assert manifest.provenance.rows == []
+        assert manifest.embeddings.rows == []
+
+        result = run_surreal_delta_sync(
+            manifest,
+            FakeSurrealDeltaWriter(),
+            state=SurrealDeltaSyncState(),
+            batch_size=50,
+        )
+        assert result.applied_counts["tombstones"] == 2

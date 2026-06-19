@@ -74,10 +74,14 @@ from dotmd.ingestion.source_lifecycle import (
 )
 from dotmd.ingestion.source_provider import ApplicationSourceProviderProtocol
 from dotmd.ingestion.surreal_delta_sync import (
+    SurrealDeltaChange,
+    SurrealDeltaChangeType,
     SurrealDeltaCheckpointCandidate,
     SurrealDeltaManifest,
+    SurrealDeltaSection,
     SurrealDeltaSourceSelection,
     SurrealDeltaSyncState,
+    SurrealDeltaTombstone,
     run_surreal_delta_sync,
 )
 from dotmd.ingestion.surreal_direct_sink import (
@@ -2682,6 +2686,277 @@ class IndexingPipeline:
             state=self._surreal_direct_sync_state,
         )
 
+    def _filesystem_surreal_tombstone_manifest(
+        self,
+        file_path: str,
+        *,
+        reason: str,
+        include_chunk_tombstones: bool,
+    ) -> SurrealDeltaManifest | None:
+        """Build a direct Surreal tombstone manifest for one filesystem path."""
+        if self._settings.search_backend != "surreal":
+            return None
+
+        document_ref = self._meta_entity_id(file_path)
+        source_document = self._metadata_store.get_source_document(
+            "filesystem",
+            document_ref,
+            conn=self._conn,
+        )
+        resource_binding = self._metadata_store.get_resource_binding("filesystem", document_ref)
+        now = datetime.now(UTC)
+
+        changes: list[SurrealDeltaChange] = []
+
+        if source_document is not None:
+            changes.append(
+                SurrealDeltaChange(
+                    ref=source_document.ref,
+                    table="source_documents",
+                    change_type=SurrealDeltaChangeType.TOMBSTONE,
+                    tombstone=SurrealDeltaTombstone(
+                        ref=source_document.ref,
+                        table="source_documents",
+                        reason=reason,
+                        previous_row={
+                            "namespace": source_document.namespace,
+                            "document_ref": source_document.document_ref,
+                            "ref": source_document.ref,
+                            "source_uri": source_document.source_uri,
+                            "title": source_document.title,
+                            "media_type": source_document.media_type,
+                            "parser_name": source_document.parser_name,
+                            "document_type": source_document.document_type,
+                            "updated_at": source_document.updated_at,
+                            "content_fingerprint": source_document.content_fingerprint,
+                            "metadata_fingerprint": source_document.metadata_fingerprint,
+                            "metadata": dict(source_document.metadata_json),
+                        },
+                    ),
+                )
+            )
+
+        binding_previous_row: dict[str, Any] | None = None
+        if resource_binding is not None:
+            binding_previous_row = {
+                "namespace": resource_binding.namespace,
+                "resource_ref": resource_binding.resource_ref,
+                "document_ref": resource_binding.document_ref,
+                "ref": resource_binding.ref,
+                "active": resource_binding.active,
+                "bound_at": resource_binding.bound_at,
+                "unbound_at": resource_binding.unbound_at,
+                "content_fingerprint": resource_binding.content_fingerprint,
+                "metadata_fingerprint": resource_binding.metadata_fingerprint,
+                "source_unit_refs": list(resource_binding.source_unit_refs),
+                "metadata": dict(resource_binding.metadata_json),
+            }
+        elif source_document is not None:
+            binding_previous_row = {
+                "namespace": source_document.namespace,
+                "resource_ref": source_document.document_ref,
+                "document_ref": source_document.document_ref,
+                "ref": source_document.ref,
+                "active": True,
+                "bound_at": source_document.updated_at,
+                "unbound_at": None,
+                "content_fingerprint": source_document.content_fingerprint,
+                "metadata_fingerprint": source_document.metadata_fingerprint,
+                "source_unit_refs": [],
+                "metadata": dict(source_document.metadata_json),
+            }
+
+        if binding_previous_row is not None:
+            changes.append(
+                SurrealDeltaChange(
+                    ref=str(binding_previous_row["ref"]),
+                    table="bindings",
+                    change_type=SurrealDeltaChangeType.TOMBSTONE,
+                    tombstone=SurrealDeltaTombstone(
+                        ref=str(binding_previous_row["ref"]),
+                        table="bindings",
+                        reason=reason,
+                        previous_row=binding_previous_row,
+                    ),
+                )
+            )
+
+        if include_chunk_tombstones:
+            for strategy in sorted(self._present_strategies(self._conn)):
+                chunk_refs = self._metadata_store.get_chunk_refs_by_file(strategy, file_path)
+                if not chunk_refs:
+                    continue
+
+                chunk_ids = [chunk_id for chunk_id, _ in chunk_refs]
+                orphan_chunk_ids = [
+                    chunk_id
+                    for chunk_id in chunk_ids
+                    if len(self._metadata_store.get_file_paths_by_chunk_id(strategy, chunk_id)) <= 1
+                ]
+                provenance_by_chunk_id = (
+                    self._metadata_store.get_chunk_provenance_for_chunk_ids(strategy, orphan_chunk_ids)
+                    if orphan_chunk_ids
+                    else {}
+                )
+
+                for chunk_id, chunk_index in chunk_refs:
+                    binding_id = f"{chunk_id}\x1f{file_path}\x1f{chunk_index}"
+                    changes.append(
+                        SurrealDeltaChange(
+                            ref=binding_id,
+                            table="chunk_file_bindings",
+                            change_type=SurrealDeltaChangeType.TOMBSTONE,
+                            tombstone=SurrealDeltaTombstone(
+                                ref=binding_id,
+                                table="chunk_file_bindings",
+                                reason=reason,
+                                previous_row={
+                                    "binding_id": binding_id,
+                                    "chunk_id": chunk_id,
+                                    "file_path": file_path,
+                                    "chunk_index": chunk_index,
+                                },
+                            ),
+                        )
+                    )
+
+                for chunk_id in orphan_chunk_ids:
+                    provenance = provenance_by_chunk_id.get(chunk_id)
+                    parser_name = provenance.parser_name if provenance is not None else (
+                        source_document.parser_name if source_document is not None else "markdown"
+                    )
+                    chunk_strategy = (
+                        provenance.chunk_strategy if provenance is not None else strategy
+                    )
+                    source_unit_refs = (
+                        list(provenance.source_unit_refs) if provenance is not None else []
+                    )
+                    provenance_id = f"{chunk_id}\x1ffilesystem\x1f{document_ref}"
+                    changes.append(
+                        SurrealDeltaChange(
+                            ref=chunk_id,
+                            table="chunks",
+                            change_type=SurrealDeltaChangeType.TOMBSTONE,
+                            tombstone=SurrealDeltaTombstone(
+                                ref=chunk_id,
+                                table="chunks",
+                                reason=reason,
+                                previous_row={
+                                    "chunk_id": chunk_id,
+                                    "original_chunk_id": chunk_id,
+                                },
+                            ),
+                        )
+                    )
+                    changes.append(
+                        SurrealDeltaChange(
+                            ref=provenance_id,
+                            table="provenance",
+                            change_type=SurrealDeltaChangeType.TOMBSTONE,
+                            tombstone=SurrealDeltaTombstone(
+                                ref=provenance_id,
+                                table="provenance",
+                                reason=reason,
+                                previous_row={
+                                    "chunk_id": chunk_id,
+                                    "provenance_id": provenance_id,
+                                    "namespace": "filesystem",
+                                    "document_ref": document_ref,
+                                    "chunk_strategy": chunk_strategy,
+                                    "parser_name": parser_name,
+                                    "source_unit_refs": source_unit_refs,
+                                },
+                            ),
+                        )
+                    )
+                    changes.append(
+                        SurrealDeltaChange(
+                            ref=f"{strategy}\x1f{self._settings.embedding_model}\x1f{chunk_id}",
+                            table="embeddings",
+                            change_type=SurrealDeltaChangeType.TOMBSTONE,
+                            tombstone=SurrealDeltaTombstone(
+                                ref=f"{strategy}\x1f{self._settings.embedding_model}\x1f{chunk_id}",
+                                table="embeddings",
+                                reason=reason,
+                                previous_row={
+                                    "chunk_strategy": strategy,
+                                    "embedding_model": self._settings.embedding_model,
+                                    "chunk_id": chunk_id,
+                                },
+                            ),
+                        )
+                    )
+
+        if not changes:
+            return None
+
+        source_time = source_document.updated_at if source_document is not None else now
+        checkpoint_cursor = source_document.ref if source_document is not None else document_ref
+        checkpoint_watermark = (
+            source_document.content_fingerprint if source_document is not None else document_ref
+        )
+
+        return SurrealDeltaManifest(
+            source_selection=SurrealDeltaSourceSelection(
+                source_name="filesystem",
+                table_name="source_documents",
+                changed_at=source_time,
+                cursor=checkpoint_cursor,
+            ),
+            checkpoint_candidate=SurrealDeltaCheckpointCandidate(
+                cursor=checkpoint_cursor,
+                watermark=checkpoint_watermark,
+                source_time=source_time,
+            ),
+            documents=SurrealDeltaSection(
+                rows=sorted(
+                    [change for change in changes if change.table == "source_documents"],
+                    key=lambda change: (change.table, change.ref),
+                )
+            ),
+            source_units=SurrealDeltaSection(),
+            chunks=SurrealDeltaSection(
+                rows=sorted(
+                    [change for change in changes if change.table == "chunks"],
+                    key=lambda change: (change.table, change.ref),
+                )
+            ),
+            chunk_file_bindings=SurrealDeltaSection(
+                rows=sorted(
+                    [change for change in changes if change.table == "chunk_file_bindings"],
+                    key=lambda change: (change.table, change.ref),
+                )
+            ),
+            provenance=SurrealDeltaSection(
+                rows=sorted(
+                    [change for change in changes if change.table == "provenance"],
+                    key=lambda change: (change.table, change.ref),
+                )
+            ),
+            resource_bindings=SurrealDeltaSection(
+                rows=sorted(
+                    [change for change in changes if change.table == "bindings"],
+                    key=lambda change: (change.table, change.ref),
+                )
+            ),
+            fingerprints=SurrealDeltaSection(),
+            embeddings=SurrealDeltaSection(
+                rows=sorted(
+                    [change for change in changes if change.table == "embeddings"],
+                    key=lambda change: (change.table, change.ref),
+                )
+            ),
+            vector_components=SurrealDeltaSection(),
+            graph=SurrealDeltaSection(
+                deferred=True,
+                deferred_reason="graph sync is deferred for the direct filesystem slice",
+            ),
+            feedback=SurrealDeltaSection(
+                deferred=True,
+                deferred_reason="feedback sync is deferred for the direct filesystem slice",
+            ),
+        )
+
     def _build_file_meta_from_fileinfo(
         self,
         files: list[FileInfo],
@@ -3190,6 +3465,15 @@ class IndexingPipeline:
             needs.  This method uses the holder-aware path: delete_chunks_from_graph
             (orphan chunk_ids only) + delete_file_node (File node only).
         """
+        if self._settings.search_backend == "surreal":
+            direct_manifest = self._filesystem_surreal_tombstone_manifest(
+                file_path,
+                reason="filesystem file purged",
+                include_chunk_tombstones=True,
+            )
+            if direct_manifest is not None:
+                self._write_surreal_direct_manifest(direct_manifest)
+
         conn = self._conn
 
         # -- Single-transaction DB cascade (M2M + orphan + vec + FTS) ---------
@@ -3235,6 +3519,15 @@ class IndexingPipeline:
         reason: str = "file_missing",
     ) -> None:
         """Deactivate a filesystem binding while retaining derived artifacts."""
+        if self._settings.search_backend == "surreal":
+            direct_manifest = self._filesystem_surreal_tombstone_manifest(
+                file_path,
+                reason=reason,
+                include_chunk_tombstones=False,
+            )
+            if direct_manifest is not None:
+                self._write_surreal_direct_manifest(direct_manifest)
+
         document_ref = self._meta_entity_id(file_path)
         source_document = self._metadata_store.get_source_document(
             "filesystem",
