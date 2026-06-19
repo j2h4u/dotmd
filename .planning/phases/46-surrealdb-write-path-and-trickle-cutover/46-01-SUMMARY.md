@@ -34,6 +34,8 @@ focused direct-write and service-level visibility smokes on the Surreal sink:
 - direct Surreal write -> `DotMDService.search(... mode=SearchMode.KEYWORD,
   rerank=False, expand=False)` visibility smoke against a temporary SurrealKV
   DB.
+- safe local temporary `surrealkv://` public-entrypoint smokes for API, CLI,
+  and MCP direct-written visibility.
 - commit `06e8179` guards manual reindex paths in Surreal mode:
   `IndexingPipeline.reindex_vectors()`, `reindex_fts5()`, and
   `DotMDService.reindex('all')` now return `0`/skip without mutating the local
@@ -42,6 +44,10 @@ focused direct-write and service-level visibility smokes on the Surreal sink:
   `search_backend='surreal'` ingest and metadata-only refresh path while still
   keeping SQLite source metadata, bindings, fingerprints, and
   `VecComponentStore` in place for metadata-only reuse and change detection.
+- commits `c9fa512`, `5542938`, and `231f531` fence legacy purge paths in
+  Surreal mode so destructive admin/public methods fail fast, `_purge_file`
+  and `purge_orphaned_files` stay tombstone-only, and trickle delete/orphan
+  handling uses those safe paths.
 
 ## Evidence
 
@@ -58,6 +64,10 @@ Commits:
 - `f775c05` `test(46): smoke changed-file surreal delta`
 - `527fda0` `fix(46): sanitize surreal delta payloads by schema`
 - `06e8179` `fix(46): guard manual reindex paths in surreal mode`
+- `53f6e18` `test(46): add public-entrypoint surreal visibility smokes`
+- `c9fa512` `fix(46): fence purge application source in surreal mode`
+- `5542938` `fix(46): fence legacy drop paths in surreal mode`
+- `231f531` `fix(46): route trickle orphan handling through tombstones`
 
 Verification run on 2026-06-19:
 
@@ -67,6 +77,7 @@ UV_LINK_MODE=hardlink uv run pytest tests/ingestion/test_surreal_delta_sync.py t
 UV_LINK_MODE=hardlink uv run ruff check src/dotmd/ingestion/surreal_delta_sync.py tests/ingestion/test_surreal_delta_sync.py tests/ingestion/test_surreal_delta_sync_live.py
 UV_LINK_MODE=hardlink uv run pytest tests/ingestion/test_application_source_ingestion.py tests/ingestion/test_surreal_direct_sink.py tests/ingestion/test_surreal_delta_sync.py tests/ingestion/test_surreal_delta_sync_live.py tests/ingestion/test_bulk_fusion_pairing.py tests/ingestion/test_metadata_only_reindex.py tests/ingestion/test_pipeline_purge.py tests/ingestion/test_pipeline_orphan_sweep.py -q
 UV_LINK_MODE=hardlink uv run pytest tests/ingestion/test_application_source_ingestion.py tests/ingestion/test_surreal_direct_sink.py tests/ingestion/test_surreal_delta_sync.py tests/ingestion/test_surreal_delta_sync_live.py tests/ingestion/test_bulk_fusion_pairing.py tests/ingestion/test_metadata_only_reindex.py tests/ingestion/test_pipeline_purge.py tests/ingestion/test_pipeline_orphan_sweep.py tests/search/test_surreal_direct_visibility.py tests/search/test_surreal_native_fts.py tests/api/test_service_reindex_surreal.py -q
+UV_LINK_MODE=hardlink uv run pytest tests/ingestion/test_application_source_ingestion.py tests/ingestion/test_surreal_direct_sink.py tests/ingestion/test_surreal_delta_sync.py tests/ingestion/test_surreal_delta_sync_live.py tests/ingestion/test_bulk_fusion_pairing.py tests/ingestion/test_metadata_only_reindex.py tests/ingestion/test_pipeline_purge.py tests/ingestion/test_pipeline_orphan_sweep.py tests/ingestion/test_pipeline_surreal_guards.py tests/search/test_surreal_direct_visibility.py tests/search/test_surreal_native_fts.py tests/api/test_service_reindex_surreal.py -q
 UV_LINK_MODE=hardlink uv run ruff check src/dotmd/ingestion/pipeline.py src/dotmd/api/service.py tests/ingestion/test_metadata_only_reindex.py tests/api/test_service_reindex_surreal.py tests/search/test_surreal_direct_visibility.py tests/search/test_surreal_native_fts.py
 ```
 
@@ -74,6 +85,8 @@ Result:
 
 - Earlier delta-sync smoke: `21 passed`, `74 passed in 1.99s`, `All checks passed!`
 - Orchestrator validation: `85 passed in 2.30s`, `All checks passed!`
+- Expanded orchestrator validation: `94 passed, 1 warning in 3.28s`.
+- Ruff over changed code/tests: `All checks passed!`
 
 The live smoke used real temporary `surrealkv://` storage, applied the dotMD
 schema, seeded bootstrap-style records, applied a delta, reran with the same
@@ -100,6 +113,10 @@ SQLite metadata/source lifecycle, bindings, fingerprints, and
 Commit `06e8179` closes the remaining manual-reindex gap in Surreal mode by
 making the legacy reindex entry points return no-op/skip instead of mutating
 sqlite-vec or FTS5.
+
+Commits `c9fa512`, `5542938`, and `231f531` fence legacy purge and orphan
+handling in Surreal mode so direct writes keep flowing through tombstone-safe
+paths without mutating local legacy stores.
 
 ## Direction Change
 

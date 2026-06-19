@@ -21,14 +21,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 46 direct SurrealDB write path. Runtime retrieval works
-through SurrealDB, idempotent Surreal delta-apply machinery is verified, and
-focused smokes now prove direct Surreal writes reach FTS and
-`DotMDService.search` keyword visibility. Commit `41409a3` quarantined local
-sqlite-vec and FTS5 writes for the normal Surreal ingest/metadata-only refresh
-path while keeping SQLite metadata/source lifecycle, bindings, fingerprints,
-and `VecComponentStore` reuse. Commit `06e8179` now guards manual reindex
-paths in Surreal mode so legacy sqlite-vec/FTS5 stores are not mutated there.
+**Current focus:** Phase 46 direct SurrealDB write path. Runtime retrieval
+works through SurrealDB, idempotent Surreal delta-apply machinery is verified,
+and focused smokes now prove direct Surreal writes reach FTS,
+`DotMDService.search` keyword visibility, and the safe local temporary
+`surrealkv://` API/CLI/MCP public entrypoints. Commit `41409a3` quarantined
+local sqlite-vec and FTS5 writes for the normal Surreal ingest/metadata-only
+refresh path while keeping SQLite metadata/source lifecycle, bindings,
+fingerprints, and `VecComponentStore` reuse. Commit `06e8179` now guards
+manual reindex paths in Surreal mode so legacy sqlite-vec/FTS5 stores are not
+mutated there. Commits `c9fa512`, `5542938`, and `231f531` fence legacy purge
+and orphan handling to tombstone-only or fail-fast behavior in Surreal mode.
 The product decision is to cut over directly instead of building a long-lived
 old-stack hybrid sync.
 
@@ -37,7 +40,8 @@ old-stack hybrid sync.
 **v1.8 — SurrealDB-Native Storage Cutover**
 
 Phase: 46-surrealdb-write-path-and-trickle-cutover
-Status: Plan 46-01 in progress; direct Surreal write path selected
+Status: Plan 46-01 in progress; direct Surreal write path selected, with
+public-entrypoint visibility and tombstone-only purge/orphan fencing recorded
 Last activity: 2026-06-19
 
 Progress: [█████████-] Phase 46 write safety and visibility evidence complete; production cutover criteria/update work next

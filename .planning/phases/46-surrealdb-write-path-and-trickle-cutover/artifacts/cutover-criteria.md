@@ -14,15 +14,23 @@ write-path evidence landed in Phase 46. It does not approve cutover.
 - `vector_rowid` selection is deterministic and integer-based.
 - Direct writes are visible to `SurrealFTSSearchEngine`.
 - Direct writes are visible through `DotMDService` keyword search.
+- Direct writes are visible through safe local temporary `surrealkv://`
+  API, CLI, and MCP public-entrypoint smokes.
 - Normal Surreal ingest skips local sqlite-vec and FTS writes.
 - Manual reindex paths in Surreal mode now skip legacy sqlite-vec and FTS5
   writes instead of mutating local legacy stores.
+- Destructive admin/public purge methods fail fast in Surreal mode, and
+  `_purge_file`/`purge_orphaned_files` stay tombstone-only.
 - The focused gate passed: `85 passed`, with `ruff` clean.
+- Expanded orchestrator validation passed: `94 passed, 1 warning`, with `ruff`
+  clean.
 
 Reference:
 
 - `46-01-SUMMARY.md` records the direct-write smoke, service-level visibility,
   the normal-ingest sqlite-vec/FTS skip decision, and the manual reindex guard.
+- `46-01-SUMMARY.md` also records the public-entrypoint smokes and tombstone
+  fencing for purge/orphan handling.
 
 ## Remaining Cutover Gates
 
@@ -52,6 +60,8 @@ Reference:
   sqlite-vec and FTS writes for the normal Surreal ingest path.
 - Commit `06e8179` guards manual reindex paths in Surreal mode so they no-op
   instead of mutating sqlite-vec or FTS5.
+- Commits `c9fa512`, `5542938`, and `231f531` fence Surreal purge/orphan paths
+  to tombstone-only behavior.
 
 ## Status
 

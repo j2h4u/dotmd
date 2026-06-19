@@ -328,11 +328,15 @@ Progress:
 - [x] Direct Surreal writes are visible through
   `DotMDService.search(... mode=SearchMode.KEYWORD, rerank=False, expand=False)`
   in focused smoke coverage.
+- [x] Safe local temporary `surrealkv://` public-entrypoint smokes cover API,
+  CLI, and MCP direct-written visibility.
 - [x] Normal `search_backend='surreal'` ingest/metadata-only refresh now skips
   local sqlite-vec and FTS5 writes while preserving SQLite metadata/source
   lifecycle, bindings, fingerprints, and `VecComponentStore` reuse.
 - [x] Manual reindex paths in Surreal mode now no-op instead of mutating
   local sqlite-vec and FTS5 stores.
+- [x] Legacy purge/orphan paths in Surreal mode are fenced to fail fast or stay
+  tombstone-only instead of mutating local legacy stores.
 - [x] Product decision recorded: proceed with direct SurrealDB writes, not a
   bounded hybrid runtime.
 - [ ] Surreal-backed API/CLI/prod smoke for direct-written changes remains
