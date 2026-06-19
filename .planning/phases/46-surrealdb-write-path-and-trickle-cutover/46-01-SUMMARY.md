@@ -9,8 +9,8 @@ last_updated: 2026-06-19
 
 ## What is done
 
-Phase 46 now has the core idempotent SurrealDB delta-apply machinery plus a
-focused direct-write smoke on the Surreal sink:
+Phase 46 now has the core idempotent SurrealDB delta-apply machinery plus
+focused direct-write and service-level visibility smokes on the Surreal sink:
 
 - delta manifest contract for changed old-stack rows only;
 - deterministic sync runner with resume state and progress/ETA snapshots;
@@ -29,6 +29,11 @@ focused direct-write smoke on the Surreal sink:
   `IndexingPipeline(search_backend='surreal')`, proving the direct pipeline ->
   Surreal writer path without Falkor dependency and with native relation
   inserts.
+- direct Surreal write -> Surreal FTS visibility smoke through
+  `SurrealFTSSearchEngine`.
+- direct Surreal write -> `DotMDService.search(... mode=SearchMode.KEYWORD,
+  rerank=False, expand=False)` visibility smoke against a temporary SurrealKV
+  DB.
 
 ## Evidence
 
@@ -89,7 +94,7 @@ ID. It is not the target steady-state architecture.
 Phase 46 is not complete. Remaining work:
 
 - prove Surreal-backed search sees changed direct-written results through the
-  service/CLI/API path;
+  service/API/CLI path at cutover scope;
 - update production cutover criteria with the write-path evidence;
 - remove or quarantine old-stack write dependencies, or mark them explicitly
   non-authoritative, before production cutover;

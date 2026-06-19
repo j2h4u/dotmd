@@ -323,14 +323,20 @@ Progress:
   `IndexingPipeline(search_backend='surreal')` passed with counts:
   documents=1, chunks=1, bindings=1, embeddings=1, files=1, sections=1,
   tags=1, relations=2.
+- [x] Direct Surreal writes are visible to `SurrealFTSSearchEngine` in focused
+  smoke coverage.
+- [x] Direct Surreal writes are visible through
+  `DotMDService.search(... mode=SearchMode.KEYWORD, rerank=False, expand=False)`
+  in focused smoke coverage.
 - [x] Product decision recorded: proceed with direct SurrealDB writes, not a
   bounded hybrid runtime.
-- [ ] Surreal-backed search/API/CLI readback for direct-written changes remains
-  before cutover.
-- [ ] Production cutover criteria need to be updated with the write-path
-  evidence before approval.
+- [ ] Surreal-backed API/CLI/prod smoke for direct-written changes remains
+  before cutover validation.
+- [ ] Production cutover criteria and runbook need to be updated with the
+  write-path evidence before approval.
 - [ ] Old-stack write dependencies still need to be removed, quarantined, or
   explicitly marked non-authoritative.
+- [ ] Reranker latency decision still needs to be settled for cutover.
 
 ### Phase 47: Legacy stack removal
 

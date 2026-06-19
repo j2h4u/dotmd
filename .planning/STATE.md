@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: SurrealDB-Native Storage Cutover
 status: executing
-stopped_at: Phase 45 runtime smoke complete; Surreal write-path/trickle remains cutover blocker
+stopped_at: Phase 45 runtime smoke complete; Phase 46 write/read visibility evidence added; cutover blockers remain
 last_updated: "2026-06-19T00:00:00+06:00"
 last_activity: 2026-06-19
 progress:
@@ -22,9 +22,10 @@ See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
 **Current focus:** Phase 46 direct SurrealDB write path. Runtime retrieval works
-through SurrealDB, and the idempotent Surreal delta-apply machinery is verified;
-the product decision is to cut over directly instead of building a long-lived
-old-stack hybrid sync.
+through SurrealDB, idempotent Surreal delta-apply machinery is verified, and
+focused smokes now prove direct Surreal writes reach FTS and
+`DotMDService.search` keyword visibility. The product decision is to cut over
+directly instead of building a long-lived old-stack hybrid sync.
 
 ## Current Milestone
 
@@ -34,7 +35,7 @@ Phase: 46-surrealdb-write-path-and-trickle-cutover
 Status: Plan 46-01 in progress; direct Surreal write path selected
 Last activity: 2026-06-19
 
-Progress: [█████████-] Phase 46 write safety evidence complete; direct Surreal ingest/write sink next
+Progress: [█████████-] Phase 46 write safety and visibility evidence complete; production cutover criteria/update work next
 
 ## Deferred Items
 
