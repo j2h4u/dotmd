@@ -195,6 +195,50 @@ def _create_graph_store(settings: Settings) -> GraphStoreProtocol:
     )
 
 
+def _create_surreal_direct_writer(settings: Settings) -> Any:
+    """Instantiate the direct Surreal delta writer for standalone ingest."""
+    from dotmd.ingestion.surreal_delta_sync import SurrealDeltaStoreWriter
+    from dotmd.storage.surreal import SurrealConnection, SurrealStoreConfig
+    from dotmd.storage.surreal_schema import define_dotmd_surreal_schema
+
+    if not settings.surreal_retrieval_url:
+        raise ValueError("surreal_retrieval_url must be set when search_backend='surreal'")
+    if not settings.surreal_retrieval_namespace:
+        raise ValueError(
+            "surreal_retrieval_namespace must be set when search_backend='surreal'"
+        )
+    if not settings.surreal_retrieval_database:
+        raise ValueError("surreal_retrieval_database must be set when search_backend='surreal'")
+
+    has_username = bool(settings.surreal_retrieval_username)
+    has_password = bool(settings.surreal_retrieval_password)
+    if has_username != has_password:
+        raise ValueError(
+            "surreal_retrieval_username and surreal_retrieval_password must be set together"
+        )
+    if (has_username or has_password) and settings.surreal_retrieval_access_token:
+        raise ValueError(
+            "surreal_retrieval_access_token must not be combined with username/password auth"
+        )
+
+    connection = SurrealConnection(
+        SurrealStoreConfig(
+            url=settings.surreal_retrieval_url,
+            namespace=settings.surreal_retrieval_namespace,
+            database=settings.surreal_retrieval_database,
+            username=settings.surreal_retrieval_username,
+            password=settings.surreal_retrieval_password,
+            access_token=settings.surreal_retrieval_access_token,
+        )
+    )
+    try:
+        define_dotmd_surreal_schema(connection)
+        return SurrealDeltaStoreWriter(connection=connection)
+    except Exception:
+        connection.close()
+        raise
+
+
 class IndexingPipeline:
     """Orchestrates the full indexing workflow from raw files to populated stores.
 
@@ -393,8 +437,10 @@ class IndexingPipeline:
         _write_pipeline_init_progress("pipeline:embedding_cache", "applied")
 
         # Transitional direct-Surreal seam for bulk filesystem ingest.
-        # This stays disabled unless a writer is injected by tests or future wiring.
-        self._surreal_direct_writer: Any | None = None
+        # Enabled only for the standalone Surreal search backend.
+        self._surreal_direct_writer: Any | None = (
+            _create_surreal_direct_writer(settings) if settings.search_backend == "surreal" else None
+        )
         self._surreal_direct_sync_state = SurrealDeltaSyncState()
 
         # Startup integrity checks can delete vector and graph state. They must
@@ -2498,6 +2544,9 @@ class IndexingPipeline:
             all_text_hashes.update(text_hashes)
             chunk_order.extend(file_chunks)
 
+            if self._settings.search_backend != "surreal":
+                continue
+
             source_document = source_documents_by_path.get(fp)
             if source_document is None:
                 continue
@@ -2563,15 +2612,13 @@ class IndexingPipeline:
     def _write_surreal_direct_manifest(self, manifest: SurrealDeltaManifest) -> None:
         """Apply a direct Surreal manifest when a writer is configured.
 
-        Transitional no-op: bulk filesystem ingest can call this seam before
-        direct Surreal wiring exists in the pipeline. Tests may monkeypatch the
-        method or inject a writer to observe the manifest.
+        This is only available when the standalone Surreal backend is enabled.
         """
         writer = self._surreal_direct_writer
         if writer is None:
-            logger.debug(
-                "surreal_direct_manifest skipped: no direct writer configured"
-            )
+            if self._settings.search_backend == "surreal":
+                raise RuntimeError("surreal direct writer is not configured")
+            logger.debug("surreal_direct_manifest skipped: standalone Surreal backend disabled")
             return
         run_surreal_delta_sync(
             manifest,

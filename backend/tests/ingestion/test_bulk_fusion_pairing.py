@@ -47,6 +47,22 @@ def pipeline_settings(tmp_path):
     )
 
 
+@pytest.fixture
+def surreal_pipeline_settings(pipeline_settings):
+    return pipeline_settings.model_copy(
+        update={
+            "search_backend": "surreal",
+            "surreal_retrieval_url": "http://surrealdb:8000",
+            "surreal_retrieval_namespace": "dotmd",
+            "surreal_retrieval_database": "phase46_direct_ingest",
+            "surreal_retrieval_username": "root",
+            "surreal_retrieval_password": "root",
+            "surreal_retrieval_access_token": None,
+            "surreal_retrieval_embedding_dimension": 768,
+        }
+    )
+
+
 def _make_pipeline_tracking_inputs(settings):
     """Construct pipeline with mock encode_batch that tracks inputs per call.
 
@@ -173,19 +189,25 @@ def test_bulk_path_chunks_stored_with_correct_etext(pipeline_settings, tmp_path)
 
 
 def test_bulk_path_calls_direct_surreal_sink_with_in_memory_rows(
-    pipeline_settings, tmp_path, monkeypatch
+    surreal_pipeline_settings, tmp_path, monkeypatch
 ):
     """_save_and_embed_chunks() must hand the direct sink in-memory bulk rows.
 
     The seam is the only thing this test exercises. SQLite reread helpers are
     patched to fail so the manifest cannot be assembled from persisted rows.
     """
+    from dotmd.ingestion import pipeline as pipeline_module
     from dotmd.ingestion.pipeline import IndexingPipeline
 
-    file_path = pipeline_settings.data_dir / "direct.md"
+    file_path = surreal_pipeline_settings.data_dir / "direct.md"
     _write_md(file_path, "Direct Doc", ["direct"], "Bulk direct sink body.")
 
-    pipeline = IndexingPipeline(pipeline_settings)
+    monkeypatch.setattr(
+        pipeline_module,
+        "_create_surreal_direct_writer",
+        lambda _settings: object(),
+    )
+    pipeline = IndexingPipeline(surreal_pipeline_settings)
     file_info = FileInfo(
         path=file_path,
         title="Direct Doc",
@@ -310,6 +332,181 @@ def test_bulk_path_calls_direct_surreal_sink_with_in_memory_rows(
         [1.1, 1.1],
         [1.2, 1.2],
     ]
+
+
+def test_surreal_backend_builds_direct_writer_and_routes_delta_sync(
+    surreal_pipeline_settings, tmp_path, monkeypatch
+):
+    from dotmd.ingestion import pipeline as pipeline_module
+    from dotmd.ingestion.pipeline import IndexingPipeline
+
+    file_path = surreal_pipeline_settings.data_dir / "direct-route.md"
+    _write_md(file_path, "Route Doc", ["route"], "Bulk route body.")
+
+    schema_calls: list[object] = []
+    run_calls: list[tuple[object, object, object]] = []
+
+    class FakeSurrealConnection:
+        def __init__(self, config):
+            self.config = config
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class FakeSurrealWriter:
+        def __init__(self, connection):
+            self.connection = connection
+
+    def fake_define_schema(connection):
+        schema_calls.append(connection)
+
+    def fake_run_surreal_delta_sync(manifest, writer, state):
+        run_calls.append((manifest, writer, state))
+        return None
+
+    monkeypatch.setattr("dotmd.storage.surreal.SurrealConnection", FakeSurrealConnection)
+    monkeypatch.setattr("dotmd.storage.surreal_schema.define_dotmd_surreal_schema", fake_define_schema)
+    monkeypatch.setattr(
+        "dotmd.ingestion.surreal_delta_sync.SurrealDeltaStoreWriter",
+        FakeSurrealWriter,
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "run_surreal_delta_sync",
+        fake_run_surreal_delta_sync,
+    )
+
+    pipeline = IndexingPipeline(surreal_pipeline_settings)
+    assert isinstance(pipeline._surreal_direct_writer, FakeSurrealWriter)
+    assert schema_calls == [pipeline._surreal_direct_writer.connection]
+    assert pipeline._surreal_direct_writer.connection.config.url == "http://surrealdb:8000"
+    assert pipeline._surreal_direct_writer.connection.config.namespace == "dotmd"
+    assert (
+        pipeline._surreal_direct_writer.connection.config.database
+        == "phase46_direct_ingest"
+    )
+    assert pipeline._surreal_direct_writer.connection.config.username == "root"
+    assert pipeline._surreal_direct_writer.connection.config.password == "root"
+
+    file_info = FileInfo(
+        path=file_path,
+        title="Route Doc",
+        last_modified=datetime(2026, 6, 19, 12, 0, tzinfo=UTC),
+        size_bytes=128,
+        kind=DocKind.DOCUMENT,
+        frontmatter={"tags": ["route"]},
+    )
+    source_document = _direct_source_document(file_info)
+    chunks = [
+        Chunk(
+            chunk_id="route-chunk-0",
+            file_paths=[file_path],
+            heading_hierarchy=["Route Doc", "Overview"],
+            level=2,
+            text="chunk body zero",
+            chunk_index=0,
+            provenance=ChunkProvenance(
+                namespace="filesystem",
+                document_ref=source_document.document_ref,
+                ref=source_document.ref,
+                source_unit_refs=[],
+                chunk_strategy=pipeline._strategy,
+                parser_name="markdown",
+            ),
+        ),
+        Chunk(
+            chunk_id="route-chunk-1",
+            file_paths=[file_path],
+            heading_hierarchy=["Route Doc", "Details"],
+            level=2,
+            text="chunk body one",
+            chunk_index=1,
+            provenance=ChunkProvenance(
+                namespace="filesystem",
+                document_ref=source_document.document_ref,
+                ref=source_document.ref,
+                source_unit_refs=[],
+                chunk_strategy=pipeline._strategy,
+                parser_name="markdown",
+            ),
+        ),
+    ]
+
+    monkeypatch.setattr(
+        pipeline,
+        "_source_document_for_file_info",
+        lambda _file_info: source_document,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_embed_chunks",
+        lambda _chunks: (
+            [[0.1, 0.1], [0.2, 0.2]],
+            {"route-chunk-0": "hash-0", "route-chunk-1": "hash-1"},
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_embed_meta_component",
+        lambda _file_info: [1.0, 1.0],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_fuse_vectors",
+        lambda e_text, e_meta, _weights: [e_text[0] + e_meta[0], e_text[1] + e_meta[1]],
+    )
+    monkeypatch.setattr(
+        pipeline._metadata_store,
+        "get_chunk_ids_by_file",
+        lambda *_args, **_kwargs: pytest.fail("chunk reread helper must not be used"),
+    )
+    monkeypatch.setattr(
+        pipeline._metadata_store,
+        "get_chunks",
+        lambda *_args, **_kwargs: pytest.fail("chunk reread helper must not be used"),
+    )
+    monkeypatch.setattr(pipeline._metadata_store, "save_chunks", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        pipeline,
+        "_persist_chunk_source_provenance",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(pipeline._vector_store, "add_chunks", MagicMock())
+    monkeypatch.setattr(pipeline._keyword_engine, "add_chunks", MagicMock())
+    monkeypatch.setattr(
+        pipeline,
+        "_upsert_active_filesystem_binding",
+        lambda *_args, **_kwargs: None,
+    )
+
+    pipeline._save_and_embed_chunks(chunks, [file_info], run_id="test-surreal-route")
+
+    assert len(run_calls) == 1
+    manifest, writer, state = run_calls[0]
+    assert writer is pipeline._surreal_direct_writer
+    assert state is pipeline._surreal_direct_sync_state
+    assert [row.ref for row in manifest.documents.rows] == [source_document.ref]
+    assert [row.row["chunk_id"] for row in manifest.embeddings.rows] == [
+        "route-chunk-0",
+        "route-chunk-1",
+    ]
+
+
+def test_default_sqlite_settings_do_not_create_surreal_writer(
+    pipeline_settings, monkeypatch
+):
+    from dotmd.ingestion import pipeline as pipeline_module
+    from dotmd.ingestion.pipeline import IndexingPipeline
+
+    monkeypatch.setattr(
+        pipeline_module,
+        "_create_surreal_direct_writer",
+        lambda _settings: pytest.fail("sqlite defaults must not create a surreal writer"),
+    )
+
+    pipeline = IndexingPipeline(pipeline_settings)
+    assert pipeline._surreal_direct_writer is None
 
 
 def test_meta_entity_id_normalizes_path(pipeline_settings):
