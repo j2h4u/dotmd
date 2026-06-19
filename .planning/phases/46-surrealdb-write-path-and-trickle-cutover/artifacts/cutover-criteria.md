@@ -36,8 +36,8 @@ Reference:
 
 - Standalone production SurrealDB target must be fresh-migrated, imported, and
   rebuilt if needed.
-- API, CLI, MCP, and production smoke must pass against the direct-written
-  changes.
+- Local API, CLI, and MCP smoke is satisfied; production/live smoke must pass
+  against the direct-written changes.
 - Trickle must pass a live smoke with a controlled file change; no full reindex
   or `index --force` while the container runs.
 - Old-stack remaining dependencies outside normal ingest must be removed,

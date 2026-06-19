@@ -339,8 +339,8 @@ Progress:
   tombstone-only instead of mutating local legacy stores.
 - [x] Product decision recorded: proceed with direct SurrealDB writes, not a
   bounded hybrid runtime.
-- [ ] Surreal-backed API/CLI/prod smoke for direct-written changes remains
-  before cutover validation.
+- [ ] Production/live Surreal-backed API/CLI/MCP smoke for direct-written
+  changes remains before cutover validation.
 - [ ] Runbook and deploy approval still need to be updated with the
   write-path evidence before approval.
 - [ ] Remaining old-stack dependencies outside the normal Surreal ingest path

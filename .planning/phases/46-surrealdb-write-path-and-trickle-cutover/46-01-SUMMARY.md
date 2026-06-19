@@ -35,7 +35,7 @@ focused direct-write and service-level visibility smokes on the Surreal sink:
   rerank=False, expand=False)` visibility smoke against a temporary SurrealKV
   DB.
 - safe local temporary `surrealkv://` public-entrypoint smokes for API, CLI,
-  and MCP direct-written visibility.
+  and MCP direct-written visibility are done.
 - commit `06e8179` guards manual reindex paths in Surreal mode:
   `IndexingPipeline.reindex_vectors()`, `reindex_fts5()`, and
   `DotMDService.reindex('all')` now return `0`/skip without mutating the local
@@ -130,7 +130,7 @@ ID. It is not the target steady-state architecture.
 Phase 46 is not complete. Remaining work:
 
 - prove Surreal-backed search sees changed direct-written results through the
-  service/API/CLI path at cutover scope;
+  production/live API/CLI/MCP smoke path at cutover scope;
 - update production cutover criteria with the write-path evidence;
 - remove or quarantine any remaining old-stack write dependencies outside the
   normal Surreal ingest path, or mark them explicitly non-authoritative, before
