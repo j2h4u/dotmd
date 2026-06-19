@@ -724,6 +724,25 @@ class _FakeSurrealConnection:
         stored["id"] = key
         self.tables.setdefault(table, {})[key] = stored
 
+    def insert_relation_rows(
+        self,
+        table_name: str,
+        rows: list[dict[str, object]],
+        *,
+        batch_size: int = 1000,
+    ) -> list[list[dict[str, object]]]:
+        self.calls.append(("insert_relation_rows", table_name, str(len(rows))))
+        batches: list[list[dict[str, object]]] = []
+        for offset in range(0, len(rows), batch_size):
+            batch = rows[offset : offset + batch_size]
+            batches.append(batch)
+            for row in batch:
+                key = f"{table_name}:{row['id']}"
+                stored = dict(row)
+                stored["id"] = key
+                self.tables.setdefault(table_name, {})[key] = stored
+        return batches
+
     def delete(self, record: object) -> None:
         table = self._table_name(record)
         key = self._record_key(record)
@@ -1092,7 +1111,7 @@ def test_surreal_delta_store_writer_writes_graph_rows_and_is_idempotent() -> Non
         ("upsert", "sections", section_id),
         ("upsert", "entities", entity_id),
         ("upsert", "tags", tag_id),
-        ("upsert", "relations", relation_id),
+        ("insert_relation_rows", "relations", "1"),
     ]
 
 
@@ -1181,7 +1200,7 @@ def test_surreal_delta_store_writer_removes_stale_frontmatter_relations_and_keep
     ]
     assert current_calls[2:] == [
         ("upsert", "files", str(writer.codec.encode("files", file_path))),
-        ("upsert", "relations", beta_relation_id),
+        ("insert_relation_rows", "relations", "1"),
     ]
     assert connection.tables["relations"][other_relation_id]["relation_type"] == "MENTIONS"
 

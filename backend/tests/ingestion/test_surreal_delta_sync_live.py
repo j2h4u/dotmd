@@ -659,3 +659,191 @@ def test_surreal_delta_store_writer_smoke_changed_file_from_old_stack_fixture(
         }
 
     assert second_snapshot == first_snapshot
+
+
+def test_surreal_delta_store_writer_smoke_graph_relations_use_native_inserts(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "surreal-graph-relations.db"
+    codec = SurrealRecordIdCodec()
+    file_path = "/notes/graph.md"
+    stale_tag_name = "alpha"
+    stale_participant_name = "Carol"
+    fresh_tag_name = "beta"
+
+    with SurrealConnection(
+        SurrealStoreConfig(
+            url=f"surrealkv://{db_path}",
+            namespace="dotmd_phase46",
+            database="delta_smoke",
+        )
+    ) as connection:
+        define_dotmd_surreal_schema(connection)
+        writer = SurrealDeltaStoreWriter(connection=connection)
+
+        _seed_row(
+            connection,
+            codec,
+            "files",
+            file_path,
+            {
+                "schema_version": SURREAL_SCHEMA_VERSION,
+                "original_id": file_path,
+                "path": file_path,
+                "file_path": file_path,
+                "metadata": {"seed": "graph"},
+            },
+        )
+        _seed_row(
+            connection,
+            codec,
+            "entities",
+            stale_participant_name,
+            {
+                "schema_version": SURREAL_SCHEMA_VERSION,
+                "original_id": stale_participant_name,
+                "name": stale_participant_name,
+                "metadata": {"seed": "graph"},
+            },
+        )
+        _seed_row(
+            connection,
+            codec,
+            "tags",
+            stale_tag_name,
+            {
+                "schema_version": SURREAL_SCHEMA_VERSION,
+                "original_id": stale_tag_name,
+                "name": stale_tag_name,
+                "metadata": {"seed": "graph"},
+            },
+        )
+        connection.insert_relation_rows(
+            "relations",
+            [
+                {
+                    "id": str(
+                        codec.encode(
+                            "relations",
+                            f"{file_path}\x1f{stale_participant_name}\x1fHAS_PARTICIPANT",
+                        ).id
+                    ),
+                    "schema_version": SURREAL_SCHEMA_VERSION,
+                    "relation_id": f"{file_path}\x1f{stale_participant_name}\x1fHAS_PARTICIPANT",
+                    "rel_type": "HAS_PARTICIPANT",
+                    "relation_type": "HAS_PARTICIPANT",
+                    "weight": 1.0,
+                    "source_id": file_path,
+                    "target_id": stale_participant_name,
+                    "source_table": "files",
+                    "target_table": "entities",
+                    "properties": {"seed": "stale"},
+                    "metadata": {"seed": "stale"},
+                    "out": codec.encode("files", file_path),
+                    "in": codec.encode("entities", stale_participant_name),
+                },
+                {
+                    "id": str(
+                        codec.encode("relations", f"{file_path}\x1f{stale_tag_name}\x1fHAS_TAG").id
+                    ),
+                    "schema_version": SURREAL_SCHEMA_VERSION,
+                    "relation_id": f"{file_path}\x1f{stale_tag_name}\x1fHAS_TAG",
+                    "rel_type": "HAS_TAG",
+                    "relation_type": "HAS_TAG",
+                    "weight": 1.0,
+                    "source_id": file_path,
+                    "target_id": stale_tag_name,
+                    "source_table": "files",
+                    "target_table": "tags",
+                    "properties": {"seed": "stale"},
+                    "metadata": {"seed": "stale"},
+                    "out": codec.encode("files", file_path),
+                    "in": codec.encode("tags", stale_tag_name),
+                },
+            ],
+        )
+
+        manifest = build_surreal_delta_manifest(
+            source_selection=SurrealDeltaSourceSelection(
+                source_name="filesystem",
+                table_name="source_documents",
+                changed_at=datetime(2026, 6, 19, 14, 0, tzinfo=UTC),
+                cursor="filesystem:changed:graph",
+            ),
+            checkpoint_candidate=SurrealDeltaCheckpointCandidate(
+                cursor="checkpoint:graph",
+                watermark="watermark:graph",
+                source_time=datetime(2026, 6, 19, 14, 0, tzinfo=UTC),
+            ),
+            graph=SurrealDeltaSection(
+                rows=[
+                    SurrealDeltaChange(
+                        ref=file_path,
+                        table="files",
+                        row={
+                            "schema_version": SURREAL_SCHEMA_VERSION,
+                            "path": file_path,
+                            "title": "Graph note",
+                        },
+                    ),
+                    SurrealDeltaChange(
+                        ref=f"{file_path}#beta",
+                        table="tags",
+                        row={
+                            "schema_version": SURREAL_SCHEMA_VERSION,
+                            "name": fresh_tag_name,
+                        },
+                    ),
+                    SurrealDeltaChange(
+                        ref=f"{file_path}\x1f{fresh_tag_name}\x1fHAS_TAG",
+                        table="relations",
+                        row={
+                            "schema_version": SURREAL_SCHEMA_VERSION,
+                            "source_id": file_path,
+                            "source_table": "files",
+                            "target_id": fresh_tag_name,
+                            "target_table": "tags",
+                            "relation_type": "HAS_TAG",
+                            "rel_type": "HAS_TAG",
+                            "weight": 1.0,
+                            "properties": {"source": "frontmatter"},
+                            "metadata": {"kind": "relation"},
+                        },
+                    ),
+                ]
+            ),
+        )
+
+        first_state = SurrealDeltaSyncState()
+        first = run_surreal_delta_sync(manifest, writer, state=first_state, batch_size=2)
+        first_snapshot = {
+            table: _scan_by_id(connection, table)
+            for table in ("files", "tags", "entities", "relations", "checkpoints")
+        }
+
+        fresh_relation_id = str(
+            writer.codec.encode("relations", f"{file_path}\x1f{fresh_tag_name}\x1fHAS_TAG")
+        )
+        stale_participant_id = str(
+            writer.codec.encode("relations", f"{file_path}\x1f{stale_participant_name}\x1fHAS_PARTICIPANT")
+        )
+        stale_tag_id = str(writer.codec.encode("relations", f"{file_path}\x1f{stale_tag_name}\x1fHAS_TAG"))
+
+        assert first.applied_counts["graph"] == 5
+        assert fresh_relation_id in first_snapshot["relations"]
+        assert stale_participant_id not in first_snapshot["relations"]
+        assert stale_tag_id not in first_snapshot["relations"]
+        assert first_snapshot["relations"][fresh_relation_id]["relation_type"] == "HAS_TAG"
+        assert first_snapshot["relations"][fresh_relation_id]["source_id"] == file_path
+        assert first_snapshot["relations"][fresh_relation_id]["target_id"] == fresh_tag_name
+        assert first_snapshot["relations"][fresh_relation_id]["properties"] == {"source": "frontmatter"}
+
+        second_state = SurrealDeltaSyncState()
+        second = run_surreal_delta_sync(manifest, writer, state=second_state, batch_size=2)
+        second_snapshot = {
+            table: _scan_by_id(connection, table)
+            for table in ("files", "tags", "entities", "relations", "checkpoints")
+        }
+
+    assert second.applied_counts.get("graph", 0) == 0
+    assert second_snapshot == first_snapshot

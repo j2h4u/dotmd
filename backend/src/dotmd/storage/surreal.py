@@ -177,6 +177,21 @@ class SurrealConnection:
             result.append(self._db.query(f"INSERT INTO {table_name} $rows;", {"rows": batch}))
         return result
 
+    def insert_relation_rows(
+        self,
+        table_name: str,
+        rows: list[dict[str, Any]],
+        *,
+        batch_size: int = 1000,
+    ) -> Any:
+        if not rows:
+            return []
+        result = []
+        for offset in range(0, len(rows), batch_size):
+            batch = rows[offset : offset + batch_size]
+            result.append(self._db.query(f"INSERT RELATION INTO {table_name} $rows;", {"rows": batch}))
+        return result
+
     def delete(self, record: RecordID | str) -> Any:
         return self._db.delete(record)
 

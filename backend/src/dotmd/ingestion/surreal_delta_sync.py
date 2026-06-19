@@ -976,6 +976,7 @@ class SurrealDeltaStoreWriter:
 
     def write_graph(self, rows: Sequence[SurrealDeltaChange]) -> int:
         applied = self._delete_stale_frontmatter_relations(rows)
+        relation_payloads: list[dict[str, Any]] = []
         for change in rows:
             table = self._normalize_table_name(change.table)
             row = dict(change.row)
@@ -1013,11 +1014,22 @@ class SurrealDeltaStoreWriter:
                     row.setdefault("out", source_record_id)
                 if target_record_id is not None:
                     row.setdefault("in", target_record_id)
+                row.setdefault("metadata", {})
+                prepared = self._prepare_payload(table, raw_identifier, row)
+                record_id = self._record_id(table, raw_identifier)
+                existing = self._existing_row(record_id)
+                if self._same_row(existing, prepared):
+                    continue
+                prepared["id"] = str(record_id.id)
+                relation_payloads.append(prepared)
+                applied += 1
+                continue
             else:
                 raise ValueError(f"unsupported graph table: {change.table}")
 
-            row.setdefault("metadata", {})
             applied += self._upsert_point(table, raw_identifier, row)
+        if relation_payloads:
+            self.connection.insert_relation_rows("relations", relation_payloads)
         return applied
 
     def _delete_stale_frontmatter_relations(self, rows: Sequence[SurrealDeltaChange]) -> int:
