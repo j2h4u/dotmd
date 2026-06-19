@@ -242,6 +242,78 @@ def test_surreal_backend_initializes_without_falkor_graph_store(
     assert pipeline._graph_store.get_graph_data() == {"nodes": [], "edges": []}
 
 
+def test_surreal_metadata_only_reindex_skips_local_vec_and_fts_artifacts(
+    tmp_path, monkeypatch
+):
+    from dotmd.core.config import Settings
+    from dotmd.core.models import ExtractDepth
+    from dotmd.ingestion.pipeline import IndexingPipeline
+    from dotmd.storage.surreal import SurrealConnection, SurrealStoreConfig
+    from tests.fixtures.surreal_native import apply_surreal_native_retrieval_schema
+
+    data_dir = tmp_path / "data"
+    index_dir = tmp_path / "index"
+    surreal_db = tmp_path / "surreal.db"
+    data_dir.mkdir()
+    index_dir.mkdir()
+
+    settings = Settings(
+        data_dir=data_dir,
+        index_dir=index_dir,
+        embedding_url="http://localhost:18088",
+        indexing_paths=[str(data_dir)],
+        extract_depth=ExtractDepth.STRUCTURAL,
+        search_backend="surreal",
+        chunk_strategy="contextual_512_50",
+        surreal_retrieval_url=f"surrealkv://{surreal_db}",
+        surreal_retrieval_database="metadata_only_visibility",
+        surreal_retrieval_embedding_dimension=3,
+    )
+
+    doc = data_dir / "surreal.md"
+    _write_md(doc, "Surreal Doc", ["alpha"], "Initial body text for surreal metadata-only smoke.")
+
+    schema_config = SurrealStoreConfig(
+        url=f"surrealkv://{surreal_db}",
+        database="metadata_only_visibility",
+    )
+    with SurrealConnection(schema_config) as schema_connection:
+        apply_surreal_native_retrieval_schema(
+            schema_connection,
+            embedding_dimension=3,
+            hnsw_ef=40,
+        )
+
+    pipeline = IndexingPipeline(settings)
+    pipeline._semantic_engine.encode_batch = MagicMock(  # type: ignore[method-assign]
+        side_effect=lambda texts: [[1.0, 0.0, 0.0] for _text in texts]
+    )
+    pipeline._semantic_engine.get_tei_model_id = lambda: "fixture-model"  # type: ignore[method-assign]
+
+    try:
+        assert pipeline.index_file(doc) == 1
+        assert pipeline._vector_store.count() == 0
+        assert (
+            pipeline._conn.execute(f"SELECT COUNT(*) FROM {pipeline._fts_table}").fetchone()[0]
+            == 0
+        )
+
+        _write_md(
+            doc,
+            "Surreal Doc",
+            ["alpha", "beta"],
+            "Initial body text for surreal metadata-only smoke.",
+        )
+        pipeline.index_file(doc)
+        assert pipeline._vector_store.count() == 0
+        assert (
+            pipeline._conn.execute(f"SELECT COUNT(*) FROM {pipeline._fts_table}").fetchone()[0]
+            == 0
+        )
+    finally:
+        pipeline.close()
+
+
 def test_index_file_embed_routes_surreal_manifests_with_complete_text_hashes(
     surreal_pipeline_settings, monkeypatch
 ):

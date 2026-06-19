@@ -31,7 +31,7 @@ def _pipeline_settings(tmp_path: Path, surreal_db: Path) -> Settings:
     )
 
 
-def _index_direct_surreal_fixture(tmp_path: Path) -> tuple[Settings, Path]:
+def _index_direct_surreal_fixture(tmp_path: Path) -> tuple[Settings, Path, int, int]:
     surreal_db = tmp_path / "surreal.db"
     settings = _pipeline_settings(tmp_path, surreal_db)
     file_path = settings.data_dir / "surrealcutoversmoke42.md"
@@ -59,16 +59,23 @@ def _index_direct_surreal_fixture(tmp_path: Path) -> tuple[Settings, Path]:
 
     try:
         assert pipeline.index_file(file_path) == 1
+        vector_count = pipeline._vector_store.count()
+        fts_count = pipeline._conn.execute(
+            f"SELECT COUNT(*) FROM {pipeline._fts_table}"
+        ).fetchone()[0]
     finally:
         pipeline.close()
 
-    return settings, file_path
+    return settings, file_path, vector_count, fts_count
 
 
 def test_direct_surreal_ingest_is_visible_to_surreal_keyword_search(
     tmp_path: Path,
 ) -> None:
-    _settings, _ = _index_direct_surreal_fixture(tmp_path)
+    _settings, _, vector_count, fts_count = _index_direct_surreal_fixture(tmp_path)
+
+    assert vector_count == 0
+    assert fts_count == 0
 
     # This smoke only proves search visibility; read() still resolves through local metadata.
     with SurrealConnection(
@@ -92,7 +99,7 @@ def test_direct_surreal_ingest_is_visible_to_surreal_keyword_search(
 def test_direct_surreal_ingest_is_visible_through_service_keyword_search(
     tmp_path: Path,
 ) -> None:
-    settings, file_path = _index_direct_surreal_fixture(tmp_path)
+    settings, file_path, _, _ = _index_direct_surreal_fixture(tmp_path)
     service = DotMDService(settings)
 
     try:

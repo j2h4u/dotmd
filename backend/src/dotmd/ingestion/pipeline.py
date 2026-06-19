@@ -2135,6 +2135,8 @@ class IndexingPipeline:
             )
             self._write_surreal_direct_manifest(direct_manifest)
 
+        write_local_search_artifacts = self._settings.search_backend != "surreal"
+
         # ── WRITE PHASE ───────────────────────────────────────────────────────────────
         # Each store call owns its own commit. Cross-store atomicity is not achievable
         # here because SQLiteVecVectorStore.add_chunks() commits internally — wrapping
@@ -2155,16 +2157,17 @@ class IndexingPipeline:
 
         # Store e_meta component (canonical path via _meta_entity_id)
         self._vec_components.store(self._meta_entity_id(file_info.path), "meta", e_meta)
-        # Write e_fused to vec0 (add_chunks commits internally).
-        # overwrite=False: _holder_aware_chunk_cleanup already removed orphan vec_meta rows.
-        # Full-table wipe would destroy shared chunks still held by other files.
-        self._delete_vector_rows_for_chunks(chunks)
-        self._vector_store.add_chunks(
-            chunks,
-            e_fused_vectors,
-            overwrite=False,
-            text_hashes=text_hashes,
-        )
+        if write_local_search_artifacts:
+            # Write e_fused to vec0 (add_chunks commits internally).
+            # overwrite=False: _holder_aware_chunk_cleanup already removed orphan vec_meta rows.
+            # Full-table wipe would destroy shared chunks still held by other files.
+            self._delete_vector_rows_for_chunks(chunks)
+            self._vector_store.add_chunks(
+                chunks,
+                e_fused_vectors,
+                overwrite=False,
+                text_hashes=text_hashes,
+            )
         self._metadata_store.upsert_source_document(
             source_document,
             conn=self._conn,
@@ -2768,23 +2771,27 @@ class IndexingPipeline:
             len(chunks) / t_embed if t_embed > 0 else 0,
         )
 
-        t0 = time.perf_counter()
-        self._vector_store.add_chunks(
-            chunk_order,
-            all_e_fused,
-            overwrite=overwrite_vectors,
-            text_hashes=all_text_hashes,
-        )
-        logger.info(
-            "[%s] vector_store: %d vectors (%.2fs)", run_id, len(chunks), time.perf_counter() - t0
-        )
-        if hasattr(self._vector_store, "set_model_name"):
-            self._vector_store.set_model_name(self._settings.embedding_model)  # type: ignore[attr-defined]
+        if self._settings.search_backend != "surreal":
+            t0 = time.perf_counter()
+            self._vector_store.add_chunks(
+                chunk_order,
+                all_e_fused,
+                overwrite=overwrite_vectors,
+                text_hashes=all_text_hashes,
+            )
+            logger.info(
+                "[%s] vector_store: %d vectors (%.2fs)",
+                run_id,
+                len(chunks),
+                time.perf_counter() - t0,
+            )
+            if hasattr(self._vector_store, "set_model_name"):
+                self._vector_store.set_model_name(self._settings.embedding_model)  # type: ignore[attr-defined]
 
-        t0 = time.perf_counter()
-        file_meta = self._build_file_meta_from_fileinfo(files)
-        self._keyword_engine.add_chunks(chunks, file_meta=file_meta)
-        logger.info("[%s] fts5: %d chunks (%.2fs)", run_id, len(chunks), time.perf_counter() - t0)
+            t0 = time.perf_counter()
+            file_meta = self._build_file_meta_from_fileinfo(files)
+            self._keyword_engine.add_chunks(chunks, file_meta=file_meta)
+            logger.info("[%s] fts5: %d chunks (%.2fs)", run_id, len(chunks), time.perf_counter() - t0)
 
         for source_document in source_documents:
             self._upsert_active_filesystem_binding(
@@ -3399,7 +3406,8 @@ class IndexingPipeline:
             _trickle_tags = file_info.frontmatter.get("tags", [])
             _trickle_tags_csv = ", ".join(str(t) for t in _trickle_tags) if _trickle_tags else ""
             _trickle_meta = {str(file_info.path): (file_info.title, _trickle_tags_csv)}
-            self._keyword_engine.add_chunks(chunks, file_meta=_trickle_meta)
+            if self._settings.search_backend != "surreal":
+                self._keyword_engine.add_chunks(chunks, file_meta=_trickle_meta)
             t_save = time.perf_counter() - t0
 
             _beacon("extraction")
@@ -3466,10 +3474,11 @@ class IndexingPipeline:
             if metadata_only:
                 file_chunks = self._chunks_for_file_with_paths(file_info)
                 file_meta = self._build_file_meta_from_fileinfo([file_info])
-                self._keyword_engine.add_chunks(
-                    file_chunks,
-                    file_meta=file_meta,
-                )
+                if self._settings.search_backend != "surreal":
+                    self._keyword_engine.add_chunks(
+                        file_chunks,
+                        file_meta=file_meta,
+                    )
                 self._frontmatter_to_graph([file_info])
 
             _beacon("fingerprint")
