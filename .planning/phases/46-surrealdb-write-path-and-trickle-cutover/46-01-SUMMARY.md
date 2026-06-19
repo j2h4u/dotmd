@@ -83,6 +83,18 @@ focused direct-write and service-level visibility smokes on the Surreal sink:
   Surreal mode so destructive admin/public methods fail fast, `_purge_file`
   and `purge_orphaned_files` stay tombstone-only, and trickle delete/orphan
   handling uses those safe paths.
+- production cutover was executed on 2026-06-19:
+  rollback bundle `/srv/dotmd-cutover-backups/20260619T232441+0500`,
+  `/opt/docker/dotmd/.env` switched to `DOTMD_SEARCH_BACKEND=surreal`,
+  `dotmd` recreated once, and runtime settings now report
+  `search_backend=surreal` with database `phase43_refresh_20260618g`.
+- post-cutover smoke passed:
+  internal `/health`, CLI keyword search, MCP stdio smoke, MCP
+  `search -> drill -> read`, and controlled trickle edit/delete for
+  `dotmd_surreal_cutover_smoke_20260619_232955`.
+- controlled trickle insert completed in `72.4s`; the dominant cost was
+  extraction/graph work (`extract 25.85s`, `graph 44.40s`), not Surreal vector
+  write time.
 
 ## Evidence
 
@@ -106,6 +118,9 @@ Commits:
 - `c22f6de` `Collapse Surreal FTS to one query`
 - `a098ae9` `Bound Falkor graph enrichment`
 - `fb15e14` `Fix Surreal FTS query_raw fusion`
+- `00a1aa7` `Make federated search opt-in`
+- `2c1b68a` `Clarify federated opt-in docs`
+- `479ec66` `docs: refresh dotmd mcp cutover smoke`
 
 Verification run on 2026-06-19:
 
@@ -169,17 +184,18 @@ ID. It is not the target steady-state architecture.
 
 ## Not done yet
 
-Phase 46 is not complete. Remaining work:
+Phase 46 cutover is executed and soak is in progress. Remaining work:
 
-- prove Surreal-backed search sees changed direct-written results through the
-  production/live API/CLI/MCP smoke path at cutover scope;
-- update production cutover criteria with the write-path evidence;
-- remove or quarantine any remaining old-stack write dependencies outside the
-  normal Surreal ingest path, or mark them explicitly non-authoritative, before
-  production cutover;
-- decide the production deploy/runbook for the Surreal-backed write path.
+- watch production search/trickle behavior during soak;
+- decide whether MCP search should expose lightweight `mode`/`rerank` knobs for
+  faster operational smoke checks;
+- investigate the slow extraction/graph portion of one-file trickle updates;
+- keep rollback data until Phase 47 starts;
+- Phase 47 physically removes SQLite/sqlite-vec/FTS5/FalkorDB/LadybugDB
+  code/config/data only after soak is accepted.
 
 ## Current Decision
 
-Proceed with direct SurrealDB write path. Do not build a long-lived hybrid
-old-stack-to-Surreal sync layer.
+Production is now running the direct SurrealDB search/write path. Do not build
+a long-lived hybrid old-stack-to-Surreal sync layer. Do not physically delete
+old-stack data until Phase 47.

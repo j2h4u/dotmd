@@ -1,9 +1,9 @@
 # Phase 46 Production Cutover Criteria
 
-Decision: **not production cutover yet**.
+Decision: **production cutover executed; soak in progress**.
 
 This file records the decision state and the evidence already in hand. The
-exact operator procedure lives here:
+operator procedure lives here:
 
 - [Phase 46 Production Cutover Runbook](./production-cutover-runbook.md)
 
@@ -23,15 +23,36 @@ exact operator procedure lives here:
 - Phase 43 verify-only passed.
 - Devtools gate passed.
 - Rerank off is the accepted cutover path.
-
-## Remaining cutover gates
-
 - Rollback bundle captured before restart.
 - DotMD env switch applied and production container restarted once.
 - Production/live smoke passed via internal `/health` and the MCP stdio smoke.
 - Controlled trickle edit/delete smoke passed.
-- Stop and rollback conditions are clear and tested.
-- Phase 47 deletion happens only after soak.
+
+## Production cutover evidence
+
+- Rollback/config bundle captured at
+  `/srv/dotmd-cutover-backups/20260619T232441+0500`.
+- `/opt/docker/dotmd/.env` now sets `DOTMD_SEARCH_BACKEND=surreal` and points
+  retrieval at SurrealDB database `phase43_refresh_20260618g`.
+- `dotmd` was recreated once and is healthy.
+- Runtime settings inside the container report
+  `search_backend=surreal`, database `phase43_refresh_20260618g`.
+- CLI keyword smoke passed after restart:
+  `dotmd search --mode keyword --no-rerank --no-expand -n 3 'SurrealDB вектора graph'`.
+- MCP stdio smoke passed against `docker exec -i dotmd dotmd mcp`; the tool
+  surface is lowercase `search`, `read`, `drill`, `feedback`, and
+  `search.federated` defaults to `false`.
+- MCP `search -> drill -> read` round trip passed for the returned SurrealDB
+  document ref.
+- Controlled trickle edit/delete smoke passed using disposable token
+  `dotmd_surreal_cutover_smoke_20260619_232955`; insert indexed in `72.4s`,
+  delete purged the file and subsequent keyword search returned no results.
+
+## Remaining soak gates
+
+- Watch production search/trickle behavior during soak.
+- Do not run Phase 47 deletion until soak is accepted.
+- Keep rollback data until Phase 47 is explicitly started.
 
 ## Remaining non-Surreal defects
 
@@ -43,4 +64,4 @@ exact operator procedure lives here:
 ## Non-goals
 
 - Phase 47 deletion is not done yet.
-- Production container has not been restarted for cutover yet.
+- Old SQLite/Falkor data has not been physically deleted yet.

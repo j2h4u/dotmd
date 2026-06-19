@@ -1,15 +1,15 @@
 # Phase 46 Production Cutover Runbook
 
-Status: **not production cutover yet**
+Status: **cutover executed; soak in progress**
 
-This is the operator checklist for the final Phase 46 cutover. It records the
-remaining action points only. It does not claim production cutover is complete.
+This is the operator checklist and evidence note for the Phase 46 production
+cutover.
 
 ## Scope
 
 - No legacy/backcompat work is included here.
-- No production cutover is claimed yet.
 - Do not run `dotmd index --force` while the container is running.
+- Phase 47 physical deletion is out of scope until soak is accepted.
 
 ## Pre-cutover state to verify
 
@@ -72,6 +72,37 @@ Run these checks in order:
    `cd backend && uv run python -m devtools.mcp_client.cli script --file devtools/mcp_client/smoke.json --timeout 120 -- docker exec -i dotmd dotmd mcp`
 3. Controlled trickle edit smoke.
 4. Optional controlled delete/tombstone smoke.
+
+## Executed cutover evidence
+
+- Rollback/config bundle:
+  `/srv/dotmd-cutover-backups/20260619T232441+0500`
+- DotMD env switch: `DOTMD_SEARCH_BACKEND=surreal`,
+  database `phase43_refresh_20260618g`.
+- Restart boundary: one `docker compose up -d --no-deps --force-recreate dotmd`.
+- Health after restart:
+  `docker exec dotmd curl -fsS http://127.0.0.1:8080/health` -> `{"status":"ok"}`.
+- Runtime settings inside container:
+  `search_backend=surreal`, database `phase43_refresh_20260618g`.
+- CLI keyword smoke passed:
+  `docker exec dotmd dotmd search --mode keyword --no-rerank --no-expand -n 3 'SurrealDB вектора graph'`.
+- MCP stdio smoke passed:
+  `cd backend && UV_LINK_MODE=hardlink uv run python -m devtools.mcp_client.cli script --file devtools/mcp_client/smoke.json --timeout 120 -- docker exec -i dotmd dotmd mcp`.
+- MCP `search -> drill -> read` passed for the returned SurrealDB document ref.
+- Controlled trickle edit/delete smoke passed for
+  `dotmd_surreal_cutover_smoke_20260619_232955`; insert indexed in `72.4s`
+  and delete was logged as `Watch: purged deleted ...`.
+
+## Observed follow-up risks
+
+- `dotmd status --verbose` is a poor cutover smoke: it took `47.651s` and
+  mostly exercises filesystem discovery/status rather than proving Surreal
+  search.
+- The current MCP `search` tool has no `mode`/`rerank` knobs, so MCP smoke
+  exercises full hybrid+rerank and can spend tens of seconds loading the
+  cross-encoder in a fresh stdio process.
+- The controlled one-file trickle insert was dominated by extraction/graph
+  work: `extract 25.85s`, `graph 44.40s`, `embed 2.05s`.
 
 ## Stop or rollback if any of these fail
 
