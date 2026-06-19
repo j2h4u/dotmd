@@ -325,7 +325,7 @@ are implemented or explicitly deferred as a product decision.
 
 Phase: 46-surrealdb-write-path-and-trickle-cutover
 Plan: 46-01 in progress
-Status: Direct SurrealDB write path selected; implementation remains
+Status: Direct SurrealDB write path is implemented at smoke level; readback and cutover remain
 Last activity: 2026-06-19 -- direct SurrealDB cutover decision recorded
 
 ## Operator Next Steps
