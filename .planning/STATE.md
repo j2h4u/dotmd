@@ -330,10 +330,12 @@ Last activity: 2026-06-19 -- direct SurrealDB cutover decision recorded
 
 ## Operator Next Steps
 
-- Implement direct SurrealDB ingest/write sink for trickle/indexing.
+- Direct SurrealDB ingest/write sink for trickle/indexing is implemented at
+  focused-test/smoke level.
 - Prove one changed markdown file writes directly to SurrealDB and is visible
   through Surreal-backed search without SQLite as the daily authoritative store.
-- Update cutover criteria and then remove/quarantine old-stack writes.
+- Update cutover criteria with the write-path evidence, then remove/quarantine
+  old-stack writes or mark them non-authoritative.
 - Revisit reranker-on latency before any production cutover approval.
 
 ## Session

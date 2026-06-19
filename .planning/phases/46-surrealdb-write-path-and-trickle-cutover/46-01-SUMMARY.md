@@ -9,7 +9,8 @@ last_updated: 2026-06-19
 
 ## What is done
 
-Phase 46 now has the core idempotent SurrealDB delta-apply machinery:
+Phase 46 now has the core idempotent SurrealDB delta-apply machinery plus a
+focused direct-write smoke on the Surreal sink:
 
 - delta manifest contract for changed old-stack rows only;
 - deterministic sync runner with resume state and progress/ETA snapshots;
@@ -18,12 +19,16 @@ Phase 46 now has the core idempotent SurrealDB delta-apply machinery:
 - writer-side table alias normalization for old-stack table names;
 - stable record-id selection aligned with the bootstrap migration IDs;
 - tombstone deletion by stable IDs from `previous_row`;
-- fake-connection unit tests and real temporary `surrealkv://` smoke tests.
+- fake-connection unit tests and real temporary `surrealkv://` smoke tests;
 - changed-file delta smoke from an old-stack SQLite fixture through
   `load_sqlite_rows_for_surreal()` and `build_surreal_delta_manifest_from_rows()`;
 - schema-derived payload pruning in the writer, so old-stack row shapes do not
   need test-side field stripping before Surreal upsert;
 - `vector_components` are accepted by the writer rather than excluded.
+- temporary-markdown direct-write smoke to SurrealKV through
+  `IndexingPipeline(search_backend='surreal')`, proving the direct pipeline ->
+  Surreal writer path without Falkor dependency and with native relation
+  inserts.
 
 ## Evidence
 
@@ -46,12 +51,14 @@ Verification run on 2026-06-19:
 cd backend
 UV_LINK_MODE=hardlink uv run pytest tests/ingestion/test_surreal_delta_sync.py tests/ingestion/test_surreal_delta_sync_live.py -q
 UV_LINK_MODE=hardlink uv run ruff check src/dotmd/ingestion/surreal_delta_sync.py tests/ingestion/test_surreal_delta_sync.py tests/ingestion/test_surreal_delta_sync_live.py
+UV_LINK_MODE=hardlink uv run pytest tests/ingestion/test_application_source_ingestion.py tests/ingestion/test_surreal_direct_sink.py tests/ingestion/test_surreal_delta_sync.py tests/ingestion/test_surreal_delta_sync_live.py tests/ingestion/test_bulk_fusion_pairing.py tests/ingestion/test_metadata_only_reindex.py tests/ingestion/test_pipeline_purge.py tests/ingestion/test_pipeline_orphan_sweep.py -q
 ```
 
 Result:
 
 - `21 passed`
 - `All checks passed!`
+- `74 passed in 1.99s`
 
 The live smoke used real temporary `surrealkv://` storage, applied the dotMD
 schema, seeded bootstrap-style records, applied a delta, reran with the same
@@ -62,6 +69,13 @@ The changed-file smoke used the existing synthetic old-stack SQLite fixture,
 loaded rows with `load_sqlite_rows_for_surreal()`, built a one-document delta,
 applied it to temporary SurrealKV, and proved unrelated old-stack rows were not
 applied by that delta.
+
+The direct-write smoke used a temporary markdown file plus mocked embeddings,
+wrote successfully through `IndexingPipeline(search_backend='surreal')` into
+temporary SurrealKV, and observed counts of documents=1, chunks=1,
+bindings=1, embeddings=1, files=1, sections=1, tags=1, relations=2. That
+confirms the direct pipeline -> Surreal writer path, native relation inserts,
+and deterministic int `vector_rowid`.
 
 ## Direction Change
 
@@ -74,12 +88,12 @@ ID. It is not the target steady-state architecture.
 
 Phase 46 is not complete. Remaining work:
 
-- implement direct SurrealDB ingest/write sink for trickle/indexing;
-- make changed markdown files write to SurrealDB without using SQLite as the
-  daily authoritative store;
-- prove Surreal-backed search sees updated results after direct Surreal writes;
-- remove or quarantine old-stack write dependencies before production cutover;
-- update production cutover criteria with the write-path evidence.
+- prove Surreal-backed search sees changed direct-written results through the
+  service/CLI/API path;
+- update production cutover criteria with the write-path evidence;
+- remove or quarantine old-stack write dependencies, or mark them explicitly
+  non-authoritative, before production cutover;
+- decide the production deploy/runbook for the Surreal-backed write path.
 
 ## Current Decision
 

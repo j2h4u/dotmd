@@ -301,9 +301,10 @@ SQLite/sqlite-vec/FTS5 and FalkorDB stack can be removed.
 
 Success criteria:
 
-- [ ] Trickle/index writes have an explicit SurrealDB strategy: direct write,
+- [x] Trickle/index writes have an explicit SurrealDB strategy: direct write,
   without a long-lived hybrid old-stack sync layer.
-- [ ] Daily update behavior is proven without full reindex/re-embedding.
+- [x] Daily update behavior is proven at focused-test/smoke level without full
+  reindex/re-embedding.
 - [x] Failure/retry behavior is idempotent and instrumented with progress/ETA
   for operations expected to exceed 120 seconds.
 - [ ] Production cutover criteria are updated with write-path evidence.
@@ -318,9 +319,18 @@ Progress:
 - [x] Fake-connection and temporary `surrealkv://` tests prove idempotent replay,
   stable bootstrap IDs, exact tombstones, unrelated-row preservation, and no
   bulk delete/insert paths.
+- [x] Temporary markdown direct-write smoke to SurrealKV via
+  `IndexingPipeline(search_backend='surreal')` passed with counts:
+  documents=1, chunks=1, bindings=1, embeddings=1, files=1, sections=1,
+  tags=1, relations=2.
 - [x] Product decision recorded: proceed with direct SurrealDB writes, not a
   bounded hybrid runtime.
-- [ ] Direct SurrealDB changed-file daily-update smoke remains before cutover.
+- [ ] Surreal-backed search/API/CLI readback for direct-written changes remains
+  before cutover.
+- [ ] Production cutover criteria need to be updated with the write-path
+  evidence before approval.
+- [ ] Old-stack write dependencies still need to be removed, quarantined, or
+  explicitly marked non-authoritative.
 
 ### Phase 47: Legacy stack removal
 
