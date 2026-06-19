@@ -681,14 +681,30 @@ def run_migration_command(config: SurrealMigrationRunnerConfig) -> SurrealMigrat
         + config.graph_export_json.stat().st_size
         + config.feedback_export_json.stat().st_size
     )
-    source_capture_checkpoint = _write_source_capture_progress(
-        config=config,
-        mode=mode,
-        target_mode=target_mode,
-        status="running",
-        applied_count=0,
-        planned_count=source_capture_planned_bytes,
-    )
+    if config.resume_from_progress and config.progress_json is not None and config.progress_json.exists():
+        source_capture_checkpoint = next(
+            (
+                checkpoint
+                for checkpoint in _load_existing_progress_checkpoints(config.progress_json)
+                if checkpoint.phase_name is SurrealMigrationPhaseName.SOURCE_CAPTURE
+            ),
+            SurrealMigrationPhaseCheckpoint(
+                phase_name=SurrealMigrationPhaseName.SOURCE_CAPTURE,
+                planned_count=max(1, source_capture_planned_bytes),
+                applied_count=0,
+                verified_count=0,
+                status="running",
+            ),
+        )
+    else:
+        source_capture_checkpoint = _write_source_capture_progress(
+            config=config,
+            mode=mode,
+            target_mode=target_mode,
+            status="running",
+            applied_count=0,
+            planned_count=source_capture_planned_bytes,
+        )
 
     target_url = config.target_url or f"surrealkv://{config.sqlite_snapshot.with_suffix('.surreal.db')}"
 

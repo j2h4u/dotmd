@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import devtools.surreal_migration_runner as runner
 import pytest
 from devtools.surreal_migration_runner import (
     SurrealMigrationRunnerConfig,
@@ -22,6 +23,7 @@ from dotmd.ingestion.migrate_surreal import (
     SurrealTargetMode,
     run_surreal_migration,
 )
+from dotmd.storage.surreal_schema import SURREAL_SCHEMA_VERSION
 
 
 def _write_json(path: Path, payload: dict[str, object]) -> Path:
@@ -185,6 +187,81 @@ def test_run_migration_command_writes_json_markdown_and_preserves_non_ascii(
         "restore_rehearsal",
         "reporting",
     } <= applied_phases
+
+
+def test_resume_does_not_overwrite_existing_progress_before_core_runner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sqlite_snapshot = tmp_path / "snapshot.db"
+    graph_export = tmp_path / "graph.json"
+    feedback_export = tmp_path / "feedback.json"
+    progress_json = tmp_path / "progress.json"
+    report_json = tmp_path / "report.json"
+    report_markdown = tmp_path / "report.md"
+    restore_manifest_json = tmp_path / "restore.json"
+    manifest_json = tmp_path / "manifest.json"
+    source_capture_manifest_json = tmp_path / "source-capture.json"
+    sqlite_snapshot.write_bytes(b"sqlite")
+    graph_export.write_bytes(b"graph")
+    feedback_export.write_bytes(b"feedback")
+    progress_json.write_text(
+        json.dumps(
+            {
+                "schema_version": SURREAL_SCHEMA_VERSION,
+                "mode": "apply",
+                "target_url": "http://127.0.0.1:8000",
+                "phase_checkpoints": [
+                    {
+                        "phase_name": "embeddings",
+                        "planned_count": 10,
+                        "applied_count": 10,
+                        "verified_count": 10,
+                        "status": "applied",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_run_surreal_migration(**kwargs):  # type: ignore[no-untyped-def]
+        payload = json.loads(progress_json.read_text(encoding="utf-8"))
+        assert payload["phase_checkpoints"][0]["phase_name"] == "embeddings"
+        assert payload["phase_checkpoints"][0]["status"] == "applied"
+        return runner.SurrealMigrationReport(
+            schema_version=SURREAL_SCHEMA_VERSION,
+            mode=runner.SurrealMigrationMode.APPLY,
+            status="apply",
+            target_mode=runner.SurrealTargetMode.REMOTE_SERVICE,
+            overwrite_policy=runner.SurrealOverwritePolicy.REFUSE,
+            target_url=kwargs["target_url"],
+            target_namespace=kwargs["target_namespace"],
+            target_database=kwargs["target_database"],
+            source_capture_manifest=None,
+        )
+
+    monkeypatch.setattr(runner, "run_surreal_migration", fake_run_surreal_migration)
+
+    result = runner.run_migration_command(
+        runner.SurrealMigrationRunnerConfig(
+            mode="apply",
+            target_mode="remote-service",
+            sqlite_snapshot=sqlite_snapshot,
+            source_capture_manifest_json=source_capture_manifest_json,
+            graph_export_json=graph_export,
+            feedback_export_json=feedback_export,
+            target_url="http://127.0.0.1:8000",
+            progress_json=progress_json,
+            resume_from_progress=True,
+            manifest_json=manifest_json,
+            report_json=report_json,
+            report_markdown=report_markdown,
+            restore_manifest_json=restore_manifest_json,
+        )
+    )
+
+    assert result.exit_code == 1
 
 
 def test_run_migration_command_refuses_unsafe_apply_without_gate_or_target_inputs(
