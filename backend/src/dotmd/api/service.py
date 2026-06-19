@@ -316,6 +316,7 @@ class DotMDService:
             self._pipeline.graph_store,
         )
         self._surreal_connection: Any | None = None
+        self._surreal_metadata_store: MetadataStoreProtocol | None = None
         if self._settings.search_backend == "surreal":
             self._configure_surreal_search_backend()
         _write_service_init_progress("service:keyword_graph_engines", "applied")
@@ -404,7 +405,11 @@ class DotMDService:
     def _configure_surreal_search_backend(self) -> None:
         """Replace local retrieval engines with standalone SurrealDB engines."""
         from dotmd.search.surreal_native import build_surreal_native_engine_overrides
-        from dotmd.storage.surreal import SurrealConnection, SurrealStoreConfig
+        from dotmd.storage.surreal import (
+            SurrealConnection,
+            SurrealMetadataStore,
+            SurrealStoreConfig,
+        )
 
         if not self._settings.surreal_retrieval_database:
             raise ValueError(
@@ -435,10 +440,18 @@ class DotMDService:
             embedding_shard_count=self._settings.surreal_retrieval_embedding_shard_count,
         )
         self._surreal_connection = connection
+        self._surreal_metadata_store = cast(MetadataStoreProtocol, SurrealMetadataStore(connection))
         self._semantic_engine = overrides["semantic"]
         self._keyword_engine = overrides["keyword"]
         self._graph_direct_engine = overrides["graph_direct"]
         self._graph_engine = _DisabledGraphEnrichmentEngine()
+
+    def _active_metadata_store(self) -> MetadataStoreProtocol:
+        if self._settings.search_backend == "surreal":
+            if self._surreal_metadata_store is None:
+                raise RuntimeError("Surreal metadata store is not configured")
+            return self._surreal_metadata_store
+        return cast(MetadataStoreProtocol, self._pipeline.metadata_store)
 
     def close(self) -> None:
         """Shut down service resources cleanly.
@@ -847,7 +860,7 @@ class DotMDService:
             reranked = reranker.rerank(
                 search_query,
                 chunk_ids,
-                cast(MetadataStoreProtocol, self._pipeline.metadata_store),
+                self._active_metadata_store(),
                 top_k=rerank_limit,
             )
             if not reranked:
@@ -902,7 +915,7 @@ class DotMDService:
         candidates = build_candidates(
             fused[:top_k],
             per_engine=engine_results,
-            metadata_store=cast(MetadataStoreProtocol, self._pipeline.metadata_store),
+            metadata_store=self._active_metadata_store(),
             query=original_query,
             active_provenance_map=active_provenance_map,
             top_k=top_k,
@@ -1326,7 +1339,7 @@ class DotMDService:
         """Drop inactive public candidates while preserving missing-provenance errors."""
         strategy = self._settings.chunk_strategy
         chunk_ids = [chunk_id for chunk_id, _score in fused]
-        store = self._pipeline.metadata_store
+        store = self._active_metadata_store()
         all_provenance = store.get_chunk_provenance_for_chunk_ids(strategy, chunk_ids)
         active_provenance = store.get_active_chunk_provenance_for_chunk_ids(
             strategy,

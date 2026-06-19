@@ -680,3 +680,46 @@ def test_surreal_vector_store_uses_vector_field_only(tmp_path: Path) -> None:
 
     assert stored["vector"] == [0.1, 0.2, 0.3]
     assert "embedding" not in stored
+
+
+def test_surreal_metadata_store_hydrates_active_provenance_from_chunks(tmp_path: Path) -> None:
+    from dotmd.storage.surreal import (
+        SurrealConnection,
+        SurrealMetadataStore,
+        SurrealStoreConfig,
+        define_dotmd_surreal_schema,
+    )
+
+    db_path = tmp_path / "provenance-contract.db"
+    config = SurrealStoreConfig(url=f"surrealkv://{db_path}")
+
+    with SurrealConnection(config) as connection:
+        define_dotmd_surreal_schema(connection)
+        store = SurrealMetadataStore(connection)
+        store.replace_chunk_rows(
+            [
+                {
+                    "schema_version": "test",
+                    "original_chunk_id": "telegram-chunk",
+                    "chunk_id": "telegram-chunk",
+                    "chunk_strategy": "contextual_512_50",
+                    "document_ref": "dialog:289227226",
+                    "ref": "telegram:dialog:289227226",
+                    "text": "hello",
+                    "heading_hierarchy": [],
+                    "level": 0,
+                    "file_paths": [],
+                    "file_bindings": [],
+                    "source_unit_refs": ["dialog:289227226"],
+                    "metadata": {},
+                }
+            ]
+        )
+
+        provenance = store.get_active_chunk_provenance_for_chunk_ids(
+            "contextual_512_50",
+            ["telegram-chunk"],
+        )
+
+    assert provenance["telegram-chunk"].ref == "telegram:dialog:289227226"
+    assert provenance["telegram-chunk"].source_unit_refs == ["dialog:289227226"]

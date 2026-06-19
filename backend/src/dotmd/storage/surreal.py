@@ -346,11 +346,14 @@ class SurrealMetadataStore:
         ref = stored.get("ref")
         document_ref = stored.get("document_ref")
         if isinstance(ref, str) and isinstance(document_ref, str):
+            source_unit_refs = list(stored.get("source_unit_refs", []))
+            if not source_unit_refs and ref.startswith("telegram:"):
+                source_unit_refs = [document_ref]
             provenance = ChunkProvenance(
                 namespace=ref.split(":", 1)[0],
                 document_ref=document_ref,
                 ref=ref,
-                source_unit_refs=list(stored.get("source_unit_refs", [])),
+                source_unit_refs=source_unit_refs,
                 chunk_strategy="contextual_512_50",
                 parser_name="markdown",
             )
@@ -371,6 +374,24 @@ class SurrealMetadataStore:
             if chunk is not None:
                 result.append(chunk)
         return result
+
+    def get_chunk_provenance_for_chunk_ids(
+        self,
+        _strategy: str,
+        chunk_ids: list[str],
+    ) -> dict[str, ChunkProvenance]:
+        result: dict[str, ChunkProvenance] = {}
+        for chunk in self.get_chunks(chunk_ids):
+            if chunk.provenance is not None:
+                result[chunk.chunk_id] = chunk.provenance
+        return result
+
+    def get_active_chunk_provenance_for_chunk_ids(
+        self,
+        strategy: str,
+        chunk_ids: list[str],
+    ) -> dict[str, ChunkProvenance]:
+        return self.get_chunk_provenance_for_chunk_ids(strategy, chunk_ids)
 
     def get_all_chunks(self) -> list[Chunk]:
         result: list[Chunk] = []
