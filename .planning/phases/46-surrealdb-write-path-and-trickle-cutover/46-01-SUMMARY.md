@@ -54,6 +54,17 @@ focused direct-write and service-level visibility smokes on the Surreal sink:
   `93.7s`, and Falkor graph enrichment timed out before results returned.
   Phase 46 therefore proceeds with rerank off / no-rerank cutover smoke, while
   rerank-on optimization remains follow-up work rather than a blocker.
+- commit `fb15e14` fixes the Surreal FTS adapter shape: the first one-query
+  attempt (`c22f6de`) collapsed title/text predicates into one `OR` query and
+  timed out live against standalone SurrealDB, so the final adapter uses one
+  `query_raw()` HTTP roundtrip containing two independent indexed SELECTs and
+  fuses the title/text scores in Python.
+- commit `a098ae9` fixes graph enrichment query shape by de-duplicating and
+  capping seed chunk IDs and using one batched Falkor query when available
+  instead of issuing an unbounded per-seed loop.
+- live Surreal child-process keyword smoke after `fb15e14` passed in `2.139s`
+  against database `phase43_refresh_20260618g` and returned the expected
+  SurrealDB document without requiring a production container restart.
 - Gmail federated search still logs OAuth 400 in both old-stack and Surreal
   child-process search; treat that as a separate federated-source issue, not a
   SurrealDB cutover blocker unless Gmail is made part of the acceptance scope.
@@ -89,6 +100,9 @@ Commits:
 - `c9fa512` `fix(46): fence purge application source in surreal mode`
 - `5542938` `fix(46): fence legacy drop paths in surreal mode`
 - `231f531` `fix(46): route trickle orphan handling through tombstones`
+- `c22f6de` `Collapse Surreal FTS to one query`
+- `a098ae9` `Bound Falkor graph enrichment`
+- `fb15e14` `Fix Surreal FTS query_raw fusion`
 
 Verification run on 2026-06-19:
 
@@ -100,6 +114,8 @@ UV_LINK_MODE=hardlink uv run pytest tests/ingestion/test_application_source_inge
 UV_LINK_MODE=hardlink uv run pytest tests/ingestion/test_application_source_ingestion.py tests/ingestion/test_surreal_direct_sink.py tests/ingestion/test_surreal_delta_sync.py tests/ingestion/test_surreal_delta_sync_live.py tests/ingestion/test_bulk_fusion_pairing.py tests/ingestion/test_metadata_only_reindex.py tests/ingestion/test_pipeline_purge.py tests/ingestion/test_pipeline_orphan_sweep.py tests/search/test_surreal_direct_visibility.py tests/search/test_surreal_native_fts.py tests/api/test_service_reindex_surreal.py -q
 UV_LINK_MODE=hardlink uv run pytest tests/ingestion/test_application_source_ingestion.py tests/ingestion/test_surreal_direct_sink.py tests/ingestion/test_surreal_delta_sync.py tests/ingestion/test_surreal_delta_sync_live.py tests/ingestion/test_bulk_fusion_pairing.py tests/ingestion/test_metadata_only_reindex.py tests/ingestion/test_pipeline_purge.py tests/ingestion/test_pipeline_orphan_sweep.py tests/ingestion/test_pipeline_surreal_guards.py tests/search/test_surreal_direct_visibility.py tests/search/test_surreal_native_fts.py tests/api/test_service_reindex_surreal.py -q
 UV_LINK_MODE=hardlink uv run ruff check src/dotmd/ingestion/pipeline.py src/dotmd/api/service.py tests/ingestion/test_metadata_only_reindex.py tests/api/test_service_reindex_surreal.py tests/search/test_surreal_direct_visibility.py tests/search/test_surreal_native_fts.py
+UV_LINK_MODE=hardlink uv run pytest tests/ingestion/test_application_source_ingestion.py tests/ingestion/test_surreal_direct_sink.py tests/ingestion/test_surreal_delta_sync.py tests/ingestion/test_surreal_delta_sync_live.py tests/ingestion/test_bulk_fusion_pairing.py tests/ingestion/test_metadata_only_reindex.py tests/ingestion/test_pipeline_purge.py tests/ingestion/test_pipeline_orphan_sweep.py tests/ingestion/test_pipeline_surreal_guards.py tests/search/test_surreal_fts.py tests/search/test_surreal_native_fts.py tests/search/test_surreal_direct_visibility.py tests/search/test_surreal_retrieval_parity.py tests/search/test_surreal_native_vector.py tests/search/test_surreal_native_graph.py tests/test_graph_search.py tests/storage/test_falkordb_graph.py tests/api/test_service_reindex_surreal.py -q
+UV_LINK_MODE=hardlink uv run ruff check src/dotmd/search/surreal_fts.py src/dotmd/search/graph_search.py src/dotmd/storage/falkordb_graph.py tests/search/test_surreal_fts.py tests/search/test_surreal_native_fts.py tests/search/test_surreal_direct_visibility.py tests/search/test_surreal_retrieval_parity.py tests/test_graph_search.py tests/storage/test_falkordb_graph.py
 ```
 
 Result:
@@ -107,6 +123,8 @@ Result:
 - Earlier delta-sync smoke: `21 passed`, `74 passed in 1.99s`, `All checks passed!`
 - Orchestrator validation: `85 passed in 2.30s`, `All checks passed!`
 - Expanded orchestrator validation: `94 passed, 1 warning in 3.28s`.
+- Surreal FTS + graph enrichment regression gate:
+  `141 passed, 1 warning in 3.73s`.
 - Ruff over changed code/tests: `All checks passed!`
 
 The live smoke used real temporary `surrealkv://` storage, applied the dotMD

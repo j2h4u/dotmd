@@ -17,6 +17,11 @@ remaining action points only. It does not claim production cutover is complete.
 - `surrealdb/surrealdb:v3.1.4` is running.
 - Phase 43 verify-only passed.
 - Rerank-off is the accepted cutover path; rerank-on is follow-up work.
+- Surreal FTS child-process smoke has passed without restarting production:
+  `2.139s` against `phase43_refresh_20260618g`.
+- Old-stack hybrid search is not a clean baseline right now: TEI CPU encode
+  logged `93.7s`, Gmail OAuth refresh returns 400, and Falkor graph enrichment
+  needed bounding/batching fixes.
 
 ## Rollback bundle before restart
 
@@ -76,10 +81,12 @@ Run these checks in order:
 - Gmail federated OAuth 400 is a separate issue unless Gmail is included in the
   acceptance scope.
 - Rerank-on is follow-up work, not a cutover blocker for Phase 46.
+- Old-stack TEI/Falkor latency must not be treated as proof that Surreal is
+  slow; compare no-rerank/no-expand cutover smoke and then handle rerank/TEI as
+  a separate optimization track.
 
 ## After successful soak
 
 - Phase 47 may physically remove SQLite, sqlite-vec, FTS5, FalkorDB, LadybugDB,
   and related code/config/data.
 - Before Phase 47, do not delete rollback data.
-
