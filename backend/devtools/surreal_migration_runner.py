@@ -51,7 +51,7 @@ class SurrealMigrationRunnerConfig:
     feedback_export_json: Path
     target_url: str
     target_namespace: str = "dotmd"
-    target_database: str = "phase41_migration"
+    target_database: str = "production"
     gate_report: Path | None = None
     overwrite_policy: str = "refuse"
     verification_depth: str = "cheap"
@@ -834,7 +834,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-capture-manifest-json", type=Path, default=None)
     parser.add_argument("--target-url", default="")
     parser.add_argument("--target-namespace", default="dotmd")
-    parser.add_argument("--target-database", default="phase41_migration")
+    parser.add_argument("--target-database", default="production")
     parser.add_argument("--graph-export-json", required=True, type=Path)
     parser.add_argument("--feedback-export-json", required=True, type=Path)
     parser.add_argument("--gate-report", type=Path, default=None)

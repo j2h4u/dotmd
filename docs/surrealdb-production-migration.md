@@ -7,7 +7,7 @@ execution, production cutover, runtime fallback, or legacy deletion.
 ## Scope
 
 This runbook is for operators and developers preparing and reviewing a
-production-grade migration rehearsal.
+production-grade migration rehearsal or clean production refresh.
 
 - Old SQLite/sqlite-vec/FTS5, FalkorDB, and feedback-provider outputs are read-only migration sources and evidence only.
 - Stored embeddings are reused from sqlite-vec payloads; default TEI reembedding, rechunking, GLiNER re-extraction, and indexing-pipeline recomputation are forbidden.
@@ -68,7 +68,7 @@ uv run python devtools/surreal_migration_runner.py \
   --feedback-export-json /path/to/feedback-export.json \
   --target-url surrealkv:///path/to/phase41-target.db \
   --target-namespace dotmd \
-  --target-database phase41_migration \
+  --target-database production \
   --gate-report /path/to/38-05-EMBEDDED-SAFETY-GATE.md \
   --overwrite-policy refuse \
   --verification-depth deep \
@@ -105,6 +105,9 @@ Supported flags:
 
 ## Safety Rules
 
+- Permanent deployments use a clean database name such as `production`.
+  Phase, rehearsal, refresh, or date-stamped database names are temporary
+  evidence targets only and must not become the runtime contract.
 - `apply` fails closed without explicit source inputs, target inputs, and required gate inputs.
 - `embedded-local` apply requires gate evidence before any write is attempted.
 - Populated targets are blocked by default.
@@ -125,6 +128,28 @@ The source-capture manifest should preserve:
 
 These artifacts define the migration evidence boundary. Do not point the runner
 at live mutable production stores as if they were snapshots.
+
+## Clean Production Refresh
+
+SurrealDB does not provide a safe logical database rename primitive for this
+deployment shape. Do not use a large `surreal export`/`surreal import` dump as
+the primary way to rename a production database; that path is slow, opaque, and
+can leave a partially imported target.
+
+To move from a temporary migration database to the permanent runtime database,
+capture explicit source artifacts and run this migration runner directly with:
+
+```bash
+--target-mode remote-service
+--target-namespace dotmd
+--target-database production
+--overwrite-policy refuse
+--progress-json /path/to/production-migration-progress.json
+--resume-from-progress
+```
+
+Only switch `DOTMD_SURREAL_RETRIEVAL_DATABASE=production` after the runner
+finishes, verification passes, and smoke checks confirm the target.
 
 ## Evidence Report Fields
 

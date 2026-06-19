@@ -17,8 +17,7 @@ cutover.
 - `surrealdb/surrealdb:v3.1.4` is running.
 - Phase 43 verify-only passed.
 - Rerank-off is the accepted cutover path; rerank-on is follow-up work.
-- Surreal FTS child-process smoke has passed without restarting production:
-  `2.139s` against `phase43_refresh_20260618g`.
+- Surreal FTS child-process smoke has passed without restarting production.
 - Old-stack hybrid search is not a clean baseline right now: TEI CPU encode
   logged `93.7s`, Gmail OAuth refresh returns 400, and Falkor graph enrichment
   needed bounding/batching fixes.
@@ -48,7 +47,7 @@ Apply these `dotmd` environment changes for the cutover restart:
 - `DOTMD_SEARCH_BACKEND=surreal`
 - `DOTMD_SURREAL_RETRIEVAL_URL=http://surrealdb:8000`
 - namespace: `dotmd`
-- database: `phase43_refresh_20260618g` unless a fresher target is explicitly selected
+- database: `production`
 - username/password from `/opt/docker/surrealdb/.env`
 - embedding dimension: `1024`
 - `hnsw_ef=40`
@@ -78,12 +77,12 @@ Run these checks in order:
 - Rollback/config bundle:
   `/srv/dotmd-cutover-backups/20260619T232441+0500`
 - DotMD env switch: `DOTMD_SEARCH_BACKEND=surreal`,
-  database `phase43_refresh_20260618g`.
+  initially pointed at the Phase 43 refresh database.
 - Restart boundary: one `docker compose up -d --no-deps --force-recreate dotmd`.
 - Health after restart:
   `docker exec dotmd curl -fsS http://127.0.0.1:8080/health` -> `{"status":"ok"}`.
 - Runtime settings inside container:
-  `search_backend=surreal`, database `phase43_refresh_20260618g`.
+  `search_backend=surreal`.
 - CLI keyword smoke passed:
   `docker exec dotmd dotmd search --mode keyword --no-rerank --no-expand -n 3 'SurrealDB вектора graph'`.
 - MCP stdio smoke passed:
@@ -95,6 +94,10 @@ Run these checks in order:
 
 ## Observed follow-up risks
 
+- The first standalone cutover pointed at a Phase 43 refresh database name.
+  That name must not be treated as the permanent production database. The
+  clean target database name is `production`; populate it through a clean
+  rebuild/refresh path before deleting the Phase 43 source database.
 - `dotmd status --verbose` is a poor cutover smoke: it took `47.651s` and
   mostly exercises filesystem discovery/status rather than proving Surreal
   search.

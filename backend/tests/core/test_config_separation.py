@@ -97,7 +97,7 @@ def test_runtime_validation_accepts_surreal_search_backend() -> None:
     settings = _runtime_settings(
         search_backend="surreal",
         surreal_retrieval_url="http://surrealdb:8000",
-        surreal_retrieval_database="phase43_refresh_20260618g",
+        surreal_retrieval_database="production",
         surreal_retrieval_embedding_dimension=1024,
     )
 
@@ -124,7 +124,7 @@ def test_runtime_validation_rejects_invalid_surreal_search_backend_auth_or_bound
     settings = _runtime_settings(
         search_backend="surreal",
         surreal_retrieval_url="http://surrealdb:8000",
-        surreal_retrieval_database="phase43_refresh_20260618g",
+        surreal_retrieval_database="production",
         surreal_retrieval_embedding_dimension=1024,
         **overrides,
     )

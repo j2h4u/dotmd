@@ -1216,7 +1216,7 @@ def build_surreal_migration_manifest(
     target_url: str,
     target_mode: SurrealTargetMode,
     target_namespace: str = "dotmd",
-    target_database: str = "phase41_migration",
+    target_database: str = "production",
     skew_policy: str = "bounded_skew_accepted",
 ) -> SurrealMigrationManifest:
     sqlite_stats = load_sqlite_stats_for_surreal(Path(sqlite_snapshot_path))
@@ -2152,7 +2152,7 @@ def verify_surreal_migration_target(
     target_url: str,
     target_mode: SurrealTargetMode,
     target_namespace: str = "dotmd",
-    target_database: str = "phase41_migration",
+    target_database: str = "production",
     verification_depth: SurrealVerificationDepth = SurrealVerificationDepth.CHEAP,
     overwrite_policy: SurrealOverwritePolicy = SurrealOverwritePolicy.REFUSE,
 ) -> SurrealMigrationReport:
@@ -2282,7 +2282,7 @@ def run_surreal_migration(
     target_url: str,
     target_mode: SurrealTargetMode,
     target_namespace: str = "dotmd",
-    target_database: str = "phase41_migration",
+    target_database: str = "production",
     overwrite_policy: SurrealOverwritePolicy = SurrealOverwritePolicy.REFUSE,
     inspect_target: bool = False,
     gate_report_path: Path | None = None,

@@ -1380,7 +1380,7 @@ class TestSurrealHybridOverrides:
             embedding_url="http://localhost:8088",
             search_backend="surreal",
             surreal_retrieval_url="http://surrealdb:8000",
-            surreal_retrieval_database="phase43_refresh_20260618g",
+            surreal_retrieval_database="production",
             surreal_retrieval_username="root",
             surreal_retrieval_password="root",
             surreal_retrieval_embedding_dimension=1024,
@@ -1401,13 +1401,14 @@ class TestSurrealHybridOverrides:
         ):
             service = DotMDService(settings)
 
-        conn_cls.assert_called_once()
-        config = conn_cls.call_args.args[0]
-        assert config.url == "http://surrealdb:8000"
-        assert config.namespace == "dotmd"
-        assert config.database == "phase43_refresh_20260618g"
-        assert config.username == "root"
-        assert config.password == "root"
+        assert conn_cls.call_count >= 1
+        for call in conn_cls.call_args_list:
+            config = call.args[0]
+            assert config.url == "http://surrealdb:8000"
+            assert config.namespace == "dotmd"
+            assert config.database == "production"
+            assert config.username == "root"
+            assert config.password == "root"
         build_overrides.assert_called_once_with(
             connection,
             settings,

@@ -85,7 +85,7 @@ def test_build_manifest_records_source_capture_schema_counts_and_no_recompute_de
     assert manifest.recompute_forbidden is True
     assert manifest.target_url.endswith("manifest.db")
     assert manifest.target_namespace == "dotmd"
-    assert manifest.target_database == "phase41_migration"
+    assert manifest.target_database == "production"
     assert manifest.expected_counts["documents"] == 2
     assert manifest.expected_counts["chunks"] == 2
     assert manifest.expected_counts["chunk_file_bindings"] == 2
@@ -423,7 +423,7 @@ def test_dry_run_optional_target_inspection_records_preexisting_counts(tmp_path:
 
     inputs = _build_inputs(tmp_path)
     target_path = tmp_path / "inspected.db"
-    config = SurrealStoreConfig(url=f"surrealkv://{target_path}", database="phase41_migration")
+    config = SurrealStoreConfig(url=f"surrealkv://{target_path}", database="production")
     with SurrealConnection(config) as connection:
         define_dotmd_surreal_schema(connection)
         SurrealMetadataStore(connection).replace_documents(
@@ -474,7 +474,7 @@ def test_apply_refuses_populated_target_without_explicit_replace(
 
     inputs = _build_inputs(tmp_path)
     target_path = tmp_path / f"refuse-{target_mode.lower()}.db"
-    config = SurrealStoreConfig(url=f"surrealkv://{target_path}", database="phase41_migration")
+    config = SurrealStoreConfig(url=f"surrealkv://{target_path}", database="production")
     with SurrealConnection(config) as connection:
         define_dotmd_surreal_schema(connection)
         SurrealMetadataStore(connection).replace_documents(
@@ -530,7 +530,7 @@ def test_explicit_replace_is_the_only_destructive_path_and_records_pre_counts(
 
     inputs = _build_inputs(tmp_path)
     target_path = tmp_path / "replace.db"
-    config = SurrealStoreConfig(url=f"surrealkv://{target_path}", database="phase41_migration")
+    config = SurrealStoreConfig(url=f"surrealkv://{target_path}", database="production")
     with SurrealConnection(config) as connection:
         define_dotmd_surreal_schema(connection)
         SurrealMetadataStore(connection).replace_documents(
@@ -664,7 +664,7 @@ def test_apply_fails_closed_for_recompute_requests_schemaless_targets_and_partia
     schema_mismatch_path = tmp_path / "schemaless.db"
     config = surreal_module.SurrealStoreConfig(
         url=f"surrealkv://{schema_mismatch_path}",
-        database="phase41_migration",
+        database="production",
     )
     with surreal_module.SurrealConnection(config) as connection:
         connection.query("DEFINE TABLE documents SCHEMALESS;")

@@ -18,8 +18,7 @@ operator procedure lives here:
   SELECTs and Python-side score fusion.
 - Falkor graph enrichment is now bounded and batched for the old-stack path,
   removing the earlier unbounded per-seed query loop.
-- Live Surreal keyword child-process smoke passed in `2.139s` against
-  `phase43_refresh_20260618g`.
+- Live Surreal keyword child-process smoke passed in `2.139s`.
 - Phase 43 verify-only passed.
 - Devtools gate passed.
 - Rerank off is the accepted cutover path.
@@ -33,10 +32,10 @@ operator procedure lives here:
 - Rollback/config bundle captured at
   `/srv/dotmd-cutover-backups/20260619T232441+0500`.
 - `/opt/docker/dotmd/.env` now sets `DOTMD_SEARCH_BACKEND=surreal` and points
-  retrieval at SurrealDB database `phase43_refresh_20260618g`.
+  retrieval at the standalone SurrealDB service.
 - `dotmd` was recreated once and is healthy.
 - Runtime settings inside the container report
-  `search_backend=surreal`, database `phase43_refresh_20260618g`.
+  `search_backend=surreal`.
 - CLI keyword smoke passed after restart:
   `dotmd search --mode keyword --no-rerank --no-expand -n 3 'SurrealDB вектора graph'`.
 - MCP stdio smoke passed against `docker exec -i dotmd dotmd mcp`; the tool
@@ -50,6 +49,9 @@ operator procedure lives here:
 
 ## Remaining soak gates
 
+- Replace the temporary Phase 43 refresh database name with clean database
+  `production`; do not make phase/rehearsal names part of the permanent
+  deployment contract.
 - Watch production search/trickle behavior during soak.
 - Do not run Phase 47 deletion until soak is accepted.
 - Keep rollback data until Phase 47 is explicitly started.

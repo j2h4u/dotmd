@@ -362,7 +362,7 @@ def test_classify_surreal_migration_report_blocks_false_success_paths() -> None:
         overwrite_policy=SurrealOverwritePolicy.REFUSE,
         target_url="surrealkv:///tmp/phase41.db",
         target_namespace="dotmd",
-        target_database="phase41_migration",
+        target_database="production",
         source_capture_manifest=None,
         expected_counts={"documents": 2},
         actual_counts={"documents": 2},
@@ -451,7 +451,7 @@ def test_write_surreal_migration_evidence_reports_preserves_non_ascii_and_redact
         target={
             "url": "surrealkv:///tmp/phase41.db",
             "namespace": "dotmd",
-            "database": "phase41_migration",
+            "database": "production",
         },
         source_capture_manifest={
             "sqlite_snapshot": {"path": "/mnt/копия/index.db", "counts": {"documents": 2}},

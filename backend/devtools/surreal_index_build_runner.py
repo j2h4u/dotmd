@@ -577,7 +577,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target-url", required=False)
     parser.add_argument("--target-namespace", default="dotmd")
-    parser.add_argument("--target-database", default="phase41_migration")
+    parser.add_argument("--target-database", default="production")
     parser.add_argument("--output-dir", type=Path, required=False)
     parser.add_argument(
         "--index-mode",

@@ -759,7 +759,7 @@ def test_run_surreal_migration_apply_preserves_ids_vectors_feedback_and_graph_pr
     config = SurrealStoreConfig(
         url=f"surrealkv://{target_path}",
         namespace="dotmd",
-        database="phase41_migration",
+        database="production",
     )
     with SurrealConnection(config) as connection:
         stored_chunk = connection.select(codec.encode("chunks", fixture_ids["chunk_id"]))
@@ -882,7 +882,7 @@ def test_run_surreal_migration_failed_apply_reports_partial_writes_without_rollb
     config = surreal_module.SurrealStoreConfig(
         url=f"surrealkv://{target_path}",
         namespace="dotmd",
-        database="phase41_migration",
+        database="production",
     )
     with surreal_module.SurrealConnection(config) as connection:
         documents = connection.scan_table("documents")

@@ -63,7 +63,7 @@ focused direct-write and service-level visibility smokes on the Surreal sink:
   capping seed chunk IDs and using one batched Falkor query when available
   instead of issuing an unbounded per-seed loop.
 - live Surreal child-process keyword smoke after `fb15e14` passed in `2.139s`
-  against database `phase43_refresh_20260618g` and returned the expected
+  and returned the expected
   SurrealDB document without requiring a production container restart.
 - normal cutover smoke stays local-only by default; federated search is an
   explicit opt-in via `include_federated`, `--federated`, the API `federated`
@@ -86,8 +86,7 @@ focused direct-write and service-level visibility smokes on the Surreal sink:
 - production cutover was executed on 2026-06-19:
   rollback bundle `/srv/dotmd-cutover-backups/20260619T232441+0500`,
   `/opt/docker/dotmd/.env` switched to `DOTMD_SEARCH_BACKEND=surreal`,
-  `dotmd` recreated once, and runtime settings now report
-  `search_backend=surreal` with database `phase43_refresh_20260618g`.
+  and `dotmd` recreated once.
 - post-cutover smoke passed:
   internal `/health`, CLI keyword search, MCP stdio smoke, MCP
   `search -> drill -> read`, and controlled trickle edit/delete for
@@ -191,6 +190,8 @@ Phase 46 cutover is executed and soak is in progress. Remaining work:
   faster operational smoke checks;
 - investigate the slow extraction/graph portion of one-file trickle updates;
 - keep rollback data until Phase 47 starts;
+- replace the temporary Phase 43 refresh database name with clean database
+  `production` before treating the cutover as final;
 - Phase 47 physically removes SQLite/sqlite-vec/FTS5/FalkorDB/LadybugDB
   code/config/data only after soak is accepted.
 
