@@ -26,6 +26,7 @@ def _surreal_writer_allowed_fields() -> dict[str, frozenset[str]]:
     allowed_fields["checkpoints"] = allowed_fields["checkpoints"] | frozenset(
         {"last_success_at", "last_error"}
     )
+    allowed_fields["relations"] = allowed_fields["relations"] | frozenset({"in", "out"})
     return allowed_fields
 
 
@@ -619,6 +620,53 @@ class SurrealDeltaStoreWriter:
             return str(row["original_feedback_id"])
         return str(change.ref)
 
+    def _graph_file_raw_identifier(self, change: SurrealDeltaChange) -> str:
+        row = change.row
+        if row.get("original_id") is not None:
+            return str(row["original_id"])
+        if row.get("path") is not None:
+            return str(row["path"])
+        return str(change.ref)
+
+    def _graph_section_raw_identifier(self, change: SurrealDeltaChange) -> str:
+        row = change.row
+        if row.get("original_id") is not None:
+            return str(row["original_id"])
+        if row.get("chunk_id") is not None:
+            return str(row["chunk_id"])
+        return str(change.ref)
+
+    def _graph_entity_raw_identifier(self, change: SurrealDeltaChange) -> str:
+        row = change.row
+        if row.get("original_id") is not None:
+            return str(row["original_id"])
+        if row.get("name") is not None:
+            return str(row["name"])
+        return str(change.ref)
+
+    def _graph_tag_raw_identifier(self, change: SurrealDeltaChange) -> str:
+        row = change.row
+        if row.get("original_id") is not None:
+            return str(row["original_id"])
+        if row.get("name") is not None:
+            return str(row["name"])
+        return str(change.ref)
+
+    def _graph_relation_raw_identifier(self, change: SurrealDeltaChange) -> str:
+        row = change.row
+        if row.get("relation_id") is not None:
+            return str(row["relation_id"])
+        if all(part is not None for part in (row.get("source_id"), row.get("target_id"))):
+            rel_type = row.get("rel_type") or row.get("relation_type")
+            if rel_type is not None:
+                return self._stable_composite_ref(row["source_id"], row["target_id"], rel_type)
+        return str(change.ref)
+
+    def _graph_endpoint_record_id(self, table: Any, raw_identifier: Any) -> Any | None:
+        if table in (None, "") or raw_identifier in (None, ""):
+            return None
+        return self._record_id(str(table), str(raw_identifier))
+
     def _embedding_row_for_chunk(self, chunk_id: str) -> dict[str, Any] | None:
         scan_table = getattr(self.connection, "scan_table", None)
         if scan_table is None:
@@ -670,6 +718,38 @@ class SurrealDeltaStoreWriter:
                     prepared.setdefault("chunk_id", chunk_id_text)
                     prepared.setdefault("chunk_strategy", source_embedding.get("chunk_strategy"))
                     prepared.setdefault("embedding_model", source_embedding.get("embedding_model"))
+        if table == "files":
+            prepared.setdefault("original_id", raw_identifier)
+            prepared.setdefault("path", prepared.get("path") or prepared.get("file_path") or raw_identifier)
+            prepared.setdefault("file_path", prepared.get("file_path") or prepared.get("path"))
+        if table == "sections":
+            prepared.setdefault("original_id", raw_identifier)
+            prepared.setdefault("chunk_id", prepared.get("chunk_id") or raw_identifier)
+        if table == "entities":
+            prepared.setdefault("original_id", raw_identifier)
+            prepared.setdefault("name", prepared.get("name") or raw_identifier)
+            prepared.setdefault("original_entity_name", prepared.get("original_entity_name") or prepared.get("name"))
+        if table == "tags":
+            prepared.setdefault("original_id", raw_identifier)
+            prepared.setdefault("name", prepared.get("name") or raw_identifier)
+        if table == "relations":
+            prepared.setdefault("relation_id", raw_identifier)
+            rel_type = prepared.get("rel_type") or prepared.get("relation_type")
+            if rel_type is not None:
+                prepared.setdefault("rel_type", rel_type)
+                prepared.setdefault("relation_type", rel_type)
+            prepared.setdefault("weight", 1.0)
+            prepared.setdefault("properties", {})
+            source_table = prepared.get("source_table")
+            target_table = prepared.get("target_table")
+            source_id = prepared.get("source_id")
+            target_id = prepared.get("target_id")
+            source_record_id = self._graph_endpoint_record_id(source_table, source_id)
+            target_record_id = self._graph_endpoint_record_id(target_table, target_id)
+            if source_record_id is not None:
+                prepared.setdefault("out", source_record_id)
+            if target_record_id is not None:
+                prepared.setdefault("in", target_record_id)
 
         allowed_fields = _SURREAL_WRITER_ALLOWED_FIELDS.get(table)
         if allowed_fields is None:
@@ -692,6 +772,11 @@ class SurrealDeltaStoreWriter:
                 row=dict(previous_row),
             )
             selector_map: dict[str, Callable[[SurrealDeltaChange], str]] = {
+                "files": self._graph_file_raw_identifier,
+                "sections": self._graph_section_raw_identifier,
+                "entities": self._graph_entity_raw_identifier,
+                "tags": self._graph_tag_raw_identifier,
+                "relations": self._graph_relation_raw_identifier,
                 "source_units": self._source_unit_raw_identifier,
                 "chunks": self._chunk_raw_identifier,
                 "chunk_file_bindings": self._chunk_file_binding_raw_identifier,
@@ -850,9 +935,50 @@ class SurrealDeltaStoreWriter:
         return applied
 
     def write_graph(self, rows: Sequence[SurrealDeltaChange]) -> int:
-        if rows:
-            raise NotImplementedError("graph rows are deferred in this phase 46 slice")
-        return 0
+        applied = 0
+        for change in rows:
+            table = self._normalize_table_name(change.table)
+            row = dict(change.row)
+
+            if table == "files":
+                raw_identifier = self._graph_file_raw_identifier(change)
+                row.setdefault("original_id", raw_identifier)
+                row.setdefault("path", row.get("path") or row.get("file_path") or raw_identifier)
+                row.setdefault("file_path", row.get("file_path") or row.get("path"))
+            elif table == "sections":
+                raw_identifier = self._graph_section_raw_identifier(change)
+                row.setdefault("original_id", raw_identifier)
+                row.setdefault("chunk_id", row.get("chunk_id") or raw_identifier)
+            elif table == "entities":
+                raw_identifier = self._graph_entity_raw_identifier(change)
+                row.setdefault("original_id", raw_identifier)
+                row.setdefault("name", row.get("name") or raw_identifier)
+                row.setdefault("original_entity_name", row.get("original_entity_name") or row["name"])
+            elif table == "tags":
+                raw_identifier = self._graph_tag_raw_identifier(change)
+                row.setdefault("original_id", raw_identifier)
+                row.setdefault("name", row.get("name") or raw_identifier)
+            elif table == "relations":
+                raw_identifier = self._graph_relation_raw_identifier(change)
+                row.setdefault("relation_id", raw_identifier)
+                rel_type = row.get("rel_type") or row.get("relation_type")
+                if rel_type is not None:
+                    row.setdefault("rel_type", rel_type)
+                    row.setdefault("relation_type", rel_type)
+                row.setdefault("weight", 1.0)
+                row.setdefault("properties", {})
+                source_record_id = self._graph_endpoint_record_id(row.get("source_table"), row.get("source_id"))
+                target_record_id = self._graph_endpoint_record_id(row.get("target_table"), row.get("target_id"))
+                if source_record_id is not None:
+                    row.setdefault("out", source_record_id)
+                if target_record_id is not None:
+                    row.setdefault("in", target_record_id)
+            else:
+                raise ValueError(f"unsupported graph table: {change.table}")
+
+            row.setdefault("metadata", {})
+            applied += self._upsert_point(table, raw_identifier, row)
+        return applied
 
     def write_feedback(self, rows: Sequence[SurrealDeltaChange]) -> int:
         applied = 0

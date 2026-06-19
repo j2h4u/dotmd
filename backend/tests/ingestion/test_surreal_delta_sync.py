@@ -996,16 +996,97 @@ def test_surreal_delta_store_writer_updates_bootstrap_rows_in_place() -> None:
     assert connection.tables["bindings"][binding_id]["active"] is True
 
 
-def test_surreal_delta_store_writer_rejects_non_deferred_graph_rows() -> None:
-    writer = SurrealDeltaStoreWriter(connection=_FakeSurrealConnection())
+def test_surreal_delta_store_writer_writes_graph_rows_and_is_idempotent() -> None:
+    connection = _FakeSurrealConnection()
+    writer = SurrealDeltaStoreWriter(connection=connection)
 
-    with pytest.raises(NotImplementedError, match="graph rows are deferred"):
-        writer.write_graph(
-            [
-                SurrealDeltaChange(
-                    ref="graph-1",
-                    table="graph_nodes",
-                    row={"node_id": "graph-1", "label": "Graph"},
-                )
-            ]
-        )
+    changes = [
+        SurrealDeltaChange(
+            ref="graph:file:1",
+            table="files",
+            row={
+                "path": "/notes/graph.md",
+                "title": "Graph note",
+                "metadata": {"kind": "file"},
+            },
+        ),
+        SurrealDeltaChange(
+            ref="graph:section:1",
+            table="sections",
+            row={
+                "chunk_id": "section-1",
+                "document_ref": "/notes/graph.md",
+                "heading": "Overview",
+                "level": 1,
+                "metadata": {"kind": "section"},
+            },
+        ),
+        SurrealDeltaChange(
+            ref="graph:entity:1",
+            table="entities",
+            row={
+                "name": "Alpha",
+                "entity_type": "Person",
+                "source": "ner",
+                "metadata": {"kind": "entity"},
+            },
+        ),
+        SurrealDeltaChange(
+            ref="graph:tag:1",
+            table="tags",
+            row={
+                "name": "tag-a",
+                "metadata": {"kind": "tag"},
+            },
+        ),
+        SurrealDeltaChange(
+            ref="graph:relation:1",
+            table="relations",
+            row={
+                "source_id": "section-1",
+                "source_table": "sections",
+                "target_id": "Alpha",
+                "target_table": "entities",
+                "relation_type": "MENTIONS",
+                "properties": {"confidence": 0.9},
+                "metadata": {"kind": "relation"},
+            },
+        ),
+    ]
+
+    applied = writer.write_graph(changes)
+
+    file_id = str(writer.codec.encode("files", "/notes/graph.md"))
+    section_id = str(writer.codec.encode("sections", "section-1"))
+    entity_id = str(writer.codec.encode("entities", "Alpha"))
+    tag_id = str(writer.codec.encode("tags", "tag-a"))
+    relation_raw_id = "section-1\x1fAlpha\x1fMENTIONS"
+    relation_id = str(writer.codec.encode("relations", relation_raw_id))
+
+    assert applied == 5
+    assert connection.tables["files"][file_id]["original_id"] == "/notes/graph.md"
+    assert connection.tables["files"][file_id]["path"] == "/notes/graph.md"
+    assert connection.tables["sections"][section_id]["original_id"] == "section-1"
+    assert connection.tables["sections"][section_id]["chunk_id"] == "section-1"
+    assert connection.tables["entities"][entity_id]["original_entity_name"] == "Alpha"
+    assert connection.tables["entities"][entity_id]["name"] == "Alpha"
+    assert connection.tables["tags"][tag_id]["original_id"] == "tag-a"
+    assert connection.tables["tags"][tag_id]["name"] == "tag-a"
+    assert connection.tables["relations"][relation_id]["relation_id"] == relation_raw_id
+    assert connection.tables["relations"][relation_id]["rel_type"] == "MENTIONS"
+    assert connection.tables["relations"][relation_id]["relation_type"] == "MENTIONS"
+    assert connection.tables["relations"][relation_id]["weight"] == 1.0
+    assert connection.tables["relations"][relation_id]["properties"] == {"confidence": 0.9}
+    assert str(connection.tables["relations"][relation_id]["out"]) == section_id
+    assert str(connection.tables["relations"][relation_id]["in"]) == entity_id
+
+    repeat = writer.write_graph(changes)
+
+    assert repeat == 0
+    assert connection.calls == [
+        ("upsert", "files", file_id),
+        ("upsert", "sections", section_id),
+        ("upsert", "entities", entity_id),
+        ("upsert", "tags", tag_id),
+        ("upsert", "relations", relation_id),
+    ]
