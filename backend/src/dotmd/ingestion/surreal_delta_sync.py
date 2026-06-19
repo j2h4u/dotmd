@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -234,6 +234,221 @@ def build_surreal_delta_manifest(
         graph=graph or SurrealDeltaSection(),
         feedback=feedback or SurrealDeltaSection(),
         created_at=created_at,
+    )
+
+
+def _stable_composite_ref(*parts: object) -> str:
+    return "\x1f".join(str(part) for part in parts)
+
+
+def _row_document_ref(row: Mapping[str, Any]) -> str | None:
+    document_ref = row.get("document_ref")
+    if document_ref is None:
+        return None
+    return str(document_ref)
+
+
+def _selected_rows_by_document_ref(
+    rows: Sequence[Mapping[str, Any]],
+    changed_document_refs: set[str],
+) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    for row in rows:
+        document_ref = _row_document_ref(row)
+        if document_ref is None or document_ref not in changed_document_refs:
+            continue
+        selected.append(dict(row))
+    return selected
+
+
+def _selected_rows_by_chunk_id(
+    rows: Sequence[Mapping[str, Any]],
+    selected_chunk_ids: set[str],
+) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    for row in rows:
+        chunk_id = row.get("chunk_id") or row.get("entity_id") or row.get("original_chunk_id")
+        if chunk_id is None or str(chunk_id) not in selected_chunk_ids:
+            continue
+        selected.append(dict(row))
+    return selected
+
+
+def build_surreal_delta_manifest_from_rows(
+    *,
+    source_selection: SurrealDeltaSourceSelection,
+    checkpoint_candidate: SurrealDeltaCheckpointCandidate,
+    sqlite_rows: Mapping[str, Sequence[Mapping[str, Any]]],
+    changed_document_refs: Sequence[str],
+    tombstoned_document_refs: Sequence[str] = (),
+    graph_deferred_reason: str = "graph sync is deferred for this slice",
+    feedback_deferred_reason: str = "feedback sync is deferred for this slice",
+    embedding_rows: Sequence[Mapping[str, Any]] = (),
+    vector_component_rows: Sequence[Mapping[str, Any]] = (),
+) -> SurrealDeltaManifest:
+    """Build a delta manifest from already transformed rows."""
+
+    changed_refs = {str(ref) for ref in changed_document_refs if str(ref)}
+    tombstoned_refs = {str(ref) for ref in tombstoned_document_refs if str(ref)}
+    live_changed_refs = changed_refs - tombstoned_refs
+
+    document_source_rows = list(sqlite_rows.get("documents", ()))
+    documents_by_ref = {
+        ref: dict(row)
+        for row in document_source_rows
+        if (ref := _row_document_ref(row)) is not None
+    }
+    selected_documents = _selected_rows_by_document_ref(document_source_rows, live_changed_refs)
+    tombstoned_documents = [
+        documents_by_ref.get(
+            ref,
+            {
+                "document_ref": ref,
+            },
+        )
+        for ref in sorted(tombstoned_refs)
+    ]
+
+    selected_chunk_rows = _selected_rows_by_document_ref(
+        list(sqlite_rows.get("chunks", ())),
+        live_changed_refs,
+    )
+    selected_chunk_ids = {
+        str(row["chunk_id"])
+        for row in selected_chunk_rows
+        if row.get("chunk_id") is not None
+    }
+
+    source_units = _selected_rows_by_document_ref(list(sqlite_rows.get("source_units", ())), live_changed_refs)
+    chunk_file_bindings = _selected_rows_by_chunk_id(
+        list(sqlite_rows.get("chunk_file_bindings", ())),
+        selected_chunk_ids,
+    )
+    provenance = _selected_rows_by_document_ref(list(sqlite_rows.get("provenance", ())), live_changed_refs)
+    resource_bindings = _selected_rows_by_document_ref(list(sqlite_rows.get("bindings", ())), live_changed_refs)
+    fingerprints = _selected_rows_by_document_ref(list(sqlite_rows.get("fingerprints", ())), live_changed_refs)
+
+    embedding_source_rows = list(embedding_rows) if embedding_rows else list(sqlite_rows.get("embeddings", ()))
+    vector_component_source_rows = (
+        list(vector_component_rows)
+        if vector_component_rows
+        else list(sqlite_rows.get("vector_components", ()))
+    )
+    embeddings = _selected_rows_by_chunk_id(embedding_source_rows, selected_chunk_ids)
+    vector_components = _selected_rows_by_chunk_id(vector_component_source_rows, selected_chunk_ids)
+
+    def _document_change(row: Mapping[str, Any]) -> SurrealDeltaChange:
+        ref = str(row.get("ref") or f"{row['namespace']}:{row['document_ref']}")
+        return SurrealDeltaChange(ref=ref, table="source_documents", row=dict(row))
+
+    def _document_tombstone(row: Mapping[str, Any]) -> SurrealDeltaChange:
+        ref = str(row.get("ref") or row["document_ref"])
+        previous_row = dict(row)
+        return SurrealDeltaChange(
+            ref=ref,
+            table="source_documents",
+            change_type=SurrealDeltaChangeType.TOMBSTONE,
+            tombstone=SurrealDeltaTombstone(
+                ref=ref,
+                table="source_documents",
+                previous_row=previous_row,
+            ),
+        )
+
+    def _source_unit_change(row: Mapping[str, Any]) -> SurrealDeltaChange:
+        ref = str(
+            row.get("ref")
+            or _stable_composite_ref(row["namespace"], row["document_ref"], row["unit_ref"])
+        )
+        return SurrealDeltaChange(ref=ref, table="source_units", row=dict(row))
+
+    def _chunk_change(row: Mapping[str, Any]) -> SurrealDeltaChange:
+        ref = str(row.get("ref") or row.get("chunk_id") or row.get("original_chunk_id"))
+        return SurrealDeltaChange(ref=ref, table="chunks", row=dict(row))
+
+    def _chunk_file_binding_change(row: Mapping[str, Any]) -> SurrealDeltaChange:
+        ref = str(
+            row.get("binding_id")
+            or _stable_composite_ref(row["chunk_id"], row["file_path"], row["chunk_index"])
+        )
+        return SurrealDeltaChange(ref=ref, table="chunk_file_bindings", row=dict(row))
+
+    def _provenance_change(row: Mapping[str, Any]) -> SurrealDeltaChange:
+        ref = str(
+            row.get("provenance_id")
+            or _stable_composite_ref(row["chunk_id"], row["namespace"], row["document_ref"])
+        )
+        return SurrealDeltaChange(ref=ref, table="provenance", row=dict(row))
+
+    def _resource_binding_change(row: Mapping[str, Any]) -> SurrealDeltaChange:
+        ref = str(row.get("ref") or f"{row['namespace']}:{row['document_ref']}")
+        return SurrealDeltaChange(ref=ref, table="bindings", row=dict(row))
+
+    def _fingerprint_change(row: Mapping[str, Any]) -> SurrealDeltaChange:
+        ref = str(row.get("fingerprint_id") or row.get("ref"))
+        return SurrealDeltaChange(ref=ref, table="fingerprints", row=dict(row))
+
+    def _embedding_change(row: Mapping[str, Any]) -> SurrealDeltaChange:
+        ref = str(
+            _stable_composite_ref(
+                row.get("chunk_strategy", ""),
+                row.get("embedding_model", ""),
+                row["chunk_id"],
+            )
+        )
+        return SurrealDeltaChange(ref=ref, table="embeddings", row=dict(row))
+
+    def _vector_component_change(row: Mapping[str, Any]) -> SurrealDeltaChange:
+        owner = row.get("chunk_id") or row.get("entity_id")
+        ref = str(
+            _stable_composite_ref(
+                row.get("chunk_strategy", ""),
+                row.get("embedding_model", ""),
+                owner,
+                row["component"],
+            )
+        )
+        return SurrealDeltaChange(ref=ref, table="vector_components", row=dict(row))
+
+    documents_section = SurrealDeltaSection(
+        rows=_sorted_changes(
+            [
+                *map(_document_change, selected_documents),
+                *map(_document_tombstone, tombstoned_documents),
+            ]
+        )
+    )
+    source_units_section = SurrealDeltaSection(
+        rows=_sorted_changes(list(map(_source_unit_change, source_units)))
+    )
+    chunks_section = SurrealDeltaSection(rows=_sorted_changes(list(map(_chunk_change, selected_chunk_rows))))
+    chunk_file_bindings_section = SurrealDeltaSection(
+        rows=_sorted_changes(list(map(_chunk_file_binding_change, chunk_file_bindings)))
+    )
+    provenance_section = SurrealDeltaSection(rows=_sorted_changes(list(map(_provenance_change, provenance))))
+    resource_bindings_section = SurrealDeltaSection(
+        rows=_sorted_changes(list(map(_resource_binding_change, resource_bindings)))
+    )
+    fingerprints_section = SurrealDeltaSection(rows=_sorted_changes(list(map(_fingerprint_change, fingerprints))))
+    embeddings_section = SurrealDeltaSection(rows=_sorted_changes(list(map(_embedding_change, embeddings))))
+    vector_components_section = SurrealDeltaSection(
+        rows=_sorted_changes(list(map(_vector_component_change, vector_components)))
+    )
+
+    return build_surreal_delta_manifest(
+        source_selection=source_selection,
+        checkpoint_candidate=checkpoint_candidate,
+        documents=documents_section,
+        source_units=source_units_section,
+        chunks=chunks_section,
+        chunk_file_bindings=chunk_file_bindings_section,
+        provenance=provenance_section,
+        resource_bindings=resource_bindings_section,
+        fingerprints=fingerprints_section,
+        embeddings=embeddings_section,
+        vector_components=vector_components_section,
+        graph=SurrealDeltaSection(deferred=True, deferred_reason=graph_deferred_reason),
+        feedback=SurrealDeltaSection(deferred=True, deferred_reason=feedback_deferred_reason),
     )
 
 

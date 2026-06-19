@@ -17,6 +17,7 @@ from dotmd.ingestion.surreal_delta_sync import (
     SurrealDeltaSyncState,
     SurrealDeltaTombstone,
     build_surreal_delta_manifest,
+    build_surreal_delta_manifest_from_rows,
     run_surreal_delta_sync,
 )
 
@@ -34,6 +35,258 @@ def _base_manifest_kwargs() -> dict[str, object]:
             watermark="watermark:42",
         ),
     }
+
+
+def _row_manifest_fixture() -> dict[str, list[dict[str, object]]]:
+    changed_ref = "/notes/changed.md"
+    other_ref = "/notes/other.md"
+    deleted_ref = "/notes/deleted.md"
+    chunk_strategy = "contextual_512_50"
+    embedding_model = "multilingual_e5_large"
+    return {
+        "documents": [
+            {
+                "namespace": "filesystem",
+                "document_ref": changed_ref,
+                "ref": f"filesystem:{changed_ref}",
+                "title": "Changed note",
+                "media_type": "text/markdown",
+                "metadata": {},
+            },
+            {
+                "namespace": "filesystem",
+                "document_ref": deleted_ref,
+                "ref": f"filesystem:{deleted_ref}",
+                "title": "Deleted note",
+                "media_type": "text/markdown",
+                "metadata": {},
+            },
+            {
+                "namespace": "filesystem",
+                "document_ref": other_ref,
+                "ref": f"filesystem:{other_ref}",
+                "title": "Other note",
+                "media_type": "text/markdown",
+                "metadata": {},
+            },
+        ],
+        "source_units": [
+            {
+                "namespace": "filesystem",
+                "document_ref": changed_ref,
+                "unit_ref": "unit-1",
+                "fingerprint": "unit-fp-changed",
+                "metadata": {},
+            },
+            {
+                "namespace": "filesystem",
+                "document_ref": other_ref,
+                "unit_ref": "unit-9",
+                "fingerprint": "unit-fp-other",
+                "metadata": {},
+            },
+        ],
+        "chunks": [
+            {
+                "chunk_id": "chunk-changed",
+                "chunk_strategy": chunk_strategy,
+                "document_ref": changed_ref,
+                "ref": f"filesystem:{changed_ref}#chunk-1",
+                "heading_hierarchy": ["Changed note"],
+                "level": 1,
+                "title": "Changed note",
+                "tags_text": "",
+                "text": "Changed chunk",
+                "metadata": {},
+            },
+            {
+                "chunk_id": "chunk-other",
+                "chunk_strategy": chunk_strategy,
+                "document_ref": other_ref,
+                "ref": f"filesystem:{other_ref}#chunk-1",
+                "heading_hierarchy": ["Other note"],
+                "level": 1,
+                "title": "Other note",
+                "tags_text": "",
+                "text": "Other chunk",
+                "metadata": {},
+            },
+        ],
+        "chunk_file_bindings": [
+            {
+                "binding_id": "chunk-changed\x1f/notes/changed.md\x1f0",
+                "chunk_id": "chunk-changed",
+                "file_path": changed_ref,
+                "chunk_index": 0,
+                "metadata": {},
+            },
+            {
+                "binding_id": "chunk-other\x1f/notes/other.md\x1f0",
+                "chunk_id": "chunk-other",
+                "file_path": other_ref,
+                "chunk_index": 0,
+                "metadata": {},
+            },
+        ],
+        "provenance": [
+            {
+                "provenance_id": "chunk-changed\x1ffilesystem\x1f/notes/changed.md",
+                "chunk_id": "chunk-changed",
+                "namespace": "filesystem",
+                "document_ref": changed_ref,
+                "source_unit_refs": ["unit-1"],
+                "chunk_strategy": chunk_strategy,
+                "parser_name": "markdown",
+                "metadata": {},
+            },
+            {
+                "provenance_id": "chunk-other\x1ffilesystem\x1f/notes/other.md",
+                "chunk_id": "chunk-other",
+                "namespace": "filesystem",
+                "document_ref": other_ref,
+                "source_unit_refs": ["unit-9"],
+                "chunk_strategy": chunk_strategy,
+                "parser_name": "markdown",
+                "metadata": {},
+            },
+        ],
+        "bindings": [
+            {
+                "namespace": "filesystem",
+                "resource_ref": changed_ref,
+                "document_ref": changed_ref,
+                "ref": f"filesystem:{changed_ref}",
+                "active": True,
+                "bound_at": datetime(2026, 6, 19, 12, 0, tzinfo=UTC),
+                "unbound_at": None,
+                "content_fingerprint": "content-changed",
+                "metadata_fingerprint": "metadata-changed",
+                "source_unit_refs": ["unit-1"],
+                "metadata": {},
+            },
+            {
+                "namespace": "filesystem",
+                "resource_ref": other_ref,
+                "document_ref": other_ref,
+                "ref": f"filesystem:{other_ref}",
+                "active": True,
+                "bound_at": datetime(2026, 6, 19, 12, 0, tzinfo=UTC),
+                "unbound_at": None,
+                "content_fingerprint": "content-other",
+                "metadata_fingerprint": "metadata-other",
+                "source_unit_refs": ["unit-9"],
+                "metadata": {},
+            },
+        ],
+        "fingerprints": [
+            {
+                "fingerprint_id": "source_unit::/notes/changed.md::unit-1",
+                "fingerprint_kind": "source_unit",
+                "namespace": "filesystem",
+                "document_ref": changed_ref,
+                "content_fingerprint": "unit-fp-changed",
+                "metadata_fingerprint": None,
+                "metadata": {},
+            },
+            {
+                "fingerprint_id": "source_unit::/notes/other.md::unit-9",
+                "fingerprint_kind": "source_unit",
+                "namespace": "filesystem",
+                "document_ref": other_ref,
+                "content_fingerprint": "unit-fp-other",
+                "metadata_fingerprint": None,
+                "metadata": {},
+            },
+        ],
+        "embeddings": [
+            {
+                "chunk_strategy": chunk_strategy,
+                "embedding_model": embedding_model,
+                "chunk_id": "chunk-changed",
+                "text_hash": "hash-changed",
+                "vector_rowid": 1,
+                "vector": [0.1, 0.2],
+                "metadata": {},
+            },
+            {
+                "chunk_strategy": chunk_strategy,
+                "embedding_model": embedding_model,
+                "chunk_id": "chunk-other",
+                "text_hash": "hash-other",
+                "vector_rowid": 2,
+                "vector": [0.3, 0.4],
+                "metadata": {},
+            },
+        ],
+        "vector_components": [
+            {
+                "chunk_strategy": chunk_strategy,
+                "embedding_model": embedding_model,
+                "chunk_id": "chunk-changed",
+                "component": "0",
+                "embedding": [0.5, 0.6],
+                "metadata": {},
+            },
+            {
+                "chunk_strategy": chunk_strategy,
+                "embedding_model": embedding_model,
+                "chunk_id": "chunk-other",
+                "component": "0",
+                "embedding": [0.7, 0.8],
+                "metadata": {},
+            },
+        ],
+    }
+
+
+def test_row_manifest_builder_filters_to_changed_refs_and_emits_tombstones() -> None:
+    manifest = build_surreal_delta_manifest_from_rows(
+        **_base_manifest_kwargs(),
+        sqlite_rows=_row_manifest_fixture(),
+        changed_document_refs=["/notes/changed.md"],
+        tombstoned_document_refs=["/notes/deleted.md"],
+    )
+
+    upsert_rows = [
+        row for row in manifest.documents.rows if row.change_type is SurrealDeltaChangeType.UPSERT
+    ]
+    tombstone_rows = [
+        row for row in manifest.documents.rows if row.change_type is SurrealDeltaChangeType.TOMBSTONE
+    ]
+
+    assert manifest.graph.deferred is True
+    assert manifest.graph.deferred_reason == "graph sync is deferred for this slice"
+    assert manifest.feedback.deferred is True
+    assert manifest.feedback.deferred_reason == "feedback sync is deferred for this slice"
+
+    assert [row.ref for row in upsert_rows] == ["filesystem:/notes/changed.md"]
+    assert [row.row["document_ref"] for row in upsert_rows] == ["/notes/changed.md"]
+    assert len(tombstone_rows) == 1
+    assert tombstone_rows[0].ref == "filesystem:/notes/deleted.md"
+    assert tombstone_rows[0].tombstone is not None
+    assert tombstone_rows[0].tombstone.previous_row["title"] == "Deleted note"
+
+    assert [row.row["document_ref"] for row in manifest.source_units.rows] == ["/notes/changed.md"]
+    assert [row.row["document_ref"] for row in manifest.chunks.rows] == ["/notes/changed.md"]
+    assert [row.row["chunk_id"] for row in manifest.chunk_file_bindings.rows] == ["chunk-changed"]
+    assert [row.row["file_path"] for row in manifest.chunk_file_bindings.rows] == ["/notes/changed.md"]
+    assert [row.row["document_ref"] for row in manifest.provenance.rows] == ["/notes/changed.md"]
+    assert [row.row["document_ref"] for row in manifest.resource_bindings.rows] == ["/notes/changed.md"]
+    assert [row.row["document_ref"] for row in manifest.fingerprints.rows] == ["/notes/changed.md"]
+    assert [row.row["chunk_id"] for row in manifest.embeddings.rows] == ["chunk-changed"]
+    assert [row.row["chunk_id"] for row in manifest.vector_components.rows] == ["chunk-changed"]
+    assert all("/notes/other.md" not in row.ref for row in manifest.documents.rows)
+    assert all("/notes/other.md" not in row.row.get("document_ref", "") for row in manifest.source_units.rows)
+
+
+def test_row_manifest_builder_rejects_noop_after_filtering() -> None:
+    with pytest.raises(ValidationError, match="at least one changed row or tombstone"):
+        build_surreal_delta_manifest_from_rows(
+            **_base_manifest_kwargs(),
+            sqlite_rows=_row_manifest_fixture(),
+            changed_document_refs=[],
+            tombstoned_document_refs=[],
+        )
 
 
 def test_valid_changed_file_manifest_carries_changed_rows_and_checkpoint_candidate() -> None:
