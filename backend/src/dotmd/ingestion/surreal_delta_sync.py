@@ -604,6 +604,37 @@ class SurrealDeltaStoreWriter:
             return str(row["original_feedback_id"])
         return str(change.ref)
 
+    def _tombstone_raw_identifier(self, change: SurrealDeltaChange) -> str:
+        tombstone = change.tombstone
+        if tombstone is None:
+            return str(change.ref)
+        table = self._normalize_table_name(tombstone.table)
+        if table == "documents":
+            return str(tombstone.ref or change.ref)
+
+        previous_row = tombstone.previous_row
+        if previous_row:
+            previous_change = SurrealDeltaChange(
+                ref=tombstone.ref,
+                table=table,
+                row=dict(previous_row),
+            )
+            selector_map: dict[str, Callable[[SurrealDeltaChange], str]] = {
+                "source_units": self._source_unit_raw_identifier,
+                "chunks": self._chunk_raw_identifier,
+                "chunk_file_bindings": self._chunk_file_binding_raw_identifier,
+                "provenance": self._provenance_raw_identifier,
+                "bindings": self._binding_raw_identifier,
+                "fingerprints": self._fingerprint_raw_identifier,
+                "embeddings": self._embedding_raw_identifier,
+                "vector_components": self._vector_component_raw_identifier,
+                "feedback": self._feedback_raw_identifier,
+            }
+            selector = selector_map.get(table)
+            if selector is not None:
+                return selector(previous_change)
+        return str(tombstone.ref or change.ref)
+
     def _existing_row(self, record_id: Any) -> dict[str, Any] | None:
         select = getattr(self.connection, "select", None)
         if select is None:
@@ -660,7 +691,7 @@ class SurrealDeltaStoreWriter:
             table = self._normalize_table_name(
                 tombstone.table if tombstone is not None else change.table
             )
-            ref = tombstone.ref if tombstone is not None else change.ref
+            ref = self._tombstone_raw_identifier(change) if tombstone is not None else str(change.ref)
             record_id = self._record_id(table, ref)
             if self._existing_row(record_id) is None:
                 continue

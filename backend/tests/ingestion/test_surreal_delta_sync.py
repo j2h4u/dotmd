@@ -807,6 +807,105 @@ def test_surreal_delta_store_writer_normalizes_source_document_tombstone_alias()
     assert sibling_id in connection.tables["documents"]
 
 
+def test_surreal_delta_store_writer_deletes_chunk_tombstone_by_previous_row_chunk_id() -> None:
+    connection = _FakeSurrealConnection()
+    writer = SurrealDeltaStoreWriter(connection=connection)
+
+    chunk_id = "chunk-1"
+    sibling_chunk_id = "chunk-2"
+    chunk_record_id = str(writer.codec.encode("chunks", chunk_id))
+    sibling_record_id = str(writer.codec.encode("chunks", sibling_chunk_id))
+    connection.tables["chunks"] = {
+        chunk_record_id: {
+            "id": chunk_record_id,
+            "chunk_id": chunk_id,
+            "original_chunk_id": chunk_id,
+            "ref": "filesystem:/notes/changed.md#bootstrap-chunk",
+            "text": "Deleted chunk",
+        },
+        sibling_record_id: {
+            "id": sibling_record_id,
+            "chunk_id": sibling_chunk_id,
+            "original_chunk_id": sibling_chunk_id,
+            "ref": "filesystem:/notes/changed.md#bootstrap-sibling",
+            "text": "Sibling chunk",
+        },
+    }
+    tombstone = SurrealDeltaChange(
+        ref="filesystem:/notes/changed.md#chunk-1",
+        table="chunks",
+        change_type=SurrealDeltaChangeType.TOMBSTONE,
+        tombstone=SurrealDeltaTombstone(
+            ref="filesystem:/notes/changed.md#chunk-1",
+            table="chunks",
+            previous_row={
+                "chunk_id": chunk_id,
+                "original_chunk_id": chunk_id,
+            },
+        ),
+    )
+
+    applied = writer.delete_tombstones([tombstone])
+
+    assert applied == 1
+    assert chunk_record_id not in connection.tables["chunks"]
+    assert sibling_record_id in connection.tables["chunks"]
+
+
+def test_surreal_delta_store_writer_deletes_embedding_tombstone_by_previous_row_stable_key() -> None:
+    connection = _FakeSurrealConnection()
+    writer = SurrealDeltaStoreWriter(connection=connection)
+
+    chunk_strategy = "contextual_512_50"
+    embedding_model = "multilingual_e5_large"
+    chunk_id = "chunk-1"
+    sibling_chunk_id = "chunk-2"
+    embedding_id = str(
+        writer.codec.encode("embeddings", "contextual_512_50\x1fmultilingual_e5_large\x1fchunk-1")
+    )
+    sibling_embedding_id = str(
+        writer.codec.encode("embeddings", "contextual_512_50\x1fmultilingual_e5_large\x1fchunk-2")
+    )
+    connection.tables["embeddings"] = {
+        embedding_id: {
+            "id": embedding_id,
+            "chunk_strategy": chunk_strategy,
+            "embedding_model": embedding_model,
+            "chunk_id": chunk_id,
+            "ref": "filesystem:/notes/changed.md#embedding-bootstrap",
+            "vector": [0.1, 0.2],
+        },
+        sibling_embedding_id: {
+            "id": sibling_embedding_id,
+            "chunk_strategy": chunk_strategy,
+            "embedding_model": embedding_model,
+            "chunk_id": sibling_chunk_id,
+            "ref": "filesystem:/notes/changed.md#embedding-sibling",
+            "vector": [0.3, 0.4],
+        },
+    }
+    tombstone = SurrealDeltaChange(
+        ref="filesystem:/notes/changed.md#embedding",
+        table="embeddings",
+        change_type=SurrealDeltaChangeType.TOMBSTONE,
+        tombstone=SurrealDeltaTombstone(
+            ref="filesystem:/notes/changed.md#embedding",
+            table="embeddings",
+            previous_row={
+                "chunk_strategy": chunk_strategy,
+                "embedding_model": embedding_model,
+                "chunk_id": chunk_id,
+            },
+        ),
+    )
+
+    applied = writer.delete_tombstones([tombstone])
+
+    assert applied == 1
+    assert embedding_id not in connection.tables["embeddings"]
+    assert sibling_embedding_id in connection.tables["embeddings"]
+
+
 def test_surreal_delta_store_writer_updates_bootstrap_rows_in_place() -> None:
     connection = _FakeSurrealConnection()
     writer = SurrealDeltaStoreWriter(connection=connection)
