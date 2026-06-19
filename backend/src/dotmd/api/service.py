@@ -555,6 +555,11 @@ class DotMDService:
             Number of chunks processed.
         """
         if store == "all":
+            if self._settings.search_backend == "surreal":
+                logger.info(
+                    "reindex(all): skipped local vector and FTS5 rebuilds in surreal search backend"
+                )
+                return 0
             n = self._pipeline.reindex_fts5()
             self._pipeline.reindex_vectors()
             self._pipeline.reindex_graph()

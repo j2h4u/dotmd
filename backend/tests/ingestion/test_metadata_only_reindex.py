@@ -314,6 +314,219 @@ def test_surreal_metadata_only_reindex_skips_local_vec_and_fts_artifacts(
         pipeline.close()
 
 
+def test_surreal_reindex_vectors_skips_local_vector_store_mutation(
+    surreal_pipeline_settings, monkeypatch
+):
+    from dotmd.core.models import Chunk, ChunkProvenance
+    from dotmd.ingestion.pipeline import IndexingPipeline
+
+    doc = surreal_pipeline_settings.data_dir / "surreal-vectors.md"
+    _write_md(doc, "Surreal Vectors", ["alpha"], "Initial body text for vector reindexing.")
+
+    class FakeConnection:
+        def close(self) -> None:
+            pass
+
+    class FakeWriter:
+        def __init__(self) -> None:
+            self.connection = FakeConnection()
+
+    monkeypatch.setattr(
+        "dotmd.ingestion.pipeline._create_surreal_direct_writer",
+        lambda _settings: FakeWriter(),
+    )
+
+    pipeline = IndexingPipeline(surreal_pipeline_settings)
+    pipeline._semantic_engine.encode_batch = MagicMock(  # type: ignore[method-assign]
+        return_value=[[1.0, 0.0, 0.0]]
+    )
+    pipeline._semantic_engine.get_tei_model_id = MagicMock(return_value="fixture-model")
+    pipeline._write_surreal_direct_manifest = (  # type: ignore[method-assign]
+        lambda *_args, **_kwargs: None
+    )
+    pipeline._write_surreal_graph_manifest = (  # type: ignore[method-assign]
+        lambda *_args, **_kwargs: None
+    )
+
+    try:
+        assert pipeline.index_file(doc) == 1
+
+        legacy_path = surreal_pipeline_settings.data_dir / "legacy-vector.md"
+        legacy_chunk = Chunk(
+            chunk_id="legacy-vector-chunk",
+            file_paths=[legacy_path],
+            heading_hierarchy=["Legacy Vector"],
+            level=1,
+            text="Legacy vector body text.",
+            chunk_index=0,
+            provenance=ChunkProvenance(
+                namespace="filesystem",
+                document_ref=str(legacy_path.resolve()),
+                ref=f"filesystem:{legacy_path.resolve()}",
+                source_unit_refs=[],
+                chunk_strategy=pipeline._strategy,
+                parser_name="markdown",
+            ),
+        )
+        pipeline._vector_store.add_chunks(
+            [legacy_chunk],
+            [[0.9, 0.1, 0.0]],
+            overwrite=False,
+            text_hashes={legacy_chunk.chunk_id: "legacy-text-hash"},
+        )
+        pipeline._vec_components.store(legacy_chunk.chunk_id, "text", [0.9, 0.1, 0.0])
+        pipeline._vec_components.store(str(legacy_path.resolve()), "meta", [0.2, 0.3, 0.5])
+        pipeline._conn.commit()
+
+        vector_meta_table = pipeline._vector_store._META_TABLE
+        vec_components_table = pipeline._vec_components._TABLE
+        vector_row_count = pipeline._vector_store.count()
+        vec_component_row_count = pipeline._vec_components.count()
+        legacy_vector_row_count = pipeline._conn.execute(
+            f"SELECT COUNT(*) FROM {vector_meta_table} WHERE chunk_id = ?",
+            (legacy_chunk.chunk_id,),
+        ).fetchone()[0]
+        legacy_component_row_count = pipeline._conn.execute(
+            f"SELECT COUNT(*) FROM {vec_components_table} WHERE entity_id IN (?, ?)",
+            (legacy_chunk.chunk_id, str(legacy_path.resolve())),
+        ).fetchone()[0]
+
+        monkeypatch.setattr(
+            pipeline._vector_store,
+            "delete_all",
+            MagicMock(side_effect=lambda *args, **kwargs: pytest.fail("vector delete_all must not run")),
+        )
+        monkeypatch.setattr(
+            pipeline._vector_store,
+            "add_chunks",
+            MagicMock(side_effect=lambda *args, **kwargs: pytest.fail("vector add_chunks must not run")),
+        )
+        monkeypatch.setattr(
+            pipeline._vec_components,
+            "delete_all",
+            MagicMock(side_effect=lambda *args, **kwargs: pytest.fail("vec_components delete_all must not run")),
+        )
+        monkeypatch.setattr(
+            pipeline._semantic_engine,
+            "encode_batch",
+            MagicMock(side_effect=lambda *args, **kwargs: pytest.fail("TEI encode must not run")),
+        )
+
+        assert pipeline.reindex_vectors() == 0
+
+        pipeline._vector_store.delete_all.assert_not_called()
+        pipeline._vector_store.add_chunks.assert_not_called()
+        pipeline._vec_components.delete_all.assert_not_called()
+        assert pipeline._vector_store.count() == vector_row_count
+        assert pipeline._vec_components.count() == vec_component_row_count
+        assert (
+            pipeline._conn.execute(
+                f"SELECT COUNT(*) FROM {vector_meta_table} WHERE chunk_id = ?",
+                (legacy_chunk.chunk_id,),
+            ).fetchone()[0]
+            == legacy_vector_row_count
+        )
+        assert (
+            pipeline._conn.execute(
+                f"SELECT COUNT(*) FROM {vec_components_table} WHERE entity_id IN (?, ?)",
+                (legacy_chunk.chunk_id, str(legacy_path.resolve())),
+            ).fetchone()[0]
+            == legacy_component_row_count
+        )
+    finally:
+        pipeline.close()
+
+
+def test_surreal_reindex_fts5_skips_local_fts_mutation(surreal_pipeline_settings, monkeypatch):
+    from dotmd.core.models import Chunk, ChunkProvenance
+    from dotmd.ingestion.pipeline import IndexingPipeline
+
+    doc = surreal_pipeline_settings.data_dir / "surreal-fts.md"
+    _write_md(doc, "Surreal FTS", ["alpha"], "Initial body text for FTS reindexing.")
+
+    class FakeConnection:
+        def close(self) -> None:
+            pass
+
+    class FakeWriter:
+        def __init__(self) -> None:
+            self.connection = FakeConnection()
+
+    monkeypatch.setattr(
+        "dotmd.ingestion.pipeline._create_surreal_direct_writer",
+        lambda _settings: FakeWriter(),
+    )
+
+    pipeline = IndexingPipeline(surreal_pipeline_settings)
+    pipeline._semantic_engine.encode_batch = MagicMock(  # type: ignore[method-assign]
+        return_value=[[1.0, 0.0, 0.0]]
+    )
+    pipeline._semantic_engine.get_tei_model_id = MagicMock(return_value="fixture-model")
+    pipeline._write_surreal_direct_manifest = (  # type: ignore[method-assign]
+        lambda *_args, **_kwargs: None
+    )
+    pipeline._write_surreal_graph_manifest = (  # type: ignore[method-assign]
+        lambda *_args, **_kwargs: None
+    )
+
+    try:
+        assert pipeline.index_file(doc) == 1
+
+        legacy_path = surreal_pipeline_settings.data_dir / "legacy-fts.md"
+        legacy_chunk = Chunk(
+            chunk_id="legacy-fts-chunk",
+            file_paths=[legacy_path],
+            heading_hierarchy=["Legacy FTS"],
+            level=1,
+            text="Legacy FTS body text.",
+            chunk_index=0,
+            provenance=ChunkProvenance(
+                namespace="filesystem",
+                document_ref=str(legacy_path.resolve()),
+                ref=f"filesystem:{legacy_path.resolve()}",
+                source_unit_refs=[],
+                chunk_strategy=pipeline._strategy,
+                parser_name="markdown",
+            ),
+        )
+        pipeline._keyword_engine.add_chunks(
+            [legacy_chunk],
+            file_meta={str(legacy_path.resolve()): ("Legacy FTS", "legacy")},
+        )
+        pipeline._conn.commit()
+
+        fts_row_count = pipeline._conn.execute(
+            f"SELECT COUNT(*) FROM {pipeline._fts_table}"
+        ).fetchone()[0]
+        legacy_fts_row_count = pipeline._conn.execute(
+            f"SELECT COUNT(*) FROM {pipeline._fts_table} WHERE chunk_id = ?",
+            (legacy_chunk.chunk_id,),
+        ).fetchone()[0]
+
+        monkeypatch.setattr(
+            pipeline._keyword_engine,
+            "add_chunks",
+            MagicMock(side_effect=lambda *args, **kwargs: pytest.fail("FTS add_chunks must not run")),
+        )
+
+        assert pipeline.reindex_fts5() == 0
+
+        pipeline._keyword_engine.add_chunks.assert_not_called()
+        assert (
+            pipeline._conn.execute(f"SELECT COUNT(*) FROM {pipeline._fts_table}").fetchone()[0]
+            == fts_row_count
+        )
+        assert (
+            pipeline._conn.execute(
+                f"SELECT COUNT(*) FROM {pipeline._fts_table} WHERE chunk_id = ?",
+                (legacy_chunk.chunk_id,),
+            ).fetchone()[0]
+            == legacy_fts_row_count
+        )
+    finally:
+        pipeline.close()
+
+
 def test_index_file_embed_routes_surreal_manifests_with_complete_text_hashes(
     surreal_pipeline_settings, monkeypatch
 ):

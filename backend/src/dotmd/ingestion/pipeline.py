@@ -2219,6 +2219,12 @@ class IndexingPipeline:
         embeds chunks (e_text), encodes metadata (e_meta, batched), fuses, stores.
         Uses _meta_entity_id() for canonical path normalization throughout.
         """
+        if self._settings.search_backend == "surreal":
+            logger.info(
+                "reindex_vectors: skipped local vector rebuild in surreal search backend"
+            )
+            return 0
+
         # Discover all distinct file paths from M2M table
         m2m_table = f"chunk_file_paths_{self._strategy}"
         try:
@@ -2299,6 +2305,10 @@ class IndexingPipeline:
 
     def reindex_fts5(self) -> int:
         """Rebuild FTS5 keyword index from stored chunks. Returns chunk count."""
+        if self._settings.search_backend == "surreal":
+            logger.info("reindex_fts5: skipped local FTS5 rebuild in surreal search backend")
+            return 0
+
         all_chunks = self._metadata_store.get_all_chunks()
         if not all_chunks:
             logger.info("reindex_fts5: no chunks in metadata")
