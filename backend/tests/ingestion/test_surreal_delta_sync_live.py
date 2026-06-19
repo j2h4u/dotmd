@@ -414,32 +414,6 @@ def test_surreal_delta_store_writer_smoke_changed_file_from_old_stack_fixture(
     db_path = tmp_path / "old-stack.db"
     fixture_ids = _create_transform_only_fixture(db_path)
     sqlite_rows = load_sqlite_rows_for_surreal(db_path)
-    sqlite_rows_for_manifest = dict(sqlite_rows)
-    sqlite_rows_for_manifest["vector_components"] = []
-    for row in sqlite_rows_for_manifest["documents"]:
-        row["metadata"] = {}
-    for row in sqlite_rows_for_manifest["source_units"]:
-        row["metadata"] = {}
-    for row in sqlite_rows_for_manifest["chunks"]:
-        row["heading_hierarchy"] = []
-        row["file_paths"] = []
-        row["file_bindings"] = []
-        row["source_unit_refs"] = []
-        row["metadata"] = {}
-    for row in sqlite_rows_for_manifest["chunk_file_bindings"]:
-        row["metadata"] = {}
-    for row in sqlite_rows_for_manifest["provenance"]:
-        row["source_unit_refs"] = []
-        row["metadata"] = {}
-    for row in sqlite_rows_for_manifest["bindings"]:
-        row["source_unit_refs"] = []
-        row["metadata"] = {}
-        row.pop("unbound_at", None)
-    for row in sqlite_rows_for_manifest["fingerprints"]:
-        row["metadata"] = {}
-    for row in sqlite_rows_for_manifest["embeddings"]:
-        row.pop("original_chunk_id", None)
-        row["metadata"] = {}
     now = datetime(2026, 6, 19, 13, 0, tzinfo=UTC)
 
     manifest = build_surreal_delta_manifest_from_rows(
@@ -454,7 +428,7 @@ def test_surreal_delta_store_writer_smoke_changed_file_from_old_stack_fixture(
             watermark="watermark:46-smoke",
             source_time=now,
         ),
-        sqlite_rows=sqlite_rows_for_manifest,
+        sqlite_rows=sqlite_rows,
         changed_document_refs=[fixture_ids["file_path"]],
     )
 

@@ -12,9 +12,24 @@ from typing import Any, ClassVar, Protocol, runtime_checkable
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from dotmd.storage.surreal import SurrealConnection, SurrealRecordIdCodec
-from dotmd.storage.surreal_schema import SURREAL_SCHEMA_VERSION
+from dotmd.storage.surreal_schema import SURREAL_SCHEMA_VERSION, build_dotmd_surreal_schema_plan
 
 DELTA_MANIFEST_SCHEMA_VERSION = "phase46_delta_manifest_v1"
+
+
+def _surreal_writer_allowed_fields() -> dict[str, frozenset[str]]:
+    plan = build_dotmd_surreal_schema_plan()
+    allowed_fields = {
+        table.name: frozenset(field.name for field in table.fields)
+        for table in plan.tables
+    }
+    allowed_fields["checkpoints"] = allowed_fields["checkpoints"] | frozenset(
+        {"last_success_at", "last_error"}
+    )
+    return allowed_fields
+
+
+_SURREAL_WRITER_ALLOWED_FIELDS = _surreal_writer_allowed_fields()
 
 
 class SurrealDeltaScope(StrEnum):
@@ -604,6 +619,63 @@ class SurrealDeltaStoreWriter:
             return str(row["original_feedback_id"])
         return str(change.ref)
 
+    def _embedding_row_for_chunk(self, chunk_id: str) -> dict[str, Any] | None:
+        scan_table = getattr(self.connection, "scan_table", None)
+        if scan_table is None:
+            return None
+        for row in scan_table("embeddings"):
+            if str(row.get("chunk_id")) == chunk_id:
+                return dict(row)
+        return None
+
+    def _prepare_payload(self, table: str, raw_identifier: str, payload: dict[str, Any]) -> dict[str, Any]:
+        table = self._normalize_table_name(table)
+        prepared = dict(payload)
+        prepared.setdefault("schema_version", SURREAL_SCHEMA_VERSION)
+
+        if table in {"documents", "source_units", "provenance", "chunk_file_bindings", "bindings", "fingerprints", "embeddings", "vector_components", "feedback", "chunks"}:
+            prepared.setdefault("metadata", {})
+        if table == "chunks":
+            prepared.setdefault("file_paths", [])
+            prepared.setdefault("file_bindings", [])
+            prepared.setdefault("source_unit_refs", [])
+        if table == "bindings":
+            prepared.setdefault("resource_ref", prepared.get("document_ref"))
+        if table == "provenance":
+            prepared.setdefault("source_unit_refs", [])
+        if table == "embeddings":
+            prepared.setdefault("vector_rowid", None)
+            prepared.setdefault("vector", [])
+        if table == "vector_components":
+            prepared.setdefault("embedding", [])
+        if table == "feedback":
+            prepared.setdefault("original_feedback_id", raw_identifier)
+            prepared.setdefault("submitted_at", None)
+        if table == "vector_components":
+            prepared.setdefault("chunk_id", prepared.get("entity_id"))
+            chunk_id = prepared.get("chunk_id")
+            chunk_id_text = str(chunk_id) if chunk_id is not None else None
+            if isinstance(chunk_id, str) and (
+                prepared.get("chunk_strategy") is None or prepared.get("embedding_model") is None
+            ):
+                source_embedding = self._embedding_row_for_chunk(chunk_id)
+                if source_embedding is not None:
+                    prepared.setdefault("chunk_strategy", source_embedding.get("chunk_strategy"))
+                    prepared.setdefault("embedding_model", source_embedding.get("embedding_model"))
+            elif chunk_id_text is not None and (
+                prepared.get("chunk_strategy") is None or prepared.get("embedding_model") is None
+            ):
+                source_embedding = self._embedding_row_for_chunk(chunk_id_text)
+                if source_embedding is not None:
+                    prepared.setdefault("chunk_id", chunk_id_text)
+                    prepared.setdefault("chunk_strategy", source_embedding.get("chunk_strategy"))
+                    prepared.setdefault("embedding_model", source_embedding.get("embedding_model"))
+
+        allowed_fields = _SURREAL_WRITER_ALLOWED_FIELDS.get(table)
+        if allowed_fields is None:
+            return prepared
+        return {key: value for key, value in prepared.items() if key in allowed_fields}
+
     def _tombstone_raw_identifier(self, change: SurrealDeltaChange) -> str:
         tombstone = change.tombstone
         if tombstone is None:
@@ -659,26 +731,7 @@ class SurrealDeltaStoreWriter:
         table = self._normalize_table_name(table)
         record_id = self._record_id(table, raw_identifier)
         existing = self._existing_row(record_id)
-        prepared = dict(payload)
-        prepared.setdefault("schema_version", SURREAL_SCHEMA_VERSION)
-        if table in {"documents", "source_units", "provenance", "chunk_file_bindings", "bindings", "fingerprints", "embeddings", "vector_components", "feedback", "chunks"}:
-            prepared.setdefault("metadata", {})
-        if table == "chunks":
-            prepared.setdefault("file_paths", [])
-            prepared.setdefault("file_bindings", [])
-            prepared.setdefault("source_unit_refs", [])
-        if table == "bindings":
-            prepared.setdefault("resource_ref", prepared.get("document_ref"))
-        if table == "provenance":
-            prepared.setdefault("source_unit_refs", [])
-        if table == "embeddings":
-            prepared.setdefault("vector_rowid", None)
-            prepared.setdefault("vector", [])
-        if table == "vector_components":
-            prepared.setdefault("embedding", [])
-        if table == "feedback":
-            prepared.setdefault("original_feedback_id", raw_identifier)
-            prepared.setdefault("submitted_at", None)
+        prepared = self._prepare_payload(table, raw_identifier, payload)
         if self._same_row(existing, prepared):
             return 0
         self.connection.upsert(record_id, prepared)
