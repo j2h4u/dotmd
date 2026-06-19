@@ -83,6 +83,7 @@ DEFERRED_EMBEDDING_INDEX_NAMES = tuple(
 )
 HNSW_EMBEDDING_INDEX_NAME = "embeddings_vector_hnsw"
 _INDEX_PROGRESS_HEARTBEAT_SECONDS = 30.0
+_DEFAULT_MIGRATION_HTTP_QUERY_TIMEOUT_SECONDS = 1800.0
 
 
 class SurrealMigrationMode(StrEnum):
@@ -1314,6 +1315,10 @@ def _connection_for_target(
             "DOTMD_SURREAL_RETRIEVAL_ACCESS_TOKEN must not be combined with "
             "username/password auth"
         )
+    http_query_timeout_seconds = float(
+        os.environ.get("DOTMD_SURREAL_MIGRATION_HTTP_QUERY_TIMEOUT_SECONDS")
+        or _DEFAULT_MIGRATION_HTTP_QUERY_TIMEOUT_SECONDS
+    )
     return SurrealConnection(
         SurrealStoreConfig(
             url=target_url,
@@ -1322,6 +1327,7 @@ def _connection_for_target(
             username=username,
             password=password,
             access_token=access_token,
+            http_query_timeout_seconds=http_query_timeout_seconds,
         )
     )
 

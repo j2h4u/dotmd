@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+import requests
 from surrealdb import RecordID, Surreal
 
 from dotmd.core.models import Chunk, ChunkProvenance, IndexStats
@@ -47,6 +48,7 @@ class SurrealStoreConfig:
     username: str | None = None
     password: str | None = None
     access_token: str | None = None
+    http_query_timeout_seconds: float | None = None
 
 
 class SurrealRecordIdCodec:
@@ -151,10 +153,47 @@ class SurrealConnection:
             return
 
     def query(self, statement: str, variables: dict[str, Any] | None = None) -> Any:
+        if (
+            variables is None
+            and self.config.http_query_timeout_seconds is not None
+            and self.config.url.startswith(("http://", "https://"))
+        ):
+            return self._query_http_sql(statement, timeout=self.config.http_query_timeout_seconds)
         return self._db.query(statement, variables)
 
     def query_raw(self, statement: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
         return self._db.query_raw(statement, variables)
+
+    def _query_http_sql(self, statement: str, *, timeout: float) -> Any:
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/surrealql",
+            "Surreal-NS": self.config.namespace,
+            "Surreal-DB": self.config.database,
+        }
+        auth: tuple[str, str] | None = None
+        if self.config.access_token:
+            headers["Authorization"] = f"Bearer {self.config.access_token}"
+        elif self.config.username and self.config.password:
+            auth = (self.config.username, self.config.password)
+        response = requests.post(
+            f"{self.config.url.rstrip('/')}/sql",
+            headers=headers,
+            data=statement.encode("utf-8"),
+            auth=auth,
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, list) or not payload:
+            return payload
+        first = payload[0]
+        if not isinstance(first, dict):
+            return first
+        if first.get("status") == "ERR":
+            detail = first.get("detail") or first.get("result") or first
+            raise RuntimeError(str(detail))
+        return first.get("result")
 
     def create(self, record: RecordID | str, data: dict[str, Any]) -> Any:
         return self._db.create(record, data)

@@ -724,6 +724,7 @@ def test_remote_target_connection_uses_surreal_auth_env(
 
     monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL_USERNAME", "root")
     monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL_PASSWORD", "secret")
+    monkeypatch.setenv("DOTMD_SURREAL_MIGRATION_HTTP_QUERY_TIMEOUT_SECONDS", "2400")
     monkeypatch.setattr(migrate_module, "SurrealConnection", FakeConnection)
 
     migrate_module._connection_for_target(
@@ -739,6 +740,7 @@ def test_remote_target_connection_uses_surreal_auth_env(
     assert config.username == "root"
     assert config.password == "secret"
     assert config.access_token is None
+    assert config.http_query_timeout_seconds == 2400.0
 
 
 def test_remote_target_connection_rejects_conflicting_surreal_auth_env(

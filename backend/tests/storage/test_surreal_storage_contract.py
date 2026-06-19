@@ -564,6 +564,56 @@ def test_surreal_connection_authenticates_token_after_namespace_selection(monkey
     connection.close()
 
 
+def test_surreal_connection_can_use_http_sql_timeout_for_long_queries(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from dotmd.storage import surreal as surreal_module
+    from dotmd.storage.surreal import SurrealConnection, SurrealStoreConfig
+
+    clients: list[_FakeSurrealClient] = []
+    captured: dict[str, Any] = {}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> list[dict[str, Any]]:
+            return [{"status": "OK", "result": [{"ok": True}]}]
+
+    def fake_surreal(url: str) -> _FakeSurrealClient:
+        client = _FakeSurrealClient(url)
+        clients.append(client)
+        return client
+
+    def fake_post(url: str, **kwargs: Any) -> FakeResponse:
+        captured["url"] = url
+        captured["kwargs"] = kwargs
+        return FakeResponse()
+
+    monkeypatch.setattr(surreal_module, "Surreal", fake_surreal)
+    monkeypatch.setattr(surreal_module.requests, "post", fake_post)
+
+    connection = SurrealConnection(
+        SurrealStoreConfig(
+            url="http://surrealdb:8000",
+            namespace="dotmd",
+            database="production",
+            username="root",
+            password="secret",
+            http_query_timeout_seconds=2400,
+        )
+    )
+
+    result = connection.query("DEFINE INDEX embeddings_vector_hnsw ON TABLE embeddings;")
+
+    assert result == [{"ok": True}]
+    assert captured["url"] == "http://surrealdb:8000/sql"
+    assert captured["kwargs"]["timeout"] == 2400
+    assert captured["kwargs"]["auth"] == ("root", "secret")
+    assert captured["kwargs"]["headers"]["Surreal-NS"] == "dotmd"
+    assert captured["kwargs"]["headers"]["Surreal-DB"] == "production"
+    assert captured["kwargs"]["data"] == b"DEFINE INDEX embeddings_vector_hnsw ON TABLE embeddings;"
+    connection.close()
+
+
 def test_surreal_stores_expose_existing_protocol_method_names(tmp_path: Path) -> None:
     from dotmd.storage.base import GraphStoreProtocol, MetadataStoreProtocol, VectorStoreProtocol
     from dotmd.storage.surreal import (  # type: ignore[import-not-found]
