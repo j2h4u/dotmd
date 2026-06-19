@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+from dotmd.ingestion.migrate_surreal import load_sqlite_rows_for_surreal
 from dotmd.ingestion.surreal_delta_sync import (
     SurrealDeltaChange,
     SurrealDeltaChangeType,
@@ -13,6 +14,7 @@ from dotmd.ingestion.surreal_delta_sync import (
     SurrealDeltaSyncState,
     SurrealDeltaTombstone,
     build_surreal_delta_manifest,
+    build_surreal_delta_manifest_from_rows,
     run_surreal_delta_sync,
 )
 from dotmd.storage.surreal import (
@@ -22,6 +24,7 @@ from dotmd.storage.surreal import (
     define_dotmd_surreal_schema,
 )
 from dotmd.storage.surreal_schema import SURREAL_SCHEMA_VERSION
+from tests.ingestion.test_surreal_transform_only_migration import _create_transform_only_fixture
 
 
 def _scan_by_id(connection: SurrealConnection, table_name: str) -> dict[str, dict[str, object]]:
@@ -38,6 +41,32 @@ def _seed_row(
     record_id = str(codec.encode(table_name, raw_identifier))
     connection.upsert(codec.encode(table_name, raw_identifier), payload)
     return record_id
+
+
+def _seed_change(
+    connection: SurrealConnection,
+    writer: SurrealDeltaStoreWriter,
+    change: SurrealDeltaChange,
+    payload: dict[str, object] | None = None,
+) -> str:
+    raw_identifier_getters = {
+        "source_documents": writer._document_raw_identifier,
+        "documents": writer._document_raw_identifier,
+        "source_units": writer._source_unit_raw_identifier,
+        "chunks": writer._chunk_raw_identifier,
+        "chunk_file_bindings": writer._chunk_file_binding_raw_identifier,
+        "provenance": writer._provenance_raw_identifier,
+        "resource_bindings": writer._binding_raw_identifier,
+        "bindings": writer._binding_raw_identifier,
+        "fingerprints": writer._fingerprint_raw_identifier,
+        "embeddings": writer._embedding_raw_identifier,
+        "vector_components": writer._vector_component_raw_identifier,
+        "feedback": writer._feedback_raw_identifier,
+    }
+    raw_identifier = raw_identifier_getters[change.table](change)
+    record_id = writer._record_id(change.table, raw_identifier)
+    connection.upsert(record_id, dict(payload or change.row))
+    return str(record_id)
 
 
 def test_surreal_delta_store_writer_smoke_embedded_local_updates_and_deletes_in_place(
@@ -377,3 +406,282 @@ def test_surreal_delta_store_writer_smoke_embedded_local_updates_and_deletes_in_
     assert fresh_snapshot["documents"][unrelated_ids["document"]] == first_snapshot["documents"][unrelated_ids["document"]]
     assert fresh_snapshot["chunks"][unrelated_ids["chunk"]] == first_snapshot["chunks"][unrelated_ids["chunk"]]
     assert fresh_snapshot["embeddings"][unrelated_ids["embedding"]] == first_snapshot["embeddings"][unrelated_ids["embedding"]]
+
+
+def test_surreal_delta_store_writer_smoke_changed_file_from_old_stack_fixture(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "old-stack.db"
+    fixture_ids = _create_transform_only_fixture(db_path)
+    sqlite_rows = load_sqlite_rows_for_surreal(db_path)
+    sqlite_rows_for_manifest = dict(sqlite_rows)
+    sqlite_rows_for_manifest["vector_components"] = []
+    for row in sqlite_rows_for_manifest["documents"]:
+        row["metadata"] = {}
+    for row in sqlite_rows_for_manifest["source_units"]:
+        row["metadata"] = {}
+    for row in sqlite_rows_for_manifest["chunks"]:
+        row["heading_hierarchy"] = []
+        row["file_paths"] = []
+        row["file_bindings"] = []
+        row["source_unit_refs"] = []
+        row["metadata"] = {}
+    for row in sqlite_rows_for_manifest["chunk_file_bindings"]:
+        row["metadata"] = {}
+    for row in sqlite_rows_for_manifest["provenance"]:
+        row["source_unit_refs"] = []
+        row["metadata"] = {}
+    for row in sqlite_rows_for_manifest["bindings"]:
+        row["source_unit_refs"] = []
+        row["metadata"] = {}
+        row.pop("unbound_at", None)
+    for row in sqlite_rows_for_manifest["fingerprints"]:
+        row["metadata"] = {}
+    for row in sqlite_rows_for_manifest["embeddings"]:
+        row.pop("original_chunk_id", None)
+        row["metadata"] = {}
+    now = datetime(2026, 6, 19, 13, 0, tzinfo=UTC)
+
+    manifest = build_surreal_delta_manifest_from_rows(
+        source_selection=SurrealDeltaSourceSelection(
+            source_name="filesystem",
+            table_name="source_documents",
+            changed_at=now,
+            cursor="filesystem:changed:46-smoke",
+        ),
+        checkpoint_candidate=SurrealDeltaCheckpointCandidate(
+            cursor="checkpoint:46-smoke",
+            watermark="watermark:46-smoke",
+            source_time=now,
+        ),
+        sqlite_rows=sqlite_rows_for_manifest,
+        changed_document_refs=[fixture_ids["file_path"]],
+    )
+
+    doc_two_ref = "filesystem:/tmp/Doc Two.md"
+    weird_chunk_id = fixture_ids["chunk_id"]
+    doc_two_chunk_id = "chunk:plain"
+    doc_two_embedding_key = f"contextual_512_50\x1fmultilingual_e5_large\x1f{doc_two_chunk_id}"
+
+    assert [row.row["document_ref"] for row in manifest.documents.rows] == [fixture_ids["file_path"]]
+    assert all(row.row["document_ref"] == fixture_ids["file_path"] for row in manifest.source_units.rows)
+    assert all(row.row["document_ref"] == fixture_ids["file_path"] for row in manifest.chunks.rows)
+    assert all(row.row["file_path"] == fixture_ids["file_path"] for row in manifest.chunk_file_bindings.rows)
+    assert all(row.row["document_ref"] == fixture_ids["file_path"] for row in manifest.provenance.rows)
+    assert all(row.row["document_ref"] == fixture_ids["file_path"] for row in manifest.resource_bindings.rows)
+    assert all(row.row["document_ref"] == fixture_ids["file_path"] for row in manifest.fingerprints.rows)
+    assert all(row.row["chunk_id"] == weird_chunk_id for row in manifest.embeddings.rows)
+    assert manifest.graph.deferred is True
+    assert manifest.feedback.deferred is True
+    assert doc_two_ref not in {row.row.get("document_ref") for row in manifest.documents.rows}
+    assert doc_two_ref not in {row.row.get("document_ref") for row in manifest.source_units.rows}
+    assert doc_two_ref not in {row.row.get("document_ref") for row in manifest.chunks.rows}
+    assert doc_two_ref not in {row.row.get("document_ref") for row in manifest.resource_bindings.rows}
+
+    with SurrealConnection(
+        SurrealStoreConfig(
+            url=f"surrealkv://{tmp_path / 'surreal-delta-live.db'}",
+            namespace="dotmd_phase46",
+            database="delta_smoke",
+        )
+    ) as connection:
+        define_dotmd_surreal_schema(connection)
+        writer = SurrealDeltaStoreWriter(connection=connection)
+
+        changed_bootstrap_ids = {
+            "document": _seed_change(
+                connection,
+                writer,
+                manifest.documents.rows[0],
+                payload={
+                    **dict(manifest.documents.rows[0].row),
+                    "title": "Bootstrap title",
+                    "metadata": {"seed": "bootstrap"},
+                },
+            ),
+            "chunk": _seed_change(
+                connection,
+                writer,
+                manifest.chunks.rows[0],
+                payload={
+                    **dict(manifest.chunks.rows[0].row),
+                    "title": "Bootstrap chunk",
+                    "text": "Bootstrap body",
+                    "metadata": {"seed": "bootstrap"},
+                },
+            ),
+            "binding": _seed_change(
+                connection,
+                writer,
+                manifest.resource_bindings.rows[0],
+                payload={
+                    **dict(manifest.resource_bindings.rows[0].row),
+                    "active": False,
+                    "content_fingerprint": "content-bootstrap",
+                    "metadata_fingerprint": "metadata-bootstrap",
+                    "metadata": {"seed": "bootstrap"},
+                },
+            ),
+            "embedding": _seed_change(
+                connection,
+                writer,
+                manifest.embeddings.rows[0],
+                payload={
+                    **dict(manifest.embeddings.rows[0].row),
+                    "text_hash": "hash-bootstrap",
+                    "vector_rowid": 9,
+                    "vector": [0.1, 0.2, 0.3],
+                    "metadata": {"seed": "bootstrap"},
+                },
+            ),
+        }
+        for section_name, rows in (
+            ("source_units", manifest.source_units.rows),
+            ("chunk_file_bindings", manifest.chunk_file_bindings.rows),
+            ("provenance", manifest.provenance.rows),
+            ("fingerprints", manifest.fingerprints.rows),
+        ):
+            for index, row in enumerate(rows, start=1):
+                _seed_change(
+                    connection,
+                    writer,
+                    row,
+                    payload={
+                        **dict(row.row),
+                        "metadata": {"seed": "bootstrap", "section": section_name, "index": index},
+                    },
+                )
+
+        unrelated_ids = {
+            "document": _seed_row(
+                connection,
+                writer.codec,
+                "documents",
+                doc_two_ref,
+                {
+                    "schema_version": SURREAL_SCHEMA_VERSION,
+                    "namespace": "filesystem",
+                    "document_ref": "/tmp/Doc Two.md",
+                    "ref": doc_two_ref,
+                    "title": "Doc Two bootstrap",
+                    "media_type": "text/markdown",
+                    "metadata": {"seed": "unrelated"},
+                },
+            ),
+            "chunk": _seed_row(
+                connection,
+                writer.codec,
+                "chunks",
+                doc_two_chunk_id,
+                {
+                    "schema_version": SURREAL_SCHEMA_VERSION,
+                    "original_chunk_id": doc_two_chunk_id,
+                    "chunk_id": doc_two_chunk_id,
+                    "chunk_strategy": "contextual_512_50",
+                    "document_ref": "/tmp/Doc Two.md",
+                    "ref": "filesystem:/tmp/Doc Two.md#bootstrap",
+                    "title": "Doc Two bootstrap chunk",
+                    "tags_text": "bootstrap",
+                    "text": "Bootstrap body",
+                    "metadata": {"seed": "unrelated"},
+                },
+            ),
+            "binding": _seed_row(
+                connection,
+                writer.codec,
+                "bindings",
+                "filesystem\x1f/tmp/Doc Two.md",
+                {
+                    "schema_version": SURREAL_SCHEMA_VERSION,
+                    "namespace": "filesystem",
+                    "document_ref": "/tmp/Doc Two.md",
+                    "resource_ref": "/tmp/Doc Two.md",
+                    "ref": "filesystem:/tmp/Doc Two.md#bootstrap",
+                    "active": False,
+                    "bound_at": now,
+                    "unbound_at": None,
+                    "content_fingerprint": "content-unrelated",
+                    "metadata_fingerprint": "metadata-unrelated",
+                    "source_unit_refs": ["unit:unrelated"],
+                    "metadata": {"seed": "unrelated"},
+                },
+            ),
+            "embedding": _seed_row(
+                connection,
+                writer.codec,
+                "embeddings",
+                doc_two_embedding_key,
+                {
+                    "schema_version": SURREAL_SCHEMA_VERSION,
+                    "chunk_id": doc_two_chunk_id,
+                    "chunk_strategy": "contextual_512_50",
+                    "embedding_model": "multilingual_e5_large",
+                    "text_hash": "hash-unrelated",
+                    "vector_rowid": 2,
+                    "vector": [0.4, 0.5, 0.6],
+                    "metadata": {"seed": "unrelated"},
+                },
+            ),
+        }
+
+        first_state = SurrealDeltaSyncState()
+        first = run_surreal_delta_sync(manifest, writer, state=first_state, batch_size=2)
+        first_snapshot = {
+            table: _scan_by_id(connection, table)
+            for table in (
+                "documents",
+                "source_units",
+                "chunks",
+                "chunk_file_bindings",
+                "provenance",
+                "bindings",
+                "fingerprints",
+                "embeddings",
+                "feedback",
+                "relations",
+                "checkpoints",
+            )
+        }
+
+        assert first.applied_counts["documents"] == 1
+        assert first.applied_counts["source_units"] == 2
+        assert first.applied_counts["chunks"] == 1
+        assert first.applied_counts["resource_bindings"] == 1
+        assert first.applied_counts["embeddings"] == 1
+        assert first.applied_counts["checkpoint_candidate"] == 1
+        assert first.applied_counts.get("graph", 0) == 0
+        assert first.applied_counts.get("feedback", 0) == 0
+        assert {"graph", "feedback"}.issubset(set(first.skipped_phases))
+
+        assert first_snapshot["documents"][changed_bootstrap_ids["document"]]["title"] == "Doc One"
+        assert first_snapshot["chunks"][changed_bootstrap_ids["chunk"]]["text"] == "Alpha body"
+        assert first_snapshot["bindings"][changed_bootstrap_ids["binding"]]["active"] is True
+        assert first_snapshot["embeddings"][changed_bootstrap_ids["embedding"]]["text_hash"] == "hash-alpha"
+        assert first_snapshot["documents"][unrelated_ids["document"]]["title"] == "Doc Two bootstrap"
+        assert first_snapshot["chunks"][unrelated_ids["chunk"]]["text"] == "Bootstrap body"
+        assert first_snapshot["bindings"][unrelated_ids["binding"]]["content_fingerprint"] == "content-unrelated"
+        assert first_snapshot["embeddings"][unrelated_ids["embedding"]]["text_hash"] == "hash-unrelated"
+        assert first_snapshot["feedback"] == {}
+        assert first_snapshot["relations"] == {}
+        assert first_snapshot["checkpoints"]
+
+        second_state = SurrealDeltaSyncState()
+        run_surreal_delta_sync(manifest, writer, state=second_state, batch_size=2)
+        second_snapshot = {
+            table: _scan_by_id(connection, table)
+            for table in (
+                "documents",
+                "source_units",
+                "chunks",
+                "chunk_file_bindings",
+                "provenance",
+                "bindings",
+                "fingerprints",
+                "embeddings",
+                "feedback",
+                "relations",
+                "checkpoints",
+            )
+        }
+
+    assert second_snapshot == first_snapshot
