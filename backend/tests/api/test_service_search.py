@@ -1361,7 +1361,7 @@ class TestCompareRerankers:
 
 
 class TestSurrealHybridOverrides:
-    def test_surreal_search_backend_replaces_runtime_retrieval_engines(
+    def test_surreal_runtime_retrieval_engines_are_replaced(
         self,
         tmp_path: Path,
     ) -> None:
@@ -1381,7 +1381,6 @@ class TestSurrealHybridOverrides:
         settings = Settings(
             index_dir=tmp_path,
             embedding_url="http://localhost:8088",
-            search_backend="surreal",
             surreal_retrieval_url="http://surrealdb:8000",
             surreal_retrieval_database="production",
             surreal_retrieval_username="root",

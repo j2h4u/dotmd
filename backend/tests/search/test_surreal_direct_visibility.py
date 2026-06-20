@@ -27,7 +27,6 @@ def _pipeline_settings(tmp_path: Path, surreal_db: Path) -> Settings:
         embedding_url="http://localhost:18088",
         indexing_paths=[str(data_dir)],
         extract_depth=ExtractDepth.STRUCTURAL,
-        search_backend="surreal",
         chunk_strategy="contextual_512_50",
         surreal_retrieval_url=f"surrealkv://{surreal_db}",
         surreal_retrieval_database="direct_visibility",

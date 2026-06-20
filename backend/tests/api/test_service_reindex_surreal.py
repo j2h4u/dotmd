@@ -39,7 +39,6 @@ def test_service_reindex_fails_fast_for_local_stores_in_surreal_mode(
     settings = Settings(
         index_dir=tmp_path / "index",
         embedding_url="http://test-tei:8088",
-        search_backend="surreal",
         surreal_retrieval_url="http://surrealdb:8000",
         surreal_retrieval_database="dotmd",
         surreal_retrieval_embedding_dimension=3,

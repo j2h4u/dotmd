@@ -195,7 +195,6 @@ Set these for the live container:
 | `DOTMD_INDEX_DIR` | `/dotmd-index` | Persistent index directory inside the container |
 | `DOTMD_INDEXING_PATHS` | `["/mnt"]` | Roots or glob patterns watched by the trickle indexer |
 | `DOTMD_EMBEDDING_URL` | `http://tei:80` | TEI-compatible embedding endpoint |
-| `DOTMD_SEARCH_BACKEND` | `surreal` | Production retrieval backend |
 | `DOTMD_SURREAL_RETRIEVAL_URL` | `http://surrealdb:8000` | Standalone SurrealDB URL |
 | `DOTMD_SURREAL_RETRIEVAL_NAMESPACE` | `dotmd` | SurrealDB namespace |
 | `DOTMD_SURREAL_RETRIEVAL_DATABASE` | `production` | SurrealDB database |

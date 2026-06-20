@@ -51,7 +51,6 @@ def pipeline_settings(tmp_path):
 def surreal_pipeline_settings(pipeline_settings):
     return pipeline_settings.model_copy(
         update={
-            "search_backend": "surreal",
             "surreal_retrieval_url": "http://surrealdb:8000",
             "surreal_retrieval_namespace": "dotmd",
             "surreal_retrieval_database": "phase46_direct_ingest",

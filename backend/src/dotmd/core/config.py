@@ -212,7 +212,6 @@ class Settings(BaseSettings):
         return normalized
 
     # Search
-    search_backend: Literal["sqlite", "surreal"] = "sqlite"
     default_top_k: int = DEFAULT_DEFAULT_TOP_K
     fusion_k: int = DEFAULT_FUSION_K
     rerank_pool_size: int = DEFAULT_RERANK_POOL_SIZE
@@ -485,7 +484,6 @@ def load_settings(**overrides: object) -> Settings:
 
 def load_runtime_settings(**overrides: object) -> Settings:
     """Construct and validate SurrealDB-only settings for long-running startup."""
-    overrides["search_backend"] = "surreal"
     settings = load_settings(**overrides)
     settings.validate_for_runtime()
     return settings

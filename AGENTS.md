@@ -139,7 +139,6 @@ Production env vars (source: `/opt/docker/dotmd/.env`):
 | `DOTMD_EMBEDDING_MODEL` | Model name passed to TEI |
 | `DOTMD_TEI_BATCH_SIZE` | TEI call batch size |
 | `DOTMD_EXTRACT_DEPTH` | `structural` or `ner` |
-| `DOTMD_SEARCH_BACKEND` | `surreal` |
 | `DOTMD_SURREAL_RETRIEVAL_URL` | Standalone SurrealDB URL |
 | `DOTMD_SURREAL_RETRIEVAL_NAMESPACE` | SurrealDB namespace, normally `dotmd` |
 | `DOTMD_SURREAL_RETRIEVAL_DATABASE` | SurrealDB database, normally `production` |

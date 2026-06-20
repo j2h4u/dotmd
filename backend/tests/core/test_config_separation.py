@@ -12,7 +12,7 @@ from dotmd import mcp_server
 from dotmd.api import server as api_server
 from dotmd.api.service import DotMDService
 from dotmd.core import config
-from dotmd.core.config import Settings, load_runtime_settings
+from dotmd.core.config import Settings
 from dotmd.core.models import ExtractDepth, IndexStats, TrickleStatus
 
 
@@ -23,7 +23,6 @@ def _runtime_settings(**overrides: object) -> Settings:
         "indexing_paths": ["/mnt"],
         "embedding_url": "http://tei:80",
         "embedding_model": "BAAI/bge-small-en-v1.5",
-        "search_backend": "surreal",
         "chunk_strategy": "heading_512_50",
         "extract_depth": ExtractDepth.NER,
         "ner_model_name": "urchade/gliner_multi-v2.1",
@@ -84,6 +83,7 @@ def test_indexing_extra_exclude_is_additive() -> None:
 def test_surreal_runtime_settings_are_the_only_public_graph_runtime_config() -> None:
     settings = Settings(embedding_url="http://localhost:8088")
 
+    assert "".join(("search", "_backend")) not in Settings.model_fields
     assert "falkordb_url" not in Settings.model_fields
     assert "falkordb_graph_name" not in Settings.model_fields
     assert settings.surreal_retrieval_url == config.DEFAULT_SURREAL_URL
@@ -100,7 +100,7 @@ def test_surreal_runtime_defaults_export_surreal_settings() -> None:
     assert settings.surreal_retrieval_vector_index_type == "F32"
 
 
-def test_surreal_search_backend_vector_index_type_normalizes_and_validates() -> None:
+def test_surreal_retrieval_vector_index_type_normalizes_and_validates() -> None:
     settings = Settings(
         embedding_url="http://localhost:8088",
         surreal_retrieval_vector_index_type="f16",
@@ -208,21 +208,6 @@ def test_runtime_validation_accepts_explicit_deployment_values() -> None:
     settings = _runtime_settings()
 
     settings.validate_for_runtime()
-
-
-def test_runtime_loader_forces_surreal_even_if_backend_override_requests_sqlite() -> None:
-    settings = load_runtime_settings(
-        data_dir=Path("/mnt"),
-        index_dir=Path("/dotmd-index"),
-        indexing_paths=["/mnt"],
-        embedding_url="http://tei:80",
-        search_backend="sqlite",
-        surreal_retrieval_url="http://surrealdb:8000",
-        surreal_retrieval_database="production",
-        surreal_retrieval_embedding_dimension=1024,
-    )
-
-    assert settings.search_backend == "surreal"
 
 
 def test_base_url_none_remains_valid() -> None:

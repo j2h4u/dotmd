@@ -232,13 +232,13 @@ def _table_exists(db_path: Path, table: str) -> bool:
 
 def _get_pipeline(db_path: Path):  # type: ignore[no-untyped-def]
     """Deferred import of IndexingPipeline — raises ImportError until P3/P4 ships."""
-    return _get_pipeline_with_backend(db_path)
+    return _get_pipeline_with_direct_writer(db_path)
 
 
-def _get_pipeline_with_backend(
+def _get_pipeline_with_direct_writer(
     db_path: Path,
     *,
-    search_backend: str = "sqlite",
+    use_surreal_direct_writer: bool = False,
 ):  # type: ignore[no-untyped-def]
     from dotmd.core.config import Settings
     from dotmd.ingestion import pipeline as pipeline_module
@@ -248,11 +248,14 @@ def _get_pipeline_with_backend(
         index_dir=db_path.parent,
         embedding_url="http://localhost:18088",
         embedding_model=MODEL,
-        search_backend=search_backend,
-        surreal_retrieval_url="http://localhost:8000",
-        surreal_retrieval_database="dotmd",
     )
-    if search_backend == "surreal":
+    if use_surreal_direct_writer:
+        settings = settings.model_copy(
+            update={
+                "surreal_retrieval_url": "http://localhost:8000",
+                "surreal_retrieval_database": "dotmd",
+            }
+        )
         with patch.object(
             pipeline_module,
             "_create_surreal_direct_writer",
@@ -785,7 +788,7 @@ class TestSurrealFilesystemLifecycle:
         }
         conn.close()
 
-        pipeline = _get_pipeline_with_backend(db_path, search_backend="surreal")
+        pipeline = _get_pipeline_with_direct_writer(db_path, use_surreal_direct_writer=True)
         captured_manifests: list[object] = []
 
         def record_manifest(manifest) -> None:  # type: ignore[no-untyped-def]
@@ -864,7 +867,7 @@ class TestSurrealFilesystemLifecycle:
         _add_source_document(db_path, file_path)
         _add_resource_binding(db_path, file_path)
 
-        pipeline = _get_pipeline_with_backend(db_path, search_backend="surreal")
+        pipeline = _get_pipeline_with_direct_writer(db_path, use_surreal_direct_writer=True)
         captured_manifests: list[object] = []
 
         def record_manifest(manifest) -> None:  # type: ignore[no-untyped-def]

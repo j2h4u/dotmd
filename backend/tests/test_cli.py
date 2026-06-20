@@ -199,7 +199,6 @@ def test_oauth_code_create_outputs_pairing_code(tmp_path: Path) -> None:
 def test_status_verbose_reports_surrealdb_graph_and_skips_sqlite_tables(tmp_path: Path) -> None:
     service = SimpleNamespace(
         _settings=SimpleNamespace(
-            search_backend="surreal",
             surreal_retrieval_url="http://surrealdb:8000",
             surreal_retrieval_namespace="dotmd",
             surreal_retrieval_database="production",

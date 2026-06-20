@@ -126,7 +126,6 @@ def pipeline_settings(tmp_path):
 def surreal_pipeline_settings(pipeline_settings):
     return pipeline_settings.model_copy(
         update={
-            "search_backend": "surreal",
             "surreal_retrieval_url": "http://surrealdb:8000",
             "surreal_retrieval_namespace": "dotmd",
             "surreal_retrieval_database": "phase46_direct_ingest",
@@ -258,7 +257,6 @@ def test_surreal_metadata_only_reindex_skips_local_vec_and_fts_artifacts(
         embedding_url="http://localhost:18088",
         indexing_paths=[str(data_dir)],
         extract_depth=ExtractDepth.STRUCTURAL,
-        search_backend="surreal",
         chunk_strategy="contextual_512_50",
         surreal_retrieval_url=f"surrealkv://{surreal_db}",
         surreal_retrieval_database="metadata_only_visibility",

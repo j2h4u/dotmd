@@ -26,7 +26,6 @@ def _surreal_settings(tmp_path: Path) -> Settings:
         embedding_url="http://localhost:18088",
         indexing_paths=[str(data_dir)],
         extract_depth=ExtractDepth.STRUCTURAL,
-        search_backend="surreal",
         surreal_retrieval_url="http://surrealdb:8000",
         surreal_retrieval_database="dotmd",
         surreal_retrieval_embedding_dimension=3,

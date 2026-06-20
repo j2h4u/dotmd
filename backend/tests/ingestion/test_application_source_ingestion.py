@@ -22,7 +22,11 @@ from .application_source_fixtures import FixtureApplicationSourceProvider
 NOW = datetime(2026, 5, 8, 12, 0, tzinfo=UTC)
 
 
-def _pipeline(tmp_path: Path, *, search_backend: str = "surreal") -> IndexingPipeline:
+def _pipeline(
+    tmp_path: Path,
+    *,
+    use_surreal_direct_writer: bool = True,
+) -> IndexingPipeline:
     data_dir = tmp_path / "data"
     index_dir = tmp_path / "index"
     data_dir.mkdir()
@@ -33,11 +37,14 @@ def _pipeline(tmp_path: Path, *, search_backend: str = "surreal") -> IndexingPip
         embedding_url="http://localhost:18088",
         indexing_paths=[str(data_dir)],
         extract_depth=ExtractDepth.STRUCTURAL,
-        search_backend=search_backend,
-        surreal_retrieval_url="http://localhost:8000",
-        surreal_retrieval_database="dotmd",
     )
-    if search_backend == "surreal":
+    if use_surreal_direct_writer:
+        settings = settings.model_copy(
+            update={
+                "surreal_retrieval_url": "http://localhost:8000",
+                "surreal_retrieval_database": "dotmd",
+            }
+        )
         with patch.object(
             pipeline_module,
             "_create_surreal_direct_writer",
@@ -57,7 +64,7 @@ def _pipeline(tmp_path: Path, *, search_backend: str = "surreal") -> IndexingPip
 
 
 def _pipeline_surreal(tmp_path: Path) -> IndexingPipeline:
-    return _pipeline(tmp_path, search_backend="surreal")
+    return _pipeline(tmp_path, use_surreal_direct_writer=True)
 
 
 def _document(document_ref: str, title: str) -> SourceDocument:
@@ -207,7 +214,7 @@ def test_application_source_emits_surreal_manifest_on_surreal_backend(
 def test_purge_application_source_removes_checkpoint_fingerprints_and_vectors(
     tmp_path: Path,
 ) -> None:
-    pipeline = _pipeline(tmp_path, search_backend="sqlite")
+    pipeline = _pipeline(tmp_path, use_surreal_direct_writer=False)
     doc_a = _document("doc:a", "Doc A")
     provider = FixtureApplicationSourceProvider(
         ApplicationSourceDescription(
