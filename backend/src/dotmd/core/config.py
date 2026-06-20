@@ -392,43 +392,32 @@ class Settings(BaseSettings):
             errors.append("indexing_paths must contain absolute paths for runtime startup")
         if not self.embedding_url:
             errors.append("embedding_url must not be empty for runtime startup")
-        if self.search_backend == "surreal":
-            if not self.surreal_retrieval_url:
-                errors.append("surreal_retrieval_url must be set for Surreal search runtime")
-            if not self.surreal_retrieval_namespace:
-                errors.append(
-                    "surreal_retrieval_namespace must be set for Surreal search runtime"
-                )
-            if not self.surreal_retrieval_database:
-                errors.append(
-                    "surreal_retrieval_database must be set for Surreal search runtime"
-                )
-            if self.surreal_retrieval_embedding_dimension is None:
-                errors.append(
-                    "surreal_retrieval_embedding_dimension must be set for "
-                    "Surreal search runtime"
-                )
-            has_username = bool(self.surreal_retrieval_username)
-            has_password = bool(self.surreal_retrieval_password)
-            if has_username != has_password:
-                errors.append(
-                    "surreal_retrieval_username and surreal_retrieval_password "
-                    "must be set together"
-                )
-            if (has_username or has_password) and self.surreal_retrieval_access_token:
-                errors.append(
-                    "surreal_retrieval_access_token must not be combined with "
-                    "username/password auth"
-                )
-            if self.surreal_retrieval_hnsw_ef < 1:
-                errors.append(
-                    "surreal_retrieval_hnsw_ef must be >= 1 for Surreal search runtime"
-                )
-            if self.surreal_retrieval_embedding_shard_count < 1:
-                errors.append(
-                    "surreal_retrieval_embedding_shard_count must be >= 1 for "
-                    "Surreal search runtime"
-                )
+        if not self.surreal_retrieval_url:
+            errors.append("surreal_retrieval_url must be set for runtime startup")
+        if not self.surreal_retrieval_namespace:
+            errors.append("surreal_retrieval_namespace must be set for runtime startup")
+        if not self.surreal_retrieval_database:
+            errors.append("surreal_retrieval_database must be set for runtime startup")
+        if self.surreal_retrieval_embedding_dimension is None:
+            errors.append(
+                "surreal_retrieval_embedding_dimension must be set for runtime startup"
+            )
+        has_username = bool(self.surreal_retrieval_username)
+        has_password = bool(self.surreal_retrieval_password)
+        if has_username != has_password:
+            errors.append(
+                "surreal_retrieval_username and surreal_retrieval_password must be set together"
+            )
+        if (has_username or has_password) and self.surreal_retrieval_access_token:
+            errors.append(
+                "surreal_retrieval_access_token must not be combined with username/password auth"
+            )
+        if self.surreal_retrieval_hnsw_ef < 1:
+            errors.append("surreal_retrieval_hnsw_ef must be >= 1 for runtime startup")
+        if self.surreal_retrieval_embedding_shard_count < 1:
+            errors.append(
+                "surreal_retrieval_embedding_shard_count must be >= 1 for runtime startup"
+            )
 
         identity_fields = {
             "embedding_model": self.embedding_model,
@@ -442,11 +431,6 @@ class Settings(BaseSettings):
         for field_name, value in identity_fields.items():
             if value == "":
                 errors.append(f"{field_name} must not be empty for runtime startup")
-
-        if not self.falkordb_url:
-            errors.append("falkordb_url must be set for runtime startup")
-        elif self.falkordb_url == DEFAULT_FALKORDB_URL:
-            errors.append("falkordb_url must not use DEFAULT_FALKORDB_URL for runtime startup")
 
         if errors:
             raise ValueError("; ".join(errors))

@@ -295,13 +295,11 @@ def _create_surreal_direct_writer(settings: Settings) -> Any:
     from dotmd.storage.surreal_schema import define_dotmd_surreal_schema
 
     if not settings.surreal_retrieval_url:
-        raise ValueError("surreal_retrieval_url must be set when search_backend='surreal'")
+        raise ValueError("surreal_retrieval_url must be set for Surreal direct ingest")
     if not settings.surreal_retrieval_namespace:
-        raise ValueError(
-            "surreal_retrieval_namespace must be set when search_backend='surreal'"
-        )
+        raise ValueError("surreal_retrieval_namespace must be set for Surreal direct ingest")
     if not settings.surreal_retrieval_database:
-        raise ValueError("surreal_retrieval_database must be set when search_backend='surreal'")
+        raise ValueError("surreal_retrieval_database must be set for Surreal direct ingest")
 
     has_username = bool(settings.surreal_retrieval_username)
     has_password = bool(settings.surreal_retrieval_password)
@@ -533,7 +531,7 @@ class IndexingPipeline:
         _write_pipeline_init_progress("pipeline:embedding_cache", "applied")
 
         # Direct Surreal writer for standalone filesystem ingest.
-        # Enabled only for the standalone Surreal search backend.
+        # Enabled when the Surreal direct ingest path is configured.
         self._surreal_direct_writer: Any | None = (
             _create_surreal_direct_writer(settings) if settings.search_backend == "surreal" else None
         )
@@ -765,7 +763,7 @@ class IndexingPipeline:
             for e_text, e_meta in zip(e_text_vectors, e_meta_vectors, strict=False)
         ]
 
-        if self._settings.search_backend == "surreal":
+        if self._surreal_direct_writer is not None:
             checkpoint_cursor_for_manifest = batch.checkpoint_cursor
             if checkpoint_cursor_for_manifest is None:
                 if isinstance(checkpoint_cursor, str):
@@ -1037,7 +1035,7 @@ class IndexingPipeline:
     def _raise_if_surreal_local_destructive(self, action: str) -> None:
         if self._settings.search_backend == "surreal":
             raise RuntimeError(
-                f"{action} is disabled when search_backend='surreal' because it mutates "
+                f"{action} is disabled in Surreal mode because it mutates "
                 "local SQLite/FTS5/vector/graph state"
             )
 
@@ -2120,7 +2118,7 @@ class IndexingPipeline:
         text_hashes = self._complete_chunk_text_hashes(chunks, text_hashes)
         source_document = self._source_document_for_file_info(file_info)
 
-        if self._settings.search_backend == "surreal":
+        if self._surreal_direct_writer is not None:
             direct_write = SurrealDirectFileWrite(
                 source_document=source_document,
                 chunks=tuple(chunks),
@@ -2230,9 +2228,9 @@ class IndexingPipeline:
         embeds chunks (e_text), encodes metadata (e_meta, batched), fuses, stores.
         Uses _meta_entity_id() for canonical path normalization throughout.
         """
-        if self._settings.search_backend == "surreal":
+        if self._surreal_direct_writer is not None:
             logger.info(
-                "reindex_vectors: skipped local vector rebuild in surreal search backend"
+                "reindex_vectors: skipped local vector rebuild in Surreal mode"
             )
             return 0
 
@@ -2316,8 +2314,8 @@ class IndexingPipeline:
 
     def reindex_fts5(self) -> int:
         """Rebuild FTS5 keyword index from stored chunks. Returns chunk count."""
-        if self._settings.search_backend == "surreal":
-            logger.info("reindex_fts5: skipped local FTS5 rebuild in surreal search backend")
+        if self._surreal_direct_writer is not None:
+            logger.info("reindex_fts5: skipped local FTS5 rebuild in Surreal mode")
             return 0
 
         all_chunks = self._metadata_store.get_all_chunks()
@@ -2752,7 +2750,7 @@ class IndexingPipeline:
             all_text_hashes.update(text_hashes)
             chunk_order.extend(file_chunks)
 
-            if self._settings.search_backend != "surreal":
+            if self._surreal_direct_writer is None:
                 continue
 
             source_document = source_documents_by_path.get(fp)
@@ -2824,14 +2822,11 @@ class IndexingPipeline:
     def _write_surreal_direct_manifest(self, manifest: SurrealDeltaManifest) -> None:
         """Apply a direct Surreal manifest when a writer is configured.
 
-        This is only available when the standalone Surreal backend is enabled.
+        This is only available when the Surreal direct writer is configured.
         """
         writer = self._surreal_direct_writer
         if writer is None:
-            if self._settings.search_backend == "surreal":
-                raise RuntimeError("surreal direct writer is not configured")
-            logger.debug("surreal_direct_manifest skipped: standalone Surreal backend disabled")
-            return
+            raise RuntimeError("Surreal direct writer is not configured")
         run_surreal_delta_sync(
             manifest,
             writer,
@@ -2848,7 +2843,7 @@ class IndexingPipeline:
         source_time: datetime | None = None,
     ) -> None:
         """Emit graph-only Surreal rows from in-memory ingestion state."""
-        if self._settings.search_backend != "surreal":
+        if self._surreal_direct_writer is None:
             return
 
         graph_source_time = source_time
@@ -2882,7 +2877,7 @@ class IndexingPipeline:
         include_chunk_tombstones: bool,
     ) -> SurrealDeltaManifest | None:
         """Build a direct Surreal tombstone manifest for one filesystem path."""
-        if self._settings.search_backend != "surreal":
+        if self._surreal_direct_writer is None:
             return None
 
         document_ref = self._meta_entity_id(file_path)
@@ -3176,7 +3171,7 @@ class IndexingPipeline:
         )
 
         t0 = time.perf_counter()
-        if self._settings.search_backend == "surreal":
+        if self._surreal_direct_writer is not None:
             self._write_surreal_graph_manifest(
                 files,
                 chunks,
@@ -3438,7 +3433,7 @@ class IndexingPipeline:
 
             _beacon("graph")
             t0 = time.perf_counter()
-            if self._settings.search_backend == "surreal":
+            if self._surreal_direct_writer is not None:
                 self._write_surreal_graph_manifest(
                     [file_info],
                     chunks,
@@ -3495,7 +3490,7 @@ class IndexingPipeline:
             if metadata_only:
                 file_chunks = self._chunks_for_file_with_paths(file_info)
                 file_meta = self._build_file_meta_from_fileinfo([file_info])
-                if self._settings.search_backend != "surreal":
+                if self._surreal_direct_writer is None:
                     self._keyword_engine.add_chunks(
                         file_chunks,
                         file_meta=file_meta,
@@ -3672,7 +3667,7 @@ class IndexingPipeline:
             needs.  This method uses the holder-aware path: delete_chunks_from_graph
             (orphan chunk_ids only) + delete_file_node (File node only).
         """
-        if self._settings.search_backend == "surreal":
+        if self._surreal_direct_writer is not None:
             direct_manifest = self._filesystem_surreal_tombstone_manifest(
                 file_path,
                 reason="filesystem file purged",
@@ -3727,7 +3722,7 @@ class IndexingPipeline:
         reason: str = "file_missing",
     ) -> None:
         """Deactivate a filesystem binding while retaining derived artifacts."""
-        if self._settings.search_backend == "surreal":
+        if self._surreal_direct_writer is not None:
             direct_manifest = self._filesystem_surreal_tombstone_manifest(
                 file_path,
                 reason=reason,
@@ -3841,7 +3836,7 @@ class IndexingPipeline:
             return 0, 0, 0
 
         files_removed = 0
-        surreal_mode = self._settings.search_backend == "surreal"
+        surreal_mode = self._surreal_direct_writer is not None
         for file_path in sorted(orphan_paths):
             try:
                 if surreal_mode:
@@ -3907,7 +3902,7 @@ class IndexingPipeline:
         Kind-specific extraction (e.g. ``participants`` for meeting_transcript)
         follows the same principle: structured fields have known semantics.
         """
-        if self._settings.search_backend == "surreal":
+        if self._surreal_direct_writer is not None:
             cursor = ":".join(sorted(str(fi.path) for fi in files)) + ":frontmatter"
             self._write_surreal_graph_manifest(
                 files,

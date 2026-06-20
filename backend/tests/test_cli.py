@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from click.testing import CliRunner
 
 from dotmd.cli import main
@@ -192,3 +194,53 @@ def test_oauth_code_create_outputs_pairing_code(tmp_path: Path) -> None:
     assert len(code_line) == 9
     assert "Expires:" in result.output
     assert (tmp_path / "oauth_state.json").exists()
+
+
+def test_status_verbose_reports_surrealdb_graph_and_skips_sqlite_tables(tmp_path: Path) -> None:
+    service = SimpleNamespace(
+        _settings=SimpleNamespace(
+            search_backend="surreal",
+            surreal_retrieval_url="http://surrealdb:8000",
+            surreal_retrieval_namespace="dotmd",
+            surreal_retrieval_database="production",
+        ),
+        _pipeline=SimpleNamespace(
+            conn=SimpleNamespace(execute=lambda *_args, **_kwargs: pytest.fail("sqlite scan ran"))
+        ),
+        status=lambda: SimpleNamespace(
+            total_files=1,
+            total_chunks=2,
+            total_entities=3,
+            total_edges=4,
+            last_indexed=None,
+            data_dir=None,
+            new_files=0,
+            modified_files=0,
+            deleted_files=0,
+            trickle_status=None,
+        ),
+    )
+
+    with patch("dotmd.cli._get_runtime_service_from_ctx", return_value=service):
+        result = CliRunner().invoke(main, ["--index-dir", str(tmp_path), "status", "-V"])
+
+    assert result.exit_code == 0, result.output
+    assert "Graph:    SurrealDB @ http://surrealdb:8000/dotmd/production" in result.output
+    assert "falkordb" not in result.output.lower()
+    assert "Strategies:" not in result.output
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        (["reindex", "vectors"], "reindex vectors is retired after the SurrealDB cutover"),
+        (["reset", "model", "legacy"], "reset model is retired after the SurrealDB cutover"),
+    ],
+)
+def test_retired_old_stack_admin_commands_fail_fast(
+    tmp_path: Path, args: list[str], expected: str
+) -> None:
+    result = CliRunner().invoke(main, ["--index-dir", str(tmp_path), *args])
+
+    assert result.exit_code != 0
+    assert expected in result.output

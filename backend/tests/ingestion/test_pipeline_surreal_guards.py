@@ -313,7 +313,7 @@ def test_surreal_pipeline_destructive_methods_refuse_and_preserve_local_tables(
     if method_name == "clear":
         pipeline._settings.acronyms_path.write_text("{}", encoding="utf-8")
 
-    with pytest.raises(RuntimeError, match="search_backend='surreal'"):
+    with pytest.raises(RuntimeError, match="Surreal mode"):
         getattr(pipeline, method_name)(*args)
 
     assert _snapshot_counts(pipeline.conn, tables) == counts_before

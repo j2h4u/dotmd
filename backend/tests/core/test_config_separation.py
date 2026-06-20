@@ -23,6 +23,7 @@ def _runtime_settings(**overrides: object) -> Settings:
         "indexing_paths": ["/mnt"],
         "embedding_url": "http://tei:80",
         "embedding_model": "BAAI/bge-small-en-v1.5",
+        "search_backend": "surreal",
         "chunk_strategy": "heading_512_50",
         "extract_depth": ExtractDepth.NER,
         "ner_model_name": "urchade/gliner_multi-v2.1",
@@ -31,6 +32,15 @@ def _runtime_settings(**overrides: object) -> Settings:
         "reranker_backend": "cross_encoder",
         "embedding_weights": "text=0.7,meta=0.3",
         "falkordb_url": "redis://falkordb:6379",
+        "surreal_retrieval_url": "http://surrealdb:8000",
+        "surreal_retrieval_namespace": "dotmd",
+        "surreal_retrieval_database": "production",
+        "surreal_retrieval_username": None,
+        "surreal_retrieval_password": None,
+        "surreal_retrieval_access_token": "token",
+        "surreal_retrieval_embedding_dimension": 1024,
+        "surreal_retrieval_hnsw_ef": 40,
+        "surreal_retrieval_embedding_shard_count": 1,
     }
     values.update(overrides)
     return Settings(**values)
@@ -76,10 +86,9 @@ def test_default_falkordb_url_is_exported() -> None:
     assert config.DEFAULT_FALKORDB_URL == "redis://localhost:6379"
 
 
-def test_surreal_search_backend_defaults_to_legacy_sqlite_runtime() -> None:
+def test_surreal_runtime_defaults_export_surreal_settings() -> None:
     settings = Settings(embedding_url="http://localhost:8088")
 
-    assert settings.search_backend == "sqlite"
     assert settings.surreal_retrieval_url == "http://127.0.0.1:8000"
     assert settings.surreal_retrieval_namespace == "dotmd"
     assert settings.surreal_retrieval_database is None
@@ -103,15 +112,14 @@ def test_surreal_search_backend_vector_index_type_normalizes_and_validates() -> 
 
 
 def test_runtime_validation_requires_surreal_runtime_fields() -> None:
-    settings = _runtime_settings(search_backend="surreal")
+    settings = _runtime_settings(surreal_retrieval_database=None)
 
     with pytest.raises(ValueError, match="surreal_retrieval_database"):
         settings.validate_for_runtime()
 
 
-def test_runtime_validation_accepts_surreal_search_backend() -> None:
+def test_runtime_validation_accepts_surreal_runtime_configuration() -> None:
     settings = _runtime_settings(
-        search_backend="surreal",
         surreal_retrieval_url="http://surrealdb:8000",
         surreal_retrieval_database="production",
         surreal_retrieval_embedding_dimension=1024,
@@ -134,11 +142,10 @@ def test_runtime_validation_accepts_surreal_search_backend() -> None:
         {"surreal_retrieval_embedding_shard_count": 0},
     ],
 )
-def test_runtime_validation_rejects_invalid_surreal_search_backend_auth_or_bounds(
+def test_runtime_validation_rejects_invalid_surreal_runtime_auth_or_bounds(
     overrides: dict[str, object],
 ) -> None:
     settings = _runtime_settings(
-        search_backend="surreal",
         surreal_retrieval_url="http://surrealdb:8000",
         surreal_retrieval_database="production",
         surreal_retrieval_embedding_dimension=1024,
@@ -197,16 +204,6 @@ def test_runtime_validation_accepts_explicit_deployment_values() -> None:
     settings = _runtime_settings()
 
     settings.validate_for_runtime()
-
-
-@pytest.mark.parametrize("falkordb_url", ["", config.DEFAULT_FALKORDB_URL])
-def test_runtime_validation_rejects_missing_or_default_falkordb_url(
-    falkordb_url: str,
-) -> None:
-    settings = _runtime_settings(falkordb_url=falkordb_url)
-
-    with pytest.raises(ValueError, match="falkordb_url"):
-        settings.validate_for_runtime()
 
 
 def test_base_url_none_remains_valid() -> None:

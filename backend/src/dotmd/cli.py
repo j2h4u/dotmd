@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 import sys
 import time
 from datetime import UTC
@@ -12,7 +11,7 @@ import click
 
 from dotmd.api.service import DotMDService
 from dotmd.auth import DotMDOAuthProvider
-from dotmd.core.config import load_settings
+from dotmd.core.config import load_runtime_settings, load_settings
 from dotmd.core.exceptions import IndexingLockError
 from dotmd.core.models import SearchMode, TrickleStatus
 from dotmd.feedback import FeedbackStore
@@ -53,6 +52,16 @@ def _get_service_from_ctx(ctx: click.Context, **overrides: object) -> DotMDServi
     if index_dir is not None:
         overrides.setdefault("index_dir", index_dir)
     return _get_service(**overrides)
+
+
+def _get_runtime_service_from_ctx(ctx: click.Context, **overrides: object) -> DotMDService:
+    """Build DotMDService with SurrealDB runtime validation enabled."""
+    index_dir = (ctx.obj or {}).get("index_dir")
+    if index_dir is not None:
+        overrides.setdefault("index_dir", index_dir)
+    overrides.setdefault("search_backend", "surreal")
+    settings = load_runtime_settings(**overrides)
+    return DotMDService(settings=settings)
 
 
 @main.command()
@@ -229,16 +238,19 @@ def compare(
 @click.pass_context
 def status(ctx: click.Context, verbose: bool) -> None:
     """Show index statistics."""
-    service = _get_service_from_ctx(ctx)
+    service = _get_runtime_service_from_ctx(ctx)
+    settings = service._settings
     stats = service.status()
 
     click.echo(f"Files:    {stats.total_files}")
     click.echo(f"Chunks:   {stats.total_chunks}")
     click.echo(f"Entities: {stats.total_entities}")
     click.echo(f"Edges:    {stats.total_edges}")
-    # Graph backend info
-    settings = load_settings()
-    click.echo(f"Graph:    falkordb @ {settings.falkordb_url}/dotmd")
+    click.echo(
+        "Graph:    SurrealDB @ "
+        f"{settings.surreal_retrieval_url}/{settings.surreal_retrieval_namespace}/"
+        f"{settings.surreal_retrieval_database}"
+    )
     if stats.last_indexed:
         click.echo(f"Last indexed: {stats.last_indexed.isoformat()}")
     if stats.data_dir:
@@ -250,55 +262,8 @@ def status(ctx: click.Context, verbose: bool) -> None:
         else:
             click.echo("No changes detected since last index.")
 
-    # Verbose: per-strategy and per-model table details
     if verbose:
-        conn = service._pipeline.conn
-        rows = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-        ).fetchall()
-
-        # Collect strategies from chunks_* tables
-        # Phase 16 P5: file count from chunk_file_paths_* M2M table (not chunks_* file_path column)
-        strategies: dict[str, tuple[int, int]] = {}  # strategy -> (chunks, files)
-        for (name,) in rows:
-            if name.startswith("chunks_") and not name.startswith("chunks_fts_"):
-                strategy = name[len("chunks_") :]
-                count = conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
-                m2m_table = f"chunk_file_paths_{strategy}"
-                try:
-                    files = conn.execute(
-                        f"SELECT COUNT(DISTINCT file_path) FROM {m2m_table}"
-                    ).fetchone()[0]
-                except sqlite3.OperationalError:
-                    files = 0
-                strategies[strategy] = (count, files)
-
-        if strategies:
-            click.echo("")
-            click.echo("Strategies:")
-            for strategy, (chunks, files) in sorted(strategies.items()):
-                click.echo(f"  {strategy}: {chunks} chunks, {files} files")
-
-        # Collect models from vec_meta_* tables
-        models: dict[tuple[str, str], int] = {}  # (strategy, model) -> vectors
-        for (name,) in rows:
-            if name.startswith("vec_meta_"):
-                suffix = name[len("vec_meta_") :]
-                # suffix is {strategy}_{model} — find the split point
-                # by matching against known strategies
-                for strategy in strategies:
-                    prefix = strategy + "_"
-                    if suffix.startswith(prefix):
-                        model = suffix[len(prefix) :]
-                        count = conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
-                        models[(strategy, model)] = count
-                        break
-
-        if models:
-            click.echo("")
-            click.echo("Models per strategy:")
-            for (strategy, model), vectors in sorted(models.items()):
-                click.echo(f"  {strategy} / {model}: {vectors} vectors")
+        click.echo("Storage:  SurrealDB production database")
 
     # Trickle indexer progress
     if stats.trickle_status and stats.trickle_status != TrickleStatus.IDLE:
@@ -343,53 +308,25 @@ def reindex() -> None:
 @reindex.command("vectors")
 def reindex_vectors() -> None:
     """Rebuild vector embeddings (requires TEI)."""
-    service = _get_service()
-    click.echo("Rebuilding vector index...")
-    try:
-        n = service.reindex("vectors")
-    except IndexingLockError as e:
-        click.echo(str(e), err=True)
-        raise SystemExit(1) from None
-    click.echo(f"Done. {n} chunks re-embedded.")
+    raise click.ClickException("reindex vectors is retired after the SurrealDB cutover")
 
 
 @reindex.command("fts5")
 def reindex_fts5() -> None:
     """Rebuild FTS5 keyword index."""
-    service = _get_service()
-    click.echo("Rebuilding FTS5 index...")
-    try:
-        n = service.reindex("fts5")
-    except IndexingLockError as e:
-        click.echo(str(e), err=True)
-        raise SystemExit(1) from None
-    click.echo(f"Done. {n} chunks re-indexed.")
+    raise click.ClickException("reindex fts5 is retired after the SurrealDB cutover")
 
 
 @reindex.command("graph")
 def reindex_graph() -> None:
     """Rebuild knowledge graph (runs extraction)."""
-    service = _get_service()
-    click.echo("Rebuilding knowledge graph...")
-    try:
-        n = service.reindex("graph")
-    except IndexingLockError as e:
-        click.echo(str(e), err=True)
-        raise SystemExit(1) from None
-    click.echo(f"Done. {n} chunks processed.")
+    raise click.ClickException("reindex graph is retired after the SurrealDB cutover")
 
 
 @reindex.command("all")
 def reindex_all() -> None:
     """Rebuild all derived indexes (vectors + FTS5 + graph)."""
-    service = _get_service()
-    click.echo("Rebuilding all indexes...")
-    try:
-        n = service.reindex("all")
-    except IndexingLockError as e:
-        click.echo(str(e), err=True)
-        raise SystemExit(1) from None
-    click.echo(f"Done. {n} chunks across all stores.")
+    raise click.ClickException("reindex all is retired after the SurrealDB cutover")
 
 
 @main.group()
@@ -401,32 +338,14 @@ def reset() -> None:
 @click.argument("name")
 def reset_model(name: str) -> None:
     """Drop vectors and embed fingerprints for a model."""
-    if not click.confirm(f"This will delete all vectors for model '{name}'. Continue?"):
-        return
-    service = _get_service()
-    try:
-        service.drop_vectors()
-    except IndexingLockError as e:
-        click.echo(str(e), err=True)
-        raise SystemExit(1) from None
-    click.echo(f"Dropped vectors for model '{name}'.")
+    raise click.ClickException("reset model is retired after the SurrealDB cutover")
 
 
 @reset.command("strategy")
 @click.argument("name")
 def reset_strategy(name: str) -> None:
     """Drop ALL data for a chunk strategy (chunks, FTS5, graph, vectors)."""
-    if not click.confirm(
-        f"This will delete ALL data for strategy '{name}' including all vectors. Continue?"
-    ):
-        return
-    service = _get_service()
-    try:
-        service.drop_chunks()
-    except IndexingLockError as e:
-        click.echo(str(e), err=True)
-        raise SystemExit(1) from None
-    click.echo(f"Dropped strategy '{name}' and all associated data.")
+    raise click.ClickException("reset strategy is retired after the SurrealDB cutover")
 
 
 @main.group()

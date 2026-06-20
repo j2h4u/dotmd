@@ -1374,6 +1374,7 @@ class TestSurrealHybridOverrides:
         graph_direct = _RecordingSearchEngine([("graph-hit", 1.0)])
         connection = MagicMock()
         connection.raw = MagicMock()
+        graph_search_ctor = MagicMock(name="GraphSearchEngine")
 
         settings = Settings(
             index_dir=tmp_path,
@@ -1398,6 +1399,7 @@ class TestSurrealHybridOverrides:
                     "graph_direct": graph_direct,
                 },
             ) as build_overrides,
+            patch("dotmd.api.service.GraphSearchEngine", graph_search_ctor),
         ):
             service = DotMDService(settings)
 
@@ -1419,6 +1421,7 @@ class TestSurrealHybridOverrides:
         assert service._semantic_engine is semantic
         assert service._keyword_engine is keyword
         assert service._graph_direct_engine is graph_direct
+        graph_search_ctor.assert_not_called()
 
         with patch("dotmd.api.service.fuse_results", return_value=[("semantic-hit", 0.9)]):
             pool = service._collect_candidate_pool(

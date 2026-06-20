@@ -308,10 +308,6 @@ class DotMDService:
         _write_service_init_progress("service:semantic_engine", "applied")
         _write_service_init_progress("service:keyword_graph_engines", "running")
         self._keyword_engine = self._pipeline.keyword_engine
-        self._graph_engine = GraphSearchEngine(
-            self._pipeline.graph_store,
-            cast(MetadataStoreProtocol, self._pipeline.metadata_store),
-        )
         self._graph_direct_engine = GraphDirectEngine(
             self._pipeline.graph_store,
         )
@@ -319,6 +315,11 @@ class DotMDService:
         self._surreal_metadata_store: MetadataStoreProtocol | None = None
         if self._settings.search_backend == "surreal":
             self._configure_surreal_search_backend()
+        else:
+            self._graph_engine = GraphSearchEngine(
+                self._pipeline.graph_store,
+                cast(MetadataStoreProtocol, self._pipeline.metadata_store),
+            )
         _write_service_init_progress("service:keyword_graph_engines", "applied")
 
         # Load acronym dictionary if available
@@ -413,12 +414,11 @@ class DotMDService:
 
         if not self._settings.surreal_retrieval_database:
             raise ValueError(
-                "surreal_retrieval_database must be set when search_backend='surreal'"
+                "surreal_retrieval_database must be set for Surreal retrieval"
             )
         if self._settings.surreal_retrieval_embedding_dimension is None:
             raise ValueError(
-                "surreal_retrieval_embedding_dimension must be set "
-                "when search_backend='surreal'"
+                "surreal_retrieval_embedding_dimension must be set for Surreal retrieval"
             )
 
         connection = SurrealConnection(
@@ -447,9 +447,7 @@ class DotMDService:
         self._graph_engine = _DisabledGraphEnrichmentEngine()
 
     def _active_metadata_store(self) -> MetadataStoreProtocol:
-        if self._settings.search_backend == "surreal":
-            if self._surreal_metadata_store is None:
-                raise RuntimeError("Surreal metadata store is not configured")
+        if self._surreal_metadata_store is not None:
             return self._surreal_metadata_store
         return cast(MetadataStoreProtocol, self._pipeline.metadata_store)
 
@@ -568,9 +566,9 @@ class DotMDService:
             Number of chunks processed.
         """
         if store == "all":
-            if self._settings.search_backend == "surreal":
+            if self._surreal_metadata_store is not None:
                 logger.info(
-                    "reindex(all): skipped local vector and FTS5 rebuilds in surreal search backend"
+                    "reindex(all): skipped local vector and FTS5 rebuilds in Surreal mode"
                 )
                 return 0
             n = self._pipeline.reindex_fts5()
