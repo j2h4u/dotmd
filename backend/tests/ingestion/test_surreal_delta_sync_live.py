@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from dotmd.ingestion.migrate_surreal import load_sqlite_rows_for_surreal
 from dotmd.ingestion.surreal_delta_sync import (
     SurrealDeltaChange,
     SurrealDeltaChangeType,
@@ -17,6 +16,7 @@ from dotmd.ingestion.surreal_delta_sync import (
     build_surreal_delta_manifest_from_rows,
     run_surreal_delta_sync,
 )
+from dotmd.ingestion.surreal_sqlite_snapshot import load_sqlite_rows_for_surreal
 from dotmd.storage.surreal import (
     SurrealConnection,
     SurrealRecordIdCodec,

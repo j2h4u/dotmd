@@ -16,7 +16,7 @@ from surrealdb import SurrealError
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from dotmd.ingestion.migrate_surreal import iter_sqlite_embedding_rows_for_surreal
+from dotmd.ingestion.surreal_sqlite_snapshot import iter_sqlite_embedding_rows_for_surreal
 from dotmd.storage.surreal import SurrealConnection, SurrealStoreConfig
 from dotmd.storage.surreal_schema import surreal_embedding_shard_tables
 

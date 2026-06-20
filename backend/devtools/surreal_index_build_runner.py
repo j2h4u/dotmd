@@ -17,9 +17,6 @@ from typing import Any
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from dotmd.ingestion.migrate_surreal import (
-    _DEFERRED_EMBEDDING_INDEX_DEFINITIONS,
-)
 from dotmd.storage.surreal import SurrealConnection, SurrealStoreConfig
 from dotmd.storage.surreal_schema import (
     DEFAULT_HNSW_EF,
@@ -37,6 +34,21 @@ SURREAL_RUNTIME_ENV_KEYS = (
     "SURREAL_SURREALKV_MAX_VALUE_CACHE_SIZE",
     "SURREAL_SYNC_DATA",
     "SURREAL_HNSW_CACHE_SIZE",
+)
+
+_DEFERRED_EMBEDDING_INDEX_DEFINITIONS = (
+    (
+        "embeddings_strategy_chunk_model_idx",
+        "DEFINE INDEX embeddings_strategy_chunk_model_idx ON TABLE embeddings COLUMNS chunk_strategy, chunk_id, embedding_model UNIQUE;",
+    ),
+    (
+        "embeddings_strategy_model_idx",
+        "DEFINE INDEX embeddings_strategy_model_idx ON TABLE embeddings COLUMNS chunk_strategy, embedding_model;",
+    ),
+    (
+        "embeddings_text_hash_idx",
+        "DEFINE INDEX embeddings_text_hash_idx ON TABLE embeddings COLUMNS text_hash;",
+    ),
 )
 
 

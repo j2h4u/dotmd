@@ -25,7 +25,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from dotmd.ingestion.migrate_surreal import iter_sqlite_embedding_rows_for_surreal
+from dotmd.ingestion.surreal_sqlite_snapshot import iter_sqlite_embedding_rows_for_surreal
 from dotmd.storage.surreal import SurrealConnection, SurrealStoreConfig
 from surreal_index_build_runner import _surreal_runtime_env_snapshot, _surrealkv_file_snapshot
 
