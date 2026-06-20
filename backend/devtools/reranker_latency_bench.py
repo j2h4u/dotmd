@@ -1,4 +1,4 @@
-"""Canonical reranker latency benchmark runner for Phase 20."""
+"""Canonical reranker latency benchmark runner."""
 
 from __future__ import annotations
 
@@ -26,10 +26,10 @@ QUERY_SET_V1 = [
     "как подключить MCP к ChatGPT",
     "Claude Desktop OAuth connector setup",
     "почему hybrid search теряет BM25 результаты",
-    "FalkorDB graph backend migration notes",
+    "SurrealDB graph-direct retrieval notes",
     "как работает content-addressed chunk cache",
     "dotMD trickle indexer orphan cleanup",
-    "sqlite-vec unified index schema",
+    "SurrealDB vector index tuning",
     "русскоязычный reranker для markdown базы знаний",
     "Tailscale Funnel OAuth protected resource metadata",
     "embedding model swap TEI batch size tuning",
@@ -84,7 +84,7 @@ def percentile(values: list[float], pct: float) -> float:
 
 
 def latency_band(p95_ms: float | None, *, errors: int = 0, timeouts: int = 0) -> str:
-    """Classify hot reranking latency into Phase 20 bands."""
+    """Classify hot reranking latency into benchmark bands."""
     if p95_ms is None or errors or timeouts:
         return "unusable"
     if p95_ms <= FAST_P95_MS:

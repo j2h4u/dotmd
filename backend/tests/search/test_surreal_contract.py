@@ -28,7 +28,7 @@ def test_contract_covers_required_retrieval_surfaces() -> None:
 def test_contract_uses_quality_differences_not_rank_parity() -> None:
     contract = default_surreal_retrieval_contract()
 
-    assert contract.old_stack_role == "baseline/evaluator"
+    assert contract.old_stack_role == "historical comparison"
     assert contract.exact_rank_parity_required is False
     assert contract.product_compatibility_target is False
     assert contract.accepted_differences == frozenset(

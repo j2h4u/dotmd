@@ -34,7 +34,7 @@ For the 2026-05-02 Phase 21 run:
 - Chunks: 19575
 - Entities: 44253
 - Edges: 286361
-- Graph: `falkordb @ redis://falkordb:6379/dotmd`
+- Graph: SurrealDB graph-direct retrieval
 - Chunk strategy: `contextual_512_50`
 
 Do not run `dotmd index --force` during benchmarking while the production
@@ -96,7 +96,7 @@ uv run python devtools/reranker_quality_bench.py \
 Quality runs must use one shared candidate pool per query:
 
 1. Expand the query.
-2. Run semantic, FTS5, and graph-direct retrieval.
+2. Run semantic, Surreal keyword, and graph-direct retrieval.
 3. Fuse candidates with RRF.
 4. Pass the same candidate IDs to every reranker.
 5. Compare only the final reranked order.

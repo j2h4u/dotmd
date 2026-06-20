@@ -250,7 +250,7 @@ class GraphStoreProtocol(Protocol):
 
     # -- batch write helpers -----------------------------------------------
     # Default implementations loop over the individual methods.
-    # Backends with native batch support (e.g. FalkorDB UNWIND) override these.
+    # Backends with native batch support can override these.
 
     def batch_add_section_nodes(self, sections: list[dict]) -> None:
         """Upsert Section nodes in bulk.

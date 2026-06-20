@@ -16,10 +16,10 @@ now a standalone repository with its own product and architecture direction.
 
 The project has been substantially reworked:
 
-- **Standalone SurrealDB cutover**: production storage and retrieval now target
+- **Standalone SurrealDB cutover**: production storage and retrieval target
   the standalone SurrealDB database `dotmd/production`
-- **Legacy SQLite database**: `index.db` remains migration/internal-cache
-  scaffolding during Phase 47, not the target production retrieval backend
+- **Internal cache database**: `index.db` remains migration/internal-cache
+  scaffolding; it is not a production retrieval backend
 - **Two-dimensional storage**: tables keyed by `(chunk_strategy, embedding_model)` — supports multiple chunking strategies and embedding models simultaneously
 - **Content-aware chunking**: speaker-turn splitting for meeting transcripts, paragraph splitting for voicenotes, heading-based for docs
 - **Context prefix injection**: document title prepended to embeddings at encode time
@@ -31,8 +31,7 @@ The project has been substantially reworked:
 - **M2M content-addressed schema**: chunks → file_paths many-to-many (Phase 16)
 - **SurrealDB-native retrieval**: semantic, keyword, and graph-direct retrieval
   run through standalone SurrealDB
-- **Legacy storage removal in progress**: SQLite/sqlite-vec/FTS5/FalkorDB/
-  LadybugDB are being removed as production runtime choices in Phase 47
+- **Retired storage backends**: only SurrealDB is a production runtime choice
 - **TEI**: external embedding server (Text Embeddings Inference), CPU-only
 
 ## Phase 37: Airweave Connector Compatibility
@@ -60,7 +59,7 @@ in `GmailSourceConfig.refresh_token`, not `SourceAccess.delegated_to`.
 
 **Decision: Gmail is federated-only**
 Gmail participates through live federated search and readable message refs. It
-does not ingest into the local SQLite/FTS/vector index in Phase 37.
+does not ingest into the local SurrealDB-backed index.
 `source_native_score=None` is safe because federated candidates bypass RRF and
 flow through quota-based `_merge_with_federated_quota()`.
 
@@ -126,8 +125,7 @@ Production storage lives in standalone SurrealDB:
 - database: `production`
 - data directory: `/srv/surrealdb/data`
 
-`/dotmd-index/index.db` remains temporary Phase 47 migration/cache scaffolding
-until the legacy stack removal is complete.
+`/dotmd-index/index.db` remains migration/cache scaffolding.
 
 ## Configuration
 

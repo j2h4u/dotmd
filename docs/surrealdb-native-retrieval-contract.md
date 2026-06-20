@@ -1,17 +1,16 @@
 # SurrealDB-Native Retrieval Contract
 
-dotMD is moving toward one SurrealDB-native storage and retrieval backend. The
-old SQLite/sqlite-vec/FTS5 + FalkorDB stack is a baseline/evaluator during the
-cutover, not a product compatibility target.
+dotMD uses SurrealDB as the production storage and retrieval backend.
+This contract defines the current retrieval surfaces and the invariants that
+the production/admin tooling must preserve.
 
 ## Contract
 
-SurrealDB must provide these retrieval surfaces:
+SurrealDB provides these retrieval surfaces:
 
-- **Weighted full-text:** title, tags, and body/text are distinct signals.
-  Preserving their search intent matters more than matching SQLite FTS5 scores.
-- **Vector search:** existing embeddings are reused where practical; the new
-  vector index must pass production-like build and latency checks.
+- **Weighted full-text:** title, tags, and body/text remain distinct signals.
+- **Vector search:** embeddings are reused where practical and the vector index
+  is built and checked through the production admin path.
 - **Graph/entity retrieval:** relation records preserve labels, weights, and
   metadata needed for entity and tag traversal.
 - **Hybrid fusion:** full-text, vector, and graph candidates combine into an
@@ -19,18 +18,9 @@ SurrealDB must provide these retrieval surfaces:
 - **Reranker input:** the reranker receives a strong candidate pool with stable
   source refs, snippets, and provenance.
 
-Exact old-stack rank parity is not required. Differences are classified as:
+## Data Preservation
 
-| Difference | Cutover gate |
-|------------|--------------|
-| improvement | allow |
-| harmless reorder | allow |
-| regression | block |
-| unclear | requires explicit acceptance |
-
-## Migration
-
-The default posture is to preserve existing stored data where practical:
+The production backend preserves existing stored data where practical:
 
 - chunks
 - embeddings
@@ -40,24 +30,14 @@ The default posture is to preserve existing stored data where practical:
 - cursors
 - checkpoints
 
-The cutover must not default to rechunking, TEI reembedding, or entity
-re-extraction. A later phase may choose recomputation only after proving the
-transform path is unsafe or materially worse.
+The production path does not default to rechunking, TEI reembedding, or entity
+re-extraction. Recompute only when the operator explicitly chooses it for a
+targeted maintenance task.
 
 ## Non-Goals
 
 - No productized compatibility mode for old SQLite/Falkor retrieval behavior.
-- No runtime fallback backend after cutover acceptance.
+- No runtime fallback backend.
 - No compatibility shims for hypothetical external clients.
-- No legacy SQLite/sqlite-vec/FTS5/FalkorDB/LadybugDB code kept after the
-  SurrealDB cutover is accepted.
-
-## Phase Handoff
-
-- **Phase 40:** build golden queries and diff reports using the four difference
-  categories above.
-- **Phase 41:** harden schema/import while preserving the migration targets
-  listed here.
-- **Phase 42:** implement SurrealDB retrieval against these surfaces.
-- **Phase 43:** shadow-run old stack versus SurrealDB and block unresolved
-  regressions.
+- No legacy SQLite/sqlite-vec/FTS5/FalkorDB/LadybugDB code kept in the
+  production retrieval path.

@@ -202,8 +202,8 @@ Set these for the live container:
 | `DOTMD_SURREAL_RETRIEVAL_EMBEDDING_DIMENSION` | `1024` | Embedding dimension |
 
 Set the SurrealDB credentials from the `/opt/docker/surrealdb` deployment
-environment. The old SQLite/Falkor stack is migration history, not a production
-runtime choice.
+environment. The production retrieval stack is SurrealDB-only; `index.db`
+remains migration/internal-cache scaffolding.
 
 Path filtering:
 

@@ -1,8 +1,8 @@
 """SurrealDB-native retrieval contract vocabulary.
 
 This module deliberately contains policy terms, not backend implementation.
-Phase 40+ evaluators can import it without constructing SQLite, FalkorDB, TEI,
-or SurrealDB clients.
+Phase 40+ evaluators can import it without constructing storage or embedding
+clients.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ class RetrievalSurface(StrEnum):
 
 
 class AcceptedDifference(StrEnum):
-    """How old-stack versus SurrealDB result differences are classified."""
+    """How comparison results are classified."""
 
     IMPROVEMENT = "improvement"
     HARMLESS_REORDER = "harmless_reorder"
@@ -108,7 +108,7 @@ def default_surreal_retrieval_contract() -> SurrealRetrievalContract:
                 "checkpoints",
             }
         ),
-        old_stack_role="baseline/evaluator",
+        old_stack_role="historical comparison",
         exact_rank_parity_required=False,
         product_compatibility_target=False,
         runtime_fallback_backend_allowed=False,
@@ -117,8 +117,8 @@ def default_surreal_retrieval_contract() -> SurrealRetrievalContract:
         default_reembed=False,
         default_reextract_entities=False,
         notes=(
-            "Old-stack output is evidence for quality evaluation, not a product compatibility target.",
+            "Historical comparison output is evidence for quality evaluation, not a product compatibility target.",
             "Existing stored data should be reused unless a later phase proves recomputation is required.",
-            "After cutover acceptance, legacy storage and retrieval paths are removed.",
+            "Production storage and retrieval paths are SurrealDB-only.",
         ),
     )

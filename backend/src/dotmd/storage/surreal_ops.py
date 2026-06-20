@@ -6,7 +6,6 @@ import json
 import os
 import shutil
 import socket
-import sqlite3
 import uuid
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
@@ -40,7 +39,6 @@ class SurrealDecisionCategory(StrEnum):
     HYBRID_RRF_GAP = "hybrid/RRF gap"
     EMBEDDED_ATOMICITY = "embedded atomicity"
     CLI_BACKUP_TOOLING = "CLI backup tooling"
-    ROLLBACK_SAFETY = "rollback safety"
     SCALE_BEHAVIOR = "scale behavior"
     WRITER_COORDINATION = "writer coordination"
 
@@ -144,22 +142,6 @@ class SurrealMigrationEvidenceReport:
 
 
 @dataclass(slots=True)
-class CurrentStackRollbackReport:
-    """Rollback proof for the current SQLite/sqlite-vec/FTS5 plus FalkorDB stack."""
-
-    sqlite_source: str
-    falkor_source: str
-    restore_dir: str
-    stack: str
-    sqlite_restored: bool
-    falkor_restored: bool
-    current_stack_smoke_passed: bool
-    verified: bool
-    smoke_queries: list[str] = field(default_factory=list)
-    notes: list[str] = field(default_factory=list)
-
-
-@dataclass(slots=True)
 class SurrealOpsDecisionInputs:
     """Gate inputs consumed by the final storage recommendation."""
 
@@ -168,7 +150,6 @@ class SurrealOpsDecisionInputs:
     retrieval_parity_passed: bool
     scale_gate_passed: bool
     backup_restore_passed: bool
-    current_stack_rollback_passed: bool
     same_corpus_smoke_passed: bool
     writer_coordination_passed: bool
     failure_categories: list[SurrealDecisionCategory] = field(default_factory=list)
@@ -881,53 +862,6 @@ def validate_surreal_cli_or_fallback_restore(
     raise RuntimeError("surreal CLI unavailable and fallback restore was not validated")
 
 
-def rehearse_current_stack_rollback(
-    *,
-    sqlite_original: Path | str,
-    falkor_export: Path | str,
-    restore_dir: Path | str,
-    smoke_queries: list[str] | None = None,
-) -> CurrentStackRollbackReport:
-    """Rehearse rollback to copied current SQLite/sqlite-vec/FTS5 and FalkorDB originals."""
-
-    sqlite_source = Path(sqlite_original).resolve()
-    falkor_source = Path(falkor_export).resolve()
-    if not sqlite_source.exists():
-        raise FileNotFoundError(sqlite_source)
-    if not falkor_source.exists():
-        raise FileNotFoundError(falkor_source)
-
-    target_dir = Path(restore_dir).resolve()
-    target_dir.mkdir(parents=True, exist_ok=True)
-    sqlite_target = target_dir / sqlite_source.name
-    falkor_target = target_dir / falkor_source.name
-    shutil.copy2(sqlite_source, sqlite_target)
-    shutil.copy2(falkor_source, falkor_target)
-
-    sqlite_restored = sqlite_target.read_bytes() == sqlite_source.read_bytes()
-    falkor_restored = falkor_target.read_bytes() == falkor_source.read_bytes()
-    sqlite_smoke = _sqlite_restore_smoke(sqlite_target)
-    falkor_smoke = _json_restore_smoke(falkor_target)
-    smoke = (
-        bool(smoke_queries)
-        and sqlite_restored
-        and falkor_restored
-        and sqlite_smoke
-        and falkor_smoke
-    )
-    return CurrentStackRollbackReport(
-        sqlite_source=str(sqlite_source),
-        falkor_source=str(falkor_source),
-        restore_dir=str(target_dir),
-        stack="SQLite/sqlite-vec/FTS5 + FalkorDB",
-        sqlite_restored=sqlite_restored,
-        falkor_restored=falkor_restored,
-        current_stack_smoke_passed=smoke,
-        verified=sqlite_restored and falkor_restored and smoke,
-        smoke_queries=smoke_queries or [],
-    )
-
-
 def build_storage_recommendation(
     inputs: SurrealOpsDecisionInputs,
 ) -> SurrealStorageRecommendation:
@@ -968,12 +902,6 @@ def build_storage_recommendation(
             False,
         ),
         (
-            inputs.current_stack_rollback_passed,
-            SurrealDecisionCategory.ROLLBACK_SAFETY,
-            "rollback to the current SQLite/FalkorDB stack is unproven",
-            False,
-        ),
-        (
             inputs.same_corpus_smoke_passed,
             SurrealDecisionCategory.SCALE_BEHAVIOR,
             "same-corpus integration smoke failed",
@@ -1003,7 +931,7 @@ def build_storage_recommendation(
         return SurrealStorageRecommendation(
             recommendation="migrate",
             failure_category=SurrealDecisionCategory.NONE,
-            reasons=["all transform, parity, scale, operations, rollback, and writer gates passed"],
+            reasons=["all transform, parity, scale, operations, and writer gates passed"],
             source_reports=list(inputs.source_reports),
         )
 
@@ -1209,7 +1137,6 @@ def _dominant_failure_category(
         SurrealDecisionCategory.VECTOR_RECALL,
         SurrealDecisionCategory.GRAPH_SEMANTICS,
         SurrealDecisionCategory.FTS_WEIGHTING,
-        SurrealDecisionCategory.ROLLBACK_SAFETY,
         SurrealDecisionCategory.CLI_BACKUP_TOOLING,
         SurrealDecisionCategory.SCALE_BEHAVIOR,
         SurrealDecisionCategory.WRITER_COORDINATION,
@@ -1230,23 +1157,6 @@ def _read_surreal_counts_manifest(source_path: Path) -> SurrealImportCounts:
         return SurrealImportCounts()
     allowed = set(SurrealImportCounts.__dataclass_fields__)
     return SurrealImportCounts(**{key: int(value) for key, value in raw.items() if key in allowed})
-
-
-def _sqlite_restore_smoke(sqlite_path: Path) -> bool:
-    try:
-        with sqlite3.connect(sqlite_path) as conn:
-            conn.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
-    except sqlite3.Error:
-        return False
-    return True
-
-
-def _json_restore_smoke(json_path: Path) -> bool:
-    try:
-        json.loads(json_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return False
-    return True
 
 
 def _dedupe_preserve_order(values: list[str]) -> list[str]:

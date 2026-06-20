@@ -3,8 +3,7 @@
 dotMD is a local markdown retrieval service exposed through a CLI, REST API,
 and MCP server. The current production architecture uses standalone SurrealDB
 for metadata, keyword retrieval, vector retrieval, and graph-backed entity
-retrieval. Legacy SQLite/sqlite-vec/FTS5/FalkorDB code is Phase 47 migration
-scaffolding, not the target runtime architecture.
+retrieval.
 
 ## Pipeline Flowchart
 
@@ -198,7 +197,7 @@ internal filesystem/content-dedup holder mechanics for discovery, local file
 reads, delete detection, and content-addressed chunk sharing. They are not the
 public search/read identity.
 
-Current graph `File` nodes are filesystem-only legacy internals. Future
+Current graph `File` nodes are internal filesystem provenance records. Future
 Telegram dialogs/messages must not be modeled as `File`; new non-filesystem
 sources should use `SourceDocument` and `SourceUnit` semantics instead.
 

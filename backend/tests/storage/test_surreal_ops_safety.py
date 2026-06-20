@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -25,7 +24,6 @@ from dotmd.storage.surreal_ops import (
     force_release_surreal_writer_guard,
     probe_embedded_transaction_atomicity,
     probe_embedded_writer_safety,
-    rehearse_current_stack_rollback,
     rehearse_surreal_backup_restore,
     release_stale_surreal_writer_guard,
     run_surreal_full_pipeline_smoke,
@@ -215,7 +213,6 @@ def test_recommendation_blocks_migrate_on_parity_and_scale_failures() -> None:
         retrieval_parity_passed=False,
         scale_gate_passed=True,
         backup_restore_passed=True,
-        current_stack_rollback_passed=True,
         same_corpus_smoke_passed=True,
         writer_coordination_passed=True,
         failure_categories=[
@@ -230,34 +227,6 @@ def test_recommendation_blocks_migrate_on_parity_and_scale_failures() -> None:
     assert decision.recommendation == "reject"
     assert decision.failure_category == SurrealDecisionCategory.HYBRID_RRF_GAP
     assert "retrieval parity" in " ".join(decision.reasons).lower()
-
-
-def test_current_stack_rollback_restores_copied_sqlite_and_falkor_originals(
-    tmp_path: Path,
-) -> None:
-    """Rollback rehearsal must prove return to current SQLite/FalkorDB originals."""
-    sqlite_original = tmp_path / "index.db"
-    falkor_original = tmp_path / "falkor-export.json"
-    with sqlite3.connect(sqlite_original) as conn:
-        conn.execute("CREATE TABLE smoke (query TEXT)")
-        conn.execute("INSERT INTO smoke (query) VALUES ('Hiveon')")
-    falkor_original.write_text('{"nodes": 2, "relations": 1}', encoding="utf-8")
-
-    report = rehearse_current_stack_rollback(
-        sqlite_original=sqlite_original,
-        falkor_export=falkor_original,
-        restore_dir=tmp_path / "rollback",
-        smoke_queries=["Hiveon"],
-    )
-
-    assert report.verified is True
-    assert report.sqlite_restored is True
-    assert report.falkor_restored is True
-    assert report.current_stack_smoke_passed is True
-    assert "SQLite/sqlite-vec/FTS5" in report.stack
-    assert "FalkorDB" in report.stack
-
-
 def test_full_pipeline_smoke_requires_all_gates() -> None:
     """Same-corpus smoke must assemble inventory, safety, import, parity, ops, and decision."""
     passing_inputs = SurrealOpsDecisionInputs(
@@ -266,7 +235,6 @@ def test_full_pipeline_smoke_requires_all_gates() -> None:
         retrieval_parity_passed=True,
         scale_gate_passed=True,
         backup_restore_passed=True,
-        current_stack_rollback_passed=True,
         same_corpus_smoke_passed=True,
         writer_coordination_passed=True,
         failure_categories=[],
