@@ -234,6 +234,7 @@ def _worker_main(args: argparse.Namespace) -> int:
                 username=os.environ.get("DOTMD_SURREAL_RETRIEVAL_USERNAME") or None,
                 password=os.environ.get("DOTMD_SURREAL_RETRIEVAL_PASSWORD") or None,
                 access_token=os.environ.get("DOTMD_SURREAL_RETRIEVAL_ACCESS_TOKEN") or None,
+                http_query_timeout_seconds=float(worker_input["query_timeout_seconds"]),
             )
         ) as connection:
             if worker_input["operation"] == "info_embeddings":
@@ -296,6 +297,7 @@ def _run_statement_with_heartbeat(
             "target_url": target_url,
             "target_namespace": target_namespace,
             "target_database": target_database,
+            "query_timeout_seconds": timeout_seconds,
             "runtime_env": _surreal_runtime_env_snapshot(),
         },
     )
@@ -431,6 +433,7 @@ def _run_info_with_heartbeat(
             "target_url": target_url,
             "target_namespace": target_namespace,
             "target_database": target_database,
+            "query_timeout_seconds": timeout_seconds,
             "runtime_env": _surreal_runtime_env_snapshot(),
         },
     )
