@@ -355,7 +355,7 @@ Progress:
 **Goal:** Delete the old SQLite/sqlite-vec/FTS5, FalkorDB, and LadybugDB stack
 after SurrealDB cutover is accepted.
 **Depends on:** Accepted cutover retry after Phase 46
-**Plans:** TBD
+**Plans:** 1/1 plan in progress
 
 - [ ] Delete SQLite/sqlite-vec/FTS5, FalkorDB, and LadybugDB storage/retrieval
   code paths, configs, tests, docs, env vars, and deployment assumptions.
@@ -363,6 +363,11 @@ after SurrealDB cutover is accepted.
 - [ ] Remove temporary evaluator/baseline code that only exists for migration.
 - [ ] Verify there are no fallback backend switches, compat shims, or dead
   legacy imports left.
+
+Plans:
+
+- [ ] 47-01-PLAN.md - Remove legacy runtime switches, old-stack admin/status
+  surfaces, tests, modules, docs, and data after accepted SurrealDB cutover.
 
 ## Progress
 
