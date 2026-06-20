@@ -2668,7 +2668,12 @@ class IndexingPipeline:
         t0 = time.perf_counter()
         file_meta = self._build_file_meta_from_fileinfo(files)
         self._keyword_engine.add_chunks(chunks, file_meta=file_meta)
-        logger.info("[%s] fts5: %d chunks (%.2fs)", run_id, len(chunks), time.perf_counter() - t0)
+        logger.info(
+            "[%s] keyword_store: %d chunks (%.2fs)",
+            run_id,
+            len(chunks),
+            time.perf_counter() - t0,
+        )
 
         for source_document in source_documents:
             self._upsert_active_filesystem_binding(
@@ -3220,7 +3225,7 @@ class IndexingPipeline:
                 return 0
 
             t0 = time.perf_counter()
-            _beacon("save+fts5")
+            _beacon("save+keyword")
             # Phase 16 M2M write path: INSERT OR IGNORE on chunks_* + M2M.
             # For each chunk, check payload consistency on conflict.
             # Wrap the full per-file write loop in a single transaction so that

@@ -177,7 +177,7 @@ def chunk_file(
 
     # ADR: Strip YAML frontmatter before chunking so raw YAML never leaks
     # into chunk text. Frontmatter metadata reaches search engines through
-    # structured channels (graph entities, FTS5 columns, embedding prefix)
+    # structured channels (graph entities, keyword metadata, embedding prefix)
     # rather than as accidental text content that pollutes BM25/embeddings.
     _, body = parse_frontmatter(content)
 

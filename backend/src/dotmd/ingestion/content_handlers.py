@@ -51,9 +51,8 @@ def split_default(text: str) -> list[str]:
 def _enrich_passthrough(text: str, frontmatter: dict) -> str:
     """No-op enrichment — chunk text embedded as-is (Phase 999.12 dual-encoder).
 
-    title+tags are now a separate e_meta vector component; not prepended to
-    e_text. FTS5 path does not use this registry enrich function (verified
-    999.12): keyword_engine.add_chunks() receives file_meta separately.
+    title+tags are a separate e_meta vector component; not prepended to
+    e_text. keyword_engine.add_chunks() receives file_meta separately.
     """
     return text
 

@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class LocalEngineOutcome:
-    """Outcome from a local search engine (semantic, FTS5, graph_direct).
+    """Outcome from a local retrieval engine.
 
     Local engines run SEQUENTIALLY on one worker thread and run to completion
     with no soft timeout (D-LOCAL-SEQUENTIAL, D-09).

@@ -464,7 +464,7 @@ class Settings(BaseSettings):
 
     @property
     def index_db_path(self) -> Path:
-        """Path to the unified SQLite index database (metadata + vec + FTS5)."""
+        """Path to the internal SQLite metadata/cache database."""
         return self.index_dir / "index.db"
 
     @property

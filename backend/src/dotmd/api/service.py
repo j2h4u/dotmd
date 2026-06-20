@@ -2119,15 +2119,11 @@ class DotMDService:
         return self._pipeline.graph_store.get_graph_data()
 
     def drop_vectors(self) -> None:
-        """Drop vec tables + embed fingerprints for current (strategy, model).
-
-        Chunks, FTS5, and graph remain intact so BM25 and graph search
-        continue to work.
-        """
+        """Drop local embedding-cache artifacts for current (strategy, model)."""
         self._pipeline.drop_vectors()
 
     def drop_chunks(self) -> None:
-        """Drop chunks + FTS5 + graph + ALL vec for current strategy.
+        """Drop local chunk/cache artifacts for current strategy.
 
         CASCADE operation: everything derived from chunks under the
         current strategy is removed.

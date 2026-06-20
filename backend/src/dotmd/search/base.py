@@ -1,8 +1,7 @@
 """Search engine protocol definition for dotMD.
 
-All search engines (semantic, keyword/FTS5, graph) implement
-:class:`SearchEngineProtocol` so they can be composed
-by the fusion layer.
+All search engines implement :class:`SearchEngineProtocol` so they can be
+composed by the fusion layer.
 """
 
 from __future__ import annotations
