@@ -16,7 +16,6 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import urlparse
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -24,7 +23,6 @@ if __package__ in {None, ""}:
 
 from dotmd.api.service import DotMDService
 from dotmd.core.config import (
-    DEFAULT_FALKORDB_GRAPH_NAME,
     RUNTIME_INDEX_DIR,
     Settings,
     load_settings,
@@ -87,87 +85,6 @@ class CandidateConfig:
 
 
 @dataclass(slots=True, frozen=True)
-class IsolatedBaselineGraph:
-    falkordb_url: str
-    source_graph: str
-    baseline_graph: str
-
-
-class _NoopGraphStore:
-    """Graph store placeholder for candidate service init before Surreal overrides."""
-
-    def add_file_node(self, file_path: str, title: str) -> None:
-        del file_path, title
-
-    def add_section_node(
-        self,
-        chunk_id: str,
-        heading: str,
-        level: int,
-        file_path: str,
-        text_preview: str,
-    ) -> None:
-        del chunk_id, heading, level, file_path, text_preview
-
-    def add_entity_node(self, name: str, entity_type: str, source: str) -> None:
-        del name, entity_type, source
-
-    def add_tag_node(self, name: str) -> None:
-        del name
-
-    def add_edge(
-        self,
-        source_id: str,
-        target_id: str,
-        relation_type: str,
-        weight: float = 1.0,
-    ) -> None:
-        del source_id, target_id, relation_type, weight
-
-    def get_related_sections(self, chunk_id: str) -> list[tuple[str, str, float]]:
-        del chunk_id
-        return []
-
-    def get_all_entity_names(self) -> list[str]:
-        return []
-
-    def get_chunks_by_entity(self, entity_name: str) -> list[str]:
-        del entity_name
-        return []
-
-    def get_entities_by_file(self, file_path: str) -> list[str]:
-        del file_path
-        return []
-
-    def delete_all(self) -> None:
-        return
-
-    def delete_file_subgraph(self, file_path: str) -> None:
-        del file_path
-
-    def delete_chunks_from_graph(self, chunk_ids: list[str]) -> None:
-        del chunk_ids
-
-    def delete_file_node(self, file_path: str) -> None:
-        del file_path
-
-    def delete_frontmatter_edges(self, file_path: str) -> None:
-        del file_path
-
-    def node_count(self) -> int:
-        return 0
-
-    def edge_count(self) -> int:
-        return 0
-
-    def delete_isolated_nodes(self) -> int:
-        return 0
-
-    def get_graph_data(self) -> dict[str, list[Any]]:
-        return {"nodes": [], "edges": []}
-
-
-@dataclass(slots=True, frozen=True)
 class ShadowRunConfig:
     golden_queries: Path
     source_capture_manifest_json: Path
@@ -175,7 +92,6 @@ class ShadowRunConfig:
     artifacts: ShadowArtifactPaths
     baseline_rehearsal_path: Path
     baseline_graph_name: str = "dotmd_shadow_baseline"
-    production_graph_name: str = DEFAULT_FALKORDB_GRAPH_NAME
     metrics_replay_queries: Path | None = None
     target_url: str = ""
     target_namespace: str = "dotmd"
@@ -407,54 +323,12 @@ def enforce_rehearsal_path_isolation(rehearsal_path: Path, production_index_dir:
         raise ValueError("rehearsal index.db failed integrity_check")
 
 
-def enforce_baseline_graph_isolation(resolved_graph_name: str) -> None:
-    if resolved_graph_name == DEFAULT_FALKORDB_GRAPH_NAME:
-        raise ValueError("baseline graph name must not equal production dotmd graph")
-
-
-def _build_falkordb_client(url: str):  # type: ignore[no-untyped-def]
-    from falkordb import FalkorDB
-
-    parsed = urlparse(url)
-    return FalkorDB(host=parsed.hostname or "localhost", port=parsed.port or 6379)
-
-
-def _list_graph_names(url: str) -> list[str]:
-    try:
-        client = _build_falkordb_client(url)
-        return list(client.list_graphs())
-    except Exception:
-        return [DEFAULT_FALKORDB_GRAPH_NAME]
-
-
 def _production_index_stat(index_dir: Path) -> tuple[int, int] | None:
     db_path = index_dir / "index.db"
     if not db_path.exists():
         return None
     stat = db_path.stat()
     return (stat.st_mtime_ns, stat.st_size)
-
-
-def copy_baseline_graph(
-    falkordb_url: str,
-    source_graph: str,
-    baseline_graph: str,
-) -> IsolatedBaselineGraph:
-    enforce_baseline_graph_isolation(baseline_graph)
-    client = _build_falkordb_client(falkordb_url)
-    if baseline_graph in list(client.list_graphs()):
-        client.select_graph(baseline_graph).delete()
-    client.select_graph(source_graph).copy(baseline_graph)
-    return IsolatedBaselineGraph(
-        falkordb_url=falkordb_url,
-        source_graph=source_graph,
-        baseline_graph=baseline_graph,
-    )
-
-
-def teardown_baseline_graph(handle: IsolatedBaselineGraph) -> None:
-    client = _build_falkordb_client(handle.falkordb_url)
-    client.select_graph(handle.baseline_graph).delete()
 
 
 def assert_rehearsal_identity_matches_manifest(
@@ -737,14 +611,7 @@ def _wrap_candidate_engine_overrides_with_progress(
 
 @contextmanager
 def _temporary_noop_candidate_graph_store() -> Any:
-    import dotmd.ingestion.pipeline as pipeline_module
-
-    original_create_graph_store = pipeline_module._create_graph_store
-    pipeline_module._create_graph_store = lambda _settings: _NoopGraphStore()
-    try:
-        yield
-    finally:
-        pipeline_module._create_graph_store = original_create_graph_store
+    yield
 
 
 def preflight_candidate_target(
@@ -1165,7 +1032,6 @@ def run_shadow_run(config: ShadowRunConfig | Any) -> ShadowRunResult:
     rehearsal_settings = base_settings.model_copy(
         update={
             "index_dir": Path(config.baseline_rehearsal_path),
-            "falkordb_graph_name": config.baseline_graph_name,
         }
     )
     assert_rehearsal_identity_matches_manifest(
@@ -1173,7 +1039,6 @@ def run_shadow_run(config: ShadowRunConfig | Any) -> ShadowRunResult:
         expected_manifest,
         progress_path=progress_path,
     )
-    enforce_baseline_graph_isolation(config.baseline_graph_name)
     if not artifacts.accepted_diffs.exists():
         replay_rows = (
             load_metrics_replay_queries(config.metrics_replay_queries)
@@ -1201,100 +1066,79 @@ def run_shadow_run(config: ShadowRunConfig | Any) -> ShadowRunResult:
     golden_queries = load_golden_queries(Path(config.golden_queries))
     production_db_stat_before = _production_index_stat(production_index_dir)
     stripped_acceptance_path: Path | None = None
-    graph_handle: IsolatedBaselineGraph | None = None
     capture_baseline = bool(getattr(config, "capture_baseline", True))
     if not capture_baseline and not artifacts.baseline_results.exists():
         raise ValueError("baseline results are required when --capture-baseline is not set")
+    if capture_baseline:
+        baseline_service = build_baseline_service(rehearsal_settings)
+        capture_baseline_eval_results(
+            baseline_service,
+            Path(config.golden_queries),
+            artifacts.baseline_results,
+            progress_path=progress_path,
+        )
+    _write_preflight_progress(progress_path, step="candidate:service_init", status="running")
+    previous_init_progress_path = os.environ.get("DOTMD_INIT_PROGRESS_PATH")
+    os.environ["DOTMD_INIT_PROGRESS_PATH"] = str(progress_path)
     try:
-        if capture_baseline:
-            _write_preflight_progress(progress_path, step="baseline_graph_copy", status="running")
-            graph_handle = copy_baseline_graph(
-                rehearsal_settings.falkordb_url,
-                config.production_graph_name,
-                config.baseline_graph_name,
+        with _temporary_noop_candidate_graph_store():
+            candidate_service = build_baseline_service(
+                base_settings.model_copy(update={"index_dir": Path(config.baseline_rehearsal_path)})
             )
-            _write_preflight_progress(progress_path, step="baseline_graph_copy", status="applied")
-            baseline_service = build_baseline_service(rehearsal_settings)
-            capture_baseline_eval_results(
-                baseline_service,
-                Path(config.golden_queries),
-                artifacts.baseline_results,
+    finally:
+        if previous_init_progress_path is None:
+            os.environ.pop("DOTMD_INIT_PROGRESS_PATH", None)
+        else:
+            os.environ["DOTMD_INIT_PROGRESS_PATH"] = previous_init_progress_path
+    _write_preflight_progress(progress_path, step="candidate:service_init", status="applied")
+    with _build_candidate_connection(cast(ShadowRunConfig, config)) as connection:
+        if not getattr(config, "skip_candidate_preflight", False):
+            preflight_candidate_target(
+                connection,
+                base_settings,
+                candidate_config,
+                expected_manifest,
+                progress_path=artifacts.source_capture.parent / "preflight-progress.json",
+            )
+        if getattr(config, "capture_candidate", True):
+            capture_eval_results_from_candidates(
+                service=candidate_service,
+                golden_queries=golden_queries,
+                output_path=artifacts.candidate_results,
+                connection=connection,
+                settings=base_settings,
+                candidate_config=candidate_config,
                 progress_path=progress_path,
             )
-        _write_preflight_progress(progress_path, step="candidate:service_init", status="running")
-        previous_init_progress_path = os.environ.get("DOTMD_INIT_PROGRESS_PATH")
-        os.environ["DOTMD_INIT_PROGRESS_PATH"] = str(progress_path)
-        try:
-            with _temporary_noop_candidate_graph_store():
-                candidate_service = build_baseline_service(
-                    base_settings.model_copy(
-                        update={"index_dir": Path(config.baseline_rehearsal_path)}
-                    )
-                )
-        finally:
-            if previous_init_progress_path is None:
-                os.environ.pop("DOTMD_INIT_PROGRESS_PATH", None)
-            else:
-                os.environ["DOTMD_INIT_PROGRESS_PATH"] = previous_init_progress_path
-        _write_preflight_progress(progress_path, step="candidate:service_init", status="applied")
-        with _build_candidate_connection(cast(ShadowRunConfig, config)) as connection:
-            if not getattr(config, "skip_candidate_preflight", False):
-                preflight_candidate_target(
-                    connection,
-                    base_settings,
-                    candidate_config,
-                    expected_manifest,
-                    progress_path=artifacts.source_capture.parent / "preflight-progress.json",
-                )
-            if getattr(config, "capture_candidate", True):
-                capture_eval_results_from_candidates(
-                    service=candidate_service,
-                    golden_queries=golden_queries,
-                    output_path=artifacts.candidate_results,
-                    connection=connection,
-                    settings=base_settings,
-                    candidate_config=candidate_config,
-                    progress_path=progress_path,
-                )
-        stripped_acceptance_path = _write_stripped_acceptance_rows(ledger.acceptance_rows)
-        eval_result = run_eval(
-            EvalRunnerConfig(
-                golden_queries=Path(config.golden_queries),
-                baseline_results=artifacts.baseline_results,
-                candidate_results=artifacts.candidate_results,
-                acceptance=stripped_acceptance_path,
-                output_jsonl=artifacts.shadow_diffs,
-                summary_markdown=artifacts.shadow_summary,
-                require_complete_category_coverage=True,
-            )
-        )
-        metric_bundle = _metric_bundle_from_results(
+    stripped_acceptance_path = _write_stripped_acceptance_rows(ledger.acceptance_rows)
+    eval_result = run_eval(
+        EvalRunnerConfig(
+            golden_queries=Path(config.golden_queries),
             baseline_results=artifacts.baseline_results,
             candidate_results=artifacts.candidate_results,
-            target_url=config.target_url,
+            acceptance=stripped_acceptance_path,
+            output_jsonl=artifacts.shadow_diffs,
+            summary_markdown=artifacts.shadow_summary,
+            require_complete_category_coverage=True,
         )
-        write_shadow_metric_json(artifacts.scale_metrics, metric_bundle)
-        write_shadow_metric_json(artifacts.memory_metrics, metric_bundle)
-        _write_source_capture_output(
-            artifacts.source_capture,
-            expected_manifest,
-            rehearsal_settings,
-            config.baseline_graph_name,
-        )
-    finally:
-        if graph_handle is not None:
-            teardown_baseline_graph(graph_handle)
+    )
+    metric_bundle = _metric_bundle_from_results(
+        baseline_results=artifacts.baseline_results,
+        candidate_results=artifacts.candidate_results,
+        target_url=config.target_url,
+    )
+    write_shadow_metric_json(artifacts.scale_metrics, metric_bundle)
+    write_shadow_metric_json(artifacts.memory_metrics, metric_bundle)
+    _write_source_capture_output(
+        artifacts.source_capture,
+        expected_manifest,
+        rehearsal_settings,
+        config.baseline_graph_name,
+    )
 
     production_db_stat_after = _production_index_stat(production_index_dir)
     if production_db_stat_before is not None and production_db_stat_after != production_db_stat_before:
         raise ValueError("production index.db changed during shadow run")
-    if graph_handle is not None:
-        production_graphs_after = _list_graph_names(rehearsal_settings.falkordb_url)
-        if (
-            config.production_graph_name not in production_graphs_after
-            or config.baseline_graph_name in production_graphs_after
-        ):
-            raise ValueError("production graph changed during shadow run")
 
     return ShadowRunResult(artifacts=artifacts, exit_code=0 if eval_result.exit_code == 0 else 1)
 
@@ -1317,7 +1161,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-candidate-preflight", action="store_true")
     parser.add_argument("--baseline-rehearsal-path", required=True, type=Path)
     parser.add_argument("--baseline-graph-name", default="dotmd_shadow_baseline")
-    parser.add_argument("--production-graph-name", default=DEFAULT_FALKORDB_GRAPH_NAME)
     parser.add_argument("--metrics-replay-queries", type=Path, default=None)
     parser.add_argument("--target-url", default=None)
     parser.add_argument("--target-url-env", default=None)
@@ -1365,7 +1208,6 @@ def main(argv: list[str] | None = None) -> int:
             artifacts=_artifact_paths_from_args(args),
             baseline_rehearsal_path=args.baseline_rehearsal_path,
             baseline_graph_name=args.baseline_graph_name,
-            production_graph_name=args.production_graph_name,
             metrics_replay_queries=args.metrics_replay_queries,
             target_url=target_url,
             target_namespace=args.target_namespace,

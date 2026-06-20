@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from dotmd.core.config import DEFAULT_FALKORDB_GRAPH_NAME, RUNTIME_INDEX_DIR, Settings
+from dotmd.core.config import RUNTIME_INDEX_DIR, Settings
 from dotmd.ingestion.pipeline import _model_to_table_suffix
 from dotmd.search.surreal_eval import GoldenQueryCategory
 from dotmd.search.surreal_shadow_metrics import (
@@ -195,8 +195,6 @@ def test_build_parser_exposes_phase_43_flags_and_folded_candidate_config() -> No
             "rehearsal",
             "--baseline-graph-name",
             "dotmd_shadow_baseline",
-            "--production-graph-name",
-            DEFAULT_FALKORDB_GRAPH_NAME,
             "--metrics-replay-queries",
             "replay.jsonl",
             "--target-url",
@@ -209,7 +207,6 @@ def test_build_parser_exposes_phase_43_flags_and_folded_candidate_config() -> No
     )
 
     assert args.baseline_graph_name == "dotmd_shadow_baseline"
-    assert args.production_graph_name == DEFAULT_FALKORDB_GRAPH_NAME
     assert args.metrics_replay_queries == Path("replay.jsonl")
     assert args.candidate_config_json == Path("candidate-config.json")
     parser_help = parser.format_help()
@@ -427,8 +424,6 @@ def test_run_eval_receives_stripped_acceptance_path_not_raw_sentinel_file(
             [_eval_result_row(f"sq-{index:03d}", category) for index, category in enumerate(GoldenQueryCategory, start=1)],
         ),
     )
-    monkeypatch.setattr("devtools.surreal_shadow_runner.copy_baseline_graph", lambda *args, **kwargs: SimpleNamespace(falkordb_url="redis://localhost:6379", source_graph="dotmd", baseline_graph="dotmd_shadow_baseline"))
-    monkeypatch.setattr("devtools.surreal_shadow_runner.teardown_baseline_graph", lambda *_args, **_kwargs: None)
     monkeypatch.setattr("devtools.surreal_shadow_runner.build_baseline_service", lambda *_args, **_kwargs: object())
     monkeypatch.setattr("devtools.surreal_shadow_runner.preflight_candidate_target", lambda *_args, **_kwargs: None)
     monkeypatch.setattr("devtools.surreal_shadow_runner.load_settings", lambda: _settings(tmp_path / "prod-index"))
@@ -450,7 +445,6 @@ def test_run_eval_receives_stripped_acceptance_path_not_raw_sentinel_file(
         ),
         baseline_rehearsal_path=rehearsal_root,
         baseline_graph_name="dotmd_shadow_baseline",
-        production_graph_name=DEFAULT_FALKORDB_GRAPH_NAME,
         metrics_replay_queries=None,
         target_url="surrealkv:///tmp/shadow.db",
         target_namespace="dotmd",
@@ -506,7 +500,6 @@ def test_run_shadow_run_reuses_existing_baseline_without_graph_copy(
         artifacts["baseline_results"],
         [_eval_result_row(f"sq-{index:03d}", category) for index, category in enumerate(GoldenQueryCategory, start=1)],
     )
-    copy_calls: list[tuple[object, ...]] = []
     candidate_calls: list[Path] = []
 
     def _fake_capture_candidate(*_args, **kwargs):  # type: ignore[no-untyped-def]
@@ -517,7 +510,6 @@ def test_run_shadow_run_reuses_existing_baseline_without_graph_copy(
         )
 
     monkeypatch.setattr("devtools.surreal_shadow_runner.load_settings", lambda: _settings(tmp_path / "prod-index"))
-    monkeypatch.setattr("devtools.surreal_shadow_runner.copy_baseline_graph", lambda *args, **_kwargs: copy_calls.append(args))
     monkeypatch.setattr("devtools.surreal_shadow_runner.build_baseline_service", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
         "devtools.surreal_shadow_runner.capture_eval_results_from_candidates",
@@ -543,7 +535,6 @@ def test_run_shadow_run_reuses_existing_baseline_without_graph_copy(
         ),
         baseline_rehearsal_path=rehearsal_root,
         baseline_graph_name="dotmd_shadow_baseline",
-        production_graph_name=DEFAULT_FALKORDB_GRAPH_NAME,
         metrics_replay_queries=None,
         target_url="surrealkv:///tmp/shadow.db",
         target_namespace="dotmd",
@@ -557,7 +548,6 @@ def test_run_shadow_run_reuses_existing_baseline_without_graph_copy(
 
     run_shadow_run(config)
 
-    assert copy_calls == []
     assert candidate_calls == [artifacts["candidate_results"]]
 
 
@@ -566,15 +556,12 @@ def test_temporary_noop_candidate_graph_store_restores_factory() -> None:
 
     import dotmd.ingestion.pipeline as pipeline_module
 
-    original = pipeline_module._create_graph_store
+    original = pipeline_module._NoopGraphStore
 
     with _temporary_noop_candidate_graph_store():
-        assert pipeline_module._create_graph_store is not original
-        graph_store = pipeline_module._create_graph_store(object())
-        assert graph_store.node_count() == 0
-        assert graph_store.get_related_sections("chunk-1") == []
+        assert pipeline_module._NoopGraphStore is original
 
-    assert pipeline_module._create_graph_store is original
+    assert pipeline_module._NoopGraphStore is original
 
 
 def test_progress_search_engine_records_engine_step(tmp_path: Path) -> None:
@@ -727,137 +714,10 @@ def test_candidate_config_rejects_missing_required_field(
         load_candidate_config(_write_json(tmp_path / "candidate-config.json", payload))
 
 
-def test_enforce_baseline_graph_isolation_refuses_production_name() -> None:
-    from devtools.surreal_shadow_runner import enforce_baseline_graph_isolation
-
-    enforce_baseline_graph_isolation("dotmd_shadow_baseline")
-
-    with pytest.raises(ValueError, match="dotmd"):
-        enforce_baseline_graph_isolation(DEFAULT_FALKORDB_GRAPH_NAME)
-
-
-def test_copy_baseline_graph_uses_graph_copy(monkeypatch: pytest.MonkeyPatch) -> None:
-    from devtools.surreal_shadow_runner import copy_baseline_graph
-
-    calls: list[tuple[str, str]] = []
-
-    class _FakeGraph:
-        def __init__(self, name: str) -> None:
-            self.name = name
-
-        def copy(self, destination: str) -> None:
-            calls.append((self.name, destination))
-
-        def delete(self) -> None:
-            raise AssertionError("delete should not be called")
-
-    class _FakeClient:
-        def list_graphs(self) -> list[str]:
-            return []
-
-        def select_graph(self, graph_name: str) -> _FakeGraph:
-            return _FakeGraph(graph_name)
-
-    monkeypatch.setattr("devtools.surreal_shadow_runner._build_falkordb_client", lambda _url: _FakeClient())
-
-    handle = copy_baseline_graph("redis://localhost:6379", "dotmd", "dotmd_shadow_baseline")
-
-    assert handle.baseline_graph == "dotmd_shadow_baseline"
-    assert calls == [("dotmd", "dotmd_shadow_baseline")]
-
-
-def test_copy_baseline_graph_deletes_stale_destination_before_copy(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from devtools.surreal_shadow_runner import copy_baseline_graph
-
-    events: list[tuple[str, str]] = []
-
-    class _FakeGraph:
-        def __init__(self, name: str) -> None:
-            self.name = name
-
-        def copy(self, destination: str) -> None:
-            events.append(("copy", f"{self.name}->{destination}"))
-
-        def delete(self) -> None:
-            events.append(("delete", self.name))
-
-    class _FakeClient:
-        def list_graphs(self) -> list[str]:
-            return ["dotmd_shadow_baseline"]
-
-        def select_graph(self, graph_name: str) -> _FakeGraph:
-            return _FakeGraph(graph_name)
-
-    monkeypatch.setattr("devtools.surreal_shadow_runner._build_falkordb_client", lambda _url: _FakeClient())
-
-    copy_baseline_graph("redis://localhost:6379", "dotmd", "dotmd_shadow_baseline")
-
-    assert events == [
-        ("delete", "dotmd_shadow_baseline"),
-        ("copy", "dotmd->dotmd_shadow_baseline"),
-    ]
-
-
-def test_copy_baseline_graph_refuses_production_destination(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from devtools.surreal_shadow_runner import copy_baseline_graph
-
-    called = False
-
-    class _FakeClient:
-        def list_graphs(self) -> list[str]:
-            nonlocal called
-            called = True
-            return []
-
-    monkeypatch.setattr("devtools.surreal_shadow_runner._build_falkordb_client", lambda _url: _FakeClient())
-
-    with pytest.raises(ValueError, match="dotmd"):
-        copy_baseline_graph("redis://localhost:6379", "dotmd", DEFAULT_FALKORDB_GRAPH_NAME)
-
-    assert called is False
-
-
-def test_teardown_baseline_graph_deletes_isolated_copy(monkeypatch: pytest.MonkeyPatch) -> None:
-    from devtools.surreal_shadow_runner import IsolatedBaselineGraph, teardown_baseline_graph
-
-    deleted: list[str] = []
-
-    class _FakeGraph:
-        def __init__(self, graph_name: str) -> None:
-            self.graph_name = graph_name
-
-        def delete(self) -> None:
-            deleted.append(self.graph_name)
-
-    class _FakeClient:
-        def select_graph(self, graph_name: str) -> _FakeGraph:
-            return _FakeGraph(graph_name)
-
-    monkeypatch.setattr("devtools.surreal_shadow_runner._build_falkordb_client", lambda _url: _FakeClient())
-
-    teardown_baseline_graph(
-        IsolatedBaselineGraph(
-            falkordb_url="redis://localhost:6379",
-            source_graph="dotmd",
-            baseline_graph="dotmd_shadow_baseline",
-        )
-    )
-
-    assert deleted == ["dotmd_shadow_baseline"]
-
-
 def test_build_baseline_service_binds_isolated_graph_name(tmp_path: Path) -> None:
     from devtools.surreal_shadow_runner import build_baseline_service
 
-    rehearsal_settings = _settings(tmp_path / "rehearsal").model_copy(
-        update={
-            "falkordb_graph_name": "dotmd_shadow_baseline",
-        }
-    )
+    rehearsal_settings = _settings(tmp_path / "rehearsal")
 
     service = build_baseline_service(rehearsal_settings)
 
@@ -925,22 +785,11 @@ def test_production_index_and_graph_untouched_by_run(
     _write_json(artifacts["scale_metrics"], {"passed": True})
     _write_json(artifacts["memory_metrics"], {"passed": True})
 
-    graphs_after_run = ["dotmd"]
     monkeypatch.setattr(
         "devtools.surreal_shadow_runner.load_settings",
         lambda: _settings(production_root),
     )
     monkeypatch.setenv("DOTMD_INDEX_DIR", str(production_root))
-    monkeypatch.setattr(
-        "devtools.surreal_shadow_runner.copy_baseline_graph",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            falkordb_url="redis://localhost:6379",
-            source_graph="dotmd",
-            baseline_graph="dotmd_shadow_baseline",
-        ),
-    )
-    monkeypatch.setattr("devtools.surreal_shadow_runner.teardown_baseline_graph", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr("devtools.surreal_shadow_runner._list_graph_names", lambda _url: graphs_after_run)
     monkeypatch.setattr("devtools.surreal_shadow_runner.build_baseline_service", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
         "devtools.surreal_shadow_runner.capture_baseline_eval_results",
@@ -976,7 +825,6 @@ def test_production_index_and_graph_untouched_by_run(
         ),
         baseline_rehearsal_path=rehearsal_root,
         baseline_graph_name="dotmd_shadow_baseline",
-        production_graph_name=DEFAULT_FALKORDB_GRAPH_NAME,
         metrics_replay_queries=None,
         target_url="surrealkv:///tmp/shadow.db",
         target_namespace="dotmd",
@@ -995,7 +843,6 @@ def test_production_index_and_graph_untouched_by_run(
         production_stat_before.st_mtime_ns,
         production_stat_before.st_size,
     )
-    assert DEFAULT_FALKORDB_GRAPH_NAME in graphs_after_run
 
 
 def test_preflight_passes_when_target_queryable_with_records(tmp_path: Path) -> None:
@@ -1153,19 +1000,12 @@ def test_build_baseline_service_uses_model_copy_clone(tmp_path: Path, monkeypatc
     monkeypatch.setattr("devtools.surreal_shadow_runner.DotMDService", _FakeDotMDService)
 
     base_settings = _settings(tmp_path / "prod")
-    rehearsal_settings = base_settings.model_copy(
-        update={
-            "index_dir": tmp_path / "rehearsal",
-            "falkordb_graph_name": "dotmd_shadow_baseline",
-        }
-    )
+    rehearsal_settings = base_settings.model_copy(update={"index_dir": tmp_path / "rehearsal"})
 
     build_baseline_service(rehearsal_settings)
 
     assert calls
     assert calls[0].index_db_path == rehearsal_settings.index_db_path
-    assert calls[0].falkordb_graph_name == "dotmd_shadow_baseline"
-    assert base_settings.falkordb_graph_name == DEFAULT_FALKORDB_GRAPH_NAME
 
 
 def test_build_baseline_service_targets_isolated_copies_not_production(
@@ -1183,17 +1023,12 @@ def test_build_baseline_service_targets_isolated_copies_not_production(
     monkeypatch.setattr("devtools.surreal_shadow_runner.DotMDService", _FakeDotMDService)
 
     rehearsal_settings = _settings(tmp_path / "prod").model_copy(
-        update={
-            "index_dir": tmp_path / "rehearsal",
-            "falkordb_graph_name": "dotmd_shadow_baseline",
-        }
+        update={"index_dir": tmp_path / "rehearsal"}
     )
 
     build_baseline_service(rehearsal_settings)
 
     assert seen_settings[0].index_dir == tmp_path / "rehearsal"
-    assert seen_settings[0].falkordb_graph_name == "dotmd_shadow_baseline"
-    assert seen_settings[0].falkordb_graph_name != DEFAULT_FALKORDB_GRAPH_NAME
 
 
 def test_rehearsal_identity_match_passes(tmp_path: Path) -> None:
@@ -1283,9 +1118,6 @@ def test_expected_manifest_input_is_never_rewritten(
     _write_json(artifacts["memory_metrics"], {"passed": True})
 
     monkeypatch.setattr("devtools.surreal_shadow_runner.load_settings", lambda: _settings(tmp_path / "prod"))
-    monkeypatch.setattr("devtools.surreal_shadow_runner.copy_baseline_graph", lambda *_args, **_kwargs: SimpleNamespace(falkordb_url="redis://localhost:6379", source_graph="dotmd", baseline_graph="dotmd_shadow_baseline"))
-    monkeypatch.setattr("devtools.surreal_shadow_runner.teardown_baseline_graph", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr("devtools.surreal_shadow_runner._list_graph_names", lambda _url: ["dotmd"])
     monkeypatch.setattr("devtools.surreal_shadow_runner.build_baseline_service", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
         "devtools.surreal_shadow_runner.capture_baseline_eval_results",
@@ -1317,7 +1149,6 @@ def test_expected_manifest_input_is_never_rewritten(
         ),
         baseline_rehearsal_path=rehearsal_root,
         baseline_graph_name="dotmd_shadow_baseline",
-        production_graph_name=DEFAULT_FALKORDB_GRAPH_NAME,
         metrics_replay_queries=None,
         target_url="surrealkv:///tmp/shadow.db",
         target_namespace="dotmd",

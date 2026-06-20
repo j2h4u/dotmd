@@ -31,7 +31,6 @@ def _runtime_settings(**overrides: object) -> Settings:
         "reranker_model": "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
         "reranker_backend": "cross_encoder",
         "embedding_weights": "text=0.7,meta=0.3",
-        "falkordb_url": "redis://falkordb:6379",
         "surreal_retrieval_url": "http://surrealdb:8000",
         "surreal_retrieval_namespace": "dotmd",
         "surreal_retrieval_database": "production",
@@ -82,8 +81,13 @@ def test_indexing_extra_exclude_is_additive() -> None:
     assert "**/private" in settings.effective_indexing_exclude
 
 
-def test_default_falkordb_url_is_exported() -> None:
-    assert config.DEFAULT_FALKORDB_URL == "redis://localhost:6379"
+def test_surreal_runtime_settings_are_the_only_public_graph_runtime_config() -> None:
+    settings = Settings(embedding_url="http://localhost:8088")
+
+    assert "falkordb_url" not in Settings.model_fields
+    assert "falkordb_graph_name" not in Settings.model_fields
+    assert settings.surreal_retrieval_url == config.DEFAULT_SURREAL_URL
+    assert settings.surreal_retrieval_namespace == config.DEFAULT_SURREAL_NAMESPACE
 
 
 def test_surreal_runtime_defaults_export_surreal_settings() -> None:

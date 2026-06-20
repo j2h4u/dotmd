@@ -5,27 +5,163 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import sys
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 try:
-    from dotmd.core.config import DEFAULT_FALKORDB_GRAPH_NAME, load_settings
+    from dotmd.core.config import load_settings
     from dotmd.feedback import FeedbackStore
-    from dotmd.storage.falkordb_graph import FalkorDBGraphStore
 except ModuleNotFoundError:  # pragma: no cover - import fallback for direct test imports
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from dotmd.core.config import DEFAULT_FALKORDB_GRAPH_NAME, load_settings
+    from dotmd.core.config import load_settings
     from dotmd.feedback import FeedbackStore
-    from dotmd.storage.falkordb_graph import FalkorDBGraphStore
+
+try:  # pragma: no cover - optional migration dependency
+    from falkordb import FalkorDB
+except ModuleNotFoundError:  # pragma: no cover - keep devtools importable without optional dependency
+    FalkorDB = None  # type: ignore[assignment]
+
+try:  # pragma: no cover - optional migration dependency
+    from redis.exceptions import RedisError
+except ModuleNotFoundError:  # pragma: no cover - keep devtools importable without optional dependency
+    class RedisError(Exception):
+        pass
+
+
+_FALKOR_ERRORS = (RedisError, RuntimeError, ValueError, KeyError, IndexError, TypeError)
+logger = logging.getLogger(__name__)
+DEFAULT_FALKORDB_GRAPH_NAME = "dotmd"
+
+
+class FalkorDBGraphStore:
+    """FalkorDB implementation used by the devtools export runner."""
+
+    def __init__(
+        self,
+        url: str = "redis://localhost:6379",
+        graph_name: str = "dotmd",
+    ) -> None:
+        if FalkorDB is None:
+            raise ModuleNotFoundError("devtools.surreal_source_export_runner requires the optional falkordb dependency")
+
+        parsed = urlparse(url)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 6379
+
+        try:
+            self._db = FalkorDB(host=host, port=port)
+            self._graph = self._db.select_graph(graph_name)
+        except Exception as exc:
+            logger.exception("Cannot connect to FalkorDB at %s:%d", host, port)
+            raise ConnectionError(
+                f"Cannot connect to FalkorDB at {url}. Is the container running?"
+            ) from exc
+
+        self._graph_name = graph_name
+
+        for label in ("File", "Section", "Entity", "Tag", "Node"):
+            try:
+                self._graph.query(f"CREATE INDEX FOR (n:{label}) ON (n.id)")
+            except _FALKOR_ERRORS:
+                logger.debug("Index for %s already exists or creation skipped", label)
+
+    def add_file_node(self, file_path: str, title: str) -> None:
+        self._graph.query(
+            "MERGE (f:File:Node {id: $id}) SET f.title = $title",
+            params={"id": file_path, "title": title},
+        )
+
+    def add_section_node(
+        self,
+        chunk_id: str,
+        heading: str,
+        level: int,
+        file_path: str,
+        text_preview: str,
+    ) -> None:
+        self._graph.query(
+            "MERGE (s:Section:Node {id: $id}) "
+            "SET s.heading = $heading, s.level = $level, "
+            "s.file_path = $file_path, s.text_preview = $text_preview",
+            params={
+                "id": chunk_id,
+                "heading": heading,
+                "level": level,
+                "file_path": file_path,
+                "text_preview": text_preview,
+            },
+        )
+
+    def add_entity_node(self, name: str, entity_type: str, source: str) -> None:
+        self._graph.query(
+            "MERGE (e:Entity:Node {id: $id}) SET e.type = $type, e.source = $source",
+            params={"id": name, "type": entity_type, "source": source},
+        )
+
+    def add_tag_node(self, name: str) -> None:
+        self._graph.query(
+            "MERGE (t:Tag:Node {id: $id})",
+            params={"id": name},
+        )
+
+    def add_edge(
+        self,
+        source_id: str,
+        target_id: str,
+        relation_type: str,
+        weight: float = 1.0,
+    ) -> None:
+        self._graph.query(
+            "MATCH (a:Node {id: $src}), (b:Node {id: $tgt}) "
+            "MERGE (a)-[r:REL]->(b) "
+            "SET r.rel_type = $rel_type, r.weight = $weight",
+            params={
+                "src": source_id,
+                "tgt": target_id,
+                "rel_type": relation_type,
+                "weight": weight,
+            },
+        )
+
+    def batch_add_section_nodes(self, sections: list[dict]) -> None:
+        if not sections:
+            return
+        self._graph.query(
+            "UNWIND $rows AS row "
+            "MERGE (s:Section:Node {id: row.chunk_id}) "
+            "SET s.heading = row.heading, s.level = row.level, "
+            "s.file_path = row.file_path, s.text_preview = row.text_preview",
+            params={"rows": sections},
+        )
+
+    def batch_add_entity_nodes(self, entities: list[dict]) -> None:
+        if not entities:
+            return
+        self._graph.query(
+            "UNWIND $rows AS row "
+            "MERGE (e:Entity:Node {id: row.name}) "
+            "SET e.type = row.entity_type, e.source = row.source",
+            params={"rows": entities},
+        )
+
+    def batch_add_tag_nodes(self, tags: list[str]) -> None:
+        if not tags:
+            return
+        self._graph.query(
+            "UNWIND $ids AS id MERGE (t:Tag:Node {id: id})",
+            params={"ids": tags},
+        )
 
 DEFAULT_GRAPH_EXPORT_PAGE_SIZE = 5_000
 DEFAULT_GRAPH_QUERY_TIMEOUT_MS = 120_000

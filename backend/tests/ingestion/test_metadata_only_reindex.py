@@ -207,7 +207,7 @@ def test_metadata_only_reindex_exactly_one_tei_call(pipeline_settings):
     )
 
 
-def test_surreal_backend_initializes_without_falkor_graph_store(
+def test_surreal_backend_uses_noop_graph_store(
     surreal_pipeline_settings, monkeypatch
 ):
     from dotmd.ingestion import pipeline as pipeline_module
@@ -225,15 +225,6 @@ def test_surreal_backend_initializes_without_falkor_graph_store(
         pipeline_module,
         "_create_surreal_direct_writer",
         lambda _settings: FakeWriter(),
-    )
-    monkeypatch.setattr(
-        pipeline_module,
-        "_create_graph_store",
-        lambda *_args, **_kwargs: pytest.fail("Falkor graph store factory must not run"),
-    )
-    monkeypatch.setattr(
-        "dotmd.storage.falkordb_graph.FalkorDBGraphStore",
-        lambda *_args, **_kwargs: pytest.fail("FalkorDBGraphStore must not be constructed"),
     )
 
     pipeline = IndexingPipeline(surreal_pipeline_settings)

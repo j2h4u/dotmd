@@ -23,8 +23,6 @@ DEFAULT_INDEXING_EXCLUDE: tuple[str, ...] = (
     "**/build",
     "**/.cache",
 )
-DEFAULT_FALKORDB_URL = "redis://localhost:6379"
-DEFAULT_FALKORDB_GRAPH_NAME = "dotmd"
 DEFAULT_MAX_CHUNK_TOKENS = 512
 DEFAULT_CHUNK_OVERLAP_TOKENS = 50
 DEFAULT_TEI_BATCH_SIZE = 4
@@ -236,9 +234,6 @@ class Settings(BaseSettings):
 
     # Graph
     graph_max_hops: int = DEFAULT_GRAPH_MAX_HOPS
-    # FalkorDB connection URL (Redis protocol).
-    falkordb_url: str = DEFAULT_FALKORDB_URL
-    falkordb_graph_name: str = DEFAULT_FALKORDB_GRAPH_NAME
 
     # Standalone SurrealDB search runtime.
     surreal_retrieval_url: str = DEFAULT_SURREAL_URL

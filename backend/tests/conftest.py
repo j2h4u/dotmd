@@ -28,16 +28,13 @@ def _dotmd_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setenv("DOTMD_EMBEDDING_URL", "http://test-tei:8088")
     monkeypatch.setenv("DOTMD_EXTRACT_DEPTH", "structural")
-    # Fallback guard: tests patch graph-store construction below, but this
-    # prevents accidental production FalkorDB access if a test opts out.
-    monkeypatch.setenv("DOTMD_FALKORDB_URL", "redis://127.0.0.1:1")
 
 
 class InMemoryGraphStore:
     """Small test double for GraphStoreProtocol.
 
-    Unit tests exercise pipeline behavior, not FalkorDB connectivity. Keep this
-    fake in tests only so production has a single real graph backend.
+    Unit tests exercise pipeline behavior, not graph-backend connectivity. Keep
+    this fake in tests only so production has a single real graph backend.
     """
 
     def __init__(self) -> None:
@@ -256,10 +253,7 @@ class InMemoryGraphStore:
 
 @pytest.fixture(autouse=True)
 def _mock_graph_store_factory(request: pytest.FixtureRequest) -> Generator[None, None, None]:
-    if request.node.get_closest_marker("real_falkordb"):
-        yield
-        return
-    with patch("dotmd.ingestion.pipeline._create_graph_store", return_value=InMemoryGraphStore()):
+    with patch("dotmd.ingestion.pipeline._NoopGraphStore", InMemoryGraphStore):
         yield
 
 

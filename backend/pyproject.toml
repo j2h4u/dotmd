@@ -12,7 +12,6 @@ dependencies = [
     "blake3>=1.0",
     "click>=8.0",
     "sqlite-vec>=0.1.6",
-    "FalkorDB>=1.6.0",
     "pydantic>=2.0",
     "pydantic-settings[toml]>=2.14.1",
     "watchdog>=6.0",

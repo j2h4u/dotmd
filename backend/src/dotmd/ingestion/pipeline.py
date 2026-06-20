@@ -192,16 +192,6 @@ def _model_to_table_suffix(model_name: str) -> str:
     return f"_{name}" if name else "_default"
 
 
-def _create_graph_store(settings: Settings) -> GraphStoreProtocol:
-    """Instantiate the production graph store backend."""
-    from dotmd.storage.falkordb_graph import FalkorDBGraphStore
-
-    return FalkorDBGraphStore(
-        url=settings.falkordb_url,
-        graph_name=settings.falkordb_graph_name,
-    )
-
-
 class _NoopGraphStore:
     """Disabled graph store used when Surreal is the authoritative backend."""
 
@@ -415,10 +405,7 @@ class IndexingPipeline:
 
         _write_pipeline_init_progress("pipeline:graph_store", "running")
         self._uses_surreal_direct_ingest = bool(settings.surreal_retrieval_database)
-        if self._uses_surreal_direct_ingest:
-            self._graph_store = _NoopGraphStore()
-        else:
-            self._graph_store = _create_graph_store(settings)
+        self._graph_store = _NoopGraphStore()
         _write_pipeline_init_progress("pipeline:graph_store", "applied")
 
         # -- Two file trackers with different checksum formulas -----------------
