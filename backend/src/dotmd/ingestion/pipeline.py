@@ -414,7 +414,8 @@ class IndexingPipeline:
         _write_pipeline_init_progress("pipeline:vector_store", "applied")
 
         _write_pipeline_init_progress("pipeline:graph_store", "running")
-        if settings.search_backend == "surreal":
+        self._uses_surreal_direct_ingest = bool(settings.surreal_retrieval_database)
+        if self._uses_surreal_direct_ingest:
             self._graph_store = _NoopGraphStore()
         else:
             self._graph_store = _create_graph_store(settings)
@@ -533,8 +534,11 @@ class IndexingPipeline:
         # Direct Surreal writer for standalone filesystem ingest.
         # Enabled when the Surreal direct ingest path is configured.
         self._surreal_direct_writer: Any | None = (
-            _create_surreal_direct_writer(settings) if settings.search_backend == "surreal" else None
+            _create_surreal_direct_writer(settings)
+            if self._uses_surreal_direct_ingest
+            else None
         )
+        self._maintains_local_search_artifacts = self._surreal_direct_writer is None
         self._surreal_direct_sync_state = SurrealDeltaSyncState()
 
         # Startup integrity checks can delete vector and graph state. They must
@@ -1033,7 +1037,7 @@ class IndexingPipeline:
         return result
 
     def _raise_if_surreal_local_destructive(self, action: str) -> None:
-        if self._settings.search_backend == "surreal":
+        if self._surreal_direct_writer is not None:
             raise RuntimeError(
                 f"{action} is disabled in Surreal mode because it mutates "
                 "local SQLite/FTS5/vector/graph state"
@@ -2144,7 +2148,7 @@ class IndexingPipeline:
             )
             self._write_surreal_direct_manifest(direct_manifest)
 
-        write_local_search_artifacts = self._settings.search_backend != "surreal"
+        write_local_search_artifacts = self._maintains_local_search_artifacts
 
         # ── WRITE PHASE ───────────────────────────────────────────────────────────────
         # Each store call owns its own commit. Cross-store atomicity is not achievable
@@ -2790,7 +2794,7 @@ class IndexingPipeline:
             len(chunks) / t_embed if t_embed > 0 else 0,
         )
 
-        if self._settings.search_backend != "surreal":
+        if self._maintains_local_search_artifacts:
             t0 = time.perf_counter()
             self._vector_store.add_chunks(
                 chunk_order,
@@ -3422,7 +3426,7 @@ class IndexingPipeline:
             _trickle_tags = file_info.frontmatter.get("tags", [])
             _trickle_tags_csv = ", ".join(str(t) for t in _trickle_tags) if _trickle_tags else ""
             _trickle_meta = {str(file_info.path): (file_info.title, _trickle_tags_csv)}
-            if self._settings.search_backend != "surreal":
+            if self._maintains_local_search_artifacts:
                 self._keyword_engine.add_chunks(chunks, file_meta=_trickle_meta)
             t_save = time.perf_counter() - t0
 

@@ -171,6 +171,11 @@ class TrickleIndexer:
             raise RuntimeError("TrickleIndexer pipeline must be initialized")
         return pipeline
 
+    def _maintains_local_search_artifacts(self) -> bool:
+        return bool(
+            getattr(self._pipeline_instance, "_maintains_local_search_artifacts", True)
+        )
+
     @property
     def state(self) -> TrickleState:
         """Return current indexer state (read by status endpoint)."""
@@ -299,7 +304,7 @@ class TrickleIndexer:
                     chunks_rm,
                     vecs_rm,
                 )
-                if self._settings.search_backend != "surreal":
+                if self._maintains_local_search_artifacts():
                     self._needs_vacuum = True
             else:
                 logger.info("Orphan cleanup: no orphans found")
@@ -341,7 +346,7 @@ class TrickleIndexer:
             for path_str in diff.deleted:
                 try:
                     await asyncio.to_thread(self._pipeline_instance._purge_file, path_str)
-                    if self._settings.search_backend != "surreal":
+                    if self._maintains_local_search_artifacts():
                         self._needs_vacuum = True
                 except Exception:
                     logger.exception("Failed to purge %s", path_str)
@@ -486,7 +491,7 @@ class TrickleIndexer:
                                 "Watch: purged deleted %s",
                                 Path(path_str).name,
                             )
-                            if self._settings.search_backend != "surreal":
+                            if self._maintains_local_search_artifacts():
                                 self._needs_vacuum = True
                         except Exception:
                             logger.exception(

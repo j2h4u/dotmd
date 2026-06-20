@@ -313,7 +313,11 @@ class DotMDService:
         )
         self._surreal_connection: Any | None = None
         self._surreal_metadata_store: MetadataStoreProtocol | None = None
-        if self._settings.search_backend == "surreal":
+        self._uses_surreal_search_backend = (
+            self._settings.surreal_retrieval_database is not None
+            and self._settings.surreal_retrieval_embedding_dimension is not None
+        )
+        if self._uses_surreal_search_backend:
             self._configure_surreal_search_backend()
         else:
             self._graph_engine = GraphSearchEngine(
@@ -566,7 +570,7 @@ class DotMDService:
             Number of chunks processed.
         """
         if store == "all":
-            if self._surreal_metadata_store is not None:
+            if self._uses_surreal_search_backend:
                 logger.info(
                     "reindex(all): skipped local vector and FTS5 rebuilds in Surreal mode"
                 )
