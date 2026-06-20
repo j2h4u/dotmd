@@ -1,6 +1,10 @@
 # dotMD Architecture
 
-dotMD is a local markdown retrieval service exposed through a CLI, REST API, and MCP server. The current architecture uses a unified SQLite index for metadata, FTS5, fingerprints, and sqlite-vec vectors, plus a graph backend for entity-aware retrieval.
+dotMD is a local markdown retrieval service exposed through a CLI, REST API,
+and MCP server. The current production architecture uses standalone SurrealDB
+for metadata, keyword retrieval, vector retrieval, and graph-backed entity
+retrieval. Legacy SQLite/sqlite-vec/FTS5/FalkorDB code is Phase 47 migration
+scaffolding, not the target runtime architecture.
 
 ## Pipeline Flowchart
 
@@ -16,35 +20,29 @@ flowchart TD
     subgraph Embeddings
         D --> P[Context prefix injection]
         P --> TEI[TEI embedding server]
-        TEI --> VEC[sqlite-vec vectors]
+        TEI --> VEC[SurrealDB vectors]
         D --> HASH[text_hash cache]
         HASH --> VEC
     end
 
-    subgraph SQLite["Unified SQLite index.db"]
+    subgraph SurrealDB["Standalone SurrealDB dotmd/production"]
         D --> META[chunk metadata]
         META --> RB[active resource bindings]
         D --> M2M[Internal filesystem holder paths]
-        D --> FTS[FTS5 keyword index]
+        D --> FTS[Surreal keyword index]
         FP --> TRACK[file and embed fingerprints]
         VEC --> VMETA[vector metadata]
-    end
-
-    subgraph Extraction
         D --> STRUCT[Structural extractor]
         D --> NER[GLiNER NER extractor]
         STRUCT --> ENT[Entities and relations]
         NER --> ENT
-    end
-
-    subgraph Graph
-        ENT --> FALKOR[FalkorDB]
+        ENT --> GRAPH[graph relations]
     end
 
     subgraph Query["Query pipeline"]
         Q[User query] --> QE[Query expansion]
         QE --> SEM[Semantic search]
-        QE --> KW[FTS5 keyword search]
+        QE --> KW[Surreal keyword search]
         QE --> GD[Graph-direct entity retrieval]
         SEM --> RRF[Reciprocal Rank Fusion]
         KW --> RRF
@@ -55,7 +53,7 @@ flowchart TD
 
     VEC -.-> SEM
     FTS -.-> KW
-    FALKOR -.-> GD
+    GRAPH -.-> GD
     META -.-> RR
     M2M -.-> OUT
 
@@ -84,11 +82,11 @@ flowchart TD
 
 | Store | Technology | Contents |
 |-------|------------|----------|
-| Metadata | SQLite `index.db` | Chunks, source documents, active resource bindings, M2M file paths, index stats |
-| Keyword | SQLite FTS5 | Incremental keyword index with title/tag weighting |
-| Vector | sqlite-vec in `index.db` | Embeddings keyed by chunk strategy and embedding model |
-| Graph | FalkorDB | Files, sections, entities, tags, and relations |
-| Feedback | SQLite `feedback.db` | Agent feedback submissions |
+| Metadata | SurrealDB | Chunks, source documents, active resource bindings, M2M file paths, index stats |
+| Keyword | SurrealDB indexes | Keyword index with title/tag weighting semantics |
+| Vector | SurrealDB HNSW | Embeddings keyed by chunk strategy and embedding model |
+| Graph | SurrealDB relations | Files, sections, entities, tags, and relations |
+| Feedback | SurrealDB | Agent feedback submissions |
 
 The schema is two-dimensional where needed: `(chunk_strategy, embedding_model)`. This lets multiple chunking strategies and embedding models coexist in one index.
 
@@ -97,20 +95,20 @@ The schema is two-dimensional where needed: `(chunk_strategy, embedding_model)`.
 - TEI is the normal embedding runtime.
 - Document title/context is prepended at encode time where configured.
 - `text_hash` enables embedding reuse across compatible chunk strategies.
-- sqlite-vec keeps vector storage embedded in `index.db` without an external vector service.
+- SurrealDB stores vectors alongside document metadata and graph relations.
 
 ### 4. Extraction and Graph
 
 - Structural extraction handles headings, tags, wikilinks, markdown links, and frontmatter-derived signals.
 - GLiNER NER can add named entities when `DOTMD_EXTRACT_DEPTH=ner`.
-- FalkorDB is the graph backend.
+- SurrealDB relations are the graph backend.
 
 ### 5. Query Pipeline
 
 1. Query expansion prepares the user query for retrieval.
 2. Three engines run as peers:
-   - semantic vector search through sqlite-vec
-   - SQLite FTS5 keyword search
+   - semantic vector search through SurrealDB HNSW
+   - SurrealDB keyword search
    - graph-direct entity retrieval
 3. Reciprocal Rank Fusion combines candidate lists.
 4. Cross-encoder reranking rescores the fused candidate pool.
@@ -157,7 +155,7 @@ results live in `docs/reranker-benchmark-methodology.md`.
 
 Reranking is non-fatal. If the provider errors, is unavailable, or an optional
 raw-score floor removes all candidates, dotMD falls back to fused semantic,
-FTS5, and graph ranking instead of returning an empty search result.
+keyword, and graph ranking instead of returning an empty search result.
 
 ## Interfaces
 

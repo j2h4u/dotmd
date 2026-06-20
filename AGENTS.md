@@ -16,19 +16,23 @@ now a standalone repository with its own product and architecture direction.
 
 The project has been substantially reworked:
 
-- **Unified database**: single `index.db` (was separate `metadata.db` + `vec.db`)
+- **Standalone SurrealDB cutover**: production storage and retrieval now target
+  the standalone SurrealDB database `dotmd/production`
+- **Legacy SQLite database**: `index.db` remains migration/internal-cache
+  scaffolding during Phase 47, not the target production retrieval backend
 - **Two-dimensional storage**: tables keyed by `(chunk_strategy, embedding_model)` — supports multiple chunking strategies and embedding models simultaneously
 - **Content-aware chunking**: speaker-turn splitting for meeting transcripts, paragraph splitting for voicenotes, heading-based for docs
 - **Context prefix injection**: document title prepended to embeddings at encode time
-- **Graph-first entity retrieval**: entity-direct graph search as RRF peer alongside semantic and FTS5
+- **Graph-first entity retrieval**: entity-direct graph search as RRF peer alongside semantic and keyword retrieval
 - **Embedding reuse**: text_hash column enables cross-strategy embedding cache
 - **Split fingerprints**: chunk tracking and embed tracking separated (change model → skip re-chunking)
 - **Exclusive lock**: `fcntl.flock` prevents parallel indexing
 - **Orphan cleanup**: automatic at trickle startup
 - **M2M content-addressed schema**: chunks → file_paths many-to-many (Phase 16)
-- **sqlite-vec**: replaced LanceDB with sqlite-vec (no AVX2 requirement)
-- **FTS5**: replaced rank_bm25 with SQLite FTS5 (incremental, no pickle, column weights)
-- **FalkorDB**: production graph backend; LadybugDB kept as embedded local-dev default
+- **SurrealDB-native retrieval**: semantic, keyword, and graph-direct retrieval
+  run through standalone SurrealDB
+- **Legacy storage removal in progress**: SQLite/sqlite-vec/FTS5/FalkorDB/
+  LadybugDB are being removed as production runtime choices in Phase 47
 - **TEI**: external embedding server (Text Embeddings Inference), CPU-only
 
 ## Phase 37: Airweave Connector Compatibility
@@ -65,9 +69,9 @@ flow through quota-based `_merge_with_federated_quota()`.
 | Component | Technology |
 |-----------|------------|
 | Language | Python 3.12+ |
-| Vector store | sqlite-vec |
-| Graph DB | FalkorDB (production) / LadybugDB (local dev, no container needed) |
-| Metadata + FTS | SQLite + FTS5 |
+| Storage + retrieval | Standalone SurrealDB |
+| Vector index | SurrealDB HNSW |
+| Metadata + graph + keyword | SurrealDB tables/indexes |
 | Embeddings | TEI (Text Embeddings Inference) — external container |
 | Reranker | cross-encoder/ms-marco-MiniLM-L-6-v2 |
 | NER | GLiNER (urchade/gliner_multi-v2.1) — zero-shot |
@@ -85,8 +89,8 @@ dotMD/
 │       ├── core/         # models, config, exceptions
 │       ├── ingestion/    # reader, chunker, pipeline, trickle, migration
 │       ├── extraction/   # structural, GLiNER NER
-│       ├── storage/      # sqlite-vec (vectors), FalkorDB/LadybugDB (graph), SQLite (metadata + FTS5)
-│       ├── search/       # semantic, FTS5, graph_direct, fusion, reranker, query
+│       ├── storage/      # SurrealDB plus temporary migration/cache scaffolding
+│       ├── search/       # semantic, Surreal keyword/graph_direct, fusion, reranker, query
 │       ├── api/          # DotMDService facade + FastAPI server
 │       ├── mcp_server.py # FastMCP server (search, read, feedback tools)
 │       └── cli.py        # Click CLI (thin wrapper over api/service.py)
@@ -106,20 +110,24 @@ backend/src/dotmd/
   ingestion/chunker.py    — content-aware chunking
   search/semantic.py      — TEI embedding + vector search
   search/graph_direct.py  — entity-direct graph retrieval
-  search/fts5.py          — FTS5 keyword search
+  search/surreal_fts.py   — SurrealDB keyword search
   api/service.py          — DotMDService facade
   api/server.py           — FastAPI REST API
   cli.py                  — Click CLI
 ```
 
-Search pipeline: query → expand → 3 engines parallel (semantic + FTS5 + graph) → RRF fuse → cross-encoder rerank → top-K.
+Search pipeline: query → expand → 3 Surreal-backed engines parallel
+(semantic + keyword + graph) → RRF fuse → cross-encoder rerank → top-K.
 
 ## Storage
 
-Production index lives on docker volume `dotmd_dotmd-index` (mapped to `/dotmd-index/` in container):
-- `index.db` — unified database: chunk metadata, FTS5 tables, sqlite-vec embeddings, fingerprints, M2M file_paths
+Production storage lives in standalone SurrealDB:
+- namespace: `dotmd`
+- database: `production`
+- data directory: `/srv/surrealdb/data`
 
-Graph stored externally in FalkorDB (shared `falkordb` Docker network).
+`/dotmd-index/index.db` remains temporary Phase 47 migration/cache scaffolding
+until the legacy stack removal is complete.
 
 ## Configuration
 
@@ -133,9 +141,12 @@ Production env vars (source: `/opt/docker/dotmd/.env`):
 | `DOTMD_EMBEDDING_MODEL` | Model name passed to TEI |
 | `DOTMD_TEI_BATCH_SIZE` | TEI call batch size |
 | `DOTMD_EXTRACT_DEPTH` | `structural` or `ner` |
-| `DOTMD_GRAPH_BACKEND` | `falkordb` (prod) or `ladybugdb` (local dev) |
-| `DOTMD_FALKORDB_URL` | FalkorDB Redis URL |
-| `DOTMD_FALKORDB_GRAPH_NAME` | Graph name in FalkorDB |
+| `DOTMD_SEARCH_BACKEND` | `surreal` |
+| `DOTMD_SURREAL_RETRIEVAL_URL` | Standalone SurrealDB URL |
+| `DOTMD_SURREAL_RETRIEVAL_NAMESPACE` | SurrealDB namespace, normally `dotmd` |
+| `DOTMD_SURREAL_RETRIEVAL_DATABASE` | SurrealDB database, normally `production` |
+| `DOTMD_SURREAL_RETRIEVAL_EMBEDDING_DIMENSION` | Embedding dimension, currently `1024` |
+| `DOTMD_SURREAL_RETRIEVAL_VECTOR_INDEX_TYPE` | HNSW vector type, currently `F16` |
 | `DOTMD_PROFILE_INDEXING` | Enable pipeline timing logs |
 
 ## Deployment
@@ -152,7 +163,7 @@ exec dotmd mcp --transport streamable-http --host 0.0.0.0 --port 8080
 
 External dependencies (separate containers):
 - TEI (`embeddings` service, port 8088) — embedding server
-- FalkorDB (`falkordb`) — knowledge graph (standalone container)
+- SurrealDB (`surrealdb`, host port 8000) — storage and retrieval database
 
 Source code is bind-mounted into the container — code changes take effect on container restart, no image rebuild needed. Rebuild only when `pyproject.toml` or `start.sh` changes.
 

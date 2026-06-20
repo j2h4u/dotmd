@@ -2,7 +2,7 @@
 
 **Local markdown knowledgebase search for humans and AI agents.**
 
-dotMD indexes markdown files and exposes hybrid retrieval through a CLI, REST API, and MCP server. It combines semantic search, SQLite FTS5 keyword search, and graph-based entity retrieval, then fuses and reranks results for higher precision.
+dotMD indexes markdown files and exposes hybrid retrieval through a CLI, REST API, and MCP server. Production retrieval now runs through standalone SurrealDB for semantic vectors, keyword search, and graph-backed entity retrieval, then fuses and reranks results for higher precision.
 
 Everything runs against local or self-hosted services. No hosted LLM API key is required for normal indexing or search.
 
@@ -17,13 +17,12 @@ keeps only `mmarco-minilm`; rejected historical candidates remain documented in
 
 ## Features
 
-- Hybrid search across semantic vectors, FTS5 keywords, and knowledge graph entities
+- Hybrid search across semantic vectors, keyword search, and knowledge graph entities
 - MCP server for Claude Code, Cursor, VS Code, OpenCode, and other MCP clients
 - Content-aware markdown chunking for docs, meeting transcripts, and voicenotes
-- Unified SQLite `index.db` for metadata, FTS5, fingerprints, and sqlite-vec vectors
+- Standalone SurrealDB production storage and retrieval
 - Multiple chunk strategies and embedding models in the same index
 - External TEI embedding server support
-- FalkorDB graph backend
 - Background trickle indexer for incremental file changes
 
 ## Requirements
@@ -35,7 +34,7 @@ keeps only `mmarco-minilm`; rejected historical candidates remain documented in
 | Docker and Docker Compose | Containerized runtime and bundled services |
 | just | Development task runner |
 | TEI | Required embedding server for normal indexing/search |
-| FalkorDB | Required graph backend |
+| SurrealDB | Required production storage and retrieval database |
 
 Optional tools:
 
@@ -106,7 +105,7 @@ Search modes:
 ```bash
 uv run dotmd search "query" --mode hybrid     # semantic + keyword + graph
 uv run dotmd search "query" --mode semantic   # vector similarity
-uv run dotmd search "query" --mode keyword    # SQLite FTS5 keyword search
+uv run dotmd search "query" --mode keyword    # SurrealDB keyword search
 uv run dotmd search "query" --mode graph      # graph retrieval
 uv run dotmd search "query" --no-rerank       # skip cross-encoder reranking
 uv run dotmd search "query" --no-expand       # skip query expansion
@@ -178,7 +177,7 @@ The compose profile starts:
 
 - `dotmd` - MCP HTTP server
 - `tei` - Hugging Face Text Embeddings Inference
-- `falkordb` - graph database
+- `surrealdb` - storage and retrieval database
 
 Index data is stored in the `dotmd-index` Docker volume.
 
@@ -196,9 +195,15 @@ Set these for the live container:
 | `DOTMD_INDEX_DIR` | `/dotmd-index` | Persistent index directory inside the container |
 | `DOTMD_INDEXING_PATHS` | `["/mnt"]` | Roots or glob patterns watched by the trickle indexer |
 | `DOTMD_EMBEDDING_URL` | `http://tei:80` | TEI-compatible embedding endpoint |
-| `DOTMD_FALKORDB_URL` | `redis://falkordb:6379` | Required FalkorDB Redis URL |
+| `DOTMD_SEARCH_BACKEND` | `surreal` | Production retrieval backend |
+| `DOTMD_SURREAL_RETRIEVAL_URL` | `http://surrealdb:8000` | Standalone SurrealDB URL |
+| `DOTMD_SURREAL_RETRIEVAL_NAMESPACE` | `dotmd` | SurrealDB namespace |
+| `DOTMD_SURREAL_RETRIEVAL_DATABASE` | `production` | SurrealDB database |
+| `DOTMD_SURREAL_RETRIEVAL_EMBEDDING_DIMENSION` | `1024` | Embedding dimension |
 
-Set `DOTMD_FALKORDB_URL=redis://falkordb:6379` or another reachable Redis URL. The runtime validator rejects the unsafe `redis://localhost:6379` default because it usually points at the container itself, not the graph service.
+Set the SurrealDB credentials from the `/opt/docker/surrealdb` deployment
+environment. The old SQLite/Falkor stack is migration history, not a production
+runtime choice.
 
 Path filtering:
 
@@ -260,8 +265,8 @@ backend/src/dotmd/
 ├── core/          # Pydantic models, settings, exceptions
 ├── ingestion/     # Reader, chunker, pipeline, trickle indexer, migration
 ├── extraction/    # Structural extraction and GLiNER NER
-├── storage/       # SQLite metadata/FTS5/sqlite-vec, FalkorDB
-├── search/        # Semantic, FTS5, graph-direct, fusion, reranker
+├── storage/       # SurrealDB plus temporary migration/cache scaffolding
+├── search/        # Semantic, Surreal keyword/graph-direct, fusion, reranker
 ├── api/           # DotMDService facade and FastAPI server
 ├── mcp_server.py  # FastMCP server
 └── cli.py         # Click CLI
@@ -270,11 +275,11 @@ backend/src/dotmd/
 Search pipeline:
 
 ```text
-query -> expand -> semantic + FTS5 + graph-direct -> RRF fusion -> shared candidate pool -> cross-encoder rerank
+query -> expand -> semantic + keyword + graph-direct -> RRF fusion -> shared candidate pool -> cross-encoder rerank
 ```
 
 If the reranker is unavailable, errors, or returns no surviving candidates after
-an optional score floor, search falls back to fused semantic/FTS5/graph ranking.
+an optional score floor, search falls back to fused semantic/keyword/graph ranking.
 Use `--no-rerank` to skip reranking explicitly.
 
 ## MCP Tools
