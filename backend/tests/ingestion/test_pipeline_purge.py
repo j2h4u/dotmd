@@ -259,7 +259,12 @@ def _get_pipeline_with_backend(
             return_value=object(),
         ):
             return IndexingPipeline(settings)
-    return IndexingPipeline(settings)
+    with patch.object(
+        pipeline_module,
+        "_create_surreal_direct_writer",
+        return_value=None,
+    ):
+        return IndexingPipeline(settings)
 
 
 class TestPurgeSingleHolder:
@@ -895,23 +900,3 @@ class TestSurrealFilesystemLifecycle:
         ).fetchone()
         conn.close()
         assert binding_row == (0, binding_row[1])
-
-    def test_sqlite_backend_does_not_emit_surreal_tombstones(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        db_path = _build_post_v16_db(tmp_path)
-        file_path = "/file_A.md"
-        _add_source_document(db_path, file_path)
-        _add_resource_binding(db_path, file_path)
-
-        pipeline = _get_pipeline_with_backend(db_path, search_backend="sqlite")
-        captured_manifests: list[object] = []
-
-        def record_manifest(manifest) -> None:  # type: ignore[no-untyped-def]
-            captured_manifests.append(manifest)
-
-        pipeline._write_surreal_direct_manifest = record_manifest  # type: ignore[method-assign]
-        pipeline._deactivate_filesystem_binding(file_path)
-
-        assert captured_manifests == []

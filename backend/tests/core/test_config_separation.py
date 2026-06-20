@@ -206,7 +206,7 @@ def test_runtime_validation_accepts_explicit_deployment_values() -> None:
     settings.validate_for_runtime()
 
 
-def test_load_runtime_settings_forces_surreal_backend() -> None:
+def test_runtime_loader_forces_surreal_even_if_backend_override_requests_sqlite() -> None:
     settings = load_runtime_settings(
         data_dir=Path("/mnt"),
         index_dir=Path("/dotmd-index"),

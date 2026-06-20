@@ -22,7 +22,7 @@ from .application_source_fixtures import FixtureApplicationSourceProvider
 NOW = datetime(2026, 5, 8, 12, 0, tzinfo=UTC)
 
 
-def _pipeline(tmp_path: Path, *, search_backend: str = "sqlite") -> IndexingPipeline:
+def _pipeline(tmp_path: Path, *, search_backend: str = "surreal") -> IndexingPipeline:
     data_dir = tmp_path / "data"
     index_dir = tmp_path / "index"
     data_dir.mkdir()
@@ -44,14 +44,16 @@ def _pipeline(tmp_path: Path, *, search_backend: str = "sqlite") -> IndexingPipe
             return_value=object(),
         ):
             pipeline = IndexingPipeline(settings)
+        pipeline._write_surreal_direct_manifest = lambda manifest: None  # type: ignore[method-assign]
     else:
-        pipeline = IndexingPipeline(settings)
+        with patch.object(
+            pipeline_module,
+            "_create_surreal_direct_writer",
+            return_value=None,
+        ):
+            pipeline = IndexingPipeline(settings)
     pipeline._semantic_engine.get_tei_model_id = lambda: "fixture-model"  # type: ignore[method-assign]
     return pipeline
-
-
-def _pipeline_sqlite(tmp_path: Path) -> IndexingPipeline:
-    return _pipeline(tmp_path, search_backend="sqlite")
 
 
 def _pipeline_surreal(tmp_path: Path) -> IndexingPipeline:
@@ -104,7 +106,7 @@ def _change(document: SourceDocument, index: int, text: str) -> ApplicationSourc
 def test_application_source_embeddings_are_chunk_batched_and_document_meta_scoped(
     tmp_path: Path,
 ) -> None:
-    pipeline = _pipeline_sqlite(tmp_path)
+    pipeline = _pipeline(tmp_path)
     encode_calls: list[list[str]] = []
 
     def record_encode(texts: list[str]) -> list[list[float]]:
@@ -202,39 +204,10 @@ def test_application_source_emits_surreal_manifest_on_surreal_backend(
     } == {"fixture:doc:a", "fixture:doc:b"}
 
 
-def test_application_source_does_not_emit_surreal_manifest_on_sqlite_backend(
-    tmp_path: Path,
-) -> None:
-    pipeline = _pipeline_sqlite(tmp_path)
-    manifest_calls: list[object] = []
-
-    def record_manifest(manifest) -> None:  # type: ignore[no-untyped-def]
-        manifest_calls.append(manifest)
-
-    pipeline._write_surreal_direct_manifest = record_manifest  # type: ignore[method-assign]
-    doc_a = _document("doc:a", "Doc A")
-    provider = FixtureApplicationSourceProvider(
-        ApplicationSourceDescription(
-            namespace="fixture",
-            source_kind="document",
-            display_name="Fixture",
-        ),
-        [
-            _change(doc_a, 1, "alpha body"),
-            _change(doc_a, 2, "beta body"),
-        ],
-    )
-
-    result = pipeline.ingest_application_source(provider, limit=10)
-
-    assert result.chunks_indexed == 2
-    assert manifest_calls == []
-
-
 def test_purge_application_source_removes_checkpoint_fingerprints_and_vectors(
     tmp_path: Path,
 ) -> None:
-    pipeline = _pipeline_sqlite(tmp_path)
+    pipeline = _pipeline(tmp_path, search_backend="sqlite")
     doc_a = _document("doc:a", "Doc A")
     provider = FixtureApplicationSourceProvider(
         ApplicationSourceDescription(
