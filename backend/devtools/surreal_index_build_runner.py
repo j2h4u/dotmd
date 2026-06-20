@@ -140,6 +140,10 @@ def _statement_hash(statement: str) -> str:
     return hashlib.sha256(statement.encode("utf-8")).hexdigest()
 
 
+def _remove_index_statement(index_name: str, table_name: str) -> str:
+    return f"REMOVE INDEX {index_name} ON TABLE {table_name};"
+
+
 def build_index_steps(
     index_mode: str,
     *,
@@ -214,11 +218,11 @@ def _worker_main(args: argparse.Namespace) -> int:
     worker_input = json.loads(args.worker_input.read_text(encoding="utf-8"))
     started = time.monotonic()
     result: dict[str, Any] = {
-            "operation": worker_input["operation"],
-            "index_name": worker_input.get("index_name"),
-            "statement_hash": worker_input.get("statement_hash"),
-            "table_name": worker_input.get("table_name"),
-            "runtime_env": _surreal_runtime_env_snapshot(),
+        "operation": worker_input["operation"],
+        "index_name": worker_input.get("index_name"),
+        "statement_hash": worker_input.get("statement_hash"),
+        "table_name": worker_input.get("table_name"),
+        "runtime_env": _surreal_runtime_env_snapshot(),
         "started_at": _utc_now(),
     }
     try:
@@ -227,6 +231,9 @@ def _worker_main(args: argparse.Namespace) -> int:
                 url=worker_input["target_url"],
                 namespace=worker_input["target_namespace"],
                 database=worker_input["target_database"],
+                username=os.environ.get("DOTMD_SURREAL_RETRIEVAL_USERNAME") or None,
+                password=os.environ.get("DOTMD_SURREAL_RETRIEVAL_PASSWORD") or None,
+                access_token=os.environ.get("DOTMD_SURREAL_RETRIEVAL_ACCESS_TOKEN") or None,
             )
         ) as connection:
             if worker_input["operation"] == "info_embeddings":
@@ -257,9 +264,13 @@ def _worker_main(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_step_with_heartbeat(
+def _run_statement_with_heartbeat(
     *,
-    step: IndexBuildStep,
+    operation: str,
+    index_name: str,
+    statement: str,
+    statement_hash: str,
+    table_name: str,
     step_index: int,
     total_steps: int,
     target_url: str,
@@ -269,18 +280,19 @@ def _run_step_with_heartbeat(
     heartbeat_seconds: float,
     timeout_seconds: float,
     print_heartbeat: bool,
+    artifact_suffix: str = "",
 ) -> dict[str, Any]:
-    worker_input = output_dir / f"{step_index:02d}-{step.name}-input.json"
-    worker_result = output_dir / f"{step_index:02d}-{step.name}-result.json"
+    worker_input = output_dir / f"{step_index:02d}-{index_name}{artifact_suffix}-input.json"
+    worker_result = output_dir / f"{step_index:02d}-{index_name}{artifact_suffix}-result.json"
     heartbeat_path = output_dir / "index-build-heartbeat.jsonl"
     _write_json(
         worker_input,
         {
-            "operation": "define_index",
-            "index_name": step.name,
-            "statement": step.statement,
-            "statement_hash": step.statement_hash,
-            "table_name": step.table_name,
+            "operation": operation,
+            "index_name": index_name,
+            "statement": statement,
+            "statement_hash": statement_hash,
+            "table_name": table_name,
             "target_url": target_url,
             "target_namespace": target_namespace,
             "target_database": target_database,
@@ -309,11 +321,12 @@ def _run_step_with_heartbeat(
         storage_snapshot = _snapshot_with_delta(target_url, previous_snapshot)
         previous_snapshot = storage_snapshot or previous_snapshot
         heartbeat = {
-            "state": "waiting_opaque_define_index",
-            "index_name": step.name,
+            "state": f"waiting_opaque_{operation}",
+            "index_name": index_name,
+            "operation": operation,
             "index_ordinal": step_index,
             "total_indexes": total_steps,
-            "statement_hash": step.statement_hash,
+            "statement_hash": statement_hash,
             "elapsed_seconds": round(elapsed, 3),
             "timeout_seconds": timeout_seconds,
             "target_size_bytes": _target_size_bytes(target_url),
@@ -324,16 +337,17 @@ def _run_step_with_heartbeat(
         if print_heartbeat:
             print(
                 "index-build "
-                f"{step_index}/{total_steps} {step.name}: "
-                f"state=waiting_opaque_define_index elapsed={int(elapsed)}s",
+                f"{step_index}/{total_steps} {index_name}: "
+                f"state=waiting_opaque_{operation} elapsed={int(elapsed)}s",
                 flush=True,
             )
         if elapsed >= timeout_seconds:
             process.kill()
             _stdout, stderr = process.communicate(timeout=5)
             result = {
-                "index_name": step.name,
-                "statement_hash": step.statement_hash,
+                "index_name": index_name,
+                "operation": operation,
+                "statement_hash": statement_hash,
                 "status": "timed_out_uncertain",
                 "elapsed_seconds": round(elapsed, 3),
                 "timeout_seconds": timeout_seconds,
@@ -349,8 +363,9 @@ def _run_step_with_heartbeat(
         result = json.loads(worker_result.read_text(encoding="utf-8"))
     else:
         result = {
-            "index_name": step.name,
-            "statement_hash": step.statement_hash,
+            "index_name": index_name,
+            "operation": operation,
+            "statement_hash": statement_hash,
             "status": "failed",
             "error": "worker exited without result file",
             "returncode": process.returncode,
@@ -360,6 +375,37 @@ def _run_step_with_heartbeat(
         }
     result["stderr"] = stderr[-2000:] if stderr else ""
     return result
+
+
+def _run_step_with_heartbeat(
+    *,
+    step: IndexBuildStep,
+    step_index: int,
+    total_steps: int,
+    target_url: str,
+    target_namespace: str,
+    target_database: str,
+    output_dir: Path,
+    heartbeat_seconds: float,
+    timeout_seconds: float,
+    print_heartbeat: bool,
+) -> dict[str, Any]:
+    return _run_statement_with_heartbeat(
+        operation="define_index",
+        index_name=step.name,
+        statement=step.statement,
+        statement_hash=step.statement_hash,
+        table_name=step.table_name,
+        step_index=step_index,
+        total_steps=total_steps,
+        target_url=target_url,
+        target_namespace=target_namespace,
+        target_database=target_database,
+        output_dir=output_dir,
+        heartbeat_seconds=heartbeat_seconds,
+        timeout_seconds=timeout_seconds,
+        print_heartbeat=print_heartbeat,
+    )
 
 
 def _run_info_with_heartbeat(
@@ -485,6 +531,7 @@ def run_index_build(args: argparse.Namespace) -> int:
             "heartbeat_seconds": args.heartbeat_seconds,
             "timeout_seconds": args.timeout_seconds,
             "embedding_shard_count": args.embedding_shard_count,
+            "rebuild_existing": args.rebuild_existing,
             "steps": [asdict(step) for step in steps],
         },
     )
@@ -506,15 +553,52 @@ def run_index_build(args: argparse.Namespace) -> int:
             results.append(before_info)
             break
         if _index_name_present(before_info, step.name):
-            result = {
-                "index_name": step.name,
-                "statement_hash": step.statement_hash,
-                "table_name": step.table_name,
-                "status": "already_present",
-                "elapsed_seconds": 0.0,
-                "finished_at": _utc_now(),
-            }
-            _write_json(output_dir / f"{index:02d}-{step.name}-result.json", result)
+            if args.rebuild_existing:
+                remove_statement = _remove_index_statement(step.name, step.table_name)
+                remove_result = _run_statement_with_heartbeat(
+                    operation="remove_index",
+                    index_name=step.name,
+                    statement=remove_statement,
+                    statement_hash=_statement_hash(remove_statement),
+                    table_name=step.table_name,
+                    step_index=index,
+                    total_steps=len(steps),
+                    target_url=args.target_url,
+                    target_namespace=args.target_namespace,
+                    target_database=args.target_database,
+                    output_dir=output_dir,
+                    heartbeat_seconds=args.heartbeat_seconds,
+                    timeout_seconds=args.timeout_seconds,
+                    print_heartbeat=not args.no_print_heartbeat,
+                    artifact_suffix="-remove",
+                )
+                if remove_result.get("status") != "applied":
+                    results.append(remove_result)
+                    break
+                result = _run_step_with_heartbeat(
+                    step=step,
+                    step_index=index,
+                    total_steps=len(steps),
+                    target_url=args.target_url,
+                    target_namespace=args.target_namespace,
+                    target_database=args.target_database,
+                    output_dir=output_dir,
+                    heartbeat_seconds=args.heartbeat_seconds,
+                    timeout_seconds=args.timeout_seconds,
+                    print_heartbeat=not args.no_print_heartbeat,
+                )
+                result["rebuild_existing"] = True
+                result["rebuild_remove_result"] = remove_result
+            else:
+                result = {
+                    "index_name": step.name,
+                    "statement_hash": step.statement_hash,
+                    "table_name": step.table_name,
+                    "status": "already_present",
+                    "elapsed_seconds": 0.0,
+                    "finished_at": _utc_now(),
+                }
+                _write_json(output_dir / f"{index:02d}-{step.name}-result.json", result)
         else:
             result = _run_step_with_heartbeat(
                 step=step,
@@ -593,6 +677,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout-seconds", type=float, default=600.0)
     parser.add_argument("--embedding-dimension", type=int, default=1024)
     parser.add_argument("--embedding-shard-count", type=int, default=1)
+    parser.add_argument(
+        "--rebuild-existing",
+        action="store_true",
+        help="Remove and re-define existing indexes when the desired statement changes.",
+    )
     parser.add_argument("--hnsw-m", type=int, default=DEFAULT_HNSW_M)
     parser.add_argument("--hnsw-ef", type=int, default=DEFAULT_HNSW_EF)
     parser.add_argument(

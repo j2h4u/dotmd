@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
+import devtools.surreal_index_build_runner as runner
 from devtools.surreal_index_build_runner import (
     _index_name_present,
     _run_step_with_heartbeat,
@@ -11,6 +13,7 @@ from devtools.surreal_index_build_runner import (
     _surrealkv_file_snapshot,
     _target_size_bytes,
     build_index_steps,
+    build_parser,
 )
 
 
@@ -89,6 +92,125 @@ def test_index_name_detection_accepts_raw_info_payload() -> None:
 
     assert _index_name_present(payload, "embeddings_strategy_chunk_model_idx") is True
     assert _index_name_present(payload, "embeddings_text_hash_idx") is False
+
+
+def test_build_parser_defaults_rebuild_existing_to_false() -> None:
+    args = build_parser().parse_args([])
+
+    assert args.rebuild_existing is False
+
+
+def test_run_index_build_rebuilds_existing_indexes_when_flag_enabled(
+    monkeypatch, tmp_path: Path
+) -> None:
+    step = build_index_steps("hnsw", embedding_dimension=1024)[0]
+    calls: list[dict[str, str]] = []
+
+    monkeypatch.setattr(runner, "build_index_steps", lambda *args, **kwargs: [step])
+
+    def fake_run_info_with_heartbeat(**kwargs):
+        return {
+            "status": "applied",
+            "info": {"result": {"indexes": {step.name: "DEFINE INDEX existing"}}},
+        }
+
+    def fake_run_statement_with_heartbeat(**kwargs):
+        calls.append(
+            {
+                "operation": kwargs["operation"],
+                "statement": kwargs["statement"],
+                "statement_hash": kwargs["statement_hash"],
+            }
+        )
+        return {
+            "index_name": kwargs["index_name"],
+            "operation": kwargs["operation"],
+            "statement_hash": kwargs["statement_hash"],
+            "status": "applied",
+            "finished_at": "2026-06-20T00:00:00Z",
+        }
+
+    monkeypatch.setattr(runner, "_run_info_with_heartbeat", fake_run_info_with_heartbeat)
+    monkeypatch.setattr(runner, "_run_statement_with_heartbeat", fake_run_statement_with_heartbeat)
+
+    result = runner.run_index_build(
+        argparse.Namespace(
+            index_mode="hnsw",
+            embedding_dimension=1024,
+            hnsw_m=12,
+            hnsw_ef=40,
+            vector_index_type="F16",
+            embedding_shard_count=1,
+            target_url="surrealkv://ignored.db",
+            target_namespace="dotmd",
+            target_database="production",
+            output_dir=tmp_path,
+            heartbeat_seconds=1.0,
+            timeout_seconds=5.0,
+            no_print_heartbeat=True,
+            rebuild_existing=True,
+        )
+    )
+
+    plan = json.loads((tmp_path / "index-build-plan.json").read_text(encoding="utf-8"))
+    results = json.loads((tmp_path / "index-build-results.json").read_text(encoding="utf-8"))
+
+    assert result == 0
+    assert plan["rebuild_existing"] is True
+    assert [call["operation"] for call in calls] == ["remove_index", "define_index"]
+    assert calls[0]["statement"] == f"REMOVE INDEX {step.name} ON TABLE {step.table_name};"
+    assert results["status"] == "verified"
+    assert results["results"][0]["rebuild_existing"] is True
+    assert results["results"][0]["rebuild_remove_result"]["operation"] == "remove_index"
+    assert results["results"][0]["operation"] == "define_index"
+
+
+def test_run_index_build_keeps_existing_index_as_already_present_without_rebuild(
+    monkeypatch, tmp_path: Path
+) -> None:
+    step = build_index_steps("hnsw", embedding_dimension=1024)[0]
+    calls: list[dict[str, str]] = []
+
+    monkeypatch.setattr(runner, "build_index_steps", lambda *args, **kwargs: [step])
+
+    def fake_run_info_with_heartbeat(**kwargs):
+        return {
+            "status": "applied",
+            "info": {"result": {"indexes": {step.name: "DEFINE INDEX existing"}}},
+        }
+
+    def fake_run_statement_with_heartbeat(**kwargs):
+        calls.append({"operation": kwargs["operation"]})
+        raise AssertionError("define/remove should not run when rebuild_existing is false")
+
+    monkeypatch.setattr(runner, "_run_info_with_heartbeat", fake_run_info_with_heartbeat)
+    monkeypatch.setattr(runner, "_run_statement_with_heartbeat", fake_run_statement_with_heartbeat)
+
+    result = runner.run_index_build(
+        argparse.Namespace(
+            index_mode="hnsw",
+            embedding_dimension=1024,
+            hnsw_m=12,
+            hnsw_ef=40,
+            vector_index_type="F16",
+            embedding_shard_count=1,
+            target_url="surrealkv://ignored.db",
+            target_namespace="dotmd",
+            target_database="production",
+            output_dir=tmp_path,
+            heartbeat_seconds=1.0,
+            timeout_seconds=5.0,
+            no_print_heartbeat=True,
+            rebuild_existing=False,
+        )
+    )
+
+    results = json.loads((tmp_path / "index-build-results.json").read_text(encoding="utf-8"))
+
+    assert result == 0
+    assert calls == []
+    assert results["status"] == "verified"
+    assert results["results"][0]["status"] == "already_present"
 
 
 def test_target_size_bytes_sums_surrealkv_directory(tmp_path: Path) -> None:
