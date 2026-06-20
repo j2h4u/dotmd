@@ -569,12 +569,12 @@ class DotMDService:
         int
             Number of chunks processed.
         """
+        if self._uses_surreal_search_backend and store in {"vectors", "fts5", "graph", "all"}:
+            raise RuntimeError(
+                f"reindex({store}) is disabled in Surreal mode because local "
+                "vector/FTS5/graph stores are retired"
+            )
         if store == "all":
-            if self._uses_surreal_search_backend:
-                logger.info(
-                    "reindex(all): skipped local vector and FTS5 rebuilds in Surreal mode"
-                )
-                return 0
             n = self._pipeline.reindex_fts5()
             self._pipeline.reindex_vectors()
             self._pipeline.reindex_graph()

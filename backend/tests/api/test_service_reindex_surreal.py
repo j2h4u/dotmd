@@ -5,9 +5,16 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
 
-def test_service_reindex_all_skips_local_rebuilds_in_surreal_mode(
-    tmp_path: Path, monkeypatch
+from dotmd.ingestion import pipeline as _pipeline_module
+
+PIPELINE_MODULE = _pipeline_module
+
+
+@pytest.mark.parametrize("store", ["vectors", "fts5", "graph", "all"])
+def test_service_reindex_fails_fast_for_local_stores_in_surreal_mode(
+    tmp_path: Path, monkeypatch, store: str
 ) -> None:
     from dotmd.api.service import DotMDService
     from dotmd.core.config import Settings
@@ -44,7 +51,8 @@ def test_service_reindex_all_skips_local_rebuilds_in_surreal_mode(
     service._pipeline.reindex_graph = MagicMock(return_value=33)  # type: ignore[method-assign]
 
     try:
-        assert service.reindex("all") == 0
+        with pytest.raises(RuntimeError, match=r"reindex\(.+\) is disabled in Surreal mode"):
+            service.reindex(store)
         service._pipeline.reindex_vectors.assert_not_called()
         service._pipeline.reindex_fts5.assert_not_called()
         service._pipeline.reindex_graph.assert_not_called()

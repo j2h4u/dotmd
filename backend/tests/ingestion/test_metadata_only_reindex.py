@@ -13,6 +13,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from dotmd.ingestion import pipeline as _pipeline_module
+
+PIPELINE_MODULE = _pipeline_module
+
 
 def _write_md(path: pathlib.Path, title: str, tags: list, body: str) -> None:
     tags_yaml = "\n".join(f"  - {t}" for t in tags) if tags else ""
@@ -284,9 +288,20 @@ def test_surreal_metadata_only_reindex_skips_local_vec_and_fts_artifacts(
     try:
         assert pipeline.index_file(doc) == 1
         assert pipeline._vector_store.count() == 0
+        vec_table_name = f"vec_chunks_{pipeline._strategy}{pipeline._model_suffix}"
         assert (
-            pipeline._conn.execute(f"SELECT COUNT(*) FROM {pipeline._fts_table}").fetchone()[0]
-            == 0
+            pipeline._conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (vec_table_name,),
+            ).fetchone()
+            is None
+        )
+        assert (
+            pipeline._conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (pipeline._fts_table,),
+            ).fetchone()
+            is None
         )
 
         _write_md(
@@ -298,8 +313,18 @@ def test_surreal_metadata_only_reindex_skips_local_vec_and_fts_artifacts(
         pipeline.index_file(doc)
         assert pipeline._vector_store.count() == 0
         assert (
-            pipeline._conn.execute(f"SELECT COUNT(*) FROM {pipeline._fts_table}").fetchone()[0]
-            == 0
+            pipeline._conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (vec_table_name,),
+            ).fetchone()
+            is None
+        )
+        assert (
+            pipeline._conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (pipeline._fts_table,),
+            ).fetchone()
+            is None
         )
     finally:
         pipeline.close()
@@ -308,7 +333,6 @@ def test_surreal_metadata_only_reindex_skips_local_vec_and_fts_artifacts(
 def test_surreal_reindex_vectors_skips_local_vector_store_mutation(
     surreal_pipeline_settings, monkeypatch
 ):
-    from dotmd.core.models import Chunk, ChunkProvenance
     from dotmd.ingestion.pipeline import IndexingPipeline
 
     doc = surreal_pipeline_settings.data_dir / "surreal-vectors.md"
@@ -342,45 +366,14 @@ def test_surreal_reindex_vectors_skips_local_vector_store_mutation(
     try:
         assert pipeline.index_file(doc) == 1
 
-        legacy_path = surreal_pipeline_settings.data_dir / "legacy-vector.md"
-        legacy_chunk = Chunk(
-            chunk_id="legacy-vector-chunk",
-            file_paths=[legacy_path],
-            heading_hierarchy=["Legacy Vector"],
-            level=1,
-            text="Legacy vector body text.",
-            chunk_index=0,
-            provenance=ChunkProvenance(
-                namespace="filesystem",
-                document_ref=str(legacy_path.resolve()),
-                ref=f"filesystem:{legacy_path.resolve()}",
-                source_unit_refs=[],
-                chunk_strategy=pipeline._strategy,
-                parser_name="markdown",
-            ),
+        vec_table_name = f"vec_chunks_{pipeline._strategy}{pipeline._model_suffix}"
+        assert (
+            pipeline._conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (vec_table_name,),
+            ).fetchone()
+            is None
         )
-        pipeline._vector_store.add_chunks(
-            [legacy_chunk],
-            [[0.9, 0.1, 0.0]],
-            overwrite=False,
-            text_hashes={legacy_chunk.chunk_id: "legacy-text-hash"},
-        )
-        pipeline._vec_components.store(legacy_chunk.chunk_id, "text", [0.9, 0.1, 0.0])
-        pipeline._vec_components.store(str(legacy_path.resolve()), "meta", [0.2, 0.3, 0.5])
-        pipeline._conn.commit()
-
-        vector_meta_table = pipeline._vector_store._META_TABLE
-        vec_components_table = pipeline._vec_components._TABLE
-        vector_row_count = pipeline._vector_store.count()
-        vec_component_row_count = pipeline._vec_components.count()
-        legacy_vector_row_count = pipeline._conn.execute(
-            f"SELECT COUNT(*) FROM {vector_meta_table} WHERE chunk_id = ?",
-            (legacy_chunk.chunk_id,),
-        ).fetchone()[0]
-        legacy_component_row_count = pipeline._conn.execute(
-            f"SELECT COUNT(*) FROM {vec_components_table} WHERE entity_id IN (?, ?)",
-            (legacy_chunk.chunk_id, str(legacy_path.resolve())),
-        ).fetchone()[0]
 
         monkeypatch.setattr(
             pipeline._vector_store,
@@ -408,28 +401,18 @@ def test_surreal_reindex_vectors_skips_local_vector_store_mutation(
         pipeline._vector_store.delete_all.assert_not_called()
         pipeline._vector_store.add_chunks.assert_not_called()
         pipeline._vec_components.delete_all.assert_not_called()
-        assert pipeline._vector_store.count() == vector_row_count
-        assert pipeline._vec_components.count() == vec_component_row_count
         assert (
             pipeline._conn.execute(
-                f"SELECT COUNT(*) FROM {vector_meta_table} WHERE chunk_id = ?",
-                (legacy_chunk.chunk_id,),
-            ).fetchone()[0]
-            == legacy_vector_row_count
-        )
-        assert (
-            pipeline._conn.execute(
-                f"SELECT COUNT(*) FROM {vec_components_table} WHERE entity_id IN (?, ?)",
-                (legacy_chunk.chunk_id, str(legacy_path.resolve())),
-            ).fetchone()[0]
-            == legacy_component_row_count
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (vec_table_name,),
+            ).fetchone()
+            is None
         )
     finally:
         pipeline.close()
 
 
 def test_surreal_reindex_fts5_skips_local_fts_mutation(surreal_pipeline_settings, monkeypatch):
-    from dotmd.core.models import Chunk, ChunkProvenance
     from dotmd.ingestion.pipeline import IndexingPipeline
 
     doc = surreal_pipeline_settings.data_dir / "surreal-fts.md"
@@ -462,37 +445,13 @@ def test_surreal_reindex_fts5_skips_local_fts_mutation(surreal_pipeline_settings
 
     try:
         assert pipeline.index_file(doc) == 1
-
-        legacy_path = surreal_pipeline_settings.data_dir / "legacy-fts.md"
-        legacy_chunk = Chunk(
-            chunk_id="legacy-fts-chunk",
-            file_paths=[legacy_path],
-            heading_hierarchy=["Legacy FTS"],
-            level=1,
-            text="Legacy FTS body text.",
-            chunk_index=0,
-            provenance=ChunkProvenance(
-                namespace="filesystem",
-                document_ref=str(legacy_path.resolve()),
-                ref=f"filesystem:{legacy_path.resolve()}",
-                source_unit_refs=[],
-                chunk_strategy=pipeline._strategy,
-                parser_name="markdown",
-            ),
+        assert (
+            pipeline._conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (pipeline._fts_table,),
+            ).fetchone()
+            is None
         )
-        pipeline._keyword_engine.add_chunks(
-            [legacy_chunk],
-            file_meta={str(legacy_path.resolve()): ("Legacy FTS", "legacy")},
-        )
-        pipeline._conn.commit()
-
-        fts_row_count = pipeline._conn.execute(
-            f"SELECT COUNT(*) FROM {pipeline._fts_table}"
-        ).fetchone()[0]
-        legacy_fts_row_count = pipeline._conn.execute(
-            f"SELECT COUNT(*) FROM {pipeline._fts_table} WHERE chunk_id = ?",
-            (legacy_chunk.chunk_id,),
-        ).fetchone()[0]
 
         monkeypatch.setattr(
             pipeline._keyword_engine,
@@ -504,15 +463,11 @@ def test_surreal_reindex_fts5_skips_local_fts_mutation(surreal_pipeline_settings
 
         pipeline._keyword_engine.add_chunks.assert_not_called()
         assert (
-            pipeline._conn.execute(f"SELECT COUNT(*) FROM {pipeline._fts_table}").fetchone()[0]
-            == fts_row_count
-        )
-        assert (
             pipeline._conn.execute(
-                f"SELECT COUNT(*) FROM {pipeline._fts_table} WHERE chunk_id = ?",
-                (legacy_chunk.chunk_id,),
-            ).fetchone()[0]
-            == legacy_fts_row_count
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (pipeline._fts_table,),
+            ).fetchone()
+            is None
         )
     finally:
         pipeline.close()

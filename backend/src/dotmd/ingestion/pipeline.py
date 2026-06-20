@@ -278,6 +278,80 @@ class _NoopGraphStore:
         return {"nodes": [], "edges": []}
 
 
+class _NoopVectorStore:
+    """Inert vector store used when direct Surreal ingest owns retrieval."""
+
+    def add_chunks(
+        self,
+        chunks: list[Chunk],
+        embeddings: list[list[float]],
+        *,
+        overwrite: bool = True,
+        text_hashes: dict[str, str] | None = None,
+    ) -> None:
+        return None
+
+    def search(
+        self,
+        query_embedding: list[float],
+        top_k: int = 10,
+    ) -> list[tuple[str, float]]:
+        return []
+
+    def delete_all(self) -> None:
+        return None
+
+    def delete_vectors_by_chunk_ids(self, chunk_ids: list[str]) -> int:
+        return 0
+
+    def count(self) -> int:
+        return 0
+
+    def lookup_embeddings_by_text_hash(
+        self,
+        text_hashes: list[str],
+    ) -> dict[str, list[float]]:
+        return {}
+
+
+class _NoopKeywordSearchEngine:
+    """Inert keyword engine used when direct Surreal ingest owns retrieval."""
+
+    def load_index(self) -> None:
+        return None
+
+    def add_chunks(
+        self,
+        chunks: list[Chunk],
+        file_meta: dict[str, tuple[str, str]] | None = None,
+    ) -> None:
+        return None
+
+    def add_chunks_with_source_meta(
+        self,
+        chunks: list[Chunk],
+        *,
+        title: str,
+        tags_csv: str,
+        conn: sqlite3.Connection | None = None,
+    ) -> None:
+        return None
+
+    def remove_chunks(
+        self,
+        chunk_ids: list[str],
+        *,
+        conn: sqlite3.Connection | None = None,
+    ) -> None:
+        return None
+
+    def delete_all(self) -> None:
+        return None
+
+    def search(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
+        return []
+
+
 def _create_surreal_direct_writer(settings: Settings) -> Any:
     """Instantiate the direct Surreal delta writer for standalone ingest."""
     from dotmd.ingestion.surreal_delta_sync import SurrealDeltaStoreWriter
@@ -348,6 +422,7 @@ class IndexingPipeline:
 
         # Ensure the index directory exists.
         settings.index_dir.mkdir(parents=True, exist_ok=True)
+        self._uses_surreal_direct_ingest = bool(settings.surreal_retrieval_database)
 
         # -- Unified SQLite connection ----------------------------------------
         # ONE connection shared by metadata store, vec store, FTS5, and
@@ -359,9 +434,10 @@ class IndexingPipeline:
             isolation_level=None,  # autocommit — pipeline manages all transactions explicitly
         )
         self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.enable_load_extension(True)
-        sqlite_vec.load(self._conn)
-        self._conn.enable_load_extension(False)
+        if not self._uses_surreal_direct_ingest:
+            self._conn.enable_load_extension(True)
+            sqlite_vec.load(self._conn)
+            self._conn.enable_load_extension(False)
         _write_pipeline_init_progress("pipeline:sqlite_connect", "applied")
 
         # -- Strategy + model table name derivation ---------------------------
@@ -394,17 +470,19 @@ class IndexingPipeline:
         )
         _write_pipeline_init_progress("pipeline:metadata_store", "applied")
 
-        from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
-
         _write_pipeline_init_progress("pipeline:vector_store", "running")
-        self._vector_store: VectorStoreProtocol = SQLiteVecVectorStore(
-            conn=self._conn,
-            table_name=vec_table,
-        )
+        if self._uses_surreal_direct_ingest:
+            self._vector_store = _NoopVectorStore()
+        else:
+            from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
+
+            self._vector_store = SQLiteVecVectorStore(
+                conn=self._conn,
+                table_name=vec_table,
+            )
         _write_pipeline_init_progress("pipeline:vector_store", "applied")
 
         _write_pipeline_init_progress("pipeline:graph_store", "running")
-        self._uses_surreal_direct_ingest = bool(settings.surreal_retrieval_database)
         self._graph_store = _NoopGraphStore()
         _write_pipeline_init_progress("pipeline:graph_store", "applied")
 
@@ -471,10 +549,13 @@ class IndexingPipeline:
             tei_batch_size=settings.tei_batch_size,
             use_prefix=settings.needs_embedding_prefix,
         )
-        self._keyword_engine = FTS5SearchEngine(
-            self._conn,
-            table_name=self._fts_table,
-        )
+        if self._uses_surreal_direct_ingest:
+            self._keyword_engine = _NoopKeywordSearchEngine()
+        else:
+            self._keyword_engine = FTS5SearchEngine(
+                self._conn,
+                table_name=self._fts_table,
+            )
         _write_pipeline_init_progress("pipeline:search_engines", "applied")
 
         # -- extractors --------------------------------------------------------
@@ -4243,6 +4324,9 @@ class IndexingPipeline:
         After wipe: trickle rebuilds from scratch on next run.
         Expected rebuild time: several days on current hardware (Xeon E3-1245 V2, CPU-only TEI).
         """
+        if self._uses_surreal_direct_ingest:
+            logger.debug("_check_schema_version: skipped in Surreal direct-ingest mode")
+            return
         # Force vec_config table creation before reading from it.
         # SQLiteVecVectorStore creates tables lazily via _get_conn(); bypassing
         # it with self._conn directly would fail on a fresh database (#999.12).
@@ -4369,6 +4453,9 @@ class IndexingPipeline:
 
         Stored weights are in vec_config key 'weights_used' (JSON string).
         """
+        if self._uses_surreal_direct_ingest:
+            logger.debug("_check_weights_changed: skipped in Surreal direct-ingest mode")
+            return
         # Guard: skip if store is empty (fresh install or post schema-version wipe)
         if self._vec_components.count() == 0:
             logger.debug("_check_weights_changed: VecComponentStore is empty — skipping")

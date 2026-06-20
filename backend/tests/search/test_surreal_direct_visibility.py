@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -63,11 +64,22 @@ def _index_direct_surreal_fixture(tmp_path: Path) -> tuple[Settings, Path, int, 
     try:
         assert pipeline.index_file(file_path) == 1
         vector_count = pipeline._vector_store.count()
-        fts_count = pipeline._conn.execute(
-            f"SELECT COUNT(*) FROM {pipeline._fts_table}"
-        ).fetchone()[0]
     finally:
         pipeline.close()
+
+    with sqlite3.connect(settings.index_db_path) as conn:
+        table_names = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert f"vec_chunks_{pipeline._strategy}{pipeline._model_suffix}" not in table_names
+        assert f"chunks_fts_{pipeline._strategy}" not in table_names
+        assert conn.execute("SELECT COUNT(*) FROM source_documents").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM resource_bindings").fetchone()[0] == 1
+
+    fts_count = 0
 
     return settings, file_path, vector_count, fts_count
 
