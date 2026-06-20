@@ -469,7 +469,7 @@ class TestPurgeIsTransactional:
     """DB purge is fully transactional — failure mid-cascade rolls back everything."""
 
     def test_purge_is_transactional_on_failure(self, tmp_path: Path) -> None:
-        """Injected failure in vec cascade rolls back ALL tables to pre-purge state."""
+        """Injected failure in orphan cleanup rolls back ALL tables to pre-purge state."""
         db_path = _build_post_v16_db(tmp_path)
         strategy = STRATEGIES[0]
         chunk_id = "e" * 64
@@ -483,12 +483,12 @@ class TestPurgeIsTransactional:
 
         pipeline = _get_pipeline(db_path)
 
-        # Inject failure in vector delete (mid-cascade)
+        # Inject failure in orphan cleanup (mid-cascade)
         with (
             patch.object(
-                pipeline._vector_store,
-                "delete_vectors_by_chunk_ids",
-                side_effect=RuntimeError("Simulated failure in vector cascade"),
+                pipeline._metadata_store,
+                "delete_orphan_chunks",
+                side_effect=RuntimeError("Simulated failure in orphan cleanup"),
             ),
             pytest.raises(RuntimeError),
         ):

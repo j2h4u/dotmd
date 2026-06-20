@@ -227,19 +227,3 @@ def test_status_verbose_reports_surrealdb_graph_and_skips_sqlite_tables(tmp_path
     assert "Graph:    SurrealDB @ http://surrealdb:8000/dotmd/production" in result.output
     assert "falkordb" not in result.output.lower()
     assert "Strategies:" not in result.output
-
-
-@pytest.mark.parametrize(
-    ("args", "expected"),
-    [
-        (["reindex", "vectors"], "reindex vectors is retired after the SurrealDB cutover"),
-        (["reset", "model", "legacy"], "reset model is retired after the SurrealDB cutover"),
-    ],
-)
-def test_retired_old_stack_admin_commands_fail_fast(
-    tmp_path: Path, args: list[str], expected: str
-) -> None:
-    result = CliRunner().invoke(main, ["--index-dir", str(tmp_path), *args])
-
-    assert result.exit_code != 0
-    assert expected in result.output

@@ -1,18 +1,14 @@
 """End-to-end indexing pipeline for dotMD.
 
-Orchestrates file discovery, chunking, embedding, FTS5 index construction,
-structural and NER extraction, and knowledge-graph population.
+Orchestrates file discovery, chunking, embedding, structural and NER
+extraction, and Surreal-backed knowledge-graph population while keeping
+SQLite metadata and embedding caches consistent.
 
 Supports two modes:
 - **Incremental** (default): only new/modified files are processed;
   deleted files are purged; unchanged files are skipped entirely.
 - **Full** (``force=True``): all stores are cleared and every file is
   re-indexed from scratch.
-
-Table naming is two-dimensional: ``(chunk_strategy, embedding_model)``.
-Chunk-derived tables use ``_{strategy}`` suffix.  Vector tables use
-``_{strategy}_{model}`` suffix.  This enables safe multi-model and
-multi-strategy experimentation without data collision.
 """
 
 from __future__ import annotations
@@ -298,9 +294,6 @@ class _NoopVectorStore:
     def delete_all(self) -> None:
         return None
 
-    def delete_vectors_by_chunk_ids(self, chunk_ids: list[str]) -> int:
-        return 0
-
     def count(self) -> int:
         return 0
 
@@ -415,10 +408,10 @@ def _create_surreal_direct_writer(settings: Settings) -> Any:
 class IndexingPipeline:
     """Orchestrates the full indexing workflow from raw files to populated stores.
 
-    All SQLite-backed stores (metadata, vectors, FTS5, fingerprints) share
-    a single ``sqlite3.Connection`` to the unified ``index.db`` database.
-    Table names are derived from ``(chunk_strategy, embedding_model)`` to
-    enable multi-strategy and multi-model isolation.
+    SQLite-backed metadata and embedding caches share a single
+    ``sqlite3.Connection`` to the unified ``index.db`` database. Table names
+    are derived from ``(chunk_strategy, embedding_model)`` to enable
+    multi-strategy and multi-model isolation.
 
     Parameters
     ----------
@@ -443,8 +436,8 @@ class IndexingPipeline:
         self._uses_surreal_direct_ingest = bool(settings.surreal_retrieval_database)
 
         # -- Unified SQLite connection ----------------------------------------
-        # ONE connection shared by metadata store, vec store, FTS5, and
-        # file trackers.  sqlite-vec extension loaded once here.
+        # ONE connection shared by metadata store, embedding cache, and
+        # file trackers.
         _write_pipeline_init_progress("pipeline:sqlite_connect", "running")
         self._conn = sqlite3.connect(
             str(settings.index_db_path),
@@ -610,11 +603,10 @@ class IndexingPipeline:
             if self._uses_surreal_direct_ingest
             else None
         )
-        self._maintains_local_search_artifacts = True
         self._surreal_direct_sync_state = SurrealDeltaSyncState()
 
-        # Startup integrity checks can delete vector and graph state. They must
-        # be an explicit repair action, never a side effect of service startup.
+        # Startup integrity checks can delete derived state. They must be an
+        # explicit repair action, never a side effect of service startup.
         _write_pipeline_init_progress("pipeline:startup_checks", "running")
         if settings.allow_destructive_startup_repair:
             self._check_schema_version()  # Must run first (may wipe state)
@@ -871,8 +863,6 @@ class IndexingPipeline:
             )
             self._write_surreal_direct_manifest(direct_manifest)
 
-        if e_fused_vectors:
-            self._ensure_vector_tables_for_dimension(len(e_fused_vectors[0]))
         self._metadata_store.ensure_chunk_source_provenance_table(self._strategy)
 
         self._conn.execute("BEGIN")
@@ -923,7 +913,6 @@ class IndexingPipeline:
                     changed_chunk_ids.extend(deleted)
 
             if changed_chunk_ids:
-                self._delete_vectors_for_chunk_ids_in_transaction(changed_chunk_ids)
                 self._vec_components.delete_by_entity_ids(changed_chunk_ids)
 
             for chunk in chunks_to_index:
@@ -1079,7 +1068,6 @@ class IndexingPipeline:
                     f"DELETE FROM {chunk_table} WHERE chunk_id IN ({placeholders})",
                     chunk_ids,
                 )
-                self._delete_vectors_for_chunk_ids_in_transaction(chunk_ids)
                 result.vec_components_deleted = self._vec_components.delete_by_entity_ids(
                     vector_component_entity_ids
                 )
@@ -1112,7 +1100,7 @@ class IndexingPipeline:
         if self._surreal_direct_writer is not None:
             raise RuntimeError(
                 f"{action} is disabled in Surreal mode because it mutates "
-                "local SQLite/FTS5/vector/graph state"
+                "local index state"
             )
 
     def _application_chunk_for_unit(
@@ -1178,16 +1166,6 @@ class IndexingPipeline:
         except Exception as exc:
             raise RuntimeError("encode_batch failed for source metadata") from exc
 
-    def _ensure_vector_tables_for_dimension(self, dim: int) -> None:
-        """Local vector tables are retired; keep the hook as a no-op."""
-        return None
-
-    def _delete_vectors_for_chunk_ids_in_transaction(
-        self,
-        chunk_ids: list[str],
-    ) -> None:
-        self._vector_store.delete_vectors_by_chunk_ids(chunk_ids)
-
     def _add_vectors_in_transaction(
         self,
         chunks: list[Chunk],
@@ -1195,7 +1173,7 @@ class IndexingPipeline:
         *,
         text_hashes: dict[str, str],
     ) -> None:
-        """Record vector writes through the local interface no-op."""
+        """Record derived vector writes through the vector-store interface."""
         if not chunks:
             return
         self._vector_store.add_chunks(
@@ -1374,7 +1352,7 @@ class IndexingPipeline:
                 ).fetchall()
             }
 
-        # 1. Drop chunks and FTS5
+        # 1. Drop chunk tables and related metadata
         self._conn.execute(f"DROP TABLE IF EXISTS {chunks_table}")
         self._conn.execute(f"DROP TABLE IF EXISTS {fts_table}")
         self._conn.execute(f"DROP TABLE IF EXISTS chunk_file_paths_{strategy}")
@@ -1471,11 +1449,8 @@ class IndexingPipeline:
              Shared across strategies/models for same text content.
           3. TEI encode_batch — computed from scratch.
 
-        NOTE: lookup_embeddings_by_text_hash() (sqlite_vec.py) is intentionally NOT used here.
-        That method JOINs vec_meta with vec0; post-Phase 999.12 vec0 stores e_fused (not e_text).
-        Using it here would return e_fused instead of e_text for shared-content chunks,
-        causing double-fusion and silent search quality degradation. VecComponentStore
-        is the correct authoritative source for e_text after Phase 999.12.
+        NOTE: lookup_embeddings_by_text_hash() is intentionally NOT used here.
+        VecComponentStore is the authoritative source for e_text.
 
         Returns:
             e_text_vectors: list aligned with input chunks (no None values)
@@ -1565,7 +1540,6 @@ class IndexingPipeline:
           - _index_file_embed()             — reads meta component (fast path)
           - _save_and_embed_chunks()        — stores and reads meta component
           - _embed_existing_chunks()        — stores meta component (both sub-paths)
-          - reindex_vectors()               — stores meta component
           - _check_weights_changed()        — reads meta component
           - run() bulk embed loop           — stores meta component
         """
@@ -1602,13 +1576,6 @@ class IndexingPipeline:
             files.append(file_info)
             documents_by_path[Path(file_info.path)] = document
         return files, documents_by_path
-
-    def _delete_vector_rows_for_chunks(self, chunks: list[Chunk]) -> None:
-        """Delete current vector rows for chunk IDs before replacing them."""
-        chunk_ids = [chunk.chunk_id for chunk in chunks]
-        if not chunk_ids:
-            return
-        self._vector_store.delete_vectors_by_chunk_ids(chunk_ids)
 
     def _chunks_for_file_with_paths(self, file_info: FileInfo) -> list[Chunk]:
         """Load stored chunks for one file with path fields restored for FTS/graph."""
@@ -2048,23 +2015,23 @@ class IndexingPipeline:
 
         Case 1 — body changed (body_changed=True):
             Full path. Re-embed chunk bodies (e_text), embed metadata (e_meta),
-            fuse all chunks, overwrite vec0. chunk_tracker fires this case.
+            fuse all chunks, and store the derived vectors.
 
         Case 2 — metadata only changed (body_changed=False, metadata_changed=True):
             Fast path. Read stored e_text BLOBs from VecComponentStore (no TEI for
             body). Embed metadata once (1 TEI call for e_meta). Fuse locally.
-            Update vec0. If any e_text BLOBs are missing, fall back to full embed
-            for the missing chunks.
+            If any e_text BLOBs are missing, fall back to full embed for the
+            missing chunks.
 
         Case 3 — neither changed:
             Skip entirely. This method should not be called in this case (caller
             checks), but guards defensively.
 
-        Transaction boundary: all writes (VecComponentStore, vec0, tracker) are
-        wrapped in a single BEGIN...COMMIT block. TEI calls happen BEFORE the
-        BEGIN so the transaction never holds a lock across network I/O.
-        If any step fails, the transaction is rolled back and the error is re-raised
-        so the caller can handle it (trickle marks the file as failed and retries).
+        Transaction boundary: all writes (VecComponentStore and tracker state)
+        are wrapped in a single BEGIN...COMMIT block. TEI calls happen BEFORE
+        the BEGIN so the transaction never holds a lock across network I/O.
+        If any step fails, the transaction is rolled back and the error is
+        re-raised so the caller can handle it.
 
         entity_id for meta component: always via self._meta_entity_id(file_info.path).
         """
@@ -2156,8 +2123,6 @@ class IndexingPipeline:
             )
             self._write_surreal_direct_manifest(direct_manifest)
 
-        write_local_search_artifacts = self._maintains_local_search_artifacts
-
         # ── WRITE PHASE ───────────────────────────────────────────────────────────────
         # Each store call owns its own commit. Cross-store atomicity is not
         # required here: trickle re-indexes the file on next run if a crash
@@ -2177,17 +2142,12 @@ class IndexingPipeline:
 
         # Store e_meta component (canonical path via _meta_entity_id)
         self._vec_components.store(self._meta_entity_id(file_info.path), "meta", e_meta)
-        if write_local_search_artifacts:
-            # Write e_fused to vec0 (add_chunks commits internally).
-            # overwrite=False: _holder_aware_chunk_cleanup already removed orphan vec_meta rows.
-            # Full-table wipe would destroy shared chunks still held by other files.
-            self._delete_vector_rows_for_chunks(chunks)
-            self._vector_store.add_chunks(
-                chunks,
-                e_fused_vectors,
-                overwrite=False,
-                text_hashes=text_hashes,
-            )
+        self._vector_store.add_chunks(
+            chunks,
+            e_fused_vectors,
+            overwrite=False,
+            text_hashes=text_hashes,
+        )
         self._metadata_store.upsert_source_document(
             source_document,
             conn=self._conn,
@@ -2227,20 +2187,6 @@ class IndexingPipeline:
             connection.close()
         except (RuntimeError, OSError):
             logger.warning("surreal direct writer close failed", exc_info=True)
-
-    # ------------------------------------------------------------------
-    # Granular reindex (rebuild one store from metadata chunks)
-    # ------------------------------------------------------------------
-
-    def reindex_vectors(self) -> int:
-        """Local vector rebuilds are retired; keep the API as a no-op."""
-        logger.info("reindex_vectors: retired local vector rebuild path")
-        return 0
-
-    def reindex_fts5(self) -> int:
-        """Local keyword rebuilds are retired; keep the API as a no-op."""
-        logger.info("reindex_fts5: retired local FTS rebuild path")
-        return 0
 
     def sweep_graph_orphans(self) -> int:
         """Delete graph nodes with no edges. Returns the number of nodes removed."""
@@ -2370,19 +2316,18 @@ class IndexingPipeline:
     ) -> IndexStats:
         """Process all files from scratch (used for force=True).
 
-        Drops vectors and clears fingerprints, then re-processes everything.
-        FTS5 is cleared before re-insert to prevent duplicates (INSERT OR
-        REPLACE handles it, but explicit DELETE is a safety net).
+        Drops derived vectors and clears fingerprints, then re-processes everything.
+        Derived search metadata is cleared before re-insert to prevent duplicates.
         """
         self.drop_vectors()
         self._chunk_tracker.clear()
         self._meta_tracker.clear()
-        # Clear FTS5 content before re-indexing (safety net against duplicates).
+        # Clear derived search metadata before re-indexing.
         try:
             self._conn.execute(f"DELETE FROM {self._fts_table}")
             self._conn.commit()
         except sqlite3.OperationalError:
-            pass  # FTS5 table may not exist yet
+            pass  # table may not exist yet
         return self._ingest_and_finalize(
             files,
             list(files),
@@ -2495,7 +2440,7 @@ class IndexingPipeline:
         data_dir: str | None = None,
         run_id: str = "",
     ) -> IndexStats:
-        """Ingest *files_to_ingest* and rebuild FTS5/stats from full corpus.
+        """Ingest *files_to_ingest* and rebuild derived stats from full corpus.
 
         Parameters
         ----------
@@ -2592,23 +2537,24 @@ class IndexingPipeline:
         overwrite_vectors: bool = True,
         run_id: str = "",
     ) -> None:
-        """Save chunks to metadata, embed, fuse with file metadata, store vectors, update FTS5.
+        """Save chunks to metadata, embed, fuse with file metadata, and store derived vectors.
 
         Updated in Phase 999.12: now computes separate e_text (per chunk) and
-        e_meta (per file), fuses locally, writes e_fused to vec0.
+        e_meta (per file), fuses locally, and stores the derived vectors.
 
         Chunk-to-file grouping:
         The M2M schema allows one chunk to appear in multiple files. For fusion,
         each chunk uses the e_meta of the FileInfo that owns it in this indexing
         run (keyed by chunk.file_paths[0] matching a file's path). When a chunk
-        is shared across files, the LAST file's e_meta to write to vec0 wins
-        (last-write-wins — pre-existing M2M constraint, not a regression of 999.12).
+        is shared across files, the LAST file's e_meta to write to the derived
+        vector wins (last-write-wins — pre-existing M2M constraint, not a
+        regression of 999.12).
 
         M2M shared-chunk behavior (documented per both reviewers, Cycle 3):
         If the same chunk_id appears in multiple files (same body text, different
-        titles), the chunk gets one row in vec0 with e_fused computed from the
-        LAST file's e_meta that writes to it (last-write-wins). This is a known
-        pre-existing design constraint of the M2M content-addressed schema.
+        titles), the chunk gets one derived vector computed from the LAST file's
+        e_meta that writes to it (last-write-wins). This is a known pre-existing
+        design constraint of the M2M content-addressed schema.
         """
         t0 = time.perf_counter()
         self._metadata_store.save_chunks(chunks)
@@ -2651,10 +2597,10 @@ class IndexingPipeline:
             # Store e_text in VecComponentStore for future fast-path reads.
             # VecComponentStore.store() does not call commit() (caller owns boundary).
             # With isolation_level=None each INSERT auto-commits, but we flush explicitly
-            # so all per-file BLOBs are durable before vec0 is written.
+            # so all per-file BLOBs are durable before the derived vectors are written.
             for chunk, e_text in zip(file_chunks, e_text_vectors, strict=False):
                 self._vec_components.store(chunk.chunk_id, "text", e_text)
-            self._conn.commit()  # flush VecComponentStore writes before vec0
+            self._conn.commit()  # flush VecComponentStore writes before derived vectors
             # Encode file metadata → e_meta (1 TEI call per unique file)
             e_meta = self._embed_meta_component(fi)
             # Fuse per chunk
@@ -2703,27 +2649,26 @@ class IndexingPipeline:
             len(chunks) / t_embed if t_embed > 0 else 0,
         )
 
-        if self._maintains_local_search_artifacts:
-            t0 = time.perf_counter()
-            self._vector_store.add_chunks(
-                chunk_order,
-                all_e_fused,
-                overwrite=overwrite_vectors,
-                text_hashes=all_text_hashes,
-            )
-            logger.info(
-                "[%s] vector_store: %d vectors (%.2fs)",
-                run_id,
-                len(chunks),
-                time.perf_counter() - t0,
-            )
-            if hasattr(self._vector_store, "set_model_name"):
-                self._vector_store.set_model_name(self._settings.embedding_model)  # type: ignore[attr-defined]
+        t0 = time.perf_counter()
+        self._vector_store.add_chunks(
+            chunk_order,
+            all_e_fused,
+            overwrite=overwrite_vectors,
+            text_hashes=all_text_hashes,
+        )
+        logger.info(
+            "[%s] vector_store: %d vectors (%.2fs)",
+            run_id,
+            len(chunks),
+            time.perf_counter() - t0,
+        )
+        if hasattr(self._vector_store, "set_model_name"):
+            self._vector_store.set_model_name(self._settings.embedding_model)  # type: ignore[attr-defined]
 
-            t0 = time.perf_counter()
-            file_meta = self._build_file_meta_from_fileinfo(files)
-            self._keyword_engine.add_chunks(chunks, file_meta=file_meta)
-            logger.info("[%s] fts5: %d chunks (%.2fs)", run_id, len(chunks), time.perf_counter() - t0)
+        t0 = time.perf_counter()
+        file_meta = self._build_file_meta_from_fileinfo(files)
+        self._keyword_engine.add_chunks(chunks, file_meta=file_meta)
+        logger.info("[%s] fts5: %d chunks (%.2fs)", run_id, len(chunks), time.perf_counter() - t0)
 
         for source_document in source_documents:
             self._upsert_active_filesystem_binding(
@@ -3057,7 +3002,7 @@ class IndexingPipeline:
         self,
         files: list[FileInfo],
     ) -> dict[str, tuple[str, str]]:
-        """Build FTS5 file_meta from FileInfo objects (no disk reads needed)."""
+        """Build file metadata tuples from FileInfo objects (no disk reads needed)."""
         file_meta: dict[str, tuple[str, str]] = {}
         for fi in files:
             fm = fi.frontmatter or {}
@@ -3227,7 +3172,7 @@ class IndexingPipeline:
             # Holder-aware pre-purge: decrement M2M for this file, then
             # cascade-delete only chunks whose holder count dropped to 0.
             # Shared chunks (still referenced by another file) are left intact
-            # in chunks_*, FTS5, and vec_meta.
+            # in chunk storage and derived component caches.
             t0 = time.perf_counter()
             _beacon("purge")
             cleanup_orphans_by_strategy: dict[str, list[str]] = {}
@@ -3331,12 +3276,10 @@ class IndexingPipeline:
                 self._conn.execute("ROLLBACK")
                 raise
 
-            # FTS5: INSERT OR REPLACE is idempotent on chunk_id (Research §Component).
             _trickle_tags = file_info.frontmatter.get("tags", [])
             _trickle_tags_csv = ", ".join(str(t) for t in _trickle_tags) if _trickle_tags else ""
             _trickle_meta = {str(file_info.path): (file_info.title, _trickle_tags_csv)}
-            if self._maintains_local_search_artifacts:
-                self._keyword_engine.add_chunks(chunks, file_meta=_trickle_meta)
+            self._keyword_engine.add_chunks(chunks, file_meta=_trickle_meta)
             t_save = time.perf_counter() - t0
 
             _beacon("extraction")
@@ -3368,7 +3311,7 @@ class IndexingPipeline:
         # ADR: meta_tracker uses meta_checksum (title+tags only).
         # When only title/tags changed (chunk_diff=unchanged, meta_diff=modified),
         # we skip re-chunking but still re-embed (1 TEI call for e_meta), update
-        # FTS5 columns, and refresh graph metadata.
+        # metadata-backed search context, and refresh graph metadata.
         metadata_only = False
         if not needs_embed:
             meta_diff = self._meta_tracker.diff([file_info])
@@ -3495,8 +3438,8 @@ class IndexingPipeline:
         only chunk_ids whose holder count reached 0.
 
         This is the single shared primitive for both ``_purge_file`` and
-        ``_index_file``.  It covers the four in-transaction DB-level deletes:
-        M2M rows → orphan chunks_* rows → vec_meta_* rows → FTS5 rows.
+        ``_index_file``. It covers the in-transaction DB-level deletes for
+        M2M rows and orphan chunk/provenance cleanup.
 
         **Transaction boundary:** MUST be called inside a caller-managed
         BEGIN/COMMIT block.  This method issues no COMMIT of its own.
@@ -3539,7 +3482,6 @@ class IndexingPipeline:
                     conn=conn,
                 )
                 self._metadata_store.delete_orphan_chunks(strategy, orphans, conn=conn)
-                self._vector_store.delete_vectors_by_chunk_ids(orphans)
                 all_orphans_by_strategy[strategy] = orphans
         return all_orphans_by_strategy
 
@@ -3554,10 +3496,9 @@ class IndexingPipeline:
         another file) survive.
 
         Transaction boundary:
-            ONE sqlite3 BEGIN/COMMIT covers all strategies × {M2M delete,
-            orphan cascade, vec cascade, FTS cascade} via
-            ``_holder_aware_chunk_cleanup``.  On any exception inside the
-            BEGIN block, ROLLBACK restores exact pre-purge state.
+            ONE sqlite3 BEGIN/COMMIT covers all strategies via
+            ``_holder_aware_chunk_cleanup``. On any exception inside the BEGIN
+            block, ROLLBACK restores exact pre-purge state.
 
         Post-commit external state (graph + fingerprints):
             Runs AFTER the DB commit.  Failures are WARN-logged; they do not
@@ -3583,7 +3524,7 @@ class IndexingPipeline:
 
         conn = self._conn
 
-        # -- Single-transaction DB cascade (M2M + orphan + vec + FTS) ---------
+        # -- Single-transaction DB cascade (M2M + orphan metadata) -------------
         all_orphans_by_strategy: dict[str, list[str]] = {}
         try:
             conn.execute("BEGIN")
@@ -3931,7 +3872,7 @@ class IndexingPipeline:
     # ------------------------------------------------------------------
 
     def _build_file_meta(self, chunks: list[Chunk]) -> dict[str, tuple[str, str]]:
-        """Build file_meta mapping for FTS5 title/tags columns from source files."""
+        """Build file metadata mapping for title/tags fields from source files."""
         file_meta: dict[str, tuple[str, str]] = {}
         # Phase 16: Chunk.file_path → file_paths list; collect all unique paths.
         for fp in {str(p) for c in chunks for p in c.file_paths}:
@@ -3945,7 +3886,7 @@ class IndexingPipeline:
                 tags_str = ", ".join(str(t) for t in tags) if tags else ""
                 file_meta[fp] = (title, tags_str)
             except OSError:
-                logger.warning("Cannot read %s for FTS5 metadata, using defaults", fp)
+                logger.warning("Cannot read %s for metadata, using defaults", fp)
                 file_meta[fp] = (Path(fp).stem, "")
         return file_meta
 
@@ -4086,7 +4027,6 @@ class IndexingPipeline:
                         )
                 self._vec_components.store(self._meta_entity_id(fi.path), "meta", e_meta)
                 self._conn.commit()  # Flush VecComponentStore stores before add_chunks
-                self._delete_vector_rows_for_chunks(chunks)
                 self._vector_store.add_chunks(
                     chunks,
                     e_fused_vectors,

@@ -521,7 +521,7 @@ class DotMDService:
         if active and stored != active:
             logger.warning(
                 "Embedding model mismatch: index was built with %r, "
-                "but TEI is serving %r. Run `dotmd reindex vectors` to rebuild.",
+                "but TEI is serving %r. Re-run indexing to refresh embeddings.",
                 stored,
                 active,
             )
@@ -530,7 +530,7 @@ class DotMDService:
             if metric and metric != "cosine":
                 logger.warning(
                     "Distance metric mismatch: index uses %r, but code expects 'cosine'. "
-                    "Run `dotmd reindex vectors` to rebuild.",
+                    "Rebuild the index to refresh embeddings.",
                     metric,
                 )
 
@@ -554,39 +554,6 @@ class DotMDService:
             Summary statistics for the completed index.
         """
         return self._pipeline.index(directory, force=force)
-
-    def reindex(self, store: str) -> int:
-        """Rebuild a single store from metadata chunks.
-
-        Parameters
-        ----------
-        store:
-            Which store to rebuild: ``"vectors"``, ``"fts5"``,
-            ``"graph"``, or ``"all"``.
-
-        Returns
-        -------
-        int
-            Number of chunks processed.
-        """
-        if self._uses_surreal_search_backend and store in {"vectors", "fts5", "graph", "all"}:
-            raise RuntimeError(
-                f"reindex({store}) is disabled in Surreal mode because local "
-                "vector/FTS5/graph stores are retired"
-            )
-        if store == "all":
-            n = self._pipeline.reindex_fts5()
-            self._pipeline.reindex_vectors()
-            self._pipeline.reindex_graph()
-            return n
-        method = {
-            "vectors": self._pipeline.reindex_vectors,
-            "fts5": self._pipeline.reindex_fts5,
-            "graph": self._pipeline.reindex_graph,
-        }.get(store)
-        if method is None:
-            raise ValueError(f"Unknown store: {store!r}")
-        return method()
 
     def search(
         self,

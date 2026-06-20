@@ -26,8 +26,8 @@ read(ref) -> source content
 
 The difference is where retrieval happens. Federated sources stay external
 until read time. Ingested sources become normal dotMD corpus material and go
-through local chunking, vectorization, FTS5, graph extraction, fusion, and
-reranking.
+through local chunking, vectorization, keyword indexing, graph extraction,
+fusion, and reranking.
 
 ## What We Reuse
 

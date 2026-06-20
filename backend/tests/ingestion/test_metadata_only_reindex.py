@@ -193,7 +193,7 @@ def test_surreal_backend_uses_noop_graph_store(
     assert pipeline._graph_store.get_graph_data() == {"nodes": [], "edges": []}
 
 
-def test_surreal_metadata_only_reindex_skips_local_vec_and_fts_artifacts(
+def test_surreal_metadata_only_reindex_skips_derived_vec_and_fts_tables(
     tmp_path, monkeypatch
 ):
     from dotmd.core.config import Settings
@@ -281,99 +281,6 @@ def test_surreal_metadata_only_reindex_skips_local_vec_and_fts_artifacts(
             ).fetchone()
             is None
         )
-    finally:
-        pipeline.close()
-
-
-def test_surreal_reindex_vectors_skips_local_vector_store_mutation(
-    surreal_pipeline_settings, monkeypatch
-):
-    from dotmd.ingestion.pipeline import IndexingPipeline
-
-    doc = surreal_pipeline_settings.data_dir / "surreal-vectors.md"
-    _write_md(doc, "Surreal Vectors", ["alpha"], "Initial body text for vector reindexing.")
-
-    class FakeConnection:
-        def close(self) -> None:
-            pass
-
-    class FakeWriter:
-        def __init__(self) -> None:
-            self.connection = FakeConnection()
-
-    monkeypatch.setattr(
-        "dotmd.ingestion.pipeline._create_surreal_direct_writer",
-        lambda _settings: FakeWriter(),
-    )
-
-    pipeline = IndexingPipeline(surreal_pipeline_settings)
-    pipeline._semantic_engine.encode_batch = MagicMock(  # type: ignore[method-assign]
-        return_value=[[1.0, 0.0, 0.0]]
-    )
-    pipeline._semantic_engine.get_tei_model_id = MagicMock(return_value="fixture-model")
-    pipeline._write_surreal_direct_manifest = (  # type: ignore[method-assign]
-        lambda *_args, **_kwargs: None
-    )
-    pipeline._write_surreal_graph_manifest = (  # type: ignore[method-assign]
-        lambda *_args, **_kwargs: None
-    )
-
-    try:
-        assert pipeline.index_file(doc) == 1
-        assert pipeline.reindex_vectors() == 0
-        tables = {
-            row[0]
-            for row in pipeline._conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
-        }
-        assert not any(name.startswith("vec_chunks_") for name in tables)
-        assert not any(name.startswith("vec_meta_") for name in tables)
-    finally:
-        pipeline.close()
-
-
-def test_surreal_reindex_fts5_skips_local_fts_mutation(surreal_pipeline_settings, monkeypatch):
-    from dotmd.ingestion.pipeline import IndexingPipeline
-
-    doc = surreal_pipeline_settings.data_dir / "surreal-fts.md"
-    _write_md(doc, "Surreal FTS", ["alpha"], "Initial body text for FTS reindexing.")
-
-    class FakeConnection:
-        def close(self) -> None:
-            pass
-
-    class FakeWriter:
-        def __init__(self) -> None:
-            self.connection = FakeConnection()
-
-    monkeypatch.setattr(
-        "dotmd.ingestion.pipeline._create_surreal_direct_writer",
-        lambda _settings: FakeWriter(),
-    )
-
-    pipeline = IndexingPipeline(surreal_pipeline_settings)
-    pipeline._semantic_engine.encode_batch = MagicMock(  # type: ignore[method-assign]
-        return_value=[[1.0, 0.0, 0.0]]
-    )
-    pipeline._semantic_engine.get_tei_model_id = MagicMock(return_value="fixture-model")
-    pipeline._write_surreal_direct_manifest = (  # type: ignore[method-assign]
-        lambda *_args, **_kwargs: None
-    )
-    pipeline._write_surreal_graph_manifest = (  # type: ignore[method-assign]
-        lambda *_args, **_kwargs: None
-    )
-
-    try:
-        assert pipeline.index_file(doc) == 1
-        assert pipeline.reindex_fts5() == 0
-        tables = {
-            row[0]
-            for row in pipeline._conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
-        }
-        assert f"chunks_fts_{pipeline._strategy}" not in tables
     finally:
         pipeline.close()
 

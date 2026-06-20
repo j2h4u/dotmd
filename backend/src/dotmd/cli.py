@@ -296,58 +296,6 @@ def status(ctx: click.Context, verbose: bool) -> None:
 
 
 @main.group()
-def reindex() -> None:
-    """Rebuild a specific index from stored chunks.
-
-    Metadata (chunks) is the source of truth — each subcommand
-    rebuilds one derived store without re-reading files from disk.
-    """
-
-
-@reindex.command("vectors")
-def reindex_vectors() -> None:
-    """Rebuild vector embeddings (requires TEI)."""
-    raise click.ClickException("reindex vectors is retired after the SurrealDB cutover")
-
-
-@reindex.command("fts5")
-def reindex_fts5() -> None:
-    """Rebuild FTS5 keyword index."""
-    raise click.ClickException("reindex fts5 is retired after the SurrealDB cutover")
-
-
-@reindex.command("graph")
-def reindex_graph() -> None:
-    """Rebuild knowledge graph (runs extraction)."""
-    raise click.ClickException("reindex graph is retired after the SurrealDB cutover")
-
-
-@reindex.command("all")
-def reindex_all() -> None:
-    """Rebuild all derived indexes (vectors + FTS5 + graph)."""
-    raise click.ClickException("reindex all is retired after the SurrealDB cutover")
-
-
-@main.group()
-def reset() -> None:
-    """Drop model vectors or chunk strategy data."""
-
-
-@reset.command("model")
-@click.argument("name")
-def reset_model(name: str) -> None:
-    """Drop vectors and embed fingerprints for a model."""
-    raise click.ClickException("reset model is retired after the SurrealDB cutover")
-
-
-@reset.command("strategy")
-@click.argument("name")
-def reset_strategy(name: str) -> None:
-    """Drop ALL data for a chunk strategy (chunks, FTS5, graph, vectors)."""
-    raise click.ClickException("reset strategy is retired after the SurrealDB cutover")
-
-
-@main.group()
 def telegram() -> None:
     """Telegram source smoke commands."""
 

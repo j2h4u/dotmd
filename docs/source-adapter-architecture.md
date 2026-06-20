@@ -177,8 +177,8 @@ A Telegram dialog, group, channel, or supergroup is a `SourceDocument`. A
 Telegram message is a `SourceUnit`, and message-level fingerprints are the
 recomputation boundary for later incremental sync. Phase 29 persists pathless
 Telegram chunks with source-unit provenance, source-unit fingerprints, active
-dialog resource bindings, FTS5 rows, sqlite-vec rows, and checkpoint metadata in
-one local transaction per single provider batch.
+dialog resource bindings, SurrealDB keyword/vector rows, and checkpoint
+metadata in one local transaction per single provider batch.
 
 Low-signal messages such as acknowledgements and emoji-only replies are still
 stored as Telegram source units with fingerprints/provenance, but they are
@@ -395,7 +395,7 @@ The existing search stack is valuable and should be reused:
 
 - source-aware chunking;
 - semantic vector retrieval;
-- SQLite FTS5 keyword retrieval;
+- SurrealDB keyword retrieval;
 - graph-direct entity retrieval;
 - RRF/fusion;
 - cross-encoder reranking;
@@ -640,7 +640,7 @@ metadata_json
 
 - chunking strategy selection;
 - embeddings;
-- FTS5 indexing;
+- keyword indexing;
 - graph extraction;
 - vector/keyword/graph fusion;
 - reranking;
@@ -705,8 +705,8 @@ source_unit_fingerprints:
   indexed_at
 ```
 
-This should be shared infrastructure, not custom SQLite code invented by every
-adapter.
+This should be shared infrastructure, not custom source-state code invented by
+every adapter.
 
 Phase 27's `resource_bindings` table is the first concrete binding-state slice,
 not the full source-state platform. It tracks active/inactive resource
