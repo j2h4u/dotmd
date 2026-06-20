@@ -59,7 +59,6 @@ def _get_runtime_service_from_ctx(ctx: click.Context, **overrides: object) -> Do
     index_dir = (ctx.obj or {}).get("index_dir")
     if index_dir is not None:
         overrides.setdefault("index_dir", index_dir)
-    overrides.setdefault("search_backend", "surreal")
     settings = load_runtime_settings(**overrides)
     return DotMDService(settings=settings)
 

@@ -489,7 +489,8 @@ def load_settings(**overrides: object) -> Settings:
 
 
 def load_runtime_settings(**overrides: object) -> Settings:
-    """Construct and validate Settings for long-running service startup."""
+    """Construct and validate SurrealDB-only settings for long-running startup."""
+    overrides["search_backend"] = "surreal"
     settings = load_settings(**overrides)
     settings.validate_for_runtime()
     return settings

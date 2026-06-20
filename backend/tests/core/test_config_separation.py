@@ -12,7 +12,7 @@ from dotmd import mcp_server
 from dotmd.api import server as api_server
 from dotmd.api.service import DotMDService
 from dotmd.core import config
-from dotmd.core.config import Settings
+from dotmd.core.config import Settings, load_runtime_settings
 from dotmd.core.models import ExtractDepth, IndexStats, TrickleStatus
 
 
@@ -204,6 +204,21 @@ def test_runtime_validation_accepts_explicit_deployment_values() -> None:
     settings = _runtime_settings()
 
     settings.validate_for_runtime()
+
+
+def test_load_runtime_settings_forces_surreal_backend() -> None:
+    settings = load_runtime_settings(
+        data_dir=Path("/mnt"),
+        index_dir=Path("/dotmd-index"),
+        indexing_paths=["/mnt"],
+        embedding_url="http://tei:80",
+        search_backend="sqlite",
+        surreal_retrieval_url="http://surrealdb:8000",
+        surreal_retrieval_database="production",
+        surreal_retrieval_embedding_dimension=1024,
+    )
+
+    assert settings.search_backend == "surreal"
 
 
 def test_base_url_none_remains_valid() -> None:
