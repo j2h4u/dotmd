@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from dotmd.core.config import Settings
 from dotmd.core.models import ExtractDepth
 from dotmd.ingestion.pipeline import IndexingPipeline
@@ -49,30 +47,7 @@ def _direct_ingest_settings(tmp_path: Path) -> tuple[Settings, Path]:
 
 def test_direct_surreal_pipeline_init_skips_legacy_vec_and_fts(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from dotmd.ingestion import pipeline as pipeline_module
-
-    monkeypatch.setattr(
-        pipeline_module.sqlite_vec,
-        "load",
-        lambda *_args, **_kwargs: pytest.fail("sqlite_vec.load() must not run in direct mode"),
-    )
-    monkeypatch.setattr(
-        pipeline_module,
-        "SQLiteVecVectorStore",
-        lambda *_args, **_kwargs: pytest.fail(
-            "SQLiteVecVectorStore must not be constructed in direct mode"
-        ),
-    )
-    monkeypatch.setattr(
-        pipeline_module,
-        "FTS5SearchEngine",
-        lambda *_args, **_kwargs: pytest.fail(
-            "FTS5SearchEngine must not be constructed in direct mode"
-        ),
-    )
-
     settings, file_path = _direct_ingest_settings(tmp_path)
     pipeline = IndexingPipeline(settings)
     pipeline._semantic_engine.encode_batch = lambda texts: [  # type: ignore[method-assign]
@@ -90,7 +65,8 @@ def test_direct_surreal_pipeline_init_skips_legacy_vec_and_fts(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
-        assert f"vec_chunks_{pipeline._strategy}{pipeline._model_suffix}" not in tables
+        assert not any(name.startswith("vec_chunks_") for name in tables)
+        assert not any(name.startswith("vec_meta_") for name in tables)
         assert f"chunks_fts_{pipeline._strategy}" not in tables
 
         assert pipeline.conn.execute("SELECT COUNT(*) FROM source_documents").fetchone()[0] == 1

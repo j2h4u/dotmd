@@ -10,7 +10,7 @@ Test matrix
 -----------
 1. test_edit_preserves_shared_chunk_index_rows
        A and B share chunk_id X.  A is edited (new content).  X must survive in
-       chunks_*, FTS5, vec_meta, and M2M for B.  M2M row (X, A) must be gone.
+       chunks_* and M2M for B.  M2M row (X, A) must be gone.
 
 2. test_edit_cleans_up_orphaned_chunk
        A is sole holder of chunk_X.  A is edited (chunk_X no longer produced).
@@ -28,7 +28,7 @@ Test matrix
 5. test_property_reindex_holder_invariant
        Seeded-RNG generative: N files with overlapping chunks, random
        create/edit ops.  After each op: for every chunk_id with holder_count > 0
-       in M2M, FTS5 + vec_meta rows must exist (the holder invariant).
+       in M2M, a chunks_* row must exist.
 """
 
 from __future__ import annotations
@@ -48,12 +48,6 @@ try:
 except (OSError, ValueError):
     # Fallback for environments where DOTMD_EMBEDDING_URL is not set at collection time.
     STRATEGY = "heading_512_50"
-# The actual vec_meta table suffix is derived from the pipeline's embedding
-# model name.  Default model is BAAI/bge-small-en-v1.5 → suffix bge_small_en_v1.
-# We discover the table name at runtime via sqlite_master queries instead of
-# hardcoding it, so tests remain model-agnostic.
-
-
 # ---------------------------------------------------------------------------
 # Inline DB builder (post-v16 schema — no file_path col in chunks_*)
 # ---------------------------------------------------------------------------
@@ -62,9 +56,8 @@ except (OSError, ValueError):
 def _build_db(tmp_path: Path) -> Path:
     """Create a post-v16 schema DB with all required tables.
 
-    Does NOT pre-create vec_meta_* because the table name depends on the
-    pipeline's embedding model suffix which varies by environment.  The
-    pipeline creates it automatically via _ensure_tables on first access.
+    Does not pre-create any vector tables; the current pipeline no longer
+    materializes local vec/FTS stores.
     """
     db_path = tmp_path / "index.db"
     conn = sqlite3.connect(str(db_path))
@@ -83,41 +76,17 @@ def _build_db(tmp_path: Path) -> Path:
         );
         CREATE INDEX idx_cfp_{STRATEGY}_file_path
             ON chunk_file_paths_{STRATEGY}(file_path);
-        CREATE VIRTUAL TABLE chunks_fts_{STRATEGY} USING fts5(
-            chunk_id UNINDEXED, text, title, tags, tokenize='unicode61'
-        );
     """)
     conn.commit()
     conn.close()
     return db_path
 
 
-def _get_vec_meta_table(db_path: Path) -> str | None:
-    """Return the first vec_meta_<strategy>_* table name in the DB, or None."""
-    conn = sqlite3.connect(str(db_path))
-    row = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE ?",
-        (f"vec_meta_{STRATEGY}_%",),
-    ).fetchone()
-    conn.close()
-    return row[0] if row else None
-
-
 def _insert_chunk(db_path: Path, chunk_id: str, text: str) -> None:
-    """Insert a chunk into chunks_* and FTS5 tables.
-
-    vec_meta_* is NOT seeded here because the table name is model-dependent
-    and the pipeline creates it on first access.  Tests that need vec_meta
-    rows to exist before the pipeline runs should call pipeline.index_file()
-    for an initial seeding pass, or accept that vec_meta starts empty.
-    """
+    """Insert a chunk into chunks_*."""
     conn = sqlite3.connect(str(db_path))
     conn.execute(
         f"INSERT OR IGNORE INTO chunks_{STRATEGY} (chunk_id, text) VALUES (?, ?)",
-        (chunk_id, text),
-    )
-    conn.execute(
-        f"INSERT OR IGNORE INTO chunks_fts_{STRATEGY} (chunk_id, text, title, tags) VALUES (?, ?, '', '')",
         (chunk_id, text),
     )
     conn.commit()
@@ -149,33 +118,6 @@ def _chunk_exists(db_path: Path, chunk_id: str) -> bool:
     ).fetchone()
     conn.close()
     return row is not None
-
-
-def _fts_exists(db_path: Path, chunk_id: str) -> bool:
-    conn = sqlite3.connect(str(db_path))
-    row = conn.execute(
-        f"SELECT 1 FROM chunks_fts_{STRATEGY} WHERE chunk_id = ?", (chunk_id,)
-    ).fetchone()
-    conn.close()
-    return row is not None
-
-
-def _vec_meta_exists(db_path: Path, chunk_id: str) -> bool:
-    """Return True if chunk_id appears in any vec_meta_<strategy>_* table."""
-    conn = sqlite3.connect(str(db_path))
-    tables = [
-        r[0]
-        for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE ?",
-            (f"vec_meta_{STRATEGY}_%",),
-        ).fetchall()
-    ]
-    for tbl in tables:
-        if conn.execute(f"SELECT 1 FROM {tbl} WHERE chunk_id = ?", (chunk_id,)).fetchone():
-            conn.close()
-            return True
-    conn.close()
-    return False
 
 
 def _m2m_exists(db_path: Path, chunk_id: str, file_path: str) -> bool:
@@ -230,8 +172,8 @@ class TestEditPreservesSharedChunkIndexRows:
 
         pipeline = _get_pipeline(db_path)
 
-        # Phase 1: index both A and B so all stores (chunks_*, FTS5, vec_meta, M2M)
-        # are populated.  Both files produce SHARED_CHUNK_ID on the first pass.
+        # Phase 1: index both A and B so the chunk table and M2M are populated.
+        # Both files produce SHARED_CHUNK_ID on the first pass.
         def chunk_shared(path: Path) -> Any:
             def _fn(*args, **kwargs):  # type: ignore[no-untyped-def]
                 return [
@@ -254,15 +196,9 @@ class TestEditPreservesSharedChunkIndexRows:
         with patch.object(_chunker, "chunk_file", chunk_shared(file_b)):
             pipeline.index_file(file_b)
 
-        # Verify initial state: both M2M rows present, chunk + vec_meta + FTS5 populated.
+        # Verify initial state: both M2M rows present, chunk populated.
         assert _chunk_exists(db_path, SHARED_CHUNK_ID), (
             "setup: chunk must exist after initial index"
-        )
-        assert _fts_exists(db_path, SHARED_CHUNK_ID), (
-            "setup: FTS5 row must exist after initial index"
-        )
-        assert _vec_meta_exists(db_path, SHARED_CHUNK_ID), (
-            "setup: vec_meta row must exist after initial index"
         )
         assert _m2m_exists(db_path, SHARED_CHUNK_ID, path_a), "setup: M2M(shared,A) must exist"
         assert _m2m_exists(db_path, SHARED_CHUNK_ID, path_b), "setup: M2M(shared,B) must exist"
@@ -285,15 +221,9 @@ class TestEditPreservesSharedChunkIndexRows:
         with patch.object(_chunker, "chunk_file", patched_chunk_file):
             pipeline.index_file(file_a)
 
-        # SHARED_CHUNK_ID must still exist in all tables (B still holds it)
+        # SHARED_CHUNK_ID must still exist (B still holds it)
         assert _chunk_exists(db_path, SHARED_CHUNK_ID), (
             "chunks_* row for shared chunk must survive — B is still a holder"
-        )
-        assert _fts_exists(db_path, SHARED_CHUNK_ID), (
-            "FTS5 row for shared chunk must survive — B is still a holder"
-        )
-        assert _vec_meta_exists(db_path, SHARED_CHUNK_ID), (
-            "vec_meta row for shared chunk must survive — B is still a holder"
         )
         assert _m2m_exists(db_path, SHARED_CHUNK_ID, path_b), (
             "M2M row (shared_chunk, B) must survive"
@@ -343,15 +273,9 @@ class TestEditCleansUpOrphanedChunk:
         with patch.object(_chunker, "chunk_file", patched_chunk_file):
             pipeline.index_file(file_a)
 
-        # ORPHAN_CHUNK_ID must be completely removed from all tables
+        # ORPHAN_CHUNK_ID must be completely removed from chunks_* and M2M
         assert not _chunk_exists(db_path, ORPHAN_CHUNK_ID), (
             "Sole-held chunk must be removed from chunks_* after reindex drops it"
-        )
-        assert not _fts_exists(db_path, ORPHAN_CHUNK_ID), (
-            "Sole-held chunk must be removed from FTS5 after reindex drops it"
-        )
-        assert not _vec_meta_exists(db_path, ORPHAN_CHUNK_ID), (
-            "Sole-held chunk must be removed from vec_meta after reindex drops it"
         )
         assert not _m2m_exists(db_path, ORPHAN_CHUNK_ID, path_a), (
             "M2M row (orphan_chunk, A) must be gone"
@@ -379,7 +303,7 @@ class TestEditKeepsSharedChunkWhenOtherHolderUnchanged:
 
         pipeline = _get_pipeline(db_path)
 
-        # Phase 1: index both A and B with SHARED_CHUNK_ID so all stores are populated.
+        # Phase 1: index both A and B with SHARED_CHUNK_ID so the chunk store is populated.
         def chunk_shared(path: Path) -> Any:
             def _fn(*args, **kwargs):  # type: ignore[no-untyped-def]
                 return [
@@ -442,7 +366,6 @@ class TestEditKeepsSharedChunkWhenOtherHolderUnchanged:
         assert _chunk_exists(db_path, SHARED_CHUNK_ID), (
             "Shared chunk must survive — B is still a holder after A drops it"
         )
-        assert _fts_exists(db_path, SHARED_CHUNK_ID), "FTS5 row for shared chunk must survive"
         assert _m2m_exists(db_path, SHARED_CHUNK_ID, path_b), "M2M (shared_chunk, B) must survive"
         assert not _m2m_exists(db_path, SHARED_CHUNK_ID, path_a), (
             "M2M (shared_chunk, A) must be removed"
@@ -468,24 +391,6 @@ class TestEditHolderAwareCascadeAtomicUnderFailure:
 
         pre_chunks = _count(db_path, f"chunks_{STRATEGY}")
         pre_m2m = _count(db_path, f"chunk_file_paths_{STRATEGY}")
-        pre_fts = _count(db_path, f"chunks_fts_{STRATEGY}")
-
-        # vec_meta count: sum across all model-variant tables (may be 0 before pipeline init)
-        def _count_vec(db: Path) -> int:
-            conn = sqlite3.connect(str(db))
-            tables = [
-                r[0]
-                for r in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE ?",
-                    (f"vec_meta_{STRATEGY}_%",),
-                ).fetchall()
-            ]
-            total = sum(conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables)
-            conn.close()
-            return total
-
-        pre_vec = _count_vec(db_path)
-
         pipeline = _get_pipeline(db_path)
 
         file_a.write_text("# Changed\n\nCompletely different.\n")
@@ -515,16 +420,12 @@ class TestEditHolderAwareCascadeAtomicUnderFailure:
         ):
             pipeline.index_file(file_a)
 
-        # All tables must be in pre-edit state (ROLLBACK honoured)
+        # All chunk and M2M tables must be in pre-edit state (ROLLBACK honoured)
         assert _count(db_path, f"chunks_{STRATEGY}") == pre_chunks, (
             "chunks_* must be unchanged after rolled-back cleanup"
         )
         assert _count(db_path, f"chunk_file_paths_{STRATEGY}") == pre_m2m, (
             "chunk_file_paths_* must be unchanged after rollback"
-        )
-        assert _count_vec(db_path) == pre_vec, "vec_meta_* must be unchanged after rollback"
-        assert _count(db_path, f"chunks_fts_{STRATEGY}") == pre_fts, (
-            "chunks_fts_* must be unchanged after rollback"
         )
 
 
@@ -537,16 +438,7 @@ class TestPropertyReindexHolderInvariant:
     """Seeded generative: holder invariant holds after any create/edit sequence."""
 
     def _holder_invariant(self, db_path: Path) -> None:
-        """Assert: every chunk_id with M2M entries has an FTS5 row.
-
-        This is the core WR-2 invariant: chunks that still have M2M holders
-        must not have their FTS5 rows deleted by a reindex of any holder.
-
-        vec_meta is checked deterministically in tests 1-3; skipped here
-        because the property test can trigger a known sqlite_vec UNIQUE
-        constraint quirk when lastrowid is non-zero after INSERT OR IGNORE
-        on a shared chunk_id — an orthogonal issue to the M2M-FTS5 invariant.
-        """
+        """Assert: every chunk_id with M2M entries still has a chunk row."""
         conn = sqlite3.connect(str(db_path))
         chunk_ids_in_m2m = {
             r[0]
@@ -554,14 +446,14 @@ class TestPropertyReindexHolderInvariant:
                 f"SELECT DISTINCT chunk_id FROM chunk_file_paths_{STRATEGY}"
             ).fetchall()
         }
-        fts_ids = {
-            r[0] for r in conn.execute(f"SELECT chunk_id FROM chunks_fts_{STRATEGY}").fetchall()
+        chunk_ids = {
+            r[0] for r in conn.execute(f"SELECT chunk_id FROM chunks_{STRATEGY}").fetchall()
         }
         conn.close()
 
         for cid in chunk_ids_in_m2m:
-            assert cid in fts_ids, (
-                f"Holder invariant violated: chunk {cid!r} is in M2M but missing from FTS5 table"
+            assert cid in chunk_ids, (
+                f"Holder invariant violated: chunk {cid!r} is in M2M but missing from chunks table"
             )
 
     def test_property_reindex_holder_invariant(self, tmp_path: Path) -> None:
@@ -601,36 +493,26 @@ class TestPropertyReindexHolderInvariant:
                 for idx, cid in enumerate(chunk_ids)
             ]
 
-        # Patch add_chunks on the vector store to a no-op so the property test
-        # does not trip the sqlite_vec UNIQUE constraint quirk (lastrowid
-        # misbehaves after INSERT OR IGNORE on an already-present chunk_id —
-        # orthogonal to the M2M-FTS5 invariant that WR-2 governs).
-        from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
-
-        def _noop_add_chunks(_self_vs, chunks, embeddings, **kwargs):  # type: ignore[no-untyped-def]
-            pass
-
         N_OPS = 10
-        with patch.object(SQLiteVecVectorStore, "add_chunks", _noop_add_chunks):
-            for _ in range(N_OPS):
-                # Pick a random file
-                fp = rng.choice(FILE_PATHS)
-                fp.write_text(f"# Prop\n\nContent {rng.randint(0, 9999)}.\n")
-                path_str = str(fp)
+        for _ in range(N_OPS):
+            # Pick a random file
+            fp = rng.choice(FILE_PATHS)
+            fp.write_text(f"# Prop\n\nContent {rng.randint(0, 9999)}.\n")
+            path_str = str(fp)
 
-                # Assign 1-2 random chunk_ids from the pool
-                n_chunks = rng.randint(1, 2)
-                chosen = rng.sample(CHUNK_POOL, n_chunks)
-                file_chunks[path_str] = chosen
+            # Assign 1-2 random chunk_ids from the pool
+            n_chunks = rng.randint(1, 2)
+            chosen = rng.sample(CHUNK_POOL, n_chunks)
+            file_chunks[path_str] = chosen
 
-                def _patched(path=fp, cids=chosen):  # type: ignore[no-untyped-def]
-                    def _inner(*args, **kwargs):  # type: ignore[no-untyped-def]
-                        return _make_chunks_for_file(path, cids)
+            def _patched(path=fp, cids=chosen):  # type: ignore[no-untyped-def]
+                def _inner(*args, **kwargs):  # type: ignore[no-untyped-def]
+                    return _make_chunks_for_file(path, cids)
 
-                    return _inner
+                return _inner
 
-                with patch.object(_chunker, "chunk_file", _patched()):
-                    pipeline.index_file(fp)
+            with patch.object(_chunker, "chunk_file", _patched()):
+                pipeline.index_file(fp)
 
-                # Check invariant after each op
-                self._holder_invariant(db_path)
+            # Check invariant after each op
+            self._holder_invariant(db_path)

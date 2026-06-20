@@ -13,10 +13,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from dotmd.ingestion import pipeline as _pipeline_module
-
-PIPELINE_MODULE = _pipeline_module
-
 
 def _write_md(path: pathlib.Path, title: str, tags: list, body: str) -> None:
     tags_yaml = "\n".join(f"  - {t}" for t in tags) if tags else ""
@@ -25,45 +21,6 @@ def _write_md(path: pathlib.Path, title: str, tags: list, body: str) -> None:
         f"---\ntitle: {title}\n{tags_section}kind: document\n---\n{body}",
         encoding="utf-8",
     )
-
-
-def _vector_chunk_ids(pipeline) -> set[str]:  # type: ignore[no-untyped-def]
-    return {
-        row[0]
-        for row in pipeline._conn.execute(
-            f"SELECT chunk_id FROM {pipeline._vector_store._META_TABLE}"
-        ).fetchall()
-    }
-
-
-def _chunk_ids_for_path(pipeline, path: pathlib.Path) -> list[str]:  # type: ignore[no-untyped-def]
-    return pipeline._metadata_store.get_chunk_ids_by_file(
-        pipeline._strategy,
-        str(path),
-    )
-
-
-def _vector_blob_for_chunk(pipeline, chunk_id: str) -> bytes:  # type: ignore[no-untyped-def]
-    row = pipeline._conn.execute(
-        f"""
-        SELECT v.embedding
-        FROM {pipeline._vector_store._VEC_TABLE} v
-        JOIN {pipeline._vector_store._META_TABLE} m ON m.rowid = v.rowid
-        WHERE m.chunk_id = ?
-        """,
-        (chunk_id,),
-    ).fetchone()
-    assert row is not None
-    return row[0]
-
-
-def _fts_meta_for_chunk(pipeline, chunk_id: str) -> tuple[str, str]:  # type: ignore[no-untyped-def]
-    row = pipeline._conn.execute(
-        f"SELECT title, tags FROM {pipeline._fts_table} WHERE chunk_id = ?",
-        (chunk_id,),
-    ).fetchone()
-    assert row is not None
-    return row[0], row[1]
 
 
 def _graph_node(pipeline, node_id: str) -> dict | None:  # type: ignore[no-untyped-def]
@@ -363,49 +320,15 @@ def test_surreal_reindex_vectors_skips_local_vector_store_mutation(
 
     try:
         assert pipeline.index_file(doc) == 1
-
-        vec_table_name = f"vec_chunks_{pipeline._strategy}{pipeline._model_suffix}"
-        assert (
-            pipeline._conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-                (vec_table_name,),
-            ).fetchone()
-            is None
-        )
-
-        monkeypatch.setattr(
-            pipeline._vector_store,
-            "delete_all",
-            MagicMock(side_effect=lambda *args, **kwargs: pytest.fail("vector delete_all must not run")),
-        )
-        monkeypatch.setattr(
-            pipeline._vector_store,
-            "add_chunks",
-            MagicMock(side_effect=lambda *args, **kwargs: pytest.fail("vector add_chunks must not run")),
-        )
-        monkeypatch.setattr(
-            pipeline._vec_components,
-            "delete_all",
-            MagicMock(side_effect=lambda *args, **kwargs: pytest.fail("vec_components delete_all must not run")),
-        )
-        monkeypatch.setattr(
-            pipeline._semantic_engine,
-            "encode_batch",
-            MagicMock(side_effect=lambda *args, **kwargs: pytest.fail("TEI encode must not run")),
-        )
-
         assert pipeline.reindex_vectors() == 0
-
-        pipeline._vector_store.delete_all.assert_not_called()
-        pipeline._vector_store.add_chunks.assert_not_called()
-        pipeline._vec_components.delete_all.assert_not_called()
-        assert (
-            pipeline._conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-                (vec_table_name,),
-            ).fetchone()
-            is None
-        )
+        tables = {
+            row[0]
+            for row in pipeline._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert not any(name.startswith("vec_chunks_") for name in tables)
+        assert not any(name.startswith("vec_meta_") for name in tables)
     finally:
         pipeline.close()
 
@@ -443,30 +366,14 @@ def test_surreal_reindex_fts5_skips_local_fts_mutation(surreal_pipeline_settings
 
     try:
         assert pipeline.index_file(doc) == 1
-        assert (
-            pipeline._conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-                (pipeline._fts_table,),
-            ).fetchone()
-            is None
-        )
-
-        monkeypatch.setattr(
-            pipeline._keyword_engine,
-            "add_chunks",
-            MagicMock(side_effect=lambda *args, **kwargs: pytest.fail("FTS add_chunks must not run")),
-        )
-
         assert pipeline.reindex_fts5() == 0
-
-        pipeline._keyword_engine.add_chunks.assert_not_called()
-        assert (
-            pipeline._conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-                (pipeline._fts_table,),
-            ).fetchone()
-            is None
-        )
+        tables = {
+            row[0]
+            for row in pipeline._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert f"chunks_fts_{pipeline._strategy}" not in tables
     finally:
         pipeline.close()
 
@@ -880,42 +787,6 @@ def test_body_change_triggers_full_reembedding(pipeline_settings):
     )
 
 
-def test_metadata_only_bulk_index_retains_vectors_for_unchanged_files(
-    pipeline_settings,
-):
-    """Bulk metadata-only reindex must replace changed vectors without wiping siblings."""
-
-    doc_a = pipeline_settings.data_dir / "a.md"
-    doc_b = pipeline_settings.data_dir / "b.md"
-    _write_md(doc_a, "Initial A", ["alpha"], "Stable body A.")
-    _write_md(doc_b, "Initial B", ["alpha"], "Stable body B.")
-
-    pipeline = _make_pipeline_with_directional_vectors(pipeline_settings)
-    pipeline.index(pipeline_settings.data_dir)
-
-    doc_a_chunk_ids = set(_chunk_ids_for_path(pipeline, doc_a))
-    doc_b_chunk_ids = set(_chunk_ids_for_path(pipeline, doc_b))
-    assert doc_a_chunk_ids
-    assert doc_b_chunk_ids
-    assert _vector_chunk_ids(pipeline) == doc_a_chunk_ids | doc_b_chunk_ids
-
-    _write_md(doc_a, "Updated A", ["alpha", "beta"], "Stable body A.")
-    pipeline.index(pipeline_settings.data_dir)
-
-    assert _vector_chunk_ids(pipeline) == doc_a_chunk_ids | doc_b_chunk_ids
-    doc_a_chunk_id = next(iter(doc_a_chunk_ids))
-    assert _fts_meta_for_chunk(pipeline, doc_a_chunk_id) == (
-        "Updated A",
-        "alpha, beta",
-    )
-    source_document = pipeline._metadata_store.get_source_document(
-        "filesystem",
-        str(doc_a.resolve()),
-    )
-    assert source_document is not None
-    assert source_document.title == "Updated A"
-
-
 def test_body_reindex_keeps_binding_active_and_updates_fingerprints(
     pipeline_settings,
 ):
@@ -980,36 +851,6 @@ def test_metadata_only_refresh_keeps_binding_active_and_updates_fingerprints(
     assert after.unbound_at is None
     assert after.content_fingerprint == before.content_fingerprint
     assert after.metadata_fingerprint != before.metadata_fingerprint
-
-
-def test_metadata_only_index_file_replaces_existing_fused_vector(
-    pipeline_settings,
-):
-    """Single-file metadata-only reindex must update vec0, not leave stale rows."""
-
-    doc = pipeline_settings.data_dir / "single.md"
-    _write_md(doc, "Initial", ["alpha"], "Stable body.")
-
-    pipeline = _make_pipeline_with_directional_vectors(pipeline_settings)
-    pipeline.index(pipeline_settings.data_dir)
-
-    chunk_id = _chunk_ids_for_path(pipeline, doc)[0]
-    before = _vector_blob_for_chunk(pipeline, chunk_id)
-
-    _write_md(doc, "Updated", ["alpha", "beta"], "Stable body.")
-    pipeline.index_file(doc)
-
-    after = _vector_blob_for_chunk(pipeline, chunk_id)
-    assert after != before
-    assert _vector_chunk_ids(pipeline) == {chunk_id}
-    assert _fts_meta_for_chunk(pipeline, chunk_id) == ("Updated", "alpha, beta")
-
-    source_document = pipeline._metadata_store.get_source_document(
-        "filesystem",
-        str(doc.resolve()),
-    )
-    assert source_document is not None
-    assert source_document.title == "Updated"
 
 
 def test_modified_index_file_updates_binding_fingerprints_without_inactive_binding(
@@ -1097,25 +938,3 @@ def test_metadata_only_bulk_index_removes_stale_graph_tags(
     assert updated_node is not None
     assert updated_node["properties"]["title"] == "Updated"
     assert _graph_edges_from(pipeline, path_str, "HAS_TAG") == []
-
-
-def test_reindex_vectors_preserves_vectors_for_all_files(pipeline_settings):
-    """Vector rebuild must wipe once, then append each file's chunks."""
-
-    doc_a = pipeline_settings.data_dir / "a.md"
-    doc_b = pipeline_settings.data_dir / "b.md"
-    _write_md(doc_a, "Initial A", ["alpha"], "Stable body A.")
-    _write_md(doc_b, "Initial B", ["alpha"], "Stable body B.")
-
-    pipeline = _make_pipeline_with_directional_vectors(pipeline_settings)
-    pipeline.index(pipeline_settings.data_dir)
-
-    expected_chunk_ids = set(_chunk_ids_for_path(pipeline, doc_a)) | set(
-        _chunk_ids_for_path(pipeline, doc_b)
-    )
-    assert expected_chunk_ids
-
-    rebuilt = pipeline.reindex_vectors()
-
-    assert rebuilt == len(expected_chunk_ids)
-    assert _vector_chunk_ids(pipeline) == expected_chunk_ids

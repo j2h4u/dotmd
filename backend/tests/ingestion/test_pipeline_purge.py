@@ -47,14 +47,6 @@ def _build_post_v16_db(tmp_path: Path, strategy: str = "heading_512_50") -> Path
         );
         CREATE INDEX idx_chunk_file_paths_{strategy}_file_path
             ON chunk_file_paths_{strategy}(file_path);
-        CREATE VIRTUAL TABLE chunks_fts_{strategy} USING fts5(
-            chunk_id UNINDEXED, text, title, tags, tokenize='unicode61'
-        );
-        CREATE TABLE vec_meta_{strategy}_{MODEL} (
-            rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-            chunk_id TEXT NOT NULL UNIQUE,
-            text_hash TEXT
-        );
         CREATE TABLE source_documents (
             namespace TEXT NOT NULL,
             document_ref TEXT NOT NULL,
@@ -101,18 +93,10 @@ def _build_post_v16_db(tmp_path: Path, strategy: str = "heading_512_50") -> Path
 
 
 def _insert_chunk(db_path: Path, strategy: str, chunk_id: str, text: str) -> None:
-    """Insert a chunk row into chunks_* + vec_meta_* + chunks_fts_*."""
+    """Insert a chunk row into chunks_*."""
     conn = sqlite3.connect(str(db_path))
     conn.execute(
         f"INSERT OR IGNORE INTO chunks_{strategy} (chunk_id, text) VALUES (?, ?)",
-        (chunk_id, text),
-    )
-    conn.execute(
-        f"INSERT OR IGNORE INTO vec_meta_{strategy}_{MODEL} (chunk_id) VALUES (?)",
-        (chunk_id,),
-    )
-    conn.execute(
-        f"INSERT OR IGNORE INTO chunks_fts_{strategy} (chunk_id, text) VALUES (?, ?)",
         (chunk_id, text),
     )
     conn.commit()
@@ -215,7 +199,10 @@ def _add_chunk_provenance(
 
 def _count(db_path: Path, table: str) -> int:
     conn = sqlite3.connect(str(db_path))
-    n = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+    try:
+        n = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+    except sqlite3.OperationalError:
+        n = 0
     conn.close()
     return n
 
@@ -421,9 +408,8 @@ class TestPurgeSharedHolder:
         pipeline = _get_pipeline(db_path)
         pipeline._purge_file("/file_A.md")
 
-        # Chunk survives in chunks_* and vec_meta_*
+        # Chunk survives in chunks_*
         assert _count(db_path, f"chunks_{strategy}") == 1
-        assert _count(db_path, f"vec_meta_{strategy}_{MODEL}") == 1
         # Only file_A's M2M row removed; file_B's survives
         m2m_rows = (
             sqlite3.connect(str(db_path))
@@ -499,8 +485,9 @@ class TestPurgeIsTransactional:
 
         # Inject failure in vector delete (mid-cascade)
         with (
-            patch(
-                "dotmd.storage.sqlite_vec.SQLiteVecVectorStore.delete_by_chunk_ids",
+            patch.object(
+                pipeline._vector_store,
+                "delete_vectors_by_chunk_ids",
                 side_effect=RuntimeError("Simulated failure in vector cascade"),
             ),
             pytest.raises(RuntimeError),
@@ -711,8 +698,7 @@ class TestNormalFilesystemUnbind:
         pipeline._deactivate_filesystem_binding(file_path)
 
         assert _count(db_path, f"chunks_{strategy}") == 1
-        assert _count(db_path, f"chunks_fts_{strategy}") == 1
-        assert _count(db_path, f"vec_meta_{strategy}_{MODEL}") == 1
+        assert _count(db_path, f"chunks_{strategy}") == 1
         assert _count(db_path, f"chunk_file_paths_{strategy}") == 1
         assert graph_calls == []
 
@@ -774,8 +760,8 @@ class TestSurrealFilesystemLifecycle:
             "chunk_file_paths": conn.execute(
                 f"SELECT COUNT(*) FROM chunk_file_paths_{strategy}"
             ).fetchone()[0],
-            "chunks_fts": conn.execute(f"SELECT COUNT(*) FROM chunks_fts_{strategy}").fetchone()[0],
-            "vec_meta": conn.execute(f"SELECT COUNT(*) FROM vec_meta_{strategy}_{MODEL}").fetchone()[0],
+            "chunks_fts": _count(db_path, f"chunks_fts_{strategy}"),
+            "vec_meta": _count(db_path, f"vec_meta_{strategy}_{MODEL}"),
             "source_documents": conn.execute(
                 "SELECT COUNT(*) FROM source_documents"
             ).fetchone()[0],
@@ -833,8 +819,8 @@ class TestSurrealFilesystemLifecycle:
             "chunk_file_paths": conn.execute(
                 f"SELECT COUNT(*) FROM chunk_file_paths_{strategy}"
             ).fetchone()[0],
-            "chunks_fts": conn.execute(f"SELECT COUNT(*) FROM chunks_fts_{strategy}").fetchone()[0],
-            "vec_meta": conn.execute(f"SELECT COUNT(*) FROM vec_meta_{strategy}_{MODEL}").fetchone()[0],
+            "chunks_fts": _count(db_path, f"chunks_fts_{strategy}"),
+            "vec_meta": _count(db_path, f"vec_meta_{strategy}_{MODEL}"),
             "source_documents": conn.execute(
                 "SELECT COUNT(*) FROM source_documents"
             ).fetchone()[0],

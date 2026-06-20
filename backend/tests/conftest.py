@@ -338,23 +338,5 @@ def metadata_store(tmp_path: Path):
 
 
 @pytest.fixture
-def vector_store(tmp_path: Path):
-    """SQLiteVecVectorStore backed by a temp file DB."""
-    import sqlite3 as _sqlite3
-
-    import sqlite_vec  # type: ignore[import-untyped]
-
-    from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
-
-    db_path = tmp_path / "vec.db"
-    conn = _sqlite3.connect(str(db_path))
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.enable_load_extension(True)
-    sqlite_vec.load(conn)
-    conn.enable_load_extension(False)
-    return SQLiteVecVectorStore(table_name="vec_chunks", conn=conn)
-
-
-@pytest.fixture
 def graph_store() -> InMemoryGraphStore:
     return InMemoryGraphStore()

@@ -18,8 +18,7 @@ logger = logging.getLogger(__name__)
 class GraphSearchEngine:
     """Search engine that exploits the knowledge graph for relevance signals.
 
-    Unlike :class:`SemanticSearchEngine` and :class:`FTS5SearchEngine`,
-    this engine does **not** operate on the raw query text.  Instead it
+    Unlike engines that operate directly on raw query text, this engine
     requires a set of *seed* chunk IDs (produced by another engine) and
     discovers related sections by walking the graph.
 

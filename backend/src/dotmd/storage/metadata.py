@@ -327,10 +327,9 @@ class SQLiteMetadataStore:
         compatibility.  Use a strategy-specific name (e.g.
         ``"chunks_heading_512_50"``) for multi-strategy isolation.
     fts_table_name:
-        Name of the FTS5 virtual table managed by
-        :class:`~dotmd.search.fts5.FTS5SearchEngine`.  Only used by
-        :meth:`delete_all` to clear the FTS5 index alongside chunks.
-        Defaults to ``"chunks_fts"``.
+        Historical FTS5 virtual table name.  Only used by :meth:`delete_all`
+        to clear old local-search artifacts alongside chunks.  Defaults to
+        ``"chunks_fts"``.
     conn:
         Pre-existing SQLite connection (shared database mode).  When given,
         the store reuses this connection instead of opening its own file.

@@ -23,17 +23,15 @@ import logging
 import os
 import re
 import sqlite3
-import struct
 import tempfile
 import time
 import uuid
 from dataclasses import dataclass as _dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import blake3
-import sqlite_vec  # type: ignore[import-untyped]
 
 import dotmd.ingestion.chunker as _chunker_module
 from dotmd.core.config import Settings
@@ -91,12 +89,11 @@ from dotmd.ingestion.surreal_direct_sink import (
     build_surreal_direct_manifest,
     build_surreal_graph_manifest,
 )
-from dotmd.search.fts5 import FTS5SearchEngine
+from dotmd.search.base import SearchEngineProtocol
 from dotmd.search.semantic import SemanticSearchEngine
 from dotmd.storage.base import GraphStoreProtocol, VectorStoreProtocol
 from dotmd.storage.cache import EmbeddingCache, ExtractionCache
 from dotmd.storage.metadata import SQLiteMetadataStore
-from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
 from dotmd.storage.vec_components import VecComponentStore
 
 logger = logging.getLogger(__name__)
@@ -352,6 +349,27 @@ class _NoopKeywordSearchEngine:
         return []
 
 
+def _ensure_pipeline_state_table(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS pipeline_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    """)
+
+
+def _pipeline_state_get(conn: sqlite3.Connection, key: str) -> str | None:
+    row = conn.execute("SELECT value FROM pipeline_state WHERE key = ?", (key,)).fetchone()
+    return row[0] if row else None
+
+
+def _pipeline_state_set(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO pipeline_state (key, value) VALUES (?, ?)",
+        (key, value),
+    )
+
+
 def _create_surreal_direct_writer(settings: Settings) -> Any:
     """Instantiate the direct Surreal delta writer for standalone ingest."""
     from dotmd.ingestion.surreal_delta_sync import SurrealDeltaStoreWriter
@@ -434,10 +452,6 @@ class IndexingPipeline:
             isolation_level=None,  # autocommit — pipeline manages all transactions explicitly
         )
         self._conn.execute("PRAGMA journal_mode=WAL")
-        if not self._uses_surreal_direct_ingest:
-            self._conn.enable_load_extension(True)
-            sqlite_vec.load(self._conn)
-            self._conn.enable_load_extension(False)
         _write_pipeline_init_progress("pipeline:sqlite_connect", "applied")
 
         # -- Strategy + model table name derivation ---------------------------
@@ -450,7 +464,6 @@ class IndexingPipeline:
 
         self._chunks_table = f"chunks_{strategy}"
         self._fts_table = f"chunks_fts_{strategy}"
-        vec_table = f"vec_chunks_{strategy}{model_suffix}"
         chunk_fp_table = f"chunk_fingerprints_{strategy}"
         meta_fp_table = f"meta_fingerprints_{strategy}{model_suffix}"
         _write_pipeline_init_progress("pipeline:table_names", "applied")
@@ -471,15 +484,7 @@ class IndexingPipeline:
         _write_pipeline_init_progress("pipeline:metadata_store", "applied")
 
         _write_pipeline_init_progress("pipeline:vector_store", "running")
-        if self._uses_surreal_direct_ingest:
-            self._vector_store = _NoopVectorStore()
-        else:
-            from dotmd.storage.sqlite_vec import SQLiteVecVectorStore
-
-            self._vector_store = SQLiteVecVectorStore(
-                conn=self._conn,
-                table_name=vec_table,
-            )
+        self._vector_store = _NoopVectorStore()
         _write_pipeline_init_progress("pipeline:vector_store", "applied")
 
         _write_pipeline_init_progress("pipeline:graph_store", "running")
@@ -549,13 +554,7 @@ class IndexingPipeline:
             tei_batch_size=settings.tei_batch_size,
             use_prefix=settings.needs_embedding_prefix,
         )
-        if self._uses_surreal_direct_ingest:
-            self._keyword_engine = _NoopKeywordSearchEngine()
-        else:
-            self._keyword_engine = FTS5SearchEngine(
-                self._conn,
-                table_name=self._fts_table,
-            )
+        self._keyword_engine = _NoopKeywordSearchEngine()
         _write_pipeline_init_progress("pipeline:search_engines", "applied")
 
         # -- extractors --------------------------------------------------------
@@ -599,6 +598,11 @@ class IndexingPipeline:
             self._embedding_cache.update_model_sentinel()
         _write_pipeline_init_progress("pipeline:embedding_cache", "applied")
 
+        _write_pipeline_init_progress("pipeline:pipeline_state", "running")
+        _ensure_pipeline_state_table(self._conn)
+        self._conn.commit()
+        _write_pipeline_init_progress("pipeline:pipeline_state", "applied")
+
         # Direct Surreal writer for standalone filesystem ingest.
         # Enabled when the Surreal direct ingest path is configured.
         self._surreal_direct_writer: Any | None = (
@@ -606,7 +610,7 @@ class IndexingPipeline:
             if self._uses_surreal_direct_ingest
             else None
         )
-        self._maintains_local_search_artifacts = self._surreal_direct_writer is None
+        self._maintains_local_search_artifacts = True
         self._surreal_direct_sync_state = SurrealDeltaSyncState()
 
         # Startup integrity checks can delete vector and graph state. They must
@@ -1175,21 +1179,14 @@ class IndexingPipeline:
             raise RuntimeError("encode_batch failed for source metadata") from exc
 
     def _ensure_vector_tables_for_dimension(self, dim: int) -> None:
-        """Ensure sqlite-vec tables exist before the ingestion transaction starts."""
-        if not isinstance(self._vector_store, SQLiteVecVectorStore):
-            return
-        self._vector_store._create_vec_table(dim)
+        """Local vector tables are retired; keep the hook as a no-op."""
+        return None
 
     def _delete_vectors_for_chunk_ids_in_transaction(
         self,
         chunk_ids: list[str],
     ) -> None:
-        if isinstance(self._vector_store, SQLiteVecVectorStore):
-            self._vector_store.delete_by_chunk_ids(
-                self._strategy,
-                chunk_ids,
-                conn=self._conn,
-            )
+        self._vector_store.delete_vectors_by_chunk_ids(chunk_ids)
 
     def _add_vectors_in_transaction(
         self,
@@ -1198,30 +1195,15 @@ class IndexingPipeline:
         *,
         text_hashes: dict[str, str],
     ) -> None:
-        """Insert sqlite-vec rows without committing the caller transaction."""
+        """Record vector writes through the local interface no-op."""
         if not chunks:
             return
-        if not isinstance(self._vector_store, SQLiteVecVectorStore):
-            self._vector_store.add_chunks(
-                chunks,
-                embeddings,
-                overwrite=False,
-                text_hashes=text_hashes,
-            )
-            return
-        vec_meta_table = self._vector_store._META_TABLE
-        vec_table = self._vector_store._VEC_TABLE
-        for chunk, embedding in zip(chunks, embeddings, strict=False):
-            cur = self._conn.execute(
-                f"INSERT OR IGNORE INTO {vec_meta_table} (chunk_id, text_hash) VALUES (?, ?)",
-                (chunk.chunk_id, text_hashes.get(chunk.chunk_id)),
-            )
-            if cur.rowcount and cur.lastrowid:
-                blob = struct.pack(f"{len(embedding)}f", *embedding)
-                self._conn.execute(
-                    f"INSERT INTO {vec_table} (rowid, embedding) VALUES (?, ?)",
-                    (cur.lastrowid, blob),
-                )
+        self._vector_store.add_chunks(
+            chunks,
+            embeddings,
+            overwrite=False,
+            text_hashes=text_hashes,
+        )
 
     def index(self, directory: Path, *, force: bool = False) -> IndexStats:
         """Index markdown files under *directory*.
@@ -1339,6 +1321,11 @@ class IndexingPipeline:
         self._metadata_store.delete_all()  # also clears chunks_fts
         self._vector_store.delete_all()
         self._graph_store.delete_all()
+        self._vec_components.delete_all()
+        self._conn.execute(
+            "DELETE FROM pipeline_state WHERE key IN ('schema_version', 'weights_used')"
+        )
+        self._conn.commit()
 
         # Delete acronym dictionary
         if self._settings.acronyms_path.exists():
@@ -1347,32 +1334,22 @@ class IndexingPipeline:
         logger.info("All stores cleared")
 
     def drop_vectors(self) -> None:
-        """Drop vec tables + meta_fingerprints for current (strategy, model).
-
-        Removes only the vector-layer data.  Chunks, FTS5, and graph remain
-        intact so BM25 and graph search continue to work.
-        """
+        """Drop vector-layer artifacts for current (strategy, model)."""
         self._raise_if_surreal_local_destructive("drop_vectors")
         strategy = self._strategy
         model_suffix = self._model_suffix
 
-        vec_table = f"vec_chunks_{strategy}{model_suffix}"
-        meta_table = f"vec_meta_{strategy}{model_suffix}"
-        config_table = f"vec_config_{strategy}{model_suffix}"
         meta_fp_table = f"meta_fingerprints_{strategy}{model_suffix}"
         vec_components_table = f"vec_components_{strategy}{model_suffix}"
 
-        for table in (vec_table, meta_table, config_table):
-            self._conn.execute(f"DROP TABLE IF EXISTS {table}")
         with contextlib.suppress(sqlite3.OperationalError):  # table may not exist yet
             self._conn.execute(f"DELETE FROM {meta_fp_table}")
         with contextlib.suppress(sqlite3.OperationalError):  # table may not exist yet
             self._conn.execute(f"DELETE FROM {vec_components_table}")
+        self._conn.execute(
+            "DELETE FROM pipeline_state WHERE key IN ('schema_version', 'weights_used')"
+        )
         self._conn.commit()
-
-        # Re-ensure tables so the pipeline can immediately re-index.
-        if hasattr(self._vector_store, "_tables_ensured"):
-            del cast(Any, self._vector_store)._tables_ensured
 
         logger.info(
             "Dropped vectors for strategy=%s model=%s",
@@ -1381,12 +1358,7 @@ class IndexingPipeline:
         )
 
     def drop_chunks(self) -> None:
-        """Drop chunks + FTS5 + graph + ALL vec for current strategy.
-
-        This is a CASCADE operation: everything derived from chunks under
-        the current strategy is removed, including vector tables for ALL
-        embedding models.
-        """
+        """Drop chunks, provenance, graph, and vector components for current strategy."""
         self._raise_if_surreal_local_destructive("drop_chunks")
         strategy = self._strategy
         chunks_table = f"chunks_{strategy}"
@@ -1412,34 +1384,20 @@ class IndexingPipeline:
         with contextlib.suppress(sqlite3.OperationalError):  # table may not exist
             self._conn.execute(f"DELETE FROM {chunk_fp_table}")
 
-        # 3. CASCADE: drop ALL vec_*_{strategy}_* and meta_fp_{strategy}_* tables.
-        #    Discover tables via sqlite_master.
-        prefix_vec = f"vec_chunks_{strategy}_"
-        prefix_meta = f"vec_meta_{strategy}_"
-        prefix_config = f"vec_config_{strategy}_"
-        prefix_meta_fp = f"meta_fingerprints_{strategy}_"
         prefix_vec_components = f"vec_components_{strategy}_"
-        # Also handle legacy embed_fingerprints tables if present.
-        prefix_embed_fp = f"embed_fingerprints_{strategy}_"
 
         tables_dropped = 0
         rows = self._conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         for (name,) in rows:
-            if name.startswith(
-                (
-                    prefix_vec,
-                    prefix_meta,
-                    prefix_config,
-                    prefix_meta_fp,
-                    prefix_vec_components,
-                    prefix_embed_fp,
-                )
-            ):
+            if name.startswith(prefix_vec_components):
                 if not re.match(r"^[a-zA-Z0-9_]+$", name):
                     logger.warning("Skipping table with unexpected name: %r", name)
                     continue
                 self._conn.execute(f"DROP TABLE IF EXISTS {name}")
                 tables_dropped += 1
+        self._conn.execute(
+            "DELETE FROM pipeline_state WHERE key IN ('schema_version', 'weights_used')"
+        )
 
         remaining_paths: set[str] = set()
         m2m_rows = self._conn.execute(
@@ -1650,14 +1608,7 @@ class IndexingPipeline:
         chunk_ids = [chunk.chunk_id for chunk in chunks]
         if not chunk_ids:
             return
-        if hasattr(self._vector_store, "delete_by_chunk_ids"):
-            self._vector_store.delete_by_chunk_ids(  # type: ignore[attr-defined]
-                self._strategy,
-                chunk_ids,
-                conn=self._conn,
-            )
-        else:
-            self._vector_store.delete_vectors_by_chunk_ids(chunk_ids)
+        self._vector_store.delete_vectors_by_chunk_ids(chunk_ids)
 
     def _chunks_for_file_with_paths(self, file_info: FileInfo) -> list[Chunk]:
         """Load stored chunks for one file with path fields restored for FTS/graph."""
@@ -1840,17 +1791,6 @@ class IndexingPipeline:
             return diagnostic
 
         diagnostic["reused_chunks"] = len(chunk_ids)
-        placeholders = ",".join("?" for _ in chunk_ids)
-        if isinstance(self._vector_store, SQLiteVecVectorStore):
-            try:
-                row = self._conn.execute(
-                    f"SELECT COUNT(*) FROM {self._vector_store._META_TABLE} "
-                    f"WHERE chunk_id IN ({placeholders})",
-                    chunk_ids,
-                ).fetchone()
-                diagnostic["reused_embeddings"] = int(row[0]) if row else 0
-            except sqlite3.OperationalError:
-                diagnostic["reused_embeddings"] = 0
 
         metadata_json = dict(binding.metadata_json)
         metadata_json["last_rebind"] = {
@@ -2219,10 +2159,9 @@ class IndexingPipeline:
         write_local_search_artifacts = self._maintains_local_search_artifacts
 
         # ── WRITE PHASE ───────────────────────────────────────────────────────────────
-        # Each store call owns its own commit. Cross-store atomicity is not achievable
-        # here because SQLiteVecVectorStore.add_chunks() commits internally — wrapping
-        # it in an explicit BEGIN/COMMIT causes "cannot commit - no transaction active".
-        # Acceptable: trickle re-indexes the file on next run if a crash occurs mid-write.
+        # Each store call owns its own commit. Cross-store atomicity is not
+        # required here: trickle re-indexes the file on next run if a crash
+        # occurs mid-write.
         if body_changed:
             # Store e_text components for all chunks
             for chunk, e_text in zip(chunks, e_text_vectors, strict=False):
@@ -2294,112 +2233,14 @@ class IndexingPipeline:
     # ------------------------------------------------------------------
 
     def reindex_vectors(self) -> int:
-        """Rebuild vector store from stored chunks. Returns chunk count.
-
-        Groups chunks by file (for e_meta computation), then for each file:
-        embeds chunks (e_text), encodes metadata (e_meta, batched), fuses, stores.
-        Uses _meta_entity_id() for canonical path normalization throughout.
-        """
-        if self._surreal_direct_writer is not None:
-            logger.info(
-                "reindex_vectors: skipped local vector rebuild in Surreal mode"
-            )
-            return 0
-
-        # Discover all distinct file paths from M2M table
-        m2m_table = f"chunk_file_paths_{self._strategy}"
-        try:
-            rows = self._conn.execute(f"SELECT DISTINCT file_path FROM {m2m_table}").fetchall()
-            all_file_paths = [row[0] for row in rows]
-        except sqlite3.Error:
-            logger.warning("reindex_vectors: cannot read M2M table — falling back to no files")
-            all_file_paths = []
-
-        if not all_file_paths:
-            logger.info("reindex_vectors: no file paths in metadata")
-            return 0
-
-        # Wipe vector state before rebuild
-        self._vector_store.delete_all()
-        self._vec_components.delete_all()
-
-        # Build FileInfo for all files (read frontmatter from disk)
-        file_infos: list[FileInfo] = []
-        for fp in all_file_paths:
-            path = Path(fp)
-            try:
-                content = read_file(path)
-                fm, _ = parse_frontmatter(content)
-                stat = path.stat()
-                last_modified = datetime.fromtimestamp(stat.st_mtime, tz=UTC)
-                size_bytes = stat.st_size
-            except OSError:
-                fm = {}
-                last_modified = datetime.fromtimestamp(0, tz=UTC)
-                size_bytes = 0
-            file_infos.append(
-                FileInfo(
-                    path=path,
-                    title=str(fm.get("title", path.stem)),
-                    last_modified=last_modified,
-                    size_bytes=size_bytes,
-                    kind=fm.get("kind", DocKind.DOCUMENT),
-                    frontmatter=fm,
-                )
-            )
-
-        # Batch encode e_meta for ALL files in a single TEI call (1 batch for all metadata)
-        weights = self._settings.parsed_embedding_weights
-        meta_texts: list[str] = []
-        for fi in file_infos:
-            title = str(fi.frontmatter.get("title", "") or "") if fi.frontmatter else ""
-            tags = (fi.frontmatter.get("tags", []) or []) if fi.frontmatter else []
-            tags_str = ", ".join(str(t) for t in tags) if tags else ""
-            meta_texts.append(f"{title} {tags_str}".strip() or title or "")
-
-        e_meta_all = self._semantic_engine.encode_batch(meta_texts)
-
-        total = 0
-        for fi, e_meta in zip(file_infos, e_meta_all, strict=False):
-            canonical_path = self._meta_entity_id(fi.path)
-            self._vec_components.store(canonical_path, "meta", e_meta)
-            chunk_ids = (
-                self._metadata_store.get_chunk_ids_by_file(self._strategy, canonical_path) or []
-            )
-            chunks = self._metadata_store.get_chunks(chunk_ids) if chunk_ids else []
-            if not chunks:
-                continue
-            e_text_vectors, text_hashes = self._embed_chunks(chunks)
-            for chunk, e_text in zip(chunks, e_text_vectors, strict=False):
-                self._vec_components.store(chunk.chunk_id, "text", e_text)
-            e_fused = [self._fuse_vectors(e_t, e_meta, weights) for e_t in e_text_vectors]
-            self._vector_store.add_chunks(chunks, e_fused, overwrite=False, text_hashes=text_hashes)
-            total += len(chunks)
-
-        self._conn.commit()
-        if hasattr(self._vector_store, "set_model_name"):
-            model_id = self._semantic_engine.get_tei_model_id() or self._settings.embedding_model
-            self._vector_store.set_model_name(model_id)  # type: ignore[attr-defined]
-            self._vector_store.set_distance_metric("cosine")  # type: ignore[attr-defined]
-        logger.info("reindex_vectors: rebuilt %d chunks from %d files", total, len(file_infos))
-        return total
+        """Local vector rebuilds are retired; keep the API as a no-op."""
+        logger.info("reindex_vectors: retired local vector rebuild path")
+        return 0
 
     def reindex_fts5(self) -> int:
-        """Rebuild FTS5 keyword index from stored chunks. Returns chunk count."""
-        if self._surreal_direct_writer is not None:
-            logger.info("reindex_fts5: skipped local FTS5 rebuild in Surreal mode")
-            return 0
-
-        all_chunks = self._metadata_store.get_all_chunks()
-        if not all_chunks:
-            logger.info("reindex_fts5: no chunks in metadata")
-            return 0
-        self._conn.execute(f"DELETE FROM {self._fts_table}")
-        self._conn.commit()
-        file_meta = self._build_file_meta(all_chunks)
-        self._keyword_engine.add_chunks(all_chunks, file_meta=file_meta)
-        logger.info("reindex_fts5: %d chunks re-indexed", len(all_chunks))
-        return len(all_chunks)
+        """Local keyword rebuilds are retired; keep the API as a no-op."""
+        logger.info("reindex_fts5: retired local FTS rebuild path")
+        return 0
 
     def sweep_graph_orphans(self) -> int:
         """Delete graph nodes with no edges. Returns the number of nodes removed."""
@@ -3698,16 +3539,7 @@ class IndexingPipeline:
                     conn=conn,
                 )
                 self._metadata_store.delete_orphan_chunks(strategy, orphans, conn=conn)
-                cast(Any, self._vector_store).delete_by_chunk_ids(strategy, orphans, conn=conn)
-                # FTS5 cascade — runs inside the same transaction.
-                fts_table = f"chunks_fts_{strategy}"
-                try:
-                    conn.executemany(
-                        f"DELETE FROM {fts_table} WHERE chunk_id = ?",
-                        [(cid,) for cid in orphans],
-                    )
-                except sqlite3.OperationalError:
-                    logger.debug("FTS5 delete skipped — %s absent", fts_table)
+                self._vector_store.delete_vectors_by_chunk_ids(orphans)
                 all_orphans_by_strategy[strategy] = orphans
         return all_orphans_by_strategy
 
@@ -4295,48 +4127,11 @@ class IndexingPipeline:
     # ------------------------------------------------------------------
 
     def _check_schema_version(self) -> None:
-        """Check schema version sentinel; wipe ALL vector state if version mismatch.
-
-        Each sub-operation (delete_all, clear) commits internally, so the wipe cannot
-        be wrapped in a single atomic transaction. Crash-safe semantics are achieved via
-        a two-sentinel protocol:
-
-          Step 0: Write sentinel = 'WIPE_IN_PROGRESS' (marks start of wipe)
-          Steps 1-6: Idempotent wipes (each commits individually)
-          Step 7: Write sentinel = SCHEMA_VERSION (marks completed wipe)
-
-        On next startup:
-          - sentinel == SCHEMA_VERSION → nothing to do (normal case)
-          - sentinel == 'WIPE_IN_PROGRESS' → previous wipe was interrupted; re-run all steps
-            (all wipes are idempotent: double-delete is a no-op)
-          - sentinel == None → fresh DB or pre-999.12 DB (see None branch below)
-          - sentinel == something else → explicit version mismatch; wipe and upgrade
-
-        Clears all 7 state components:
-          1. embedding_cache (text_hash semantics changed: body-only hash)
-          2. vec_components (stale e_text BLOBs encoded with old enriched text)
-          3. vec0 / vec_meta (stale enriched vectors)
-          4. chunk_tracker (force full re-chunk on next trickle run)
-          5. meta_tracker (force full re-embed on next trickle run)
-          6. weights_used sentinel (cleared; re-written by weight detection after startup)
-          7. schema_version sentinel (written last — marks clean state)
-
-        After wipe: trickle rebuilds from scratch on next run.
-        Expected rebuild time: several days on current hardware (Xeon E3-1245 V2, CPU-only TEI).
-        """
+        """Check the pipeline schema sentinel and reset transient state when it changes."""
         if self._uses_surreal_direct_ingest:
             logger.debug("_check_schema_version: skipped in Surreal direct-ingest mode")
             return
-        # Force vec_config table creation before reading from it.
-        # SQLiteVecVectorStore creates tables lazily via _get_conn(); bypassing
-        # it with self._conn directly would fail on a fresh database (#999.12).
-        vector_store = cast(Any, self._vector_store)
-        vector_store._get_conn()
-        config_table = vector_store._CONFIG_TABLE
-        row = self._conn.execute(
-            f"SELECT value FROM {config_table} WHERE key = 'schema_version'"
-        ).fetchone()
-        stored_version = row[0] if row else None
+        stored_version = _pipeline_state_get(self._conn, "schema_version")
 
         if stored_version == self.SCHEMA_VERSION:
             return  # Up to date
@@ -4347,58 +4142,25 @@ class IndexingPipeline:
                 "_check_schema_version: previous wipe was interrupted (WIPE_IN_PROGRESS) "
                 "— resuming idempotent wipe"
             )
-            # Fall through to wipe path below
-
         elif stored_version is None:
-            # No sentinel present. Two sub-cases:
-            # A) Fresh database — just write the sentinel and return.
-            # B) Pre-999.12 database (chunk_fingerprints populated, vec_components absent),
-            #    or partial 999.12 deployment (vec_components has orphaned rows).
-            #    Wipe so stale vectors and fingerprints don't block a clean rebuild.
-            #
-            # Detection uses chunk_fingerprints, not vec_components: vec_components is new
-            # in 999.12 and is always empty on a pre-999.12 DB, making it unable to
-            # distinguish a fresh DB from an old one.
             n_chunk_fingerprints = self._conn.execute(
                 f"SELECT COUNT(*) FROM {self._chunk_tracker._table}"
             ).fetchone()[0]
             if n_chunk_fingerprints == 0 and self._vec_components.count() == 0:
-                # Case A: fresh DB — nothing to wipe.
-                self._conn.execute(
-                    f"INSERT OR REPLACE INTO {config_table} (key, value)"
-                    f" VALUES ('schema_version', ?)",
-                    (self.SCHEMA_VERSION,),
-                )
+                _pipeline_state_set(self._conn, "schema_version", self.SCHEMA_VERSION)
                 self._conn.commit()
                 return
-            # Case B: pre-existing data — fall through to wipe path.
-            logger.warning(
-                "_check_schema_version: stored_version=None but pre-existing data detected "
-                "(chunk_fingerprints=%d, vec_components=%d) "
-                "— treating as pre-999.12 or partial deployment; wiping stale state",
-                n_chunk_fingerprints,
-                self._vec_components.count(),
-            )
-
         else:
             # Explicit version mismatch (e.g. "1" → "2"). Full wipe required.
             logger.warning(
-                "schema_version mismatch: stored=%r expected=%r — wiping all vector state. "
-                "trickle will rebuild from scratch. Expected rebuild time: several days.",
+                "schema_version mismatch: stored=%r expected=%r — resetting transient state.",
                 stored_version,
                 self.SCHEMA_VERSION,
             )
-            # Fall through to wipe path below
 
-        # ── WIPE PATH ────────────────────────────────────────────────────────────────
-        # Step 0: Write in-progress sentinel FIRST so a crash before Step 7 is detected
-        # on next startup and the wipe is resumed (not silently skipped as a fresh DB).
         _wipe_step = 0
         try:
-            self._conn.execute(
-                f"INSERT OR REPLACE INTO {config_table} (key, value)"
-                f" VALUES ('schema_version', 'WIPE_IN_PROGRESS')"
-            )
+            _pipeline_state_set(self._conn, "schema_version", "WIPE_IN_PROGRESS")
             self._conn.commit()
 
             # 1. Wipe embedding cache (text_hash semantics changed)
@@ -4410,176 +4172,51 @@ class IndexingPipeline:
             # 3. Wipe knowledge graph (stale nodes/edges from old schema)
             _wipe_step = 3
             self._graph_store.delete_all()
-            # 4. Wipe vec0 + vec_meta (SQLiteVecVectorStore.delete_all handles both)
+            # 4. Clear chunk_tracker
             _wipe_step = 4
-            self._vector_store.delete_all()
-            # 5. Clear chunk_tracker
-            _wipe_step = 5
             self._chunk_tracker.clear()
-            # 6. Clear meta_tracker
-            _wipe_step = 6
+            # 5. Clear meta_tracker
+            _wipe_step = 5
             self._meta_tracker.clear()
-            # 7. Clear stored weights sentinel (re-written by _check_weights_changed)
-            _wipe_step = 7
-            self._conn.execute(f"DELETE FROM {config_table} WHERE key = 'weights_used'")
+            # 6. Clear stored weights sentinel
+            _wipe_step = 6
+            self._conn.execute("DELETE FROM pipeline_state WHERE key = 'weights_used'")
             self._conn.commit()
-            # 8. Write final sentinel (marks clean state — replaces WIPE_IN_PROGRESS)
-            _wipe_step = 8
-            self._conn.execute(
-                f"INSERT OR REPLACE INTO {config_table} (key, value) VALUES ('schema_version', ?)",
-                (self.SCHEMA_VERSION,),
-            )
+            # 7. Write final sentinel
+            _wipe_step = 7
+            _pipeline_state_set(self._conn, "schema_version", self.SCHEMA_VERSION)
             self._conn.commit()
         except Exception:
             logger.exception("_check_schema_version: wipe failed at step %d", _wipe_step)
             raise
 
-        logger.info(
-            "schema_version sentinel written: %s. Vector rebuild in progress.", self.SCHEMA_VERSION
-        )
+        logger.info("schema_version sentinel written: %s", self.SCHEMA_VERSION)
 
     def _check_weights_changed(self) -> None:
-        """Detect weight change; if changed, recompute e_fused from stored components.
-
-        Changing weights is cheap: read stored e_text + e_meta BLOBs from vec_components,
-        fuse locally with new weights, bulk-update vec0. No TEI calls.
-
-        Guards:
-        - If VecComponentStore is empty (e.g. fresh install or post-wipe), skip entirely.
-        - Recompute is batched at 1000 files at a time to avoid OOM on large indexes.
-        - Sentinel is updated ONLY if the recompute was complete (no files skipped due to
-          missing components). Partial recompute leaves sentinel unchanged so the next
-          startup detects the change and retries.
-
-        Stored weights are in vec_config key 'weights_used' (JSON string).
-        """
+        """Persist the current embedding-weight sentinel for startup checks."""
         if self._uses_surreal_direct_ingest:
             logger.debug("_check_weights_changed: skipped in Surreal direct-ingest mode")
             return
-        # Guard: skip if store is empty (fresh install or post schema-version wipe)
-        if self._vec_components.count() == 0:
-            logger.debug("_check_weights_changed: VecComponentStore is empty — skipping")
-            return
-
-        config_table = cast(Any, self._vector_store)._CONFIG_TABLE
         current_weights = self._settings.parsed_embedding_weights
         current_weights_json = json.dumps(current_weights, sort_keys=True)
 
-        row = self._conn.execute(
-            f"SELECT value FROM {config_table} WHERE key = 'weights_used'"
-        ).fetchone()
-        stored_weights_json = row[0] if row else None
+        stored_weights_json = _pipeline_state_get(self._conn, "weights_used")
 
         if stored_weights_json == current_weights_json:
-            return  # No change
+            return
 
         if stored_weights_json is None:
-            # weights_used missing = post-wipe state (wipe step 7 deletes it).
-            # vec_components is non-empty because trickle is mid-rebuild.
-            # Write current weights as baseline — no recompute needed since vec_meta
-            # is being rebuilt from scratch with correct weights already.
-            self._conn.execute(
-                f"INSERT OR REPLACE INTO {config_table} (key, value) VALUES ('weights_used', ?)",
-                (current_weights_json,),
-            )
+            _pipeline_state_set(self._conn, "weights_used", current_weights_json)
             self._conn.commit()
             return
 
         logger.info(
-            "Embedding weights changed: stored=%r current=%r — recomputing e_fused from components.",
+            "Embedding weights changed: stored=%r current=%r — refreshing pipeline sentinel.",
             stored_weights_json,
             current_weights_json,
         )
-
-        weights = current_weights
-        # Get all distinct file paths from M2M table
-        m2m_table = f"chunk_file_paths_{self._strategy}"
-        try:
-            rows = self._conn.execute(f"SELECT DISTINCT file_path FROM {m2m_table}").fetchall()
-            all_file_paths = [row[0] for row in rows]
-        except sqlite3.Error:
-            logger.warning("_check_weights_changed: cannot read M2M table — skipping")
-            return
-
-        total_recomputed = 0
-        files_skipped = 0
-
-        # M2M read (above) MUST precede delete_all(). If swapped: M2M read fails after wipe
-        # → early return → vec0 already empty → permanent empty index until manual reindex.
-        # Wipe vec0 once before the loop. Using overwrite=True inside the per-file
-        # loop deletes the ENTIRE table on every iteration (sqlite_vec DELETE FROM vec_chunks
-        # runs before each INSERT batch), leaving only the most-recently-written file's
-        # vectors in the table until the loop finishes — wrong and very slow for large indexes.
-        # One delete_all() here + overwrite=False per file is correct: table is cleared once,
-        # then each file's rows are inserted fresh.
-        self._vector_store.delete_all()
-        # delete_all() clears the entire config table including schema_version.
-        # Re-write it immediately so the next startup does not mistake the empty
-        # sentinel for a pre-999.12 DB and trigger an unnecessary full wipe.
-        self._conn.execute(
-            f"INSERT OR REPLACE INTO {config_table} (key, value) VALUES ('schema_version', ?)",
-            (self.SCHEMA_VERSION,),
-        )
+        _pipeline_state_set(self._conn, "weights_used", current_weights_json)
         self._conn.commit()
-
-        # Process in batches of 1000 files to avoid OOM on ~1.4M chunks (~5.6GB raw vectors)
-        BATCH_SIZE = 1000
-        for batch_start in range(0, len(all_file_paths), BATCH_SIZE):
-            batch = all_file_paths[batch_start : batch_start + BATCH_SIZE]
-            for fp in batch:
-                # Always use _meta_entity_id() for canonical path normalization
-                canonical_fp = self._meta_entity_id(fp)
-                chunk_ids = (
-                    self._metadata_store.get_chunk_ids_by_file(self._strategy, canonical_fp) or []
-                )
-                chunks = self._metadata_store.get_chunks(chunk_ids) if chunk_ids else []
-                if not chunks:
-                    continue
-                e_meta = self._vec_components.get(canonical_fp, "meta")
-                if e_meta is None:
-                    logger.warning("_check_weights_changed: no e_meta for %s — skipping file", fp)
-                    files_skipped += 1
-                    continue
-                e_text_map = self._vec_components.get_batch([c.chunk_id for c in chunks], "text")
-                missing = [c for c in chunks if c.chunk_id not in e_text_map]
-                if missing:
-                    logger.warning(
-                        "_check_weights_changed: %d missing e_text BLOBs for %s — skipping file",
-                        len(missing),
-                        fp,
-                    )
-                    files_skipped += 1
-                    continue
-                e_fused = [
-                    self._fuse_vectors(e_text_map[c.chunk_id], e_meta, weights) for c in chunks
-                ]
-                self._vector_store.add_chunks(chunks, e_fused, overwrite=False)
-                total_recomputed += len(chunks)
-
-        if files_skipped > 0:
-            # Partial recompute — do NOT update sentinel
-            # Next startup will detect weights_used != current and retry
-            logger.error(
-                "_check_weights_changed: %d/%d files skipped (%d chunks recomputed so far) — "
-                "vec0 is partially populated; search results are incomplete until next successful startup. "
-                "NOT updating weights_used sentinel; will retry on next startup.",
-                files_skipped,
-                len(all_file_paths),
-                total_recomputed,
-            )
-            return
-
-        # Full recompute — safe to update sentinel
-        self._conn.execute(
-            f"INSERT OR REPLACE INTO {config_table} (key, value) VALUES ('weights_used', ?)",
-            (current_weights_json,),
-        )
-        self._conn.commit()
-        logger.info(
-            "_check_weights_changed: recomputed %d fused vectors (no TEI calls). "
-            "weights_used sentinel updated.",
-            total_recomputed,
-        )
 
     # ------------------------------------------------------------------
     # Accessors (used by the service layer)
@@ -4607,7 +4244,7 @@ class IndexingPipeline:
         return self._semantic_engine
 
     @property
-    def keyword_engine(self) -> FTS5SearchEngine:
+    def keyword_engine(self) -> SearchEngineProtocol:
         return self._keyword_engine
 
     @property
