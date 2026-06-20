@@ -76,21 +76,6 @@ class VectorStoreProtocol(Protocol):
         """Remove **all** vectors from the store."""
         ...
 
-    def delete_vectors_by_chunk_ids(self, chunk_ids: list[str]) -> int:
-        """Delete vectors for the given chunk IDs.
-
-        Parameters
-        ----------
-        chunk_ids:
-            The chunk identifiers whose vectors should be removed.
-
-        Returns
-        -------
-        int
-            The number of vectors actually deleted.
-        """
-        ...
-
     def count(self) -> int:
         """Return the total number of stored vectors."""
         ...

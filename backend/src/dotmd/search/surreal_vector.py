@@ -83,9 +83,6 @@ class _UnusedVectorStore:
     def delete_all(self) -> None:
         raise NotImplementedError
 
-    def delete_vectors_by_chunk_ids(self, chunk_ids: list[str]) -> int:
-        raise NotImplementedError
-
     def lookup_embeddings_by_text_hash(self, text_hashes: list[str]) -> dict[str, list[float]]:
         raise NotImplementedError
 

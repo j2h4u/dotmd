@@ -588,15 +588,6 @@ class SurrealVectorStore:
         self._connection.delete_all_from_table("embeddings")
         self._connection.delete_all_from_table("vector_components")
 
-    def delete_vectors_by_chunk_ids(self, chunk_ids: list[str]) -> int:
-        deleted = 0
-        for chunk_id in chunk_ids:
-            existing = self._connection.select(self._codec.encode("embeddings", chunk_id))
-            if existing:
-                self._connection.delete(self._codec.encode("embeddings", chunk_id))
-                deleted += 1
-        return deleted
-
     def count(self) -> int:
         return len(self._connection.scan_table("embeddings"))
 

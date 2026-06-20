@@ -1,10 +1,8 @@
-"""RED tests for WR-2 — holder-aware cleanup in _index_file.
+"""Holder-aware cleanup tests for _index_file.
 
 These tests pin the correct behaviour of _index_file when a file is reindexed
 (its content changes): shared chunks must survive; sole-held orphan chunks must
-be cascaded.  They FAIL on the current _index_file code (which uses the M2M-
-unaware delete_file_subgraph / delete_vectors_by_chunk_ids path) and turn GREEN
-only after the _holder_aware_chunk_cleanup primitive is wired in.
+be cascaded through the _holder_aware_chunk_cleanup primitive.
 
 Test matrix
 -----------

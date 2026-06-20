@@ -373,9 +373,9 @@ class TestFingerprintTiming:
 
 
 # TestPurgeFileOrder removed: phase 16 _purge_file uses M2M cascade
-# (delete_m2m_for_file + delete_orphan_chunks + delete_by_chunk_ids) in a
-# single transaction.  The old get_chunk_ids_by_file → delete_vectors_by_chunk_ids
-# → delete_chunks_by_file → delete_file_subgraph sequence no longer exists.
+# (delete_m2m_for_file + delete_orphan_chunks) in a single transaction. The old
+# get_chunk_ids_by_file → delete_chunks_by_file → delete_file_subgraph sequence
+# no longer exists.
 # Purge order is covered by test_pipeline_purge.py.
 
 
