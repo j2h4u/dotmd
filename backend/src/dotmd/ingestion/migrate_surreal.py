@@ -34,6 +34,7 @@ from dotmd.storage.surreal_ops import (
     assert_embedded_safety_gate_passed,
 )
 from dotmd.storage.surreal_schema import (
+    DEFAULT_SURREAL_HNSW_VECTOR_INDEX_TYPE,
     SURREAL_SCHEMA_VERSION,
     build_surreal_embedding_hnsw_index_statement,
 )
@@ -2034,6 +2035,7 @@ def _rebuild_retrieval_indexes(
     connection: SurrealConnection,
     *,
     embedding_dimension: int,
+    vector_index_type: str = DEFAULT_SURREAL_HNSW_VECTOR_INDEX_TYPE,
 ) -> int:
     applied = 0
     for _index_name, statement in _DEFERRED_EMBEDDING_INDEX_DEFINITIONS:
@@ -2044,6 +2046,7 @@ def _rebuild_retrieval_indexes(
             table_name="embeddings",
             index_name=HNSW_EMBEDDING_INDEX_NAME,
             embedding_dimension=embedding_dimension,
+            vector_index_type=vector_index_type,
         )
     )
     return applied + 1
@@ -2135,6 +2138,7 @@ def _write_index_phase(
     *,
     report: SurrealMigrationReport,
     connection: SurrealConnection,
+    vector_index_type: str = DEFAULT_SURREAL_HNSW_VECTOR_INDEX_TYPE,
     progress_path: Path | None = None,
     resume_phase_names: set[str] | None = None,
 ) -> None:
@@ -2179,6 +2183,7 @@ def _write_index_phase(
                 table_name="embeddings",
                 index_name=HNSW_EMBEDDING_INDEX_NAME,
                 embedding_dimension=report.expected_vector_dimension,
+                vector_index_type=vector_index_type,
             ),
             report=report,
             checkpoint=checkpoint,
@@ -2363,6 +2368,7 @@ def run_surreal_migration(
     progress_path: Path | None = None,
     resume_from_progress: bool = False,
     build_deferred_indexes: bool = False,
+    vector_index_type: str = DEFAULT_SURREAL_HNSW_VECTOR_INDEX_TYPE,
 ) -> SurrealMigrationReport:
     input_errors = _verify_target_mode_inputs(
         target_mode=target_mode,
@@ -2702,6 +2708,7 @@ def run_surreal_migration(
                     phase_checkpoints["indexes"],
                     report=report,
                     connection=connection,
+                    vector_index_type=vector_index_type,
                     progress_path=progress_path,
                     resume_phase_names=resume_phase_names,
                 )

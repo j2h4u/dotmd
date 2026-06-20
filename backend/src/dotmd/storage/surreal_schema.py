@@ -7,6 +7,11 @@ from typing import Any, Protocol
 
 from surrealdb import SurrealError
 
+from dotmd.core.config import (
+    DEFAULT_SURREAL_HNSW_VECTOR_INDEX_TYPE,
+    SUPPORTED_SURREAL_HNSW_VECTOR_INDEX_TYPES,
+)
+
 SURREAL_SCHEMA_VERSION = "42.1.0"
 MIN_TOP_K = 1
 MAX_TOP_K = 100
@@ -200,6 +205,7 @@ class SurrealRetrievalIndexPlan:
     embedding_dimension: int
     hnsw_m: int
     hnsw_ef: int
+    vector_index_type: str
     analyzer_statement: str
     bm25_index_statements: tuple[str, ...]
     hnsw_index_statement: str
@@ -257,6 +263,18 @@ def surreal_embedding_shard_tables(shard_count: int) -> tuple[str, ...]:
     if shard_count == 1:
         return ("embeddings",)
     return tuple(surreal_embedding_table_name(index) for index in range(shard_count))
+
+
+def _normalize_surreal_hnsw_vector_index_type(vector_index_type: str) -> str:
+    if not isinstance(vector_index_type, str):
+        raise ValueError("vector_index_type must be a string")
+    normalized = vector_index_type.strip().upper()
+    if normalized not in SUPPORTED_SURREAL_HNSW_VECTOR_INDEX_TYPES:
+        raise ValueError(
+            "vector_index_type must be one of "
+            f"{', '.join(SUPPORTED_SURREAL_HNSW_VECTOR_INDEX_TYPES)}"
+        )
+    return normalized
 
 
 def _field(
@@ -356,6 +374,7 @@ def build_surreal_native_retrieval_index_plan(
     embedding_dimension: int,
     hnsw_m: int = DEFAULT_HNSW_M,
     hnsw_ef: int = DEFAULT_HNSW_EF,
+    vector_index_type: str = DEFAULT_SURREAL_HNSW_VECTOR_INDEX_TYPE,
     fulltext_concurrently: bool = False,
 ) -> SurrealRetrievalIndexPlan:
     if embedding_dimension <= 0:
@@ -364,6 +383,7 @@ def build_surreal_native_retrieval_index_plan(
         raise ValueError(f"hnsw_m must be between {MIN_HNSW_M} and {MAX_HNSW_M}, inclusive")
     if hnsw_ef < MIN_HNSW_EF or hnsw_ef > MAX_HNSW_EF:
         raise ValueError(f"hnsw_ef must be between {MIN_HNSW_EF} and {MAX_HNSW_EF}, inclusive")
+    normalized_vector_index_type = _normalize_surreal_hnsw_vector_index_type(vector_index_type)
 
     fulltext_suffix = " CONCURRENTLY" if fulltext_concurrently else ""
 
@@ -371,6 +391,7 @@ def build_surreal_native_retrieval_index_plan(
         embedding_dimension=embedding_dimension,
         hnsw_m=hnsw_m,
         hnsw_ef=hnsw_ef,
+        vector_index_type=normalized_vector_index_type,
         analyzer_statement=(
             "DEFINE ANALYZER dotmd_fts TOKENIZERS CLASS,PUNCT FILTERS LOWERCASE"
         ),
@@ -384,6 +405,7 @@ def build_surreal_native_retrieval_index_plan(
             embedding_dimension=embedding_dimension,
             hnsw_m=hnsw_m,
             hnsw_ef=hnsw_ef,
+            vector_index_type=normalized_vector_index_type,
         ),
         relation_index_statements=(
             "DEFINE INDEX relations_rel_type_idx ON TABLE relations COLUMNS rel_type;",
@@ -401,6 +423,7 @@ def build_surreal_embedding_hnsw_index_statement(
     embedding_dimension: int,
     hnsw_m: int = DEFAULT_HNSW_M,
     hnsw_ef: int = DEFAULT_HNSW_EF,
+    vector_index_type: str = DEFAULT_SURREAL_HNSW_VECTOR_INDEX_TYPE,
 ) -> str:
     if not table_name:
         raise ValueError("table_name must not be empty")
@@ -412,9 +435,11 @@ def build_surreal_embedding_hnsw_index_statement(
         raise ValueError(f"hnsw_m must be between {MIN_HNSW_M} and {MAX_HNSW_M}, inclusive")
     if hnsw_ef < MIN_HNSW_EF or hnsw_ef > MAX_HNSW_EF:
         raise ValueError(f"hnsw_ef must be between {MIN_HNSW_EF} and {MAX_HNSW_EF}, inclusive")
+    normalized_vector_index_type = _normalize_surreal_hnsw_vector_index_type(vector_index_type)
     return (
         f"DEFINE INDEX {index_name} ON TABLE {table_name} FIELDS vector "
-        f"HNSW DIMENSION {embedding_dimension} DIST COSINE TYPE F32 EFC {hnsw_ef} M {hnsw_m};"
+        f"HNSW DIMENSION {embedding_dimension} DIST COSINE TYPE {normalized_vector_index_type} "
+        f"EFC {hnsw_ef} M {hnsw_m};"
     )
 
 

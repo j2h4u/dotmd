@@ -60,6 +60,8 @@ def test_build_parser_exposes_phase_41_modes_and_safety_flags() -> None:
             "2",
             "--redact-report-samples",
             "--build-deferred-indexes",
+            "--vector-index-type",
+            "f16",
         ]
     )
 
@@ -76,6 +78,7 @@ def test_build_parser_exposes_phase_41_modes_and_safety_flags() -> None:
     assert args.max_report_samples == 2
     assert args.redact_report_samples is True
     assert args.build_deferred_indexes is True
+    assert args.vector_index_type == "f16"
 
 
 def test_json_loaders_distinguish_syntax_and_semantic_failures(tmp_path: Path) -> None:

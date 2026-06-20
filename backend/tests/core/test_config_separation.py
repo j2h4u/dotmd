@@ -84,6 +84,22 @@ def test_surreal_search_backend_defaults_to_legacy_sqlite_runtime() -> None:
     assert settings.surreal_retrieval_namespace == "dotmd"
     assert settings.surreal_retrieval_database is None
     assert settings.surreal_retrieval_embedding_dimension is None
+    assert settings.surreal_retrieval_vector_index_type == "F32"
+
+
+def test_surreal_search_backend_vector_index_type_normalizes_and_validates() -> None:
+    settings = Settings(
+        embedding_url="http://localhost:8088",
+        surreal_retrieval_vector_index_type="f16",
+    )
+
+    assert settings.surreal_retrieval_vector_index_type == "F16"
+
+    with pytest.raises(ValueError, match="surreal_retrieval_vector_index_type"):
+        Settings(
+            embedding_url="http://localhost:8088",
+            surreal_retrieval_vector_index_type="diskann",
+        )
 
 
 def test_runtime_validation_requires_surreal_runtime_fields() -> None:

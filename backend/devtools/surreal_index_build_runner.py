@@ -24,6 +24,7 @@ from dotmd.storage.surreal import SurrealConnection, SurrealStoreConfig
 from dotmd.storage.surreal_schema import (
     DEFAULT_HNSW_EF,
     DEFAULT_HNSW_M,
+    DEFAULT_SURREAL_HNSW_VECTOR_INDEX_TYPE,
     build_surreal_embedding_hnsw_index_statement,
     build_surreal_native_retrieval_index_plan,
     surreal_embedding_hnsw_index_name,
@@ -145,6 +146,7 @@ def build_index_steps(
     embedding_dimension: int,
     hnsw_m: int = DEFAULT_HNSW_M,
     hnsw_ef: int = DEFAULT_HNSW_EF,
+    vector_index_type: str = DEFAULT_SURREAL_HNSW_VECTOR_INDEX_TYPE,
     embedding_shard_count: int = 1,
 ) -> list[IndexBuildStep]:
     secondary_steps = [
@@ -161,6 +163,7 @@ def build_index_steps(
         embedding_dimension=embedding_dimension,
         hnsw_m=hnsw_m,
         hnsw_ef=hnsw_ef,
+        vector_index_type=vector_index_type,
     )
     if embedding_shard_count == 1:
         hnsw_steps = [
@@ -181,6 +184,7 @@ def build_index_steps(
                 embedding_dimension=embedding_dimension,
                 hnsw_m=hnsw_m,
                 hnsw_ef=hnsw_ef,
+                vector_index_type=vector_index_type,
             )
             hnsw_steps.append(
                 IndexBuildStep(
@@ -461,6 +465,7 @@ def run_index_build(args: argparse.Namespace) -> int:
         embedding_dimension=args.embedding_dimension,
         hnsw_m=args.hnsw_m,
         hnsw_ef=args.hnsw_ef,
+        vector_index_type=args.vector_index_type,
         embedding_shard_count=args.embedding_shard_count,
     )
     runtime_env = _surreal_runtime_env_snapshot()
@@ -590,6 +595,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--embedding-shard-count", type=int, default=1)
     parser.add_argument("--hnsw-m", type=int, default=DEFAULT_HNSW_M)
     parser.add_argument("--hnsw-ef", type=int, default=DEFAULT_HNSW_EF)
+    parser.add_argument(
+        "--vector-index-type",
+        default=DEFAULT_SURREAL_HNSW_VECTOR_INDEX_TYPE,
+        help="Surreal HNSW vector element type (for example F32, F16, or I32).",
+    )
     parser.add_argument("--no-print-heartbeat", action="store_true")
     parser.add_argument("--worker", action="store_true")
     parser.add_argument("--worker-input", type=Path)

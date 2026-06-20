@@ -292,6 +292,7 @@ def test_retrieval_index_plan_exposes_runtime_compatible_bm25_hnsw_and_relation_
     assert retrieval_plan.embedding_dimension == 3
     assert retrieval_plan.hnsw_m == 4
     assert retrieval_plan.hnsw_ef == 40
+    assert retrieval_plan.vector_index_type == "F32"
     assert retrieval_plan.analyzer_statement == (
         "DEFINE ANALYZER dotmd_fts TOKENIZERS CLASS,PUNCT FILTERS LOWERCASE"
     )
@@ -325,6 +326,32 @@ def test_retrieval_index_plan_exposes_runtime_compatible_bm25_hnsw_and_relation_
         "DEFINE INDEX chunks_title_fts ON chunks FIELDS title FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75) CONCURRENTLY",
         "DEFINE INDEX chunks_text_fts ON chunks FIELDS text FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75) CONCURRENTLY",
     )
+
+
+def test_retrieval_index_plan_accepts_custom_vector_index_types() -> None:
+    from dotmd.storage.surreal_schema import (  # type: ignore[import-not-found]
+        build_surreal_embedding_hnsw_index_statement,
+        build_surreal_native_retrieval_index_plan,
+    )
+
+    plan = build_surreal_native_retrieval_index_plan(
+        embedding_dimension=3,
+        hnsw_m=4,
+        hnsw_ef=40,
+        vector_index_type="i16",
+    )
+    statement = build_surreal_embedding_hnsw_index_statement(
+        table_name="embeddings",
+        index_name="embeddings_vector_hnsw",
+        embedding_dimension=3,
+        hnsw_m=4,
+        hnsw_ef=40,
+        vector_index_type="i16",
+    )
+
+    assert plan.vector_index_type == "I16"
+    assert "TYPE I16" in plan.hnsw_index_statement
+    assert statement.endswith("TYPE I16 EFC 40 M 4;")
 
 
 def test_retrieval_index_plan_matches_live_standalone_fulltext_surface() -> None:

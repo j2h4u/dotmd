@@ -36,7 +36,10 @@ from dotmd.storage.surreal_ops import (
     classify_surreal_migration_report,
     write_surreal_migration_evidence_reports,
 )
-from dotmd.storage.surreal_schema import SURREAL_SCHEMA_VERSION
+from dotmd.storage.surreal_schema import (
+    DEFAULT_SURREAL_HNSW_VECTOR_INDEX_TYPE,
+    SURREAL_SCHEMA_VERSION,
+)
 
 
 @dataclass(slots=True, frozen=True)
@@ -61,6 +64,7 @@ class SurrealMigrationRunnerConfig:
     progress_json: Path | None = None
     resume_from_progress: bool = False
     build_deferred_indexes: bool = False
+    vector_index_type: str = DEFAULT_SURREAL_HNSW_VECTOR_INDEX_TYPE
     restore_manifest_json: Path | None = None
     owner_id: str = "unknown"
     max_report_samples: int = 0
@@ -726,6 +730,7 @@ def run_migration_command(config: SurrealMigrationRunnerConfig) -> SurrealMigrat
         progress_path=config.progress_json,
         resume_from_progress=config.resume_from_progress,
         build_deferred_indexes=config.build_deferred_indexes,
+        vector_index_type=config.vector_index_type,
     )
     source_capture_checkpoint = _write_source_capture_progress(
         config=config,
@@ -870,6 +875,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--progress-json", type=Path, default=None)
     parser.add_argument("--resume-from-progress", action="store_true")
     parser.add_argument("--build-deferred-indexes", action="store_true")
+    parser.add_argument(
+        "--vector-index-type",
+        default=DEFAULT_SURREAL_HNSW_VECTOR_INDEX_TYPE,
+        help="Surreal HNSW vector element type (for example F32, F16, or I32).",
+    )
     parser.add_argument("--restore-manifest-json", type=Path, default=None)
     parser.add_argument("--owner-id", default="unknown")
     parser.add_argument("--max-report-samples", type=int, default=0)
@@ -901,6 +911,7 @@ def main(argv: list[str] | None = None) -> int:
             progress_json=args.progress_json,
             resume_from_progress=args.resume_from_progress,
             build_deferred_indexes=args.build_deferred_indexes,
+            vector_index_type=args.vector_index_type,
             restore_manifest_json=args.restore_manifest_json,
             owner_id=args.owner_id,
             max_report_samples=args.max_report_samples,

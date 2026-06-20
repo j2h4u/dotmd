@@ -30,6 +30,24 @@ def test_index_build_plan_orders_unique_guard_before_secondary_indexes() -> None
     )
 
 
+def test_index_build_plan_threads_custom_vector_index_type_through_hnsw_steps() -> None:
+    steps = build_index_steps(
+        "hnsw",
+        embedding_dimension=1024,
+        hnsw_m=4,
+        hnsw_ef=32,
+        vector_index_type="f16",
+        embedding_shard_count=2,
+    )
+
+    assert [step.statement for step in steps] == [
+        "DEFINE INDEX embeddings_0_vector_hnsw ON TABLE embeddings_0 FIELDS vector "
+        "HNSW DIMENSION 1024 DIST COSINE TYPE F16 EFC 32 M 4;",
+        "DEFINE INDEX embeddings_1_vector_hnsw ON TABLE embeddings_1 FIELDS vector "
+        "HNSW DIMENSION 1024 DIST COSINE TYPE F16 EFC 32 M 4;",
+    ]
+
+
 def test_index_build_plan_can_target_unique_guard_only() -> None:
     steps = build_index_steps("unique-only", embedding_dimension=1024)
 

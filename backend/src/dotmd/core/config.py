@@ -40,7 +40,18 @@ DEFAULT_RERANKER_LENGTH_PENALTY = True
 DEFAULT_SURREAL_URL = "http://127.0.0.1:8000"
 DEFAULT_SURREAL_NAMESPACE = "dotmd"
 DEFAULT_SURREAL_HNSW_EF = 40
+DEFAULT_SURREAL_HNSW_VECTOR_INDEX_TYPE = "F32"
 DEFAULT_SURREAL_EMBEDDING_SHARD_COUNT = 1
+SUPPORTED_SURREAL_HNSW_VECTOR_INDEX_TYPES = (
+    "F64",
+    "F32",
+    "F16",
+    "I64",
+    "I32",
+    "I16",
+    "I8",
+    "U8",
+)
 RUNTIME_DATA_DIR = Path("/mnt")
 RUNTIME_INDEX_DIR = Path("/dotmd-index")
 
@@ -188,6 +199,20 @@ class Settings(BaseSettings):
             return None
         return v
 
+    @field_validator("surreal_retrieval_vector_index_type", mode="before")
+    @classmethod
+    def validate_surreal_retrieval_vector_index_type(cls, v: object) -> str:
+        """Normalize and validate the Surreal HNSW vector element type."""
+        if not isinstance(v, str):
+            raise ValueError("surreal_retrieval_vector_index_type must be a string")
+        normalized = v.strip().upper()
+        if normalized not in SUPPORTED_SURREAL_HNSW_VECTOR_INDEX_TYPES:
+            raise ValueError(
+                "surreal_retrieval_vector_index_type must be one of "
+                f"{', '.join(SUPPORTED_SURREAL_HNSW_VECTOR_INDEX_TYPES)}"
+            )
+        return normalized
+
     # Search
     search_backend: Literal["sqlite", "surreal"] = "sqlite"
     default_top_k: int = DEFAULT_DEFAULT_TOP_K
@@ -224,6 +249,7 @@ class Settings(BaseSettings):
     surreal_retrieval_access_token: str | None = None
     surreal_retrieval_embedding_dimension: int | None = None
     surreal_retrieval_hnsw_ef: int = DEFAULT_SURREAL_HNSW_EF
+    surreal_retrieval_vector_index_type: str = DEFAULT_SURREAL_HNSW_VECTOR_INDEX_TYPE
     surreal_retrieval_embedding_shard_count: int = DEFAULT_SURREAL_EMBEDDING_SHARD_COUNT
 
     # Base URL for OAuth 2.0 endpoints served by FastMCP.
