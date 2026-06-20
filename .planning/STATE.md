@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: SurrealDB-Native Storage Cutover
 status: executing
-stopped_at: Phase 45 runtime smoke complete; Phase 46 write/read visibility evidence added; cutover blockers remain
-last_updated: "2026-06-19T00:00:00+06:00"
-last_activity: 2026-06-19
+stopped_at: Phase 46 cutover accepted; Phase 47 legacy stack removal next
+last_updated: "2026-06-20T00:00:00+05:00"
+last_activity: 2026-06-20
 progress:
   total_phases: 15
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 19
   completed_plans: 18
-  percent: 47
+  percent: 53
 ---
 
 # GSD State
@@ -21,31 +21,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-08 after v1.6 roadmap creation)
 
 **Core value:** Fast, incremental search indexing — daily sync doesn't bog down the server.
-**Current focus:** Phase 46 direct SurrealDB write path. Runtime retrieval
-works through SurrealDB, idempotent Surreal delta-apply machinery is verified,
-and focused smokes now prove direct Surreal writes reach FTS,
-`DotMDService.search` keyword visibility, and the safe local temporary
-`surrealkv://` API/CLI/MCP public entrypoints. Commit `41409a3` quarantined
-local sqlite-vec and FTS5 writes for the normal Surreal ingest/metadata-only
-refresh path while keeping SQLite metadata/source lifecycle, bindings,
-fingerprints, and `VecComponentStore` reuse. Commit `06e8179` now guards
-manual reindex paths in Surreal mode so legacy sqlite-vec/FTS5 stores are not
-mutated there. Commits `c9fa512`, `5542938`, and `231f531` fence legacy purge
-and orphan handling to tombstone-only or fail-fast behavior in Surreal mode.
-The product decision is to cut over directly instead of building a long-lived
-old-stack hybrid sync.
+**Current focus:** Phase 47 legacy stack removal. Phase 46 cutover is accepted:
+production runs with `DOTMD_SEARCH_BACKEND=surreal`, clean Surreal database
+`production`, ready F16 HNSW index, and live Surreal counts matching the
+expected production scale. The product decision remains direct SurrealDB
+cutover without a long-lived old-stack hybrid sync or compatibility fallback.
 
 ## Current Milestone
 
 **v1.8 — SurrealDB-Native Storage Cutover**
 
 Phase: 46-surrealdb-write-path-and-trickle-cutover
-Status: Plan 46-01 in progress; direct Surreal write path selected, with
-public-entrypoint visibility and tombstone-only purge/orphan fencing recorded
-and rerank-off cutover policy documented
-Last activity: 2026-06-19
+Status: Complete; direct Surreal write path selected, production cutover
+executed, soak accepted, and rerank-off cutover policy documented
+Last activity: 2026-06-20
 
-Progress: [█████████-] Phase 46 write safety, visibility, and rerank-off policy evidence complete; production cutover criteria/update work next
+Progress: [██████████] Phase 46 accepted; Phase 47 legacy removal next
 
 ## Deferred Items
 

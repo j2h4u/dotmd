@@ -11,7 +11,7 @@
 - [x] **v1.5 Telegram Source Adapter** — Phases 27-31 (shipped 2026-05-08)
 - [x] **v1.6 Unified Source Architecture** — Phases 32-37 (shipped 2026-05-13)
 - [x] **v1.7 Storage Simplification** — Phase 38 (shipped 2026-06-12)
-- 🚧 **v1.8 SurrealDB-Native Storage Cutover** — Phases 39-46 (active)
+- 🚧 **v1.8 SurrealDB-Native Storage Cutover** — Phases 39-47 (active)
 
 <details>
 <summary>v1.1 Incremental Indexing (Phases 1-3) — SHIPPED 2026-03-26</summary>
@@ -136,7 +136,7 @@ See: `.planning/milestones/v1.7-ROADMAP.md`
 
 </details>
 
-## v1.8 SurrealDB-Native Storage Cutover (Phases 39-46) — ACTIVE
+## v1.8 SurrealDB-Native Storage Cutover (Phases 39-47) — ACTIVE
 
 Goal: Replace the current SQLite/sqlite-vec/FTS5 + FalkorDB storage/retrieval
 stack with one SurrealDB-native persistence and retrieval architecture,
@@ -297,7 +297,7 @@ Decision:
 cutover: make trickle/index writes update standalone SurrealDB directly so the
 SQLite/sqlite-vec/FTS5 and FalkorDB stack can be removed.
 **Depends on:** Phase 45
-**Plans:** 1/1 plan in progress
+**Plans:** 1/1 plan complete
 
 Success criteria:
 
@@ -313,7 +313,7 @@ Success criteria:
 
 Plans:
 
-- [ ] 46-01-PLAN.md - SurrealDB write-path/trickle cutover strategy, implementation, and smoke.
+- [x] 46-01-PLAN.md - SurrealDB write-path/trickle cutover strategy, implementation, and smoke.
 
 Progress:
 
@@ -341,12 +341,12 @@ Progress:
   tombstone-only instead of mutating local legacy stores.
 - [x] Product decision recorded: proceed with direct SurrealDB writes, not a
   bounded hybrid runtime.
-- [ ] Production/live Surreal-backed API/CLI/MCP smoke for direct-written
-  changes remains before cutover validation.
-- [ ] Runbook and deploy approval still need to be updated with the
-  write-path evidence before approval.
-- [ ] Remaining old-stack dependencies outside the normal Surreal ingest path
-  still need to be removed, quarantined, or explicitly marked non-authoritative.
+- [x] Production/live Surreal-backed API/CLI/MCP smoke and controlled trickle
+  edit/delete smoke passed after cutover.
+- [x] Runbook and cutover criteria record soak acceptance with clean database
+  `production`, ready F16 HNSW index, and live production-scale counts.
+- [x] Remaining old-stack dependencies are non-authoritative after cutover and
+  move to Phase 47 physical removal.
 - [x] Reranker latency decision is settled for Phase 46 cutover: proceed with
   rerank off / no-rerank; rerank-on optimization is follow-up work.
 
@@ -412,8 +412,8 @@ after SurrealDB cutover is accepted.
 | 42. Surreal-native retrieval implementation | 4/4 | Complete    | 2026-06-14 |
 | 43. Shadow run and quality gate | 3/3 | Complete | 2026-06-16 |
 | 44. Standalone quality gate and cutover decision | 1/1 | Complete — NO-GO | 2026-06-19 |
-| 45. Standalone SurrealDB runtime wiring and smoke | v1.8 | In Progress | — |
-| 46. SurrealDB write path and trickle cutover | v1.8 | In Progress | — |
+| 45. Standalone SurrealDB runtime wiring and smoke | v1.8 | Complete | 2026-06-19 |
+| 46. SurrealDB write path and trickle cutover | v1.8 | Complete | 2026-06-20 |
 
 ### Backlog 999.2: Pipeline parallelism — overlap GLiNER and TEI across files
 

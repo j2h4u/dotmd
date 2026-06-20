@@ -1,8 +1,8 @@
 ---
 phase: 46-surrealdb-write-path-and-trickle-cutover
 plan: 01
-status: in_progress
-last_updated: 2026-06-19
+status: complete
+last_updated: 2026-06-20
 ---
 
 # Phase 46 Plan 01 Summary
@@ -183,17 +183,21 @@ ID. It is not the target steady-state architecture.
 
 ## Not done yet
 
-Phase 46 cutover is executed and soak is in progress. Remaining work:
+Phase 46 cutover is executed and soak is accepted. Remaining work is now Phase
+47 legacy removal, not additional hybrid migration work.
 
-- watch production search/trickle behavior during soak;
-- decide whether MCP search should expose lightweight `mode`/`rerank` knobs for
-  faster operational smoke checks;
-- investigate the slow extraction/graph portion of one-file trickle updates;
-- keep rollback data until Phase 47 starts;
-- replace the temporary Phase 43 refresh database name with clean database
-  `production` before treating the cutover as final;
+- production is configured with `DOTMD_SEARCH_BACKEND=surreal` and clean
+  Surreal database `production`;
+- live health returned `{"status":"ok"}`;
+- live Surreal counts on 2026-06-20: documents=1441, files=1083,
+  chunks=149882, embeddings=149872, entities=81822, relations=343561,
+  feedback=5;
+- HNSW index `embeddings_vector_hnsw` is ready with pending=0 over 149872
+  embeddings and was rebuilt as `TYPE F16`;
+- hybrid no-rerank CLI smoke returned Surreal-backed semantic/graph results;
+- keep rollback data only until Phase 47 starts;
 - Phase 47 physically removes SQLite/sqlite-vec/FTS5/FalkorDB/LadybugDB
-  code/config/data only after soak is accepted.
+  code/config/data.
 
 ## Current Decision
 

@@ -1,6 +1,6 @@
 # Phase 46 Production Cutover Runbook
 
-Status: **cutover executed; soak in progress**
+Status: **cutover executed; soak accepted**
 
 This is the operator checklist and evidence note for the Phase 46 production
 cutover.
@@ -92,12 +92,24 @@ Run these checks in order:
   `dotmd_surreal_cutover_smoke_20260619_232955`; insert indexed in `72.4s`
   and delete was logged as `Watch: purged deleted ...`.
 
+## Final soak acceptance
+
+- Production now targets clean database `production`, not a Phase 43 rehearsal
+  database name.
+- Runtime env inside `dotmd` reports `DOTMD_SEARCH_BACKEND=surreal` and
+  `DOTMD_SURREAL_RETRIEVAL_DATABASE=production`.
+- `/opt/docker/dotmd/.env` records
+  `DOTMD_SURREAL_RETRIEVAL_VECTOR_INDEX_TYPE=F16` for the next planned restart.
+- Live health returned `{"status":"ok"}`.
+- Live Surreal counts on 2026-06-20: documents=1441, files=1083,
+  chunks=149882, embeddings=149872, entities=81822, relations=343561,
+  feedback=5.
+- `INFO FOR INDEX embeddings_vector_hnsw ON embeddings` reports
+  `status=ready`, `pending=0`, `initial=149872`.
+- Hybrid no-rerank CLI smoke returned Surreal-backed semantic/graph results.
+
 ## Observed follow-up risks
 
-- The first standalone cutover pointed at a Phase 43 refresh database name.
-  That name must not be treated as the permanent production database. The
-  clean target database name is `production`; populate it through a clean
-  rebuild/refresh path before deleting the Phase 43 source database.
 - `dotmd status --verbose` is a poor cutover smoke: it took `47.651s` and
   mostly exercises filesystem discovery/status rather than proving Surreal
   search.
@@ -128,4 +140,4 @@ Run these checks in order:
 
 - Phase 47 may physically remove SQLite, sqlite-vec, FTS5, FalkorDB, LadybugDB,
   and related code/config/data.
-- Before Phase 47, do not delete rollback data.
+- Before Phase 47 starts, do not delete rollback data.

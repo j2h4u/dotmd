@@ -1,6 +1,6 @@
 # Phase 46 Production Cutover Criteria
 
-Decision: **production cutover executed; soak in progress**.
+Decision: **production cutover executed; soak accepted**.
 
 This file records the decision state and the evidence already in hand. The
 operator procedure lives here:
@@ -47,14 +47,21 @@ operator procedure lives here:
   `dotmd_surreal_cutover_smoke_20260619_232955`; insert indexed in `72.4s`,
   delete purged the file and subsequent keyword search returned no results.
 
-## Remaining soak gates
+## Final soak acceptance
 
-- Replace the temporary Phase 43 refresh database name with clean database
-  `production`; do not make phase/rehearsal names part of the permanent
-  deployment contract.
-- Watch production search/trickle behavior during soak.
-- Do not run Phase 47 deletion until soak is accepted.
-- Keep rollback data until Phase 47 is explicitly started.
+- Production now targets clean Surreal database `production`.
+- Runtime env inside `dotmd` reports `DOTMD_SEARCH_BACKEND=surreal` and
+  `DOTMD_SURREAL_RETRIEVAL_DATABASE=production`.
+- `/opt/docker/dotmd/.env` records
+  `DOTMD_SURREAL_RETRIEVAL_VECTOR_INDEX_TYPE=F16` for the next planned restart.
+- Health returned `{"status":"ok"}`.
+- Live Surreal counts on 2026-06-20: documents=1441, files=1083,
+  chunks=149882, embeddings=149872, entities=81822, relations=343561,
+  feedback=5.
+- `INFO FOR INDEX embeddings_vector_hnsw ON embeddings` reports
+  `status=ready`, `pending=0`, `initial=149872`.
+- Hybrid no-rerank CLI smoke returned Surreal-backed semantic/graph results.
+- Rollback data is retained only until Phase 47 starts.
 
 ## Remaining non-Surreal defects
 
