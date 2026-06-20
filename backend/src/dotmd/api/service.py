@@ -295,31 +295,31 @@ class DotMDService:
         _write_service_init_progress("service:pipeline", "applied")
 
         # Search engines -- reuse stores and shared connection from pipeline.
-        _write_service_init_progress("service:semantic_engine", "running")
-        self._semantic_engine = SemanticSearchEngine(
-            self._pipeline.vector_store,
-            self._settings.embedding_model,
-            score_floor=self._settings.semantic_score_floor,
-            embedding_url=self._settings.embedding_url,
-            tei_batch_size=self._settings.tei_batch_size,
-            use_prefix=self._settings.needs_embedding_prefix,
-            query_instruction=self._settings.query_instruction,
-        )
-        _write_service_init_progress("service:semantic_engine", "applied")
-        _write_service_init_progress("service:keyword_graph_engines", "running")
-        self._keyword_engine = self._pipeline.keyword_engine
-        self._graph_direct_engine = GraphDirectEngine(
-            self._pipeline.graph_store,
-        )
         self._surreal_connection: Any | None = None
         self._surreal_metadata_store: MetadataStoreProtocol | None = None
         self._uses_surreal_search_backend = (
             self._settings.surreal_retrieval_database is not None
             and self._settings.surreal_retrieval_embedding_dimension is not None
         )
+        _write_service_init_progress("service:keyword_graph_engines", "running")
         if self._uses_surreal_search_backend:
             self._configure_surreal_search_backend()
         else:
+            _write_service_init_progress("service:semantic_engine", "running")
+            self._semantic_engine = SemanticSearchEngine(
+                self._pipeline.vector_store,
+                self._settings.embedding_model,
+                score_floor=self._settings.semantic_score_floor,
+                embedding_url=self._settings.embedding_url,
+                tei_batch_size=self._settings.tei_batch_size,
+                use_prefix=self._settings.needs_embedding_prefix,
+                query_instruction=self._settings.query_instruction,
+            )
+            _write_service_init_progress("service:semantic_engine", "applied")
+            self._keyword_engine = self._pipeline.keyword_engine
+            self._graph_direct_engine = GraphDirectEngine(
+                self._pipeline.graph_store,
+            )
             self._graph_engine = GraphSearchEngine(
                 self._pipeline.graph_store,
                 cast(MetadataStoreProtocol, self._pipeline.metadata_store),
