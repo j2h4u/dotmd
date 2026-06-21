@@ -86,6 +86,15 @@ def mock_settings(index_dir: Path, md_dir: Path):
     settings.read_only = False
     settings.tei_batch_size = 32
     settings.needs_embedding_prefix = False
+    settings.allow_destructive_startup_repair = False
+    settings.surreal_retrieval_database = None
+    settings.surreal_retrieval_url = ""
+    settings.surreal_retrieval_namespace = ""
+    settings.surreal_retrieval_username = None
+    settings.surreal_retrieval_password = None
+    settings.surreal_retrieval_access_token = None
+    settings.surreal_retrieval_embedding_dimension = None
+    settings.parsed_embedding_weights = {"text": 0.7, "meta": 0.3}
     return settings
 
 
