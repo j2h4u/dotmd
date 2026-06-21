@@ -914,11 +914,7 @@ class SQLiteMetadataStore:
         conn: _SQLiteConn,
         fts_table_name: str | None = None,
     ) -> list[str]:
-        """Delete chunk/provenance/holder/FTS rows for one source unit.
-
-        Vector rows are intentionally deleted by the pipeline because the
-        vector table names are model-specific and owned by the vector store.
-        """
+        """Delete chunk/provenance/holder rows for one source unit."""
         provenance_table = f"chunk_source_provenance_{strategy}"
         chunk_table = f"chunks_{strategy}"
         m2m_table = f"chunk_file_paths_{strategy}"
@@ -940,10 +936,11 @@ class SQLiteMetadataStore:
             chunk_ids,
         )
         if fts_table_name:
-            conn.execute(
-                f"DELETE FROM {fts_table_name} WHERE chunk_id IN ({placeholders})",
-                chunk_ids,
-            )
+            with contextlib.suppress(sqlite3.OperationalError):
+                conn.execute(
+                    f"DELETE FROM {fts_table_name} WHERE chunk_id IN ({placeholders})",
+                    chunk_ids,
+                )
         conn.execute(
             f"DELETE FROM {chunk_table} WHERE chunk_id IN ({placeholders})",
             chunk_ids,

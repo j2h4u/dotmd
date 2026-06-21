@@ -107,9 +107,7 @@ class _TelegramSourceClientFixture:
 
 
 class _KeywordRecorder:
-    def __init__(self, conn, table_name: str) -> None:  # type: ignore[no-untyped-def]
-        self._conn = conn
-        self._table = table_name
+    def __init__(self) -> None:
         self.source_meta_calls: list[dict] = []
 
     def add_chunks_with_source_meta(
@@ -122,10 +120,6 @@ class _KeywordRecorder:
     ) -> None:  # type: ignore[no-untyped-def]
         self.source_meta_calls.append(
             {"chunk_ids": [chunk.chunk_id for chunk in chunks], "title": title, "tags": tags_csv}
-        )
-        conn.executemany(
-            f"INSERT INTO {self._table}(chunk_id, text, title, tags) VALUES (?, ?, ?, ?)",
-            [(chunk.chunk_id, chunk.text, title, tags_csv) for chunk in chunks],
         )
 
     def add_chunks(self, chunks, file_meta=None):  # type: ignore[no-untyped-def]
@@ -289,10 +283,7 @@ def _pipeline(tmp_path: Path) -> IndexingPipeline:
     pipeline._semantic_engine.encode_batch = lambda texts: [  # type: ignore[method-assign]
         [float(index + 1)] * 8 for index, _text in enumerate(texts)
     ]
-    pipeline._keyword_engine = _KeywordRecorder(  # type: ignore[assignment]
-        pipeline._conn,
-        pipeline._fts_table,
-    )
+    pipeline._keyword_engine = _KeywordRecorder()  # type: ignore[assignment]
     return pipeline
 
 
@@ -503,7 +494,7 @@ def test_telegram_chunks_with_empty_file_paths_are_saved_and_hydrated_by_provena
     )
 
 
-def test_telegram_fts_and_vector_index_without_fileinfo_frontmatter(
+def test_telegram_keyword_metadata_and_vectors_without_fileinfo_frontmatter(
     tmp_path: Path,
 ) -> None:
     pipeline = _pipeline(tmp_path)
@@ -514,20 +505,16 @@ def test_telegram_fts_and_vector_index_without_fileinfo_frontmatter(
 
     pipeline.ingest_application_source(_provider(), limit=10)
 
-    fts_rows = pipeline._conn.execute(
-        f"SELECT title, tags FROM chunks_fts_{STRATEGY} ORDER BY chunk_id"
-    ).fetchall()
-    assert fts_rows
-    assert all(title == "Project Chat" for title, _tags in fts_rows)
-    assert all("telegram" in tags for _title, tags in fts_rows)
-    vec_meta_table = cast(Any, pipeline._vector_store)._META_TABLE
-    assert (
-        pipeline._conn.execute(
-            f"SELECT COUNT(*) FROM {vec_meta_table} WHERE chunk_id IN "
-            f"(SELECT chunk_id FROM chunks_{STRATEGY})"
-        ).fetchone()[0]
-        == 2
+    keyword_engine = cast(_KeywordRecorder, pipeline._keyword_engine)
+    assert keyword_engine.source_meta_calls
+    assert all(call["title"] == "Project Chat" for call in keyword_engine.source_meta_calls)
+    assert all("telegram" in call["tags"] for call in keyword_engine.source_meta_calls)
+    chunks = pipeline._metadata_store.get_all_chunks()
+    text_components = pipeline._vec_components.get_batch(
+        [chunk.chunk_id for chunk in chunks],
+        "text",
     )
+    assert len(text_components) == 2
     metadata_inputs = [
         text for text in encoded_texts if "telegram" in text and "Project Chat" in text
     ]
@@ -591,13 +578,7 @@ def test_telegram_transaction_rolls_back_metadata_fts_vectors_and_checkpoint_on_
         ).fetchone()[0]
         == 0
     )
-    assert pipeline._conn.execute(f"SELECT COUNT(*) FROM chunks_fts_{STRATEGY}").fetchone()[0] == 0
-    assert (
-        pipeline._conn.execute(
-            f"SELECT COUNT(*) FROM {cast(Any, pipeline._vector_store)._META_TABLE}"
-        ).fetchone()[0]
-        == 0
-    )
+    assert pipeline._vec_components.count() == 0
 
 
 def test_initial_bootstrap_single_batch_semantics_are_explicit(tmp_path: Path) -> None:

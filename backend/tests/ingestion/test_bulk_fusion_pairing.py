@@ -11,7 +11,7 @@ No live TEI required — encode_batch is mocked.
 
 import pathlib
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -538,21 +538,16 @@ def test_meta_entity_id_normalizes_path(pipeline_settings):
 
 
 def test_m2m_shared_chunk_behavior_documented(pipeline_settings, tmp_path):
-    """Two files with same body → same e_text, different e_meta → last-write-wins in vec0.
+    """Two files with same body reuse e_text and store distinct e_meta components.
 
     Documents known M2M shared-chunk behavior (both reviewers, Cycle 3 MEDIUM):
     When the same chunk body text appears in multiple files (M2M schema), the chunk
-    gets one chunk_id and one row in vec0. e_text is identical for both files
-    (same body → same hash → VecComponentStore hit on second file). e_meta differs
-    because each file has a different title.
+    gets one chunk_id. e_text is identical for both files (same body → same hash →
+    VecComponentStore hit on second file). e_meta differs because each file has a
+    different title.
 
-    The vec0 row ends up fused with the LAST file's e_meta (last-write-wins).
-    This is a pre-existing design constraint of the M2M content-addressed schema,
-    not a regression introduced by Phase 999.12. The behavior is documented here
-    as a known limitation so future developers are aware.
-
-    This test does NOT assert that shared-chunk fusion is "correct" — it asserts
-    that the pipeline handles it without errors and that e_text IS reused (cache hit).
+    This test asserts that the pipeline handles shared chunks without errors and
+    that e_text is reused through the local component cache.
     """
     shared_body = "This is the shared body text that appears in both files."
     file_a = pipeline_settings.data_dir / "shared_a.md"
@@ -578,11 +573,6 @@ def test_m2m_shared_chunk_behavior_documented(pipeline_settings, tmp_path):
         f"SELECT COUNT(*) FROM {pipeline._vec_components._TABLE} WHERE component = 'text'"
     ).fetchone()[0]
     assert text_count > 0, "Shared chunks must have e_text stored in VecComponentStore"
-
-    # vec0 must have rows (fusion produced valid fused vectors)
-    vec0_table = cast(Any, pipeline._vector_store)._VEC_TABLE
-    row_count = pipeline._conn.execute(f"SELECT COUNT(*) FROM {vec0_table}").fetchone()[0]
-    assert row_count > 0, "vec0 must have rows after indexing shared-body files"
 
 
 def test_embed_existing_chunks_model_switch_does_not_use_cached_etext(pipeline_settings, tmp_path):

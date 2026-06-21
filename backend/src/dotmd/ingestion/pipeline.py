@@ -1060,10 +1060,11 @@ class IndexingPipeline:
                     f"DELETE FROM {m2m_table} WHERE chunk_id IN ({placeholders})",
                     chunk_ids,
                 )
-                self._conn.execute(
-                    f"DELETE FROM {fts_table} WHERE chunk_id IN ({placeholders})",
-                    chunk_ids,
-                )
+                with contextlib.suppress(sqlite3.OperationalError):
+                    self._conn.execute(
+                        f"DELETE FROM {fts_table} WHERE chunk_id IN ({placeholders})",
+                        chunk_ids,
+                    )
                 self._conn.execute(
                     f"DELETE FROM {chunk_table} WHERE chunk_id IN ({placeholders})",
                     chunk_ids,

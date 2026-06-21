@@ -11,7 +11,6 @@ All tests mock encode_batch — no live TEI required.
 """
 
 import pathlib
-from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -343,10 +342,8 @@ def test_schema_version_wipe_clears_all_state(minimal_settings, tmp_path):
 
     # Corrupt schema_version to simulate old-version deploy.
     # Must be a non-None value different from SCHEMA_VERSION to trigger the wipe path.
-    vector_store = cast(Any, pipeline._vector_store)
-    config_table = vector_store._CONFIG_TABLE
     pipeline._conn.execute(
-        f"INSERT OR REPLACE INTO {config_table} (key, value) VALUES ('schema_version', '1')"
+        "INSERT OR REPLACE INTO pipeline_state (key, value) VALUES ('schema_version', '1')"
     )
     pipeline._conn.commit()
 
@@ -377,28 +374,21 @@ def test_schema_version_wipe_clears_all_state(minimal_settings, tmp_path):
 
     # 5. Schema version sentinel updated to current version
     row = pipeline._conn.execute(
-        f"SELECT value FROM {config_table} WHERE key = 'schema_version'"
+        "SELECT value FROM pipeline_state WHERE key = 'schema_version'"
     ).fetchone()
     assert row is not None and row[0] == pipeline.SCHEMA_VERSION, (
         f"schema_version sentinel must be updated to {pipeline.SCHEMA_VERSION!r}"
     )
 
-    # 6. vec0 fused vector table (delete_all() drops it entirely)
-    vec0_exists = pipeline._conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-        (vector_store._VEC_TABLE,),
-    ).fetchone()
-    assert vec0_exists is None, (
-        f"vec0 table must be dropped by wipe (still exists: {vector_store._VEC_TABLE!r})"
-    )
-
-    # 7. vec_meta text_hash index (cleared by delete_all, not dropped)
-    # Note: chunks_*, chunk_file_paths_*, and FTS5 are intentionally NOT cleared —
-    # schema wipe only resets vector state so trickle can rebuild embeddings.
-    vec_meta_count = pipeline._conn.execute(
-        f"SELECT COUNT(*) FROM {vector_store._META_TABLE}"
-    ).fetchone()[0]
-    assert vec_meta_count == 0, f"vec_meta must be wiped (got {vec_meta_count} rows)"
+    # 6. Retired vec0/vec_meta tables are absent in the Surreal-only runtime.
+    retired_vec_tables = [
+        row[0]
+        for row in pipeline._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND (name LIKE 'vec_chunks_%' OR name LIKE 'vec_meta_%')"
+        ).fetchall()
+    ]
+    assert retired_vec_tables == []
 
 
 # ── Weight change recompute ──────────────────────────────────────────────────
