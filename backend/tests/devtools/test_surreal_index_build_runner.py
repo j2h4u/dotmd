@@ -261,9 +261,7 @@ def test_surreal_runtime_env_snapshot_records_surrealkv_limits(monkeypatch) -> N
     }
 
 
-def test_opaque_index_timeout_writes_uncertain_result(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_opaque_index_timeout_writes_uncertain_result(monkeypatch, tmp_path: Path) -> None:
     class _FakePipe:
         def read(self) -> str:
             return ""

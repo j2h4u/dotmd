@@ -1718,7 +1718,9 @@ class TestSearchApiRerankerSurfaces:
 
         service = MagicMock()
         service.search = MagicMock(side_effect=AssertionError("search() should not be called"))
-        service.search_async = AsyncMock(return_value=SearchResponse(candidates=[], source_status=[]))
+        service.search_async = AsyncMock(
+            return_value=SearchResponse(candidates=[], source_status=[])
+        )
         server._service = service
         client = TestClient(server.app)
 
@@ -1740,9 +1742,9 @@ class TestSearchApiRerankerSurfaces:
         from dotmd.api import server
 
         service = MagicMock()
-        service.search_async = AsyncMock(side_effect=ValueError(
-            "Unknown reranker 'missing'; available: mmarco-minilm"
-        ))
+        service.search_async = AsyncMock(
+            side_effect=ValueError("Unknown reranker 'missing'; available: mmarco-minilm")
+        )
         server._service = service
         client = TestClient(server.app)
 

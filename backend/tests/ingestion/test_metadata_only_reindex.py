@@ -167,9 +167,7 @@ def test_metadata_only_reindex_exactly_one_tei_call(pipeline_settings):
     )
 
 
-def test_surreal_backend_uses_noop_graph_store(
-    surreal_pipeline_settings, monkeypatch
-):
+def test_surreal_backend_uses_noop_graph_store(surreal_pipeline_settings, monkeypatch):
     from dotmd.ingestion import pipeline as pipeline_module
     from dotmd.ingestion.pipeline import IndexingPipeline
 
@@ -193,9 +191,7 @@ def test_surreal_backend_uses_noop_graph_store(
     assert pipeline._graph_store.get_graph_data() == {"nodes": [], "edges": []}
 
 
-def test_surreal_metadata_only_reindex_skips_derived_vec_and_fts_tables(
-    tmp_path, monkeypatch
-):
+def test_surreal_metadata_only_reindex_skips_derived_vec_and_fts_tables(tmp_path, monkeypatch):
     from dotmd.core.config import Settings
     from dotmd.core.models import ExtractDepth
     from dotmd.ingestion.pipeline import IndexingPipeline
@@ -398,7 +394,9 @@ def test_index_file_embed_routes_surreal_manifests_with_complete_text_hashes(
         blake3(b"shared body zero").hexdigest(),
         blake3(b"shared body one").hexdigest(),
     ]
-    assert [[round(value, 6) for value in row.row["vector"]] for row in first_manifest.embeddings.rows] == [
+    assert [
+        [round(value, 6) for value in row.row["vector"]] for row in first_manifest.embeddings.rows
+    ] == [
         [1.1, 1.2],
         [1.3, 1.4],
     ]
@@ -430,7 +428,9 @@ def test_index_file_embed_routes_surreal_manifests_with_complete_text_hashes(
         blake3(b"shared body zero").hexdigest(),
         blake3(b"shared body one").hexdigest(),
     ]
-    assert [[round(value, 6) for value in row.row["vector"]] for row in second_manifest.embeddings.rows] == [
+    assert [
+        [round(value, 6) for value in row.row["vector"]] for row in second_manifest.embeddings.rows
+    ] == [
         [1.1, 1.2],
         [1.3, 1.4],
     ]

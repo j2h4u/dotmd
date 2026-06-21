@@ -117,8 +117,7 @@ def test_build_dotmd_surreal_schema_plan_covers_required_categories_and_tokens()
         for statement in plan.statements
     )
     assert not any(
-        "DEFINE FIELD properties.* ON TABLE relations" in statement
-        for statement in plan.statements
+        "DEFINE FIELD properties.* ON TABLE relations" in statement for statement in plan.statements
     )
 
 

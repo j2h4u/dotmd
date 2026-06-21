@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, milestone/v1.8-standalone-surrealdb-cutover]
   pull_request:
-    branches: [main]
+    branches: [main, milestone/v1.8-standalone-surrealdb-cutover]
 
 permissions:
   contents: read
@@ -36,33 +36,8 @@ jobs:
         working-directory: backend
         run: uv sync --locked --extra dev
 
-      - name: Static quality gate
-        run: just check
-
-  test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-
-      - name: Install backend dependencies
-        working-directory: backend
-        run: uv sync --locked --extra dev
-
-      - name: Unit tests
-        run: just unit
+      - name: Static and test quality gate
+        run: just ci
 
   docker-build:
     runs-on: ubuntu-latest
@@ -83,7 +58,7 @@ jobs:
   ci:
     if: always()
     runs-on: ubuntu-latest
-    needs: [quality, test, docker-build]
+    needs: [quality, docker-build]
     steps:
       - name: Check required jobs
         run: |

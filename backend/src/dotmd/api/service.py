@@ -65,7 +65,9 @@ def _write_service_init_progress(step: str, status: str, error: str | None = Non
     }
     path = Path(progress_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def _search_mode_log_label(mode: SearchMode | str) -> str:
@@ -417,9 +419,7 @@ class DotMDService:
         )
 
         if not self._settings.surreal_retrieval_database:
-            raise ValueError(
-                "surreal_retrieval_database must be set for Surreal retrieval"
-            )
+            raise ValueError("surreal_retrieval_database must be set for Surreal retrieval")
         if self._settings.surreal_retrieval_embedding_dimension is None:
             raise ValueError(
                 "surreal_retrieval_embedding_dimension must be set for Surreal retrieval"
@@ -1520,7 +1520,7 @@ class DotMDService:
                     top_k=pool_size,
                     seed_chunk_ids=seed_ids,
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 - graph enrichment is best-effort.
                 logger.warning(
                     "graph enrichment failed; continuing with primary fused results",
                     exc_info=True,

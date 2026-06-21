@@ -278,7 +278,9 @@ def test_direct_sink_builds_direct_manifest_rows_from_in_memory_models() -> None
     )
 
     assert manifest.graph.deferred is True
-    assert manifest.graph.deferred_reason == "graph sync is deferred for the direct filesystem slice"
+    assert (
+        manifest.graph.deferred_reason == "graph sync is deferred for the direct filesystem slice"
+    )
     assert manifest.feedback.deferred is True
     assert (
         manifest.feedback.deferred_reason
@@ -553,8 +555,14 @@ def test_graph_rows_cover_files_sections_entities_tags_and_relations() -> None:
     assert row_by_ref["alpha"].row["name"] == "alpha"
 
     relation_rows = {row.ref: row for row in rows[5:]}
-    assert relation_rows["/notes/meeting.md\x1fCarol\x1fHAS_PARTICIPANT"].row["source_table"] == "files"
-    assert relation_rows["/notes/meeting.md\x1fCarol\x1fHAS_PARTICIPANT"].row["target_table"] == "entities"
+    assert (
+        relation_rows["/notes/meeting.md\x1fCarol\x1fHAS_PARTICIPANT"].row["source_table"]
+        == "files"
+    )
+    assert (
+        relation_rows["/notes/meeting.md\x1fCarol\x1fHAS_PARTICIPANT"].row["target_table"]
+        == "entities"
+    )
     assert relation_rows["/notes/meeting.md\x1falpha\x1fHAS_TAG"].row["target_table"] == "tags"
     assert relation_rows["chunk-meeting-0\x1fBeta\x1fMENTIONS"].row["source_table"] == "sections"
     assert relation_rows["chunk-meeting-0\x1fBeta\x1fMENTIONS"].row["target_table"] == "entities"
@@ -565,7 +573,9 @@ def test_graph_rows_cover_files_sections_entities_tags_and_relations() -> None:
     assert [row.ref for row in manifest.graph.rows] == [row.ref for row in rows]
 
 
-def test_direct_sink_manifest_is_idempotent_on_fresh_rerun_and_touches_only_expected_sections() -> None:
+def test_direct_sink_manifest_is_idempotent_on_fresh_rerun_and_touches_only_expected_sections() -> (
+    None
+):
     write = _write_fixture()
     source_document = write.source_document
     manifest = build_surreal_direct_manifest(

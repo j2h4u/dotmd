@@ -226,6 +226,8 @@ def test_recommendation_blocks_migrate_on_parity_and_scale_failures() -> None:
     assert decision.recommendation == "reject"
     assert decision.failure_category == SurrealDecisionCategory.HYBRID_RRF_GAP
     assert "retrieval parity" in " ".join(decision.reasons).lower()
+
+
 def test_full_pipeline_smoke_requires_all_gates() -> None:
     """Same-corpus smoke must assemble inventory, safety, import, parity, ops, and decision."""
     passing_inputs = SurrealOpsDecisionInputs(

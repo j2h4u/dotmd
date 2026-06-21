@@ -56,3 +56,19 @@ updates:
       github-actions:
         patterns:
           - "*"
+
+  # Backend container base images.
+  - package-ecosystem: "docker"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "Asia/Almaty"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    groups:
+      backend-docker:
+        patterns:
+          - "*"

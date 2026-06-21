@@ -83,7 +83,7 @@ def test_indexing_extra_exclude_is_additive() -> None:
 def test_surreal_runtime_settings_are_the_only_public_graph_runtime_config() -> None:
     settings = Settings(embedding_url="http://localhost:8088")
 
-    assert "".join(("search", "_backend")) not in Settings.model_fields
+    assert "search_backend" not in Settings.model_fields
     assert "falkordb_url" not in Settings.model_fields
     assert "falkordb_graph_name" not in Settings.model_fields
     assert settings.surreal_retrieval_url == config.DEFAULT_SURREAL_URL

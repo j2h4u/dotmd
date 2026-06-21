@@ -762,12 +762,10 @@ class TestSurrealFilesystemLifecycle:
             ).fetchone()[0],
             "chunks_fts": _count(db_path, f"chunks_fts_{strategy}"),
             "vec_meta": _count(db_path, f"vec_meta_{strategy}_{MODEL}"),
-            "source_documents": conn.execute(
-                "SELECT COUNT(*) FROM source_documents"
-            ).fetchone()[0],
-            "resource_bindings": conn.execute(
-                "SELECT COUNT(*) FROM resource_bindings"
-            ).fetchone()[0],
+            "source_documents": conn.execute("SELECT COUNT(*) FROM source_documents").fetchone()[0],
+            "resource_bindings": conn.execute("SELECT COUNT(*) FROM resource_bindings").fetchone()[
+                0
+            ],
             "chunk_source_provenance": conn.execute(
                 f"SELECT COUNT(*) FROM chunk_source_provenance_{strategy}"
             ).fetchone()[0],
@@ -790,13 +788,13 @@ class TestSurrealFilesystemLifecycle:
         assert manifest.documents.rows[0].tombstone.previous_row["document_ref"] == str(
             Path(file_path).resolve()
         )
-        assert [row.change_type.value for row in manifest.resource_bindings.rows] == [
-            "tombstone"
-        ]
+        assert [row.change_type.value for row in manifest.resource_bindings.rows] == ["tombstone"]
         assert manifest.resource_bindings.rows[0].tombstone.previous_row["resource_ref"] == str(
             Path(file_path).resolve()
         )
-        assert [row.tombstone.previous_row["binding_id"] for row in manifest.chunk_file_bindings.rows] == [
+        assert [
+            row.tombstone.previous_row["binding_id"] for row in manifest.chunk_file_bindings.rows
+        ] == [
             f"{orphan_chunk_id}\x1f{file_path}\x1f0",
             f"{shared_chunk_id}\x1f{file_path}\x1f1",
         ]
@@ -821,12 +819,10 @@ class TestSurrealFilesystemLifecycle:
             ).fetchone()[0],
             "chunks_fts": _count(db_path, f"chunks_fts_{strategy}"),
             "vec_meta": _count(db_path, f"vec_meta_{strategy}_{MODEL}"),
-            "source_documents": conn.execute(
-                "SELECT COUNT(*) FROM source_documents"
-            ).fetchone()[0],
-            "resource_bindings": conn.execute(
-                "SELECT COUNT(*) FROM resource_bindings"
-            ).fetchone()[0],
+            "source_documents": conn.execute("SELECT COUNT(*) FROM source_documents").fetchone()[0],
+            "resource_bindings": conn.execute("SELECT COUNT(*) FROM resource_bindings").fetchone()[
+                0
+            ],
             "chunk_source_provenance": conn.execute(
                 f"SELECT COUNT(*) FROM chunk_source_provenance_{strategy}"
             ).fetchone()[0],
@@ -865,9 +861,7 @@ class TestSurrealFilesystemLifecycle:
         assert len(captured_manifests) == 1
         manifest = captured_manifests[0]
         assert [row.change_type.value for row in manifest.documents.rows] == ["tombstone"]
-        assert [row.change_type.value for row in manifest.resource_bindings.rows] == [
-            "tombstone"
-        ]
+        assert [row.change_type.value for row in manifest.resource_bindings.rows] == ["tombstone"]
         assert manifest.chunks.rows == []
         assert manifest.chunk_file_bindings.rows == []
         assert manifest.provenance.rows == []

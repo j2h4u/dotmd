@@ -362,10 +362,11 @@ def test_surreal_backend_builds_direct_writer_and_routes_delta_sync(
 
     def fake_run_surreal_delta_sync(manifest, writer, state):
         run_calls.append((manifest, writer, state))
-        return None
 
     monkeypatch.setattr("dotmd.storage.surreal.SurrealConnection", FakeSurrealConnection)
-    monkeypatch.setattr("dotmd.storage.surreal_schema.define_dotmd_surreal_schema", fake_define_schema)
+    monkeypatch.setattr(
+        "dotmd.storage.surreal_schema.define_dotmd_surreal_schema", fake_define_schema
+    )
     monkeypatch.setattr(
         "dotmd.ingestion.surreal_delta_sync.SurrealDeltaStoreWriter",
         FakeSurrealWriter,
@@ -381,10 +382,7 @@ def test_surreal_backend_builds_direct_writer_and_routes_delta_sync(
     assert schema_calls == [pipeline._surreal_direct_writer.connection]
     assert pipeline._surreal_direct_writer.connection.config.url == "http://surrealdb:8000"
     assert pipeline._surreal_direct_writer.connection.config.namespace == "dotmd"
-    assert (
-        pipeline._surreal_direct_writer.connection.config.database
-        == "phase46_direct_ingest"
-    )
+    assert pipeline._surreal_direct_writer.connection.config.database == "phase46_direct_ingest"
     assert pipeline._surreal_direct_writer.connection.config.username == "root"
     assert pipeline._surreal_direct_writer.connection.config.password == "root"
 
@@ -492,9 +490,7 @@ def test_surreal_backend_builds_direct_writer_and_routes_delta_sync(
     ]
 
 
-def test_default_sqlite_settings_do_not_create_surreal_writer(
-    pipeline_settings, monkeypatch
-):
+def test_default_sqlite_settings_do_not_create_surreal_writer(pipeline_settings, monkeypatch):
     from dotmd.ingestion import pipeline as pipeline_module
     from dotmd.ingestion.pipeline import IndexingPipeline
 

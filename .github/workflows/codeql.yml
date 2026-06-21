@@ -5,9 +5,9 @@ name: CodeQL
 
 on:
   push:
-    branches: [main]
+    branches: [main, milestone/v1.8-standalone-surrealdb-cutover]
   pull_request:
-    branches: [main]
+    branches: [main, milestone/v1.8-standalone-surrealdb-cutover]
   schedule:
     - cron: "27 7 * * 1"
 

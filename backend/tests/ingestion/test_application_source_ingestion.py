@@ -205,9 +205,15 @@ def test_application_source_emits_surreal_manifest_on_surreal_backend(
         "meta",
         "meta",
     ]
-    assert {row.row["chunk_id"] for row in manifest.vector_components.rows if row.row["component"] == "text"} == chunk_ids
     assert {
-        row.row["chunk_id"] for row in manifest.vector_components.rows if row.row["component"] == "meta"
+        row.row["chunk_id"]
+        for row in manifest.vector_components.rows
+        if row.row["component"] == "text"
+    } == chunk_ids
+    assert {
+        row.row["chunk_id"]
+        for row in manifest.vector_components.rows
+        if row.row["component"] == "meta"
     } == {"fixture:doc:a", "fixture:doc:b"}
 
 

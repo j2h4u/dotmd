@@ -327,13 +327,13 @@ class TestOrphanSweepSurreal:
             "chunk_file_paths": conn.execute(
                 f"SELECT COUNT(*) FROM chunk_file_paths_{strategy}"
             ).fetchone()[0],
-            "vec_meta": conn.execute(f"SELECT COUNT(*) FROM vec_meta_{strategy}_{MODEL}").fetchone()[0],
-            "source_documents": conn.execute(
-                "SELECT COUNT(*) FROM source_documents"
+            "vec_meta": conn.execute(
+                f"SELECT COUNT(*) FROM vec_meta_{strategy}_{MODEL}"
             ).fetchone()[0],
-            "resource_bindings": conn.execute(
-                "SELECT COUNT(*) FROM resource_bindings"
-            ).fetchone()[0],
+            "source_documents": conn.execute("SELECT COUNT(*) FROM source_documents").fetchone()[0],
+            "resource_bindings": conn.execute("SELECT COUNT(*) FROM resource_bindings").fetchone()[
+                0
+            ],
         }
         conn.close()
 
@@ -352,9 +352,7 @@ class TestOrphanSweepSurreal:
         assert len(captured_manifests) == 1
         manifest = captured_manifests[0]
         assert [row.change_type.value for row in manifest.documents.rows] == ["tombstone"]
-        assert [row.change_type.value for row in manifest.resource_bindings.rows] == [
-            "tombstone"
-        ]
+        assert [row.change_type.value for row in manifest.resource_bindings.rows] == ["tombstone"]
         assert manifest.chunks.rows == []
         assert manifest.chunk_file_bindings.rows == []
         assert manifest.provenance.rows == []
@@ -366,13 +364,13 @@ class TestOrphanSweepSurreal:
             "chunk_file_paths": conn.execute(
                 f"SELECT COUNT(*) FROM chunk_file_paths_{strategy}"
             ).fetchone()[0],
-            "vec_meta": conn.execute(f"SELECT COUNT(*) FROM vec_meta_{strategy}_{MODEL}").fetchone()[0],
-            "source_documents": conn.execute(
-                "SELECT COUNT(*) FROM source_documents"
+            "vec_meta": conn.execute(
+                f"SELECT COUNT(*) FROM vec_meta_{strategy}_{MODEL}"
             ).fetchone()[0],
-            "resource_bindings": conn.execute(
-                "SELECT COUNT(*) FROM resource_bindings"
-            ).fetchone()[0],
+            "source_documents": conn.execute("SELECT COUNT(*) FROM source_documents").fetchone()[0],
+            "resource_bindings": conn.execute("SELECT COUNT(*) FROM resource_bindings").fetchone()[
+                0
+            ],
         }
         conn.close()
         assert counts_after == counts_before

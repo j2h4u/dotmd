@@ -252,7 +252,9 @@ def test_row_manifest_builder_filters_to_changed_refs_and_emits_tombstones() -> 
         row for row in manifest.documents.rows if row.change_type is SurrealDeltaChangeType.UPSERT
     ]
     tombstone_rows = [
-        row for row in manifest.documents.rows if row.change_type is SurrealDeltaChangeType.TOMBSTONE
+        row
+        for row in manifest.documents.rows
+        if row.change_type is SurrealDeltaChangeType.TOMBSTONE
     ]
 
     assert manifest.graph.deferred is True
@@ -270,14 +272,21 @@ def test_row_manifest_builder_filters_to_changed_refs_and_emits_tombstones() -> 
     assert [row.row["document_ref"] for row in manifest.source_units.rows] == ["/notes/changed.md"]
     assert [row.row["document_ref"] for row in manifest.chunks.rows] == ["/notes/changed.md"]
     assert [row.row["chunk_id"] for row in manifest.chunk_file_bindings.rows] == ["chunk-changed"]
-    assert [row.row["file_path"] for row in manifest.chunk_file_bindings.rows] == ["/notes/changed.md"]
+    assert [row.row["file_path"] for row in manifest.chunk_file_bindings.rows] == [
+        "/notes/changed.md"
+    ]
     assert [row.row["document_ref"] for row in manifest.provenance.rows] == ["/notes/changed.md"]
-    assert [row.row["document_ref"] for row in manifest.resource_bindings.rows] == ["/notes/changed.md"]
+    assert [row.row["document_ref"] for row in manifest.resource_bindings.rows] == [
+        "/notes/changed.md"
+    ]
     assert [row.row["document_ref"] for row in manifest.fingerprints.rows] == ["/notes/changed.md"]
     assert [row.row["chunk_id"] for row in manifest.embeddings.rows] == ["chunk-changed"]
     assert [row.row["chunk_id"] for row in manifest.vector_components.rows] == ["chunk-changed"]
     assert all("/notes/other.md" not in row.ref for row in manifest.documents.rows)
-    assert all("/notes/other.md" not in row.row.get("document_ref", "") for row in manifest.source_units.rows)
+    assert all(
+        "/notes/other.md" not in row.row.get("document_ref", "")
+        for row in manifest.source_units.rows
+    )
 
 
 def test_row_manifest_builder_rejects_noop_after_filtering() -> None:
@@ -656,9 +665,15 @@ def test_incremental_sync_resume_skips_completed_phases_after_forced_failure() -
     resumed = run_surreal_delta_sync(manifest, writer, state=state, batch_size=1)
 
     assert resumed.progress.checkpoint_applied is True
-    assert writer.active_sections["documents"]["filesystem:/notes/changed.md"]["row"]["title"] == "Changed note"
+    assert (
+        writer.active_sections["documents"]["filesystem:/notes/changed.md"]["row"]["title"]
+        == "Changed note"
+    )
     assert writer.active_sections["chunks"]["chunk-1"]["row"]["chunk_id"] == "chunk-1"
-    assert writer.active_sections["feedback"]["filesystem:/notes/feedback.md#1"]["row"]["status"] == "open"
+    assert (
+        writer.active_sections["feedback"]["filesystem:/notes/feedback.md#1"]["row"]["status"]
+        == "open"
+    )
     assert state.completed_phases[-1] == "checkpoint_candidate"
 
 
@@ -755,16 +770,16 @@ class _FakeSurrealConnection:
     def delete_all_from_table(self, table_name: str) -> int:
         raise AssertionError(f"bulk delete is not allowed for {table_name}")
 
-    def insert_rows(self, table_name: str, rows: list[dict[str, object]], *, batch_size: int = 1000) -> object:
+    def insert_rows(
+        self, table_name: str, rows: list[dict[str, object]], *, batch_size: int = 1000
+    ) -> object:
         raise AssertionError(f"bulk insert is not allowed for {table_name}")
 
 
 def test_surreal_delta_store_writer_uses_point_ops_and_is_idempotent() -> None:
     manifest = _sync_manifest(graph_deferred=True)
     connection = _FakeSurrealConnection()
-    connection.tables["unrelated"] = {
-        "unrelated:keep": {"id": "unrelated:keep", "marker": "keep"}
-    }
+    connection.tables["unrelated"] = {"unrelated:keep": {"id": "unrelated:keep", "marker": "keep"}}
     writer = SurrealDeltaStoreWriter(connection=connection)
 
     first_state = SurrealDeltaSyncState()
@@ -775,7 +790,9 @@ def test_surreal_delta_store_writer_uses_point_ops_and_is_idempotent() -> None:
     }
 
     assert first.progress.checkpoint_applied is True
-    assert connection.tables["unrelated"] == {"unrelated:keep": {"id": "unrelated:keep", "marker": "keep"}}
+    assert connection.tables["unrelated"] == {
+        "unrelated:keep": {"id": "unrelated:keep", "marker": "keep"}
+    }
     assert all(call[0] != "delete_all" for call in connection.calls)
     assert all(call[0] != "insert_rows" for call in connection.calls)
 
@@ -797,7 +814,9 @@ def test_surreal_delta_store_writer_uses_point_ops_and_is_idempotent() -> None:
         "checkpoint_candidate": 0,
     }
     assert connection.tables == first_snapshot
-    assert connection.tables["unrelated"] == {"unrelated:keep": {"id": "unrelated:keep", "marker": "keep"}}
+    assert connection.tables["unrelated"] == {
+        "unrelated:keep": {"id": "unrelated:keep", "marker": "keep"}
+    }
 
 
 def test_surreal_delta_store_writer_normalizes_source_document_tombstone_alias() -> None:
@@ -874,7 +893,9 @@ def test_surreal_delta_store_writer_deletes_chunk_tombstone_by_previous_row_chun
     assert sibling_record_id in connection.tables["chunks"]
 
 
-def test_surreal_delta_store_writer_deletes_embedding_tombstone_by_previous_row_stable_key() -> None:
+def test_surreal_delta_store_writer_deletes_embedding_tombstone_by_previous_row_stable_key() -> (
+    None
+):
     connection = _FakeSurrealConnection()
     writer = SurrealDeltaStoreWriter(connection=connection)
 
@@ -1115,7 +1136,9 @@ def test_surreal_delta_store_writer_writes_graph_rows_and_is_idempotent() -> Non
     ]
 
 
-def test_surreal_delta_store_writer_removes_stale_frontmatter_relations_and_keeps_other_edges() -> None:
+def test_surreal_delta_store_writer_removes_stale_frontmatter_relations_and_keeps_other_edges() -> (
+    None
+):
     connection = _FakeSurrealConnection()
     writer = SurrealDeltaStoreWriter(connection=connection)
 

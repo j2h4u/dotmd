@@ -254,7 +254,7 @@ def _worker_main(args: argparse.Namespace) -> int:
                 result["info"] = connection.query_raw(f"INFO FOR TABLE {table_name};")
             else:
                 connection.query(worker_input["statement"])
-    except BaseException as exc:
+    except Exception as exc:  # noqa: BLE001 - worker results must capture arbitrary failures.
         result.update(
             {
                 "status": "failed",
@@ -484,9 +484,9 @@ def _run_info_with_heartbeat(
             process.kill()
             _stdout, stderr = process.communicate(timeout=5)
             result = {
-            "operation": label,
-            "table_name": table_name,
-            "status": "timed_out_uncertain",
+                "operation": label,
+                "table_name": table_name,
+                "status": "timed_out_uncertain",
                 "elapsed_seconds": round(elapsed, 3),
                 "timeout_seconds": timeout_seconds,
                 "stderr": stderr[-2000:],
@@ -673,7 +673,9 @@ def run_index_build(args: argparse.Namespace) -> int:
             "info_after_results": info_after_results,
         },
     )
-    print(f"index-build status={final_status} present={len(present_indexes)}/{len(expected_indexes)}")
+    print(
+        f"index-build status={final_status} present={len(present_indexes)}/{len(expected_indexes)}"
+    )
     return 0 if final_status == "verified" else 1
 
 

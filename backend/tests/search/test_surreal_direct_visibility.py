@@ -69,9 +69,7 @@ def _index_direct_surreal_fixture(tmp_path: Path) -> tuple[Settings, Path, int, 
     with sqlite3.connect(settings.index_db_path) as conn:
         table_names = {
             row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
         assert f"vec_chunks_{pipeline._strategy}{pipeline._model_suffix}" not in table_names
         assert f"chunks_fts_{pipeline._strategy}" not in table_names

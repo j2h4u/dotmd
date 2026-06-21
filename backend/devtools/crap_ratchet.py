@@ -155,7 +155,9 @@ def _qualname_from_block(
 
 def _load_coverage_report(path: Path) -> _CoverageReport:
     raw_report = cast(dict[str, object], json.loads(path.read_text(encoding="utf-8")))
-    files = _expect_dict(raw_report.get("files"), "coverage report does not contain an object at 'files'")
+    files = _expect_dict(
+        raw_report.get("files"), "coverage report does not contain an object at 'files'"
+    )
     return cast(_CoverageReport, {"files": files})
 
 
@@ -167,7 +169,9 @@ def _load_baseline(path: Path) -> dict[str, _BaselineFunctionEntry]:
     return cast(dict[str, _BaselineFunctionEntry], entries)
 
 
-def _save_baseline(path: Path, source_root: Path, threshold: float, metrics: list[FunctionMetric]) -> None:
+def _save_baseline(
+    path: Path, source_root: Path, threshold: float, metrics: list[FunctionMetric]
+) -> None:
     payload = {
         "version": 1,
         "source_root": source_root.as_posix(),

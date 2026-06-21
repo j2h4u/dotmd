@@ -392,9 +392,7 @@ def build_surreal_native_retrieval_index_plan(
         hnsw_m=hnsw_m,
         hnsw_ef=hnsw_ef,
         vector_index_type=normalized_vector_index_type,
-        analyzer_statement=(
-            "DEFINE ANALYZER dotmd_fts TOKENIZERS CLASS,PUNCT FILTERS LOWERCASE"
-        ),
+        analyzer_statement=("DEFINE ANALYZER dotmd_fts TOKENIZERS CLASS,PUNCT FILTERS LOWERCASE"),
         bm25_index_statements=(
             f"DEFINE INDEX chunks_title_fts ON chunks FIELDS title FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75){fulltext_suffix}",
             f"DEFINE INDEX chunks_text_fts ON chunks FIELDS text FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75){fulltext_suffix}",

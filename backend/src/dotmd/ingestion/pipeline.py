@@ -113,7 +113,9 @@ def _write_pipeline_init_progress(step: str, status: str, error: str | None = No
     }
     path = Path(progress_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 @_dataclass
@@ -599,9 +601,7 @@ class IndexingPipeline:
         # Direct Surreal writer for standalone filesystem ingest.
         # Enabled when the Surreal direct ingest path is configured.
         self._surreal_direct_writer: Any | None = (
-            _create_surreal_direct_writer(settings)
-            if self._uses_surreal_direct_ingest
-            else None
+            _create_surreal_direct_writer(settings) if self._uses_surreal_direct_ingest else None
         )
         self._surreal_direct_sync_state = SurrealDeltaSyncState()
 
@@ -1100,8 +1100,7 @@ class IndexingPipeline:
     def _raise_if_surreal_local_destructive(self, action: str) -> None:
         if self._surreal_direct_writer is not None:
             raise RuntimeError(
-                f"{action} is disabled in Surreal mode because it mutates "
-                "local index state"
+                f"{action} is disabled in Surreal mode because it mutates local index state"
             )
 
     def _application_chunk_for_unit(
@@ -2841,7 +2840,9 @@ class IndexingPipeline:
                     if len(self._metadata_store.get_file_paths_by_chunk_id(strategy, chunk_id)) <= 1
                 ]
                 provenance_by_chunk_id = (
-                    self._metadata_store.get_chunk_provenance_for_chunk_ids(strategy, orphan_chunk_ids)
+                    self._metadata_store.get_chunk_provenance_for_chunk_ids(
+                        strategy, orphan_chunk_ids
+                    )
                     if orphan_chunk_ids
                     else {}
                 )
@@ -2869,8 +2870,14 @@ class IndexingPipeline:
 
                 for chunk_id in orphan_chunk_ids:
                     provenance = provenance_by_chunk_id.get(chunk_id)
-                    parser_name = provenance.parser_name if provenance is not None else (
-                        source_document.parser_name if source_document is not None else "markdown"
+                    parser_name = (
+                        provenance.parser_name
+                        if provenance is not None
+                        else (
+                            source_document.parser_name
+                            if source_document is not None
+                            else "markdown"
+                        )
                     )
                     chunk_strategy = (
                         provenance.chunk_strategy if provenance is not None else strategy

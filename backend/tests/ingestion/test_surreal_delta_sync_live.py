@@ -356,13 +356,19 @@ def test_surreal_delta_store_writer_smoke_embedded_local_updates_and_deletes_in_
         assert first_snapshot["documents"][seed_ids["document"]]["title"] == "Updated title"
         assert first_snapshot["chunks"][seed_ids["chunk"]]["text"] == "Updated body"
         assert first_snapshot["bindings"][seed_ids["binding"]]["active"] is True
-        assert first_snapshot["bindings"][seed_ids["binding"]]["content_fingerprint"] == "content-updated"
+        assert (
+            first_snapshot["bindings"][seed_ids["binding"]]["content_fingerprint"]
+            == "content-updated"
+        )
         assert first_snapshot["embeddings"][seed_ids["embedding"]]["vector"] == [0.9, 0.8]
         assert first_snapshot["embeddings"][seed_ids["embedding"]]["text_hash"] == "hash-updated"
         assert first_snapshot["documents"][unrelated_ids["document"]]["title"] == "Unrelated title"
         assert first_snapshot["chunks"][unrelated_ids["chunk"]]["text"] == "Unrelated body"
         assert first_snapshot["embeddings"][unrelated_ids["embedding"]]["vector"] == [0.3, 0.4]
-        assert "last_success_at" in first_snapshot["checkpoints"][str(codec.encode("checkpoints", "phase46_delta"))]
+        assert (
+            "last_success_at"
+            in first_snapshot["checkpoints"][str(codec.encode("checkpoints", "phase46_delta"))]
+        )
 
         second = run_surreal_delta_sync(manifest, writer, state=state, batch_size=2)
         second_snapshot = {
@@ -389,9 +395,14 @@ def test_surreal_delta_store_writer_smoke_embedded_local_updates_and_deletes_in_
     assert second.applied_counts.get("resource_bindings", 0) == 0
     assert second.applied_counts.get("embeddings", 0) == 0
     assert second.applied_counts.get("checkpoint_candidate", 0) == 0
-    assert {"tombstones", "documents", "chunks", "resource_bindings", "embeddings", "checkpoint_candidate"}.issubset(
-        set(second.skipped_phases)
-    )
+    assert {
+        "tombstones",
+        "documents",
+        "chunks",
+        "resource_bindings",
+        "embeddings",
+        "checkpoint_candidate",
+    }.issubset(set(second.skipped_phases))
     assert second_snapshot == first_snapshot
 
     assert set(fresh_snapshot["documents"]) == set(first_snapshot["documents"])
@@ -399,13 +410,33 @@ def test_surreal_delta_store_writer_smoke_embedded_local_updates_and_deletes_in_
     assert set(fresh_snapshot["bindings"]) == set(first_snapshot["bindings"])
     assert set(fresh_snapshot["embeddings"]) == set(first_snapshot["embeddings"])
     assert set(fresh_snapshot["checkpoints"]) == set(first_snapshot["checkpoints"])
-    assert fresh_snapshot["documents"][seed_ids["document"]] == first_snapshot["documents"][seed_ids["document"]]
-    assert fresh_snapshot["chunks"][seed_ids["chunk"]] == first_snapshot["chunks"][seed_ids["chunk"]]
-    assert fresh_snapshot["bindings"][seed_ids["binding"]] == first_snapshot["bindings"][seed_ids["binding"]]
-    assert fresh_snapshot["embeddings"][seed_ids["embedding"]] == first_snapshot["embeddings"][seed_ids["embedding"]]
-    assert fresh_snapshot["documents"][unrelated_ids["document"]] == first_snapshot["documents"][unrelated_ids["document"]]
-    assert fresh_snapshot["chunks"][unrelated_ids["chunk"]] == first_snapshot["chunks"][unrelated_ids["chunk"]]
-    assert fresh_snapshot["embeddings"][unrelated_ids["embedding"]] == first_snapshot["embeddings"][unrelated_ids["embedding"]]
+    assert (
+        fresh_snapshot["documents"][seed_ids["document"]]
+        == first_snapshot["documents"][seed_ids["document"]]
+    )
+    assert (
+        fresh_snapshot["chunks"][seed_ids["chunk"]] == first_snapshot["chunks"][seed_ids["chunk"]]
+    )
+    assert (
+        fresh_snapshot["bindings"][seed_ids["binding"]]
+        == first_snapshot["bindings"][seed_ids["binding"]]
+    )
+    assert (
+        fresh_snapshot["embeddings"][seed_ids["embedding"]]
+        == first_snapshot["embeddings"][seed_ids["embedding"]]
+    )
+    assert (
+        fresh_snapshot["documents"][unrelated_ids["document"]]
+        == first_snapshot["documents"][unrelated_ids["document"]]
+    )
+    assert (
+        fresh_snapshot["chunks"][unrelated_ids["chunk"]]
+        == first_snapshot["chunks"][unrelated_ids["chunk"]]
+    )
+    assert (
+        fresh_snapshot["embeddings"][unrelated_ids["embedding"]]
+        == first_snapshot["embeddings"][unrelated_ids["embedding"]]
+    )
 
 
 def test_surreal_delta_store_writer_smoke_changed_file_from_old_stack_fixture(
@@ -437,20 +468,36 @@ def test_surreal_delta_store_writer_smoke_changed_file_from_old_stack_fixture(
     doc_two_chunk_id = "chunk:plain"
     doc_two_embedding_key = f"contextual_512_50\x1fmultilingual_e5_large\x1f{doc_two_chunk_id}"
 
-    assert [row.row["document_ref"] for row in manifest.documents.rows] == [fixture_ids["file_path"]]
-    assert all(row.row["document_ref"] == fixture_ids["file_path"] for row in manifest.source_units.rows)
+    assert [row.row["document_ref"] for row in manifest.documents.rows] == [
+        fixture_ids["file_path"]
+    ]
+    assert all(
+        row.row["document_ref"] == fixture_ids["file_path"] for row in manifest.source_units.rows
+    )
     assert all(row.row["document_ref"] == fixture_ids["file_path"] for row in manifest.chunks.rows)
-    assert all(row.row["file_path"] == fixture_ids["file_path"] for row in manifest.chunk_file_bindings.rows)
-    assert all(row.row["document_ref"] == fixture_ids["file_path"] for row in manifest.provenance.rows)
-    assert all(row.row["document_ref"] == fixture_ids["file_path"] for row in manifest.resource_bindings.rows)
-    assert all(row.row["document_ref"] == fixture_ids["file_path"] for row in manifest.fingerprints.rows)
+    assert all(
+        row.row["file_path"] == fixture_ids["file_path"]
+        for row in manifest.chunk_file_bindings.rows
+    )
+    assert all(
+        row.row["document_ref"] == fixture_ids["file_path"] for row in manifest.provenance.rows
+    )
+    assert all(
+        row.row["document_ref"] == fixture_ids["file_path"]
+        for row in manifest.resource_bindings.rows
+    )
+    assert all(
+        row.row["document_ref"] == fixture_ids["file_path"] for row in manifest.fingerprints.rows
+    )
     assert all(row.row["chunk_id"] == weird_chunk_id for row in manifest.embeddings.rows)
     assert manifest.graph.deferred is True
     assert manifest.feedback.deferred is True
     assert doc_two_ref not in {row.row.get("document_ref") for row in manifest.documents.rows}
     assert doc_two_ref not in {row.row.get("document_ref") for row in manifest.source_units.rows}
     assert doc_two_ref not in {row.row.get("document_ref") for row in manifest.chunks.rows}
-    assert doc_two_ref not in {row.row.get("document_ref") for row in manifest.resource_bindings.rows}
+    assert doc_two_ref not in {
+        row.row.get("document_ref") for row in manifest.resource_bindings.rows
+    }
 
     with SurrealConnection(
         SurrealStoreConfig(
@@ -630,11 +677,22 @@ def test_surreal_delta_store_writer_smoke_changed_file_from_old_stack_fixture(
         assert first_snapshot["documents"][changed_bootstrap_ids["document"]]["title"] == "Doc One"
         assert first_snapshot["chunks"][changed_bootstrap_ids["chunk"]]["text"] == "Alpha body"
         assert first_snapshot["bindings"][changed_bootstrap_ids["binding"]]["active"] is True
-        assert first_snapshot["embeddings"][changed_bootstrap_ids["embedding"]]["text_hash"] == "hash-alpha"
-        assert first_snapshot["documents"][unrelated_ids["document"]]["title"] == "Doc Two bootstrap"
+        assert (
+            first_snapshot["embeddings"][changed_bootstrap_ids["embedding"]]["text_hash"]
+            == "hash-alpha"
+        )
+        assert (
+            first_snapshot["documents"][unrelated_ids["document"]]["title"] == "Doc Two bootstrap"
+        )
         assert first_snapshot["chunks"][unrelated_ids["chunk"]]["text"] == "Bootstrap body"
-        assert first_snapshot["bindings"][unrelated_ids["binding"]]["content_fingerprint"] == "content-unrelated"
-        assert first_snapshot["embeddings"][unrelated_ids["embedding"]]["text_hash"] == "hash-unrelated"
+        assert (
+            first_snapshot["bindings"][unrelated_ids["binding"]]["content_fingerprint"]
+            == "content-unrelated"
+        )
+        assert (
+            first_snapshot["embeddings"][unrelated_ids["embedding"]]["text_hash"]
+            == "hash-unrelated"
+        )
         assert first_snapshot["feedback"] == {}
         assert first_snapshot["relations"] == {}
         assert first_snapshot["checkpoints"]
@@ -825,20 +883,30 @@ def test_surreal_delta_store_writer_smoke_graph_relations_use_native_inserts(
             writer.codec.encode("relations", f"{file_path}\x1f{fresh_tag_name}\x1fHAS_TAG")
         )
         stale_participant_id = str(
-            writer.codec.encode("relations", f"{file_path}\x1f{stale_participant_name}\x1fHAS_PARTICIPANT")
+            writer.codec.encode(
+                "relations", f"{file_path}\x1f{stale_participant_name}\x1fHAS_PARTICIPANT"
+            )
         )
-        stale_tag_id = str(writer.codec.encode("relations", f"{file_path}\x1f{stale_tag_name}\x1fHAS_TAG"))
+        stale_tag_id = str(
+            writer.codec.encode("relations", f"{file_path}\x1f{stale_tag_name}\x1fHAS_TAG")
+        )
 
         assert first.applied_counts["graph"] == 5
         assert fresh_relation_id in first_snapshot["relations"]
         assert stale_participant_id not in first_snapshot["relations"]
         assert stale_tag_id not in first_snapshot["relations"]
         assert first_snapshot["relations"][fresh_relation_id]["relation_type"] == "HAS_TAG"
-        assert first_snapshot["relations"][fresh_relation_id]["in"] == writer.codec.encode("files", file_path)
-        assert first_snapshot["relations"][fresh_relation_id]["out"] == writer.codec.encode("tags", fresh_tag_name)
+        assert first_snapshot["relations"][fresh_relation_id]["in"] == writer.codec.encode(
+            "files", file_path
+        )
+        assert first_snapshot["relations"][fresh_relation_id]["out"] == writer.codec.encode(
+            "tags", fresh_tag_name
+        )
         assert first_snapshot["relations"][fresh_relation_id]["source_id"] == file_path
         assert first_snapshot["relations"][fresh_relation_id]["target_id"] == fresh_tag_name
-        assert first_snapshot["relations"][fresh_relation_id]["properties"] == {"source": "frontmatter"}
+        assert first_snapshot["relations"][fresh_relation_id]["properties"] == {
+            "source": "frontmatter"
+        }
 
         second_state = SurrealDeltaSyncState()
         second = run_surreal_delta_sync(manifest, writer, state=second_state, batch_size=2)

@@ -344,7 +344,11 @@ def test_snapshot_loaders_read_transform_only_rows(tmp_path: Path) -> None:
     assert sqlite_rows["documents"][0]["document_ref"] == fixture_ids["file_path"]
     assert sqlite_rows["chunks"][0]["chunk_id"] == fixture_ids["chunk_id"]
     assert sqlite_rows["embeddings"][0]["chunk_id"] == fixture_ids["chunk_id"]
-    assert sqlite_rows["embeddings"][0]["vector"] == [0.10999999940395355, 0.2199999988079071, 0.33000001311302185]
+    assert sqlite_rows["embeddings"][0]["vector"] == [
+        0.10999999940395355,
+        0.2199999988079071,
+        0.33000001311302185,
+    ]
     assert len(sqlite_rows["vector_components"]) == 2
     assert sqlite_rows["expected_vector_dimension"] == 3
     assert sqlite_rows["embedding_model"] == "multilingual-e5-large"

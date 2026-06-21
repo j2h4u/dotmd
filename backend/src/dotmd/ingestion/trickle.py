@@ -172,9 +172,7 @@ class TrickleIndexer:
         return pipeline
 
     def _maintains_local_search_artifacts(self) -> bool:
-        return bool(
-            getattr(self._pipeline_instance, "_maintains_local_search_artifacts", True)
-        )
+        return bool(getattr(self._pipeline_instance, "_maintains_local_search_artifacts", True))
 
     @property
     def state(self) -> TrickleState:

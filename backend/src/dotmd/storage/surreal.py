@@ -228,7 +228,9 @@ class SurrealConnection:
         result = []
         for offset in range(0, len(rows), batch_size):
             batch = rows[offset : offset + batch_size]
-            result.append(self._db.query(f"INSERT RELATION INTO {table_name} $rows;", {"rows": batch}))
+            result.append(
+                self._db.query(f"INSERT RELATION INTO {table_name} $rows;", {"rows": batch})
+            )
         return result
 
     def delete(self, record: RecordID | str) -> Any:

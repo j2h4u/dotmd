@@ -32,8 +32,7 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def _shard_index(row: dict[str, Any], shard_count: int) -> int:
     raw = "\x1f".join(
-        str(row.get(key, ""))
-        for key in ("chunk_strategy", "embedding_model", "chunk_id")
+        str(row.get(key, "")) for key in ("chunk_strategy", "embedding_model", "chunk_id")
     )
     digest = hashlib.blake2b(raw.encode("utf-8"), digest_size=8).digest()
     return int.from_bytes(digest, "big") % shard_count

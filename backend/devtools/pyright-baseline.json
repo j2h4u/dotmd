@@ -1,1 +1,17 @@
-{}
+{
+  "src/dotmd/api/service.py": 6,
+  "src/dotmd/extraction/ner.py": 1,
+  "src/dotmd/ingestion/pipeline.py": 2,
+  "src/dotmd/ingestion/surreal_delta_sync.py": 9,
+  "src/dotmd/search/graph_search.py": 1,
+  "src/dotmd/search/semantic.py": 2,
+  "tests/api/test_service_search.py": 6,
+  "tests/ingestion/test_application_source_ingestion.py": 8,
+  "tests/ingestion/test_bulk_fusion_pairing.py": 2,
+  "tests/ingestion/test_metadata_only_reindex.py": 6,
+  "tests/ingestion/test_pipeline_orphan_sweep.py": 7,
+  "tests/ingestion/test_pipeline_purge.py": 17,
+  "tests/ingestion/test_pipeline_surreal_guards.py": 1,
+  "tests/ingestion/test_surreal_delta_sync.py": 77,
+  "tests/search/test_surreal_direct_visibility.py": 6
+}

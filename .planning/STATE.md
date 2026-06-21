@@ -53,6 +53,16 @@ Items acknowledged and deferred at v1.7 milestone close:
 | seed | SEED-001-safe-migration-architecture | dormant |
 | seed | SEED-002-promote-content-addressed-bindings-before-telegram | dormant |
 
+## Cutover Retention
+
+- Keep `/srv/dotmd-cutover-backups/20260620T001203+0500-production-refresh-capture/`
+  as the single large SQLite/Falkor rollback snapshot for the SurrealDB cutover
+  until Phase 47 closeout confirms stable Surreal-only runtime. It contains the
+  final `index.snapshot.db` plus graph/feedback/migration evidence. Delete it
+  after the cutover is accepted as irreversible; the other two
+  `/srv/dotmd-cutover-backups/20260619*` directories are tiny compose/env
+  safety captures, not production data snapshots.
+
 ## Performance Metrics
 
 **Velocity:**

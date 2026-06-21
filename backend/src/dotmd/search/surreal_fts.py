@@ -27,8 +27,7 @@ def _sanitize_keyword_query(query: str) -> str:
     normalized = unicodedata.normalize("NFKC", query)
     normalized = _CONTROL_RE.sub(" ", normalized)
     normalized = _QUERY_CLEAN_RE.sub(" ", normalized)
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-    return normalized
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 @dataclass(frozen=True, slots=True)

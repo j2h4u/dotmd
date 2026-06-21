@@ -393,9 +393,7 @@ class Settings(BaseSettings):
         if not self.surreal_retrieval_database:
             errors.append("surreal_retrieval_database must be set for runtime startup")
         if self.surreal_retrieval_embedding_dimension is None:
-            errors.append(
-                "surreal_retrieval_embedding_dimension must be set for runtime startup"
-            )
+            errors.append("surreal_retrieval_embedding_dimension must be set for runtime startup")
         has_username = bool(self.surreal_retrieval_username)
         has_password = bool(self.surreal_retrieval_password)
         if has_username != has_password:

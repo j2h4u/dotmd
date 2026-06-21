@@ -319,10 +319,14 @@ def load_sqlite_rows_for_surreal(
                 chunk_rows[str(row["chunk_id"])] = payload
             provenance_table = f"chunk_source_provenance_{strategy}"
             if provenance_table in known_tables:
-                provenance_rows.extend(dict(row) for row in _fetch_all(conn, provenance_table, known_tables))
+                provenance_rows.extend(
+                    dict(row) for row in _fetch_all(conn, provenance_table, known_tables)
+                )
             file_paths_table = f"chunk_file_paths_{strategy}"
             if file_paths_table in known_tables:
-                file_path_rows.extend(dict(row) for row in _fetch_all(conn, file_paths_table, known_tables))
+                file_path_rows.extend(
+                    dict(row) for row in _fetch_all(conn, file_paths_table, known_tables)
+                )
             chunk_fingerprint_table = f"chunk_fingerprints_{strategy}"
             if chunk_fingerprint_table in known_tables:
                 chunk_fingerprint_rows.extend(

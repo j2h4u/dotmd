@@ -107,7 +107,9 @@ def test_surreal_fts_search_can_emit_explain_queries() -> None:
     connection = FakeSurrealConnection(expected_query="Alpha", expected_limit=2)
     engine = SurrealFTSSearchEngine(
         connection,
-        search_config=SurrealFTSConfig(query_timeout_seconds=120, max_query_timeout_seconds=7, explain=True),
+        search_config=SurrealFTSConfig(
+            query_timeout_seconds=120, max_query_timeout_seconds=7, explain=True
+        ),
     )
 
     assert engine.search("Alpha", top_k=2) == [
@@ -116,5 +118,9 @@ def test_surreal_fts_search_can_emit_explain_queries() -> None:
     ]
     assert len(connection.query_calls) == 1
     assert len(connection.query_raw_calls) == 1
-    assert connection.query_calls[0][0].startswith("EXPLAIN FULL SELECT chunk_id, search::score(0) AS score ")
-    assert connection.query_raw_calls[0][0].startswith("SELECT chunk_id, search::score(0) AS score ")
+    assert connection.query_calls[0][0].startswith(
+        "EXPLAIN FULL SELECT chunk_id, search::score(0) AS score "
+    )
+    assert connection.query_raw_calls[0][0].startswith(
+        "SELECT chunk_id, search::score(0) AS score "
+    )

@@ -1,33 +1,118 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
+backend := "backend"
+
+# Show available repo commands.
 default:
     @just --list
 
-# Human CRAP report over the full backend suite.
-crap:
-    cd backend && uv run pytest tests --ignore=tests/e2e --cov=src/dotmd --cov-report=term-missing --crap --crap-threshold=30 --crap-top-n=30
+# Install backend dev dependencies.
+setup:
+    cd {{backend}} && UV_LINK_MODE=hardlink uv sync --extra dev
 
-# CI/regression CRAP gate that checks the tracked baseline.
-crap-check: crap-ratchet
+# Compile Python sources for syntax errors.
+_compile:
+    cd {{backend}} && UV_LINK_MODE=hardlink uv run python -m compileall -q src devtools tests
 
-# Regenerate the tracked CRAP baseline from the current coverage state.
-crap-baseline:
-    cd backend && coverage_file="$(mktemp /tmp/dotmd-crap-coverage.XXXXXX.json)"; \
-    trap 'rm -f "$coverage_file"' EXIT; \
-    uv run pytest tests --ignore=tests/e2e --cov=src/dotmd --cov-report=json:"$coverage_file"; \
-    uv run python -m devtools.crap_ratchet --coverage "$coverage_file" --baseline reports/crap-baseline.json --src src/dotmd --threshold 30 --write-baseline
+# Check formatting without writing.
+_fmt-check:
+    cd {{backend}} && UV_LINK_MODE=hardlink uv run ruff format --check src tests devtools
 
-# Tighten the tracked CRAP baseline by clamping existing entries downward and adding
-# only new entries that are at/below threshold.
-crap-tighten:
-    cd backend && coverage_file="$(mktemp /tmp/dotmd-crap-coverage.XXXXXX.json)"; \
-    trap 'rm -f "$coverage_file"' EXIT; \
-    uv run pytest tests --ignore=tests/e2e --cov=src/dotmd --cov-report=json:"$coverage_file"; \
-    uv run python -m devtools.crap_ratchet --coverage "$coverage_file" --baseline reports/crap-baseline.json --src src/dotmd --threshold 30 --tighten-baseline
+# Run Ruff lint checks at the current dotMD baseline.
+_lint:
+    cd {{backend}} && UV_LINK_MODE=hardlink uv run ruff check src tests devtools
+
+# Check import-layer architecture contracts.
+_import-contracts:
+    cd {{backend}} && UV_LINK_MODE=hardlink uv run lint-imports
+
+# Check GitHub Actions workflow syntax and expressions.
+_actionlint:
+    cd {{backend}} && UV_LINK_MODE=hardlink uv run actionlint ../.github/workflows/*.yml
+
+# Run Pyright ratchet against the checked-in baseline.
+_typecheck:
+    cd {{backend}} && UV_LINK_MODE=hardlink uv run python devtools/pyright_ratchet.py
+
+# Scan for dead code. Vendored Airweave is excluded because local deltas are
+# tracked separately in vendor notes and should stay close to upstream shape.
+_dead-code:
+    cd {{backend}} && UV_LINK_MODE=hardlink uv run vulture src tests --min-confidence 65 --exclude "*/vendor/*"
+
+# Strict Ruff hardening gate.
+_lint-strict:
+    cd {{backend}} && UV_LINK_MODE=hardlink uv run ruff check src tests devtools --select E4,E7,E9,F,I,B,BLE,UP,C4,PIE,ISC,RSE,FLY,RUF,PERF,SIM,PTH,DTZ,PGH,PLE,LOG,G,FURB,RET,N818 --ignore RUF001,RUF002,RUF003,ISC001,E501,B008,N802,N803,N806,SIM108
 
 # Enforce the CRAP ratchet against the tracked baseline.
-crap-ratchet:
-    cd backend && coverage_file="$(mktemp /tmp/dotmd-crap-coverage.XXXXXX.json)"; \
+_crap-ratchet:
+    cd {{backend}} && coverage_file="$(mktemp /tmp/dotmd-crap-coverage.XXXXXX.json)"; \
     trap 'rm -f "$coverage_file"' EXIT; \
-    uv run pytest tests --ignore=tests/e2e --cov=src/dotmd --cov-report=json:"$coverage_file"; \
-    uv run python -m devtools.crap_ratchet --coverage "$coverage_file" --baseline reports/crap-baseline.json --src src/dotmd --threshold 30
+    UV_LINK_MODE=hardlink uv run pytest tests --ignore=tests/e2e --cov=src/dotmd --cov-report=json:"$coverage_file"; \
+    UV_LINK_MODE=hardlink uv run python -m devtools.crap_ratchet --coverage "$coverage_file" --baseline reports/crap-baseline.json --src src/dotmd --threshold 30
+
+# Tighten the tracked CRAP baseline from the current coverage state.
+_crap-tighten:
+    cd {{backend}} && coverage_file="$(mktemp /tmp/dotmd-crap-coverage.XXXXXX.json)"; \
+    trap 'rm -f "$coverage_file"' EXIT; \
+    UV_LINK_MODE=hardlink uv run pytest tests --ignore=tests/e2e --cov=src/dotmd --cov-report=json:"$coverage_file"; \
+    UV_LINK_MODE=hardlink uv run python -m devtools.crap_ratchet --coverage "$coverage_file" --baseline reports/crap-baseline.json --src src/dotmd --threshold 30 --tighten-baseline
+
+# Run local backend pytest suite. Live MCP checks are opt-in.
+test *args:
+    cd {{backend}} && UV_LINK_MODE=hardlink uv run pytest -m "not e2e and not smoke" {{args}}
+
+# Unit tests only.
+unit *args:
+    cd {{backend}} && UV_LINK_MODE=hardlink uv run pytest -q -m "not e2e and not smoke" {{args}}
+
+# Run live MCP e2e tests inside the running dotMD container.
+test-e2e *args:
+    docker exec dotmd sh -lc 'cd /mnt/home/repos/j2h4u/dotmd/backend && python -m pytest -c tests/e2e/pytest.ini tests/e2e/ -p no:cacheprovider --tb=short -q {{args}}'
+
+# Run production MCP/Funnel connectivity smoke against live containers.
+test-mcp-remote *args:
+    cd {{backend}} && UV_LINK_MODE=hardlink uv run python devtools/mcp_remote_smoke.py {{args}}
+
+# Run Ruff lint checks.
+lint: _lint
+
+# Format Python code and apply safe Ruff fixes.
+fmt:
+    cd {{backend}} && UV_LINK_MODE=hardlink uv run ruff format src tests devtools
+    cd {{backend}} && UV_LINK_MODE=hardlink uv run ruff check --fix src tests devtools
+
+# Alias for fmt.
+format: fmt
+
+# Opt-in stricter basedpyright source gate.
+typecheck-strict:
+    cd {{backend}} && UV_LINK_MODE=hardlink uv run basedpyright src --warnings
+
+# Static and test quality gate for local development.
+check: _fmt-check _lint-strict _typecheck _import-contracts _actionlint _compile _dead-code _crap-tighten
+
+# Non-mutating quality gate for CI.
+ci: _fmt-check _lint-strict _typecheck _import-contracts _actionlint _compile _dead-code _crap-ratchet
+
+# Full local gate for agents before claiming completion.
+verify: check
+
+# Build the dotMD container image.
+docker-build:
+    docker compose build dotmd
+
+# Start dotMD container.
+docker-up:
+    docker compose up dotmd
+
+# Start dotMD with bundled TEI and FalkorDB.
+docker-up-bundled:
+    docker compose --profile bundled up dotmd tei falkordb
+
+# Stop containers.
+docker-down:
+    docker compose down
+
+# Remove local Python/tool caches.
+clean:
+    find . -type d \( -name __pycache__ -o -name .pytest_cache -o -name .ruff_cache -o -name .mypy_cache -o -name .pyright \) -prune -exec rm -rf {} +

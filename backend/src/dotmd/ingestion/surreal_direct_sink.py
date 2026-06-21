@@ -201,9 +201,7 @@ def _application_provenance_change(
 ) -> SurrealDeltaChange:
     provenance = chunk.provenance
     namespace = provenance.namespace if provenance is not None else source_document.namespace
-    source_unit_refs = (
-        list(provenance.source_unit_refs) if provenance is not None else []
-    )
+    source_unit_refs = list(provenance.source_unit_refs) if provenance is not None else []
     parser_name = provenance.parser_name if provenance is not None else source_document.parser_name
     provenance_id = _stable_composite_ref(chunk.chunk_id, namespace, source_document.document_ref)
     return SurrealDeltaChange(
@@ -214,7 +212,9 @@ def _application_provenance_change(
             "provenance_id": provenance_id,
             "namespace": namespace,
             "document_ref": source_document.document_ref,
-            "chunk_strategy": provenance.chunk_strategy if provenance is not None else chunk_strategy,
+            "chunk_strategy": provenance.chunk_strategy
+            if provenance is not None
+            else chunk_strategy,
             "source_unit_refs": source_unit_refs,
             "parser_name": parser_name,
             "metadata": {},
@@ -260,9 +260,7 @@ def _provenance_change(
 ) -> SurrealDeltaChange:
     provenance = chunk.provenance
     namespace = provenance.namespace if provenance is not None else source_document.namespace
-    source_unit_refs = (
-        list(provenance.source_unit_refs) if provenance is not None else []
-    )
+    source_unit_refs = list(provenance.source_unit_refs) if provenance is not None else []
     parser_name = provenance.parser_name if provenance is not None else source_document.parser_name
     provenance_id = _stable_composite_ref(chunk.chunk_id, namespace, source_document.document_ref)
     return SurrealDeltaChange(
@@ -273,7 +271,9 @@ def _provenance_change(
             "provenance_id": provenance_id,
             "namespace": namespace,
             "document_ref": source_document.document_ref,
-            "chunk_strategy": provenance.chunk_strategy if provenance is not None else chunk_strategy,
+            "chunk_strategy": provenance.chunk_strategy
+            if provenance is not None
+            else chunk_strategy,
             "source_unit_refs": source_unit_refs,
             "parser_name": parser_name,
             "metadata": {},
@@ -469,7 +469,11 @@ def build_surreal_graph_rows(
         add(_graph_file_change(file_info))
 
     for chunk in chunks:
-        file_path = str(chunk.file_paths[0]) if chunk.file_paths else (sorted(file_paths)[0] if file_paths else "")
+        file_path = (
+            str(chunk.file_paths[0])
+            if chunk.file_paths
+            else (sorted(file_paths)[0] if file_paths else "")
+        )
         add(_graph_section_change(chunk, file_path=file_path))
         if file_path:
             add(
@@ -622,7 +626,9 @@ def build_surreal_application_source_manifest(
 ) -> SurrealDeltaManifest:
     """Build a direct Surreal delta manifest from application-source state."""
 
-    if len(write.chunks) != len(write.e_text_vectors) or len(write.chunks) != len(write.e_fused_vectors):
+    if len(write.chunks) != len(write.e_text_vectors) or len(write.chunks) != len(
+        write.e_fused_vectors
+    ):
         raise ValueError("chunks, e_text_vectors, and e_fused_vectors must be aligned")
     if len(write.indexed_changes) != len(write.chunks):
         raise ValueError("indexed_changes and chunks must be aligned")
@@ -635,12 +641,9 @@ def build_surreal_application_source_manifest(
     for change in write.changes:
         documents_by_ref.setdefault(change.document.ref, change.document)
 
-    document_changes = [
-        _document_change(documents_by_ref[ref]) for ref in sorted(documents_by_ref)
-    ]
+    document_changes = [_document_change(documents_by_ref[ref]) for ref in sorted(documents_by_ref)]
     resource_binding_changes = [
-        _resource_binding_change(documents_by_ref[ref])
-        for ref in sorted(documents_by_ref)
+        _resource_binding_change(documents_by_ref[ref]) for ref in sorted(documents_by_ref)
     ]
 
     chunk_changes: list[SurrealDeltaChange] = []
@@ -691,7 +694,9 @@ def build_surreal_application_source_manifest(
 
     for ref in sorted(documents_by_ref):
         source_document = documents_by_ref[ref]
-        meta_vector = write.e_meta_by_source_key.get((source_document.namespace, source_document.document_ref))
+        meta_vector = write.e_meta_by_source_key.get(
+            (source_document.namespace, source_document.document_ref)
+        )
         if meta_vector is None:
             continue
         vector_component_changes.append(
@@ -790,7 +795,9 @@ def build_surreal_direct_manifest(
         chunks=SurrealDeltaSection(rows=chunk_changes),
         chunk_file_bindings=SurrealDeltaSection(rows=chunk_file_binding_changes),
         provenance=SurrealDeltaSection(rows=provenance_changes),
-        resource_bindings=SurrealDeltaSection(rows=[_resource_binding_change(write.source_document)]),
+        resource_bindings=SurrealDeltaSection(
+            rows=[_resource_binding_change(write.source_document)]
+        ),
         fingerprints=SurrealDeltaSection(),
         embeddings=SurrealDeltaSection(rows=embedding_changes),
         vector_components=SurrealDeltaSection(),

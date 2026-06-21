@@ -59,13 +59,9 @@ def _legacy_fulltext_statement(statement: str) -> str | None:
     if statement == (
         "DEFINE INDEX chunks_title_fts ON chunks FIELDS title FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75)"
     ):
-        return (
-            "DEFINE INDEX chunks_title_fts ON TABLE chunks COLUMNS title SEARCH ANALYZER dotmd_fts BM25;"
-        )
+        return "DEFINE INDEX chunks_title_fts ON TABLE chunks COLUMNS title SEARCH ANALYZER dotmd_fts BM25;"
     if statement == (
         "DEFINE INDEX chunks_text_fts ON chunks FIELDS text FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75)"
     ):
-        return (
-            "DEFINE INDEX chunks_text_fts ON TABLE chunks COLUMNS text SEARCH ANALYZER dotmd_fts BM25;"
-        )
+        return "DEFINE INDEX chunks_text_fts ON TABLE chunks COLUMNS text SEARCH ANALYZER dotmd_fts BM25;"
     return None

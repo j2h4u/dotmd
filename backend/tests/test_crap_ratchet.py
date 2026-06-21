@@ -158,7 +158,9 @@ def test_tighten_baseline_only_decreases_existing_crap(tmp_path: Path) -> None:
     baseline = cast(BaselineReport, json.loads(baseline_path.read_text(encoding="utf-8")))
     simple_key = "sample.py::simple"
     baseline["functions"][simple_key]["crap"] += 10.0
-    baseline_path.write_text(json.dumps(baseline, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    baseline_path.write_text(
+        json.dumps(baseline, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
     exit_code = main(
         [
@@ -245,7 +247,9 @@ def test_tighten_baseline_rejects_regressions(tmp_path: Path, capsys: CaptureFix
     baseline = cast(BaselineReport, json.loads(baseline_path.read_text(encoding="utf-8")))
     simple_key = "sample.py::simple"
     baseline["functions"][simple_key]["crap"] = 0.1
-    baseline_path.write_text(json.dumps(baseline, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    baseline_path.write_text(
+        json.dumps(baseline, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
     exit_code = main(
         [
@@ -295,7 +299,9 @@ def test_ratchet_flags_regression_and_new_offender(
     complex_key = "sample.py::complex"
     baseline["functions"][simple_key]["crap"] -= 0.5
     del baseline["functions"][complex_key]
-    baseline_path.write_text(json.dumps(baseline, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    baseline_path.write_text(
+        json.dumps(baseline, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
     exit_code = main(
         [
@@ -340,7 +346,9 @@ def test_tighten_baseline_rejects_new_offender(tmp_path: Path, capsys: CaptureFi
 
     baseline = cast(BaselineReport, json.loads(baseline_path.read_text(encoding="utf-8")))
     baseline["functions"].clear()
-    baseline_path.write_text(json.dumps(baseline, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    baseline_path.write_text(
+        json.dumps(baseline, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
     exit_code = main(
         [

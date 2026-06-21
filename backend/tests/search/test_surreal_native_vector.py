@@ -217,7 +217,9 @@ def test_search_caps_hnsw_results_per_shard_when_service_overfetches(
         statement for statement, _variables in connection.calls if "vector <|" in statement
     ]
     assert search_statements
-    assert all("<|20,20|>" in statement and "vector <|" in statement for statement in search_statements)
+    assert all(
+        "<|20,20|>" in statement and "vector <|" in statement for statement in search_statements
+    )
 
 
 @pytest.mark.parametrize("top_k", [0, 101])

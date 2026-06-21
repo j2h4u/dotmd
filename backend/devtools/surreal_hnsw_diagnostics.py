@@ -98,20 +98,18 @@ def _vector_for(row_index: int, dimension: int) -> list[float]:
 
 
 def _embedding_rows(case: HnswDiagnosticCase, *, offset: int, limit: int) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
     upper_bound = min(case.count, offset + limit)
-    for row_index in range(offset, upper_bound):
-        rows.append(
-            {
-                "id": f"embeddings:diag_{row_index}",
-                "chunk_id": f"chunks:diag_{row_index}",
-                "chunk_strategy": "diagnostic",
-                "embedding_model": f"diagnostic-{case.dimension}",
-                "text_hash": f"hash-{row_index}",
-                "embedding": _vector_for(row_index, case.dimension),
-            }
-        )
-    return rows
+    return [
+        {
+            "id": f"embeddings:diag_{row_index}",
+            "chunk_id": f"chunks:diag_{row_index}",
+            "chunk_strategy": "diagnostic",
+            "embedding_model": f"diagnostic-{case.dimension}",
+            "text_hash": f"hash-{row_index}",
+            "embedding": _vector_for(row_index, case.dimension),
+        }
+        for row_index in range(offset, upper_bound)
+    ]
 
 
 def _actual_embedding_batches(
@@ -223,7 +221,7 @@ def _worker_main(args: argparse.Namespace) -> int:
             )
         ) as connection:
             connection.query(payload["statement"])
-    except BaseException as exc:
+    except Exception as exc:  # noqa: BLE001 - diagnostics must report arbitrary worker failures.
         result.update(
             {
                 "status": "failed",
@@ -372,7 +370,9 @@ def _build_cases(args: argparse.Namespace) -> list[HnswDiagnosticCase]:
     return cases[: args.max_cases] if args.max_cases else cases
 
 
-def _run_case(case: HnswDiagnosticCase, *, output_dir: Path, args: argparse.Namespace) -> dict[str, Any]:
+def _run_case(
+    case: HnswDiagnosticCase, *, output_dir: Path, args: argparse.Namespace
+) -> dict[str, Any]:
     case_dir = output_dir / case.name
     target_dir = case_dir / "target.surreal.db"
     if case_dir.exists() and not args.keep_existing:
@@ -456,7 +456,7 @@ def run_diagnostics(args: argparse.Namespace) -> int:
             f"define={result['define_result'].get('elapsed_seconds')}s",
             flush=True,
         )
-        if result["status"] not in {"applied"}:
+        if result["status"] != "applied":
             failed = True
             if args.stop_on_failure:
                 break
@@ -474,7 +474,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--vector-type", choices=("F32", "F64"), default="F32")
     parser.add_argument("--source-kind", choices=("synthetic", "actual"), default="synthetic")
     parser.add_argument("--source-sqlite", type=Path)
-    parser.add_argument("--distance", choices=("COSINE", "EUCLIDEAN", "MANHATTAN"), default="COSINE")
+    parser.add_argument(
+        "--distance", choices=("COSINE", "EUCLIDEAN", "MANHATTAN"), default="COSINE"
+    )
     parser.add_argument("--insert-batch-size", type=int, default=1000)
     parser.add_argument("--heartbeat-seconds", type=float, default=10.0)
     parser.add_argument("--timeout-seconds", type=float, default=300.0)

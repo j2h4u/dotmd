@@ -21,8 +21,7 @@ DELTA_MANIFEST_SCHEMA_VERSION = "phase46_delta_manifest_v1"
 def _surreal_writer_allowed_fields() -> dict[str, frozenset[str]]:
     plan = build_dotmd_surreal_schema_plan()
     allowed_fields = {
-        table.name: frozenset(field.name for field in table.fields)
-        for table in plan.tables
+        table.name: frozenset(field.name for field in table.fields) for table in plan.tables
     }
     allowed_fields["checkpoints"] = allowed_fields["checkpoints"] | frozenset(
         {"last_success_at", "last_error"}
@@ -188,9 +187,7 @@ class SurrealDeltaManifest(BaseModel):
     @model_validator(mode="after")
     def _validate_manifest(self) -> SurrealDeltaManifest:
         if self.schema_version != DELTA_MANIFEST_SCHEMA_VERSION:
-            raise ValueError(
-                f"schema_version must be {DELTA_MANIFEST_SCHEMA_VERSION!r}"
-            )
+            raise ValueError(f"schema_version must be {DELTA_MANIFEST_SCHEMA_VERSION!r}")
         if self.checkpoint_candidate.advanced:
             raise ValueError("delta manifest must not advance the checkpoint")
 
@@ -346,21 +343,29 @@ def build_surreal_delta_manifest_from_rows(
         live_changed_refs,
     )
     selected_chunk_ids = {
-        str(row["chunk_id"])
-        for row in selected_chunk_rows
-        if row.get("chunk_id") is not None
+        str(row["chunk_id"]) for row in selected_chunk_rows if row.get("chunk_id") is not None
     }
 
-    source_units = _selected_rows_by_document_ref(list(sqlite_rows.get("source_units", ())), live_changed_refs)
+    source_units = _selected_rows_by_document_ref(
+        list(sqlite_rows.get("source_units", ())), live_changed_refs
+    )
     chunk_file_bindings = _selected_rows_by_chunk_id(
         list(sqlite_rows.get("chunk_file_bindings", ())),
         selected_chunk_ids,
     )
-    provenance = _selected_rows_by_document_ref(list(sqlite_rows.get("provenance", ())), live_changed_refs)
-    resource_bindings = _selected_rows_by_document_ref(list(sqlite_rows.get("bindings", ())), live_changed_refs)
-    fingerprints = _selected_rows_by_document_ref(list(sqlite_rows.get("fingerprints", ())), live_changed_refs)
+    provenance = _selected_rows_by_document_ref(
+        list(sqlite_rows.get("provenance", ())), live_changed_refs
+    )
+    resource_bindings = _selected_rows_by_document_ref(
+        list(sqlite_rows.get("bindings", ())), live_changed_refs
+    )
+    fingerprints = _selected_rows_by_document_ref(
+        list(sqlite_rows.get("fingerprints", ())), live_changed_refs
+    )
 
-    embedding_source_rows = list(embedding_rows) if embedding_rows else list(sqlite_rows.get("embeddings", ()))
+    embedding_source_rows = (
+        list(embedding_rows) if embedding_rows else list(sqlite_rows.get("embeddings", ()))
+    )
     vector_component_source_rows = (
         list(vector_component_rows)
         if vector_component_rows
@@ -453,16 +458,24 @@ def build_surreal_delta_manifest_from_rows(
     source_units_section = SurrealDeltaSection(
         rows=_sorted_changes(list(map(_source_unit_change, source_units)))
     )
-    chunks_section = SurrealDeltaSection(rows=_sorted_changes(list(map(_chunk_change, selected_chunk_rows))))
+    chunks_section = SurrealDeltaSection(
+        rows=_sorted_changes(list(map(_chunk_change, selected_chunk_rows)))
+    )
     chunk_file_bindings_section = SurrealDeltaSection(
         rows=_sorted_changes(list(map(_chunk_file_binding_change, chunk_file_bindings)))
     )
-    provenance_section = SurrealDeltaSection(rows=_sorted_changes(list(map(_provenance_change, provenance))))
+    provenance_section = SurrealDeltaSection(
+        rows=_sorted_changes(list(map(_provenance_change, provenance)))
+    )
     resource_bindings_section = SurrealDeltaSection(
         rows=_sorted_changes(list(map(_resource_binding_change, resource_bindings)))
     )
-    fingerprints_section = SurrealDeltaSection(rows=_sorted_changes(list(map(_fingerprint_change, fingerprints))))
-    embeddings_section = SurrealDeltaSection(rows=_sorted_changes(list(map(_embedding_change, embeddings))))
+    fingerprints_section = SurrealDeltaSection(
+        rows=_sorted_changes(list(map(_fingerprint_change, fingerprints)))
+    )
+    embeddings_section = SurrealDeltaSection(
+        rows=_sorted_changes(list(map(_embedding_change, embeddings)))
+    )
     vector_components_section = SurrealDeltaSection(
         rows=_sorted_changes(list(map(_vector_component_change, vector_components)))
     )
@@ -494,41 +507,29 @@ class SurrealDeltaWriterProtocol(Protocol):
         """Apply tombstones/deletes before any upserts."""
         ...
 
-    def write_documents(self, rows: Sequence[SurrealDeltaChange]) -> int:
-        ...
+    def write_documents(self, rows: Sequence[SurrealDeltaChange]) -> int: ...
 
-    def write_source_units(self, rows: Sequence[SurrealDeltaChange]) -> int:
-        ...
+    def write_source_units(self, rows: Sequence[SurrealDeltaChange]) -> int: ...
 
-    def write_chunks(self, rows: Sequence[SurrealDeltaChange]) -> int:
-        ...
+    def write_chunks(self, rows: Sequence[SurrealDeltaChange]) -> int: ...
 
-    def write_chunk_file_bindings(self, rows: Sequence[SurrealDeltaChange]) -> int:
-        ...
+    def write_chunk_file_bindings(self, rows: Sequence[SurrealDeltaChange]) -> int: ...
 
-    def write_provenance(self, rows: Sequence[SurrealDeltaChange]) -> int:
-        ...
+    def write_provenance(self, rows: Sequence[SurrealDeltaChange]) -> int: ...
 
-    def write_resource_bindings(self, rows: Sequence[SurrealDeltaChange]) -> int:
-        ...
+    def write_resource_bindings(self, rows: Sequence[SurrealDeltaChange]) -> int: ...
 
-    def write_fingerprints(self, rows: Sequence[SurrealDeltaChange]) -> int:
-        ...
+    def write_fingerprints(self, rows: Sequence[SurrealDeltaChange]) -> int: ...
 
-    def write_embeddings(self, rows: Sequence[SurrealDeltaChange]) -> int:
-        ...
+    def write_embeddings(self, rows: Sequence[SurrealDeltaChange]) -> int: ...
 
-    def write_vector_components(self, rows: Sequence[SurrealDeltaChange]) -> int:
-        ...
+    def write_vector_components(self, rows: Sequence[SurrealDeltaChange]) -> int: ...
 
-    def write_graph(self, rows: Sequence[SurrealDeltaChange]) -> int:
-        ...
+    def write_graph(self, rows: Sequence[SurrealDeltaChange]) -> int: ...
 
-    def write_feedback(self, rows: Sequence[SurrealDeltaChange]) -> int:
-        ...
+    def write_feedback(self, rows: Sequence[SurrealDeltaChange]) -> int: ...
 
-    def write_checkpoint_candidate(self, candidate: SurrealDeltaCheckpointCandidate) -> int:
-        ...
+    def write_checkpoint_candidate(self, candidate: SurrealDeltaCheckpointCandidate) -> int: ...
 
 
 @dataclass(slots=True)
@@ -565,8 +566,13 @@ class SurrealDeltaStoreWriter:
         row = change.row
         if row.get("ref") is not None:
             return str(row["ref"])
-        if all(part is not None for part in (row.get("namespace"), row.get("document_ref"), row.get("unit_ref"))):
-            return self._stable_composite_ref(row["namespace"], row["document_ref"], row["unit_ref"])
+        if all(
+            part is not None
+            for part in (row.get("namespace"), row.get("document_ref"), row.get("unit_ref"))
+        ):
+            return self._stable_composite_ref(
+                row["namespace"], row["document_ref"], row["unit_ref"]
+            )
         return str(change.ref)
 
     def _chunk_raw_identifier(self, change: SurrealDeltaChange) -> str:
@@ -581,7 +587,10 @@ class SurrealDeltaStoreWriter:
         row = change.row
         if row.get("binding_id") is not None:
             return str(row["binding_id"])
-        if all(part is not None for part in (row.get("chunk_id"), row.get("file_path"), row.get("chunk_index"))):
+        if all(
+            part is not None
+            for part in (row.get("chunk_id"), row.get("file_path"), row.get("chunk_index"))
+        ):
             return self._stable_composite_ref(row["chunk_id"], row["file_path"], row["chunk_index"])
         return str(change.ref)
 
@@ -589,8 +598,13 @@ class SurrealDeltaStoreWriter:
         row = change.row
         if row.get("provenance_id") is not None:
             return str(row["provenance_id"])
-        if all(part is not None for part in (row.get("chunk_id"), row.get("namespace"), row.get("document_ref"))):
-            return self._stable_composite_ref(row["chunk_id"], row["namespace"], row["document_ref"])
+        if all(
+            part is not None
+            for part in (row.get("chunk_id"), row.get("namespace"), row.get("document_ref"))
+        ):
+            return self._stable_composite_ref(
+                row["chunk_id"], row["namespace"], row["document_ref"]
+            )
         return str(change.ref)
 
     def _binding_raw_identifier(self, change: SurrealDeltaChange) -> str:
@@ -608,7 +622,8 @@ class SurrealDeltaStoreWriter:
     def _embedding_raw_identifier(self, change: SurrealDeltaChange) -> str:
         row = change.row
         if all(
-            part is not None for part in (row.get("chunk_strategy"), row.get("embedding_model"), row.get("chunk_id"))
+            part is not None
+            for part in (row.get("chunk_strategy"), row.get("embedding_model"), row.get("chunk_id"))
         ):
             return self._stable_composite_ref(
                 row["chunk_strategy"], row["embedding_model"], row["chunk_id"]
@@ -630,7 +645,15 @@ class SurrealDeltaStoreWriter:
     def _vector_component_raw_identifier(self, change: SurrealDeltaChange) -> str:
         row = change.row
         owner = row.get("chunk_id") or row.get("entity_id")
-        if all(part is not None for part in (row.get("chunk_strategy"), row.get("embedding_model"), owner, row.get("component"))):
+        if all(
+            part is not None
+            for part in (
+                row.get("chunk_strategy"),
+                row.get("embedding_model"),
+                owner,
+                row.get("component"),
+            )
+        ):
             return self._stable_composite_ref(
                 row["chunk_strategy"],
                 row["embedding_model"],
@@ -701,12 +724,25 @@ class SurrealDeltaStoreWriter:
                 return dict(row)
         return None
 
-    def _prepare_payload(self, table: str, raw_identifier: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _prepare_payload(
+        self, table: str, raw_identifier: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         table = self._normalize_table_name(table)
         prepared = dict(payload)
         prepared.setdefault("schema_version", SURREAL_SCHEMA_VERSION)
 
-        if table in {"documents", "source_units", "provenance", "chunk_file_bindings", "bindings", "fingerprints", "embeddings", "vector_components", "feedback", "chunks"}:
+        if table in {
+            "documents",
+            "source_units",
+            "provenance",
+            "chunk_file_bindings",
+            "bindings",
+            "fingerprints",
+            "embeddings",
+            "vector_components",
+            "feedback",
+            "chunks",
+        }:
             prepared.setdefault("metadata", {})
         if table == "chunks":
             prepared.setdefault("file_paths", [])
@@ -722,10 +758,7 @@ class SurrealDeltaStoreWriter:
                 chunk_strategy = prepared.get("chunk_strategy")
                 embedding_model = prepared.get("embedding_model")
                 chunk_id = prepared.get("chunk_id")
-                if all(
-                    part is not None
-                    for part in (chunk_strategy, embedding_model, chunk_id)
-                ):
+                if all(part is not None for part in (chunk_strategy, embedding_model, chunk_id)):
                     prepared["vector_rowid"] = _stable_vector_rowid(
                         chunk_strategy,
                         embedding_model,
@@ -759,7 +792,9 @@ class SurrealDeltaStoreWriter:
                     prepared.setdefault("embedding_model", source_embedding.get("embedding_model"))
         if table == "files":
             prepared.setdefault("original_id", raw_identifier)
-            prepared.setdefault("path", prepared.get("path") or prepared.get("file_path") or raw_identifier)
+            prepared.setdefault(
+                "path", prepared.get("path") or prepared.get("file_path") or raw_identifier
+            )
             prepared.setdefault("file_path", prepared.get("file_path") or prepared.get("path"))
         if table == "sections":
             prepared.setdefault("original_id", raw_identifier)
@@ -767,7 +802,9 @@ class SurrealDeltaStoreWriter:
         if table == "entities":
             prepared.setdefault("original_id", raw_identifier)
             prepared.setdefault("name", prepared.get("name") or raw_identifier)
-            prepared.setdefault("original_entity_name", prepared.get("original_entity_name") or prepared.get("name"))
+            prepared.setdefault(
+                "original_entity_name", prepared.get("original_entity_name") or prepared.get("name")
+            )
         if table == "tags":
             prepared.setdefault("original_id", raw_identifier)
             prepared.setdefault("name", prepared.get("name") or raw_identifier)
@@ -868,7 +905,9 @@ class SurrealDeltaStoreWriter:
             table = self._normalize_table_name(
                 tombstone.table if tombstone is not None else change.table
             )
-            ref = self._tombstone_raw_identifier(change) if tombstone is not None else str(change.ref)
+            ref = (
+                self._tombstone_raw_identifier(change) if tombstone is not None else str(change.ref)
+            )
             record_id = self._record_id(table, ref)
             if self._existing_row(record_id) is None:
                 continue
@@ -994,7 +1033,9 @@ class SurrealDeltaStoreWriter:
                 raw_identifier = self._graph_entity_raw_identifier(change)
                 row.setdefault("original_id", raw_identifier)
                 row.setdefault("name", row.get("name") or raw_identifier)
-                row.setdefault("original_entity_name", row.get("original_entity_name") or row["name"])
+                row.setdefault(
+                    "original_entity_name", row.get("original_entity_name") or row["name"]
+                )
             elif table == "tags":
                 raw_identifier = self._graph_tag_raw_identifier(change)
                 row.setdefault("original_id", raw_identifier)
@@ -1008,8 +1049,12 @@ class SurrealDeltaStoreWriter:
                     row.setdefault("relation_type", rel_type)
                 row.setdefault("weight", 1.0)
                 row.setdefault("properties", {})
-                source_record_id = self._graph_endpoint_record_id(row.get("source_table"), row.get("source_id"))
-                target_record_id = self._graph_endpoint_record_id(row.get("target_table"), row.get("target_id"))
+                source_record_id = self._graph_endpoint_record_id(
+                    row.get("source_table"), row.get("source_id")
+                )
+                target_record_id = self._graph_endpoint_record_id(
+                    row.get("target_table"), row.get("target_id")
+                )
                 if source_record_id is not None:
                     row.setdefault("in", source_record_id)
                 if target_record_id is not None:
@@ -1263,7 +1308,9 @@ def _build_progress(
 ) -> SurrealDeltaSyncProgress:
     elapsed_seconds = max(now_seconds - started_at_seconds, 0.0)
     applied_units = min(completed_units, total_units)
-    percent_complete = 100.0 if total_units <= 0 else min(applied_units / total_units * 100.0, 100.0)
+    percent_complete = (
+        100.0 if total_units <= 0 else min(applied_units / total_units * 100.0, 100.0)
+    )
     eta_seconds: float | None = None
     eta: str | None = None
     if applied_units < total_units and elapsed_seconds >= 120.0 and applied_units > 0:
@@ -1468,15 +1515,21 @@ def run_surreal_delta_sync(
             clock=clock,
             total_units=total_units,
             current_phase=state.last_progress.current_phase if state.last_progress else None,
-            current_phase_units=state.last_progress.current_phase_units if state.last_progress else 0,
+            current_phase_units=state.last_progress.current_phase_units
+            if state.last_progress
+            else 0,
             target_size_bytes=target_size_bytes,
-            applied_units=state.last_progress.applied_units if state.last_progress else state.completed_units,
+            applied_units=state.last_progress.applied_units
+            if state.last_progress
+            else state.completed_units,
         )
         raise
 
     final_progress = _build_progress(
         status="applied",
-        started_at_seconds=state.started_at_seconds if state.started_at_seconds is not None else clock(),
+        started_at_seconds=state.started_at_seconds
+        if state.started_at_seconds is not None
+        else clock(),
         now_seconds=clock(),
         total_units=total_units,
         completed_units=state.completed_units,
@@ -1494,6 +1547,8 @@ def run_surreal_delta_sync(
         applied_counts=applied_counts,
         skipped_phases=tuple(skipped_phases),
     )
+
+
 def _change_record(change: SurrealDeltaChange) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "ref": change.ref,
@@ -1504,6 +1559,8 @@ def _change_record(change: SurrealDeltaChange) -> dict[str, Any]:
     if change.tombstone is not None:
         payload["tombstone"] = change.tombstone.model_dump()
     return payload
+
+
 @dataclass(slots=True)
 class FakeSurrealDeltaWriter:
     """In-memory idempotent writer used by the sync tests."""
