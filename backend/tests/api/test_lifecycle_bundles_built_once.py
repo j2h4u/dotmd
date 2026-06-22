@@ -10,13 +10,16 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from tests.conftest import make_surreal_service
+
 
 def _get_service(tmp_path: Path):  # type: ignore[no-untyped-def]
-    from dotmd.api.service import DotMDService
-    from dotmd.core.config import Settings
-
-    settings = Settings(index_dir=tmp_path, embedding_url="http://localhost:8088")
-    return DotMDService(settings)
+    return make_surreal_service(
+        tmp_path,
+        data_dir=tmp_path,
+        indexing_paths=[str(tmp_path)],
+        embedding_url="http://localhost:8088",
+    )
 
 
 def test_lifecycle_bundles_built_once(tmp_path: Path) -> None:

@@ -91,481 +91,526 @@
       "start_line": 196
     },
     "api/service.py::DotMDService.__init__": {
-      "complexity": 4,
+      "complexity": 2,
       "coverage_fraction": 1.0,
-      "crap": 4.0,
-      "end_line": 370,
+      "crap": 2.0,
+      "end_line": 344,
       "path": "api/service.py",
       "qualname": "DotMDService.__init__",
-      "start_line": 291
+      "start_line": 289
     },
     "api/service.py::DotMDService._active_filter_pool_size": {
       "complexity": 1,
       "coverage_fraction": 1.0,
       "crap": 1.0,
-      "end_line": 1256,
+      "end_line": 1232,
       "path": "api/service.py",
       "qualname": "DotMDService._active_filter_pool_size",
-      "start_line": 1251
+      "start_line": 1227
     },
     "api/service.py::DotMDService._active_metadata_store": {
       "complexity": 2,
       "coverage_fraction": 1.0,
       "crap": 2.0,
-      "end_line": 456,
+      "end_line": 432,
       "path": "api/service.py",
       "qualname": "DotMDService._active_metadata_store",
-      "start_line": 453
+      "start_line": 429
+    },
+    "api/service.py::DotMDService._apply_metadata_count_fallback": {
+      "complexity": 8,
+      "coverage_fraction": 0.727273,
+      "crap": 9.298272,
+      "end_line": 2046,
+      "path": "api/service.py",
+      "qualname": "DotMDService._apply_metadata_count_fallback",
+      "start_line": 2032
+    },
+    "api/service.py::DotMDService._apply_status_live_diff": {
+      "complexity": 4,
+      "coverage_fraction": 0.357143,
+      "crap": 8.250729,
+      "end_line": 2063,
+      "path": "api/service.py",
+      "qualname": "DotMDService._apply_status_live_diff",
+      "start_line": 2048
+    },
+    "api/service.py::DotMDService._apply_status_trickle_stats": {
+      "complexity": 4,
+      "coverage_fraction": 1.0,
+      "crap": 4.0,
+      "end_line": 2094,
+      "path": "api/service.py",
+      "qualname": "DotMDService._apply_status_trickle_stats",
+      "start_line": 2081
     },
     "api/service.py::DotMDService._batch_load_provenance": {
       "complexity": 3,
       "coverage_fraction": 0.0,
       "crap": 12.0,
-      "end_line": 1054,
+      "end_line": 1030,
       "path": "api/service.py",
       "qualname": "DotMDService._batch_load_provenance",
-      "start_line": 1028
+      "start_line": 1004
     },
     "api/service.py::DotMDService._build_candidates_with_federated": {
       "complexity": 35,
       "coverage_fraction": 0.0,
       "crap": 1260.0,
-      "end_line": 1249,
+      "end_line": 1225,
       "path": "api/service.py",
       "qualname": "DotMDService._build_candidates_with_federated",
-      "start_line": 1056
+      "start_line": 1032
     },
     "api/service.py::DotMDService._build_federated_bundles": {
       "complexity": 6,
-      "coverage_fraction": 0.923077,
-      "crap": 6.016386,
-      "end_line": 410,
+      "coverage_fraction": 1.0,
+      "crap": 6.0,
+      "end_line": 384,
       "path": "api/service.py",
       "qualname": "DotMDService._build_federated_bundles",
-      "start_line": 381
+      "start_line": 355
     },
     "api/service.py::DotMDService._build_telegram_provider": {
       "complexity": 3,
       "coverage_fraction": 0.833333,
       "crap": 3.041667,
-      "end_line": 379,
+      "end_line": 353,
       "path": "api/service.py",
       "qualname": "DotMDService._build_telegram_provider",
-      "start_line": 372
+      "start_line": 346
     },
     "api/service.py::DotMDService._check_embedding_model": {
       "complexity": 8,
       "coverage_fraction": 0.0,
       "crap": 72.0,
-      "end_line": 534,
+      "end_line": 510,
       "path": "api/service.py",
       "qualname": "DotMDService._check_embedding_model",
-      "start_line": 506
+      "start_line": 482
     },
     "api/service.py::DotMDService._collect_active_candidate_pool": {
       "complexity": 6,
       "coverage_fraction": 0.789474,
       "crap": 6.335909,
-      "end_line": 1302,
+      "end_line": 1278,
       "path": "api/service.py",
       "qualname": "DotMDService._collect_active_candidate_pool",
-      "start_line": 1259
+      "start_line": 1235
     },
     "api/service.py::DotMDService._collect_candidate_pool": {
       "complexity": 20,
       "coverage_fraction": 0.975,
       "crap": 20.00625,
-      "end_line": 1549,
+      "end_line": 1523,
       "path": "api/service.py",
       "qualname": "DotMDService._collect_candidate_pool",
-      "start_line": 1441
+      "start_line": 1415
     },
     "api/service.py::DotMDService._configure_surreal_search_backend": {
       "complexity": 3,
-      "coverage_fraction": 0.857143,
-      "crap": 3.026239,
-      "end_line": 451,
+      "coverage_fraction": 0.866667,
+      "crap": 3.021333,
+      "end_line": 427,
       "path": "api/service.py",
       "qualname": "DotMDService._configure_surreal_search_backend",
-      "start_line": 412
+      "start_line": 386
+    },
+    "api/service.py::DotMDService._discover_status_files": {
+      "complexity": 4,
+      "coverage_fraction": 0.333333,
+      "crap": 8.740741,
+      "end_line": 2079,
+      "path": "api/service.py",
+      "qualname": "DotMDService._discover_status_files",
+      "start_line": 2065
     },
     "api/service.py::DotMDService._drill_telegram_message": {
       "complexity": 14,
       "coverage_fraction": 0.580645,
       "crap": 28.454433,
-      "end_line": 1948,
+      "end_line": 1922,
       "path": "api/service.py",
       "qualname": "DotMDService._drill_telegram_message",
-      "start_line": 1875
+      "start_line": 1849
     },
     "api/service.py::DotMDService._ensure_source_provenance_ready": {
       "complexity": 10,
       "coverage_fraction": 0.724138,
       "crap": 12.099307,
-      "end_line": 1631,
+      "end_line": 1605,
       "path": "api/service.py",
       "qualname": "DotMDService._ensure_source_provenance_ready",
-      "start_line": 1552
+      "start_line": 1526
     },
     "api/service.py::DotMDService._execute_search": {
       "complexity": 29,
       "coverage_fraction": 0.947368,
       "crap": 29.122613,
-      "end_line": 913,
+      "end_line": 889,
       "path": "api/service.py",
       "qualname": "DotMDService._execute_search",
-      "start_line": 768
+      "start_line": 744
     },
     "api/service.py::DotMDService._federated_engine_name": {
       "complexity": 2,
       "coverage_fraction": 0.75,
       "crap": 2.0625,
-      "end_line": 992,
+      "end_line": 968,
       "path": "api/service.py",
       "qualname": "DotMDService._federated_engine_name",
-      "start_line": 976
+      "start_line": 952
     },
     "api/service.py::DotMDService._filesystem_path_for_source": {
       "complexity": 4,
       "coverage_fraction": 0.75,
       "crap": 4.25,
-      "end_line": 1744,
+      "end_line": 1718,
       "path": "api/service.py",
       "qualname": "DotMDService._filesystem_path_for_source",
-      "start_line": 1732
+      "start_line": 1706
     },
     "api/service.py::DotMDService._filter_active_fused_candidates": {
       "complexity": 5,
-      "coverage_fraction": 0.9375,
-      "crap": 5.006104,
-      "end_line": 1329,
+      "coverage_fraction": 0.941176,
+      "crap": 5.005089,
+      "end_line": 1303,
       "path": "api/service.py",
       "qualname": "DotMDService._filter_active_fused_candidates",
-      "start_line": 1304
+      "start_line": 1280
     },
     "api/service.py::DotMDService._filter_active_fused_candidates_by_ref": {
       "complexity": 4,
       "coverage_fraction": 0.0,
       "crap": 20.0,
-      "end_line": 1026,
+      "end_line": 1002,
       "path": "api/service.py",
       "qualname": "DotMDService._filter_active_fused_candidates_by_ref",
-      "start_line": 994
+      "start_line": 970
     },
     "api/service.py::DotMDService._load_acronyms": {
       "complexity": 3,
       "coverage_fraction": 0.25,
       "crap": 6.796875,
-      "end_line": 2158,
+      "end_line": 2131,
       "path": "api/service.py",
       "qualname": "DotMDService._load_acronyms",
-      "start_line": 2142
+      "start_line": 2115
+    },
+    "api/service.py::DotMDService._load_status_stats": {
+      "complexity": 2,
+      "coverage_fraction": 1.0,
+      "crap": 2.0,
+      "end_line": 2030,
+      "path": "api/service.py",
+      "qualname": "DotMDService._load_status_stats",
+      "start_line": 2026
     },
     "api/service.py::DotMDService._parse_ref": {
       "complexity": 4,
       "coverage_fraction": 1.0,
       "crap": 4.0,
-      "end_line": 1638,
+      "end_line": 1612,
       "path": "api/service.py",
       "qualname": "DotMDService._parse_ref",
-      "start_line": 1633
+      "start_line": 1607
     },
     "api/service.py::DotMDService._read_frontmatter": {
       "complexity": 2,
       "coverage_fraction": 1.0,
       "crap": 2.0,
-      "end_line": 1752,
+      "end_line": 1726,
       "path": "api/service.py",
       "qualname": "DotMDService._read_frontmatter",
-      "start_line": 1746
+      "start_line": 1720
     },
     "api/service.py::DotMDService._read_telegram_message": {
       "complexity": 10,
       "coverage_fraction": 0.884615,
       "crap": 10.153619,
-      "end_line": 1871,
+      "end_line": 1845,
       "path": "api/service.py",
       "qualname": "DotMDService._read_telegram_message",
-      "start_line": 1789
+      "start_line": 1763
     },
     "api/service.py::DotMDService._require_active_source_document": {
       "complexity": 2,
       "coverage_fraction": 1.0,
       "crap": 2.0,
-      "end_line": 1684,
+      "end_line": 1658,
       "path": "api/service.py",
       "qualname": "DotMDService._require_active_source_document",
-      "start_line": 1676
+      "start_line": 1650
     },
     "api/service.py::DotMDService._require_active_telegram_message_ref": {
       "complexity": 4,
       "coverage_fraction": 0.714286,
       "crap": 4.373178,
-      "end_line": 1730,
+      "end_line": 1704,
       "path": "api/service.py",
       "qualname": "DotMDService._require_active_telegram_message_ref",
-      "start_line": 1716
+      "start_line": 1690
     },
     "api/service.py::DotMDService._resolve_source_document": {
       "complexity": 6,
       "coverage_fraction": 0.846154,
       "crap": 6.131088,
-      "end_line": 1674,
+      "end_line": 1648,
       "path": "api/service.py",
       "qualname": "DotMDService._resolve_source_document",
-      "start_line": 1640
+      "start_line": 1614
     },
     "api/service.py::DotMDService._resolve_telegram_read_path": {
       "complexity": 4,
       "coverage_fraction": 0.8,
       "crap": 4.128,
-      "end_line": 1714,
+      "end_line": 1688,
       "path": "api/service.py",
       "qualname": "DotMDService._resolve_telegram_read_path",
-      "start_line": 1686
+      "start_line": 1660
     },
     "api/service.py::DotMDService._run_local_search_sequence": {
       "complexity": 1,
       "coverage_fraction": 0.0,
       "crap": 2.0,
-      "end_line": 974,
+      "end_line": 950,
       "path": "api/service.py",
       "qualname": "DotMDService._run_local_search_sequence",
-      "start_line": 915
+      "start_line": 891
     },
     "api/service.py::DotMDService._telegram_unit_payload": {
       "complexity": 4,
       "coverage_fraction": 0.75,
       "crap": 4.25,
-      "end_line": 1786,
+      "end_line": 1760,
       "path": "api/service.py",
       "qualname": "DotMDService._telegram_unit_payload",
-      "start_line": 1763
+      "start_line": 1737
     },
     "api/service.py::DotMDService._telegram_window_sizes": {
       "complexity": 2,
       "coverage_fraction": 1.0,
       "crap": 2.0,
-      "end_line": 1761,
+      "end_line": 1735,
       "path": "api/service.py",
       "qualname": "DotMDService._telegram_window_sizes",
-      "start_line": 1754
+      "start_line": 1728
     },
     "api/service.py::DotMDService.binding_diagnostics": {
       "complexity": 3,
       "coverage_fraction": 1.0,
       "crap": 3.0,
-      "end_line": 2028,
+      "end_line": 2002,
       "path": "api/service.py",
       "qualname": "DotMDService.binding_diagnostics",
-      "start_line": 2015
+      "start_line": 1989
     },
     "api/service.py::DotMDService.clear": {
       "complexity": 1,
-      "coverage_fraction": 0.0,
-      "crap": 2.0,
-      "end_line": 2140,
+      "coverage_fraction": 1.0,
+      "crap": 1.0,
+      "end_line": 2113,
       "path": "api/service.py",
       "qualname": "DotMDService.clear",
-      "start_line": 2133
+      "start_line": 2111
     },
     "api/service.py::DotMDService.close": {
       "complexity": 6,
       "coverage_fraction": 0.6,
       "crap": 8.304,
-      "end_line": 478,
+      "end_line": 454,
       "path": "api/service.py",
       "qualname": "DotMDService.close",
-      "start_line": 458
+      "start_line": 434
     },
     "api/service.py::DotMDService.compare_rerankers": {
       "complexity": 15,
       "coverage_fraction": 0.974359,
       "crap": 15.003793,
-      "end_line": 1438,
+      "end_line": 1412,
       "path": "api/service.py",
       "qualname": "DotMDService.compare_rerankers",
-      "start_line": 1331
+      "start_line": 1305
     },
     "api/service.py::DotMDService.drill": {
       "complexity": 2,
       "coverage_fraction": 1.0,
       "crap": 2.0,
-      "end_line": 2012,
+      "end_line": 1986,
       "path": "api/service.py",
       "qualname": "DotMDService.drill",
-      "start_line": 1993
+      "start_line": 1967
     },
     "api/service.py::DotMDService.drop_chunks": {
       "complexity": 1,
-      "coverage_fraction": 0.0,
-      "crap": 2.0,
-      "end_line": 2131,
+      "coverage_fraction": 1.0,
+      "crap": 1.0,
+      "end_line": 2109,
       "path": "api/service.py",
       "qualname": "DotMDService.drop_chunks",
-      "start_line": 2125
+      "start_line": 2107
     },
     "api/service.py::DotMDService.drop_vectors": {
       "complexity": 1,
-      "coverage_fraction": 0.0,
-      "crap": 2.0,
-      "end_line": 2123,
+      "coverage_fraction": 1.0,
+      "crap": 1.0,
+      "end_line": 2105,
       "path": "api/service.py",
       "qualname": "DotMDService.drop_vectors",
-      "start_line": 2121
+      "start_line": 2103
     },
     "api/service.py::DotMDService.graph_data": {
-      "complexity": 1,
-      "coverage_fraction": 0.0,
+      "complexity": 2,
+      "coverage_fraction": 1.0,
       "crap": 2.0,
-      "end_line": 2119,
+      "end_line": 2101,
       "path": "api/service.py",
       "qualname": "DotMDService.graph_data",
-      "start_line": 2117
+      "start_line": 2097
     },
     "api/service.py::DotMDService.index": {
       "complexity": 1,
       "coverage_fraction": 1.0,
       "crap": 1.0,
-      "end_line": 556,
+      "end_line": 532,
       "path": "api/service.py",
       "qualname": "DotMDService.index",
-      "start_line": 537
+      "start_line": 513
     },
     "api/service.py::DotMDService.read": {
       "complexity": 4,
       "coverage_fraction": 1.0,
       "crap": 4.0,
-      "end_line": 1990,
+      "end_line": 1964,
       "path": "api/service.py",
       "qualname": "DotMDService.read",
-      "start_line": 1952
+      "start_line": 1926
     },
     "api/service.py::DotMDService.search": {
       "complexity": 2,
       "coverage_fraction": 0.8,
       "crap": 2.032,
-      "end_line": 630,
+      "end_line": 606,
       "path": "api/service.py",
       "qualname": "DotMDService.search",
-      "start_line": 558
+      "start_line": 534
     },
     "api/service.py::DotMDService.search_async": {
       "complexity": 12,
       "coverage_fraction": 0.76,
       "crap": 13.990656,
-      "end_line": 766,
+      "end_line": 742,
       "path": "api/service.py",
       "qualname": "DotMDService.search_async",
-      "start_line": 633
+      "start_line": 609
     },
     "api/service.py::DotMDService.status": {
-      "complexity": 13,
-      "coverage_fraction": 0.565217,
-      "crap": 26.89003,
-      "end_line": 2115,
+      "complexity": 1,
+      "coverage_fraction": 1.0,
+      "crap": 1.0,
+      "end_line": 2024,
       "path": "api/service.py",
       "qualname": "DotMDService.status",
-      "start_line": 2031
+      "start_line": 2005
     },
     "api/service.py::DotMDService.trickle_indexer": {
       "complexity": 1,
       "coverage_fraction": 0.0,
       "crap": 2.0,
-      "end_line": 486,
+      "end_line": 462,
       "path": "api/service.py",
       "qualname": "DotMDService.trickle_indexer",
-      "start_line": 485
+      "start_line": 461
     },
     "api/service.py::DotMDService.warmup": {
       "complexity": 4,
       "coverage_fraction": 1.0,
       "crap": 4.0,
-      "end_line": 504,
+      "end_line": 480,
       "path": "api/service.py",
       "qualname": "DotMDService.warmup",
-      "start_line": 488
+      "start_line": 464
     },
     "api/service.py::GraphEnrichmentEngineProtocol.search": {
       "complexity": 1,
       "coverage_fraction": 1.0,
       "crap": 1.0,
-      "end_line": 168,
+      "end_line": 166,
       "path": "api/service.py",
       "qualname": "GraphEnrichmentEngineProtocol.search",
-      "start_line": 161
+      "start_line": 159
     },
     "api/service.py::_DisabledGraphEnrichmentEngine.search": {
       "complexity": 1,
       "coverage_fraction": 1.0,
       "crap": 1.0,
-      "end_line": 180,
+      "end_line": 178,
       "path": "api/service.py",
       "qualname": "_DisabledGraphEnrichmentEngine.search",
-      "start_line": 174
+      "start_line": 172
     },
     "api/service.py::_is_low_signal_federated_candidate": {
       "complexity": 5,
       "coverage_fraction": 1.0,
       "crap": 5.0,
-      "end_line": 236,
+      "end_line": 234,
       "path": "api/service.py",
       "qualname": "_is_low_signal_federated_candidate",
-      "start_line": 223
+      "start_line": 221
     },
     "api/service.py::_is_telegram_message_ref": {
       "complexity": 2,
       "coverage_fraction": 1.0,
       "crap": 2.0,
-      "end_line": 202,
+      "end_line": 200,
       "path": "api/service.py",
       "qualname": "_is_telegram_message_ref",
-      "start_line": 200
+      "start_line": 198
     },
     "api/service.py::_merge_with_federated_quota": {
       "complexity": 3,
       "coverage_fraction": 1.0,
       "crap": 3.0,
-      "end_line": 275,
+      "end_line": 273,
       "path": "api/service.py",
       "qualname": "_merge_with_federated_quota",
-      "start_line": 239
+      "start_line": 237
     },
     "api/service.py::_parse_telegram_message_ref": {
       "complexity": 5,
       "coverage_fraction": 0.692308,
       "crap": 5.728266,
-      "end_line": 197,
+      "end_line": 195,
       "path": "api/service.py",
       "qualname": "_parse_telegram_message_ref",
-      "start_line": 183
+      "start_line": 181
     },
     "api/service.py::_search_mode_log_label": {
       "complexity": 2,
       "coverage_fraction": 0.0,
       "crap": 6.0,
-      "end_line": 78,
+      "end_line": 76,
       "path": "api/service.py",
       "qualname": "_search_mode_log_label",
-      "start_line": 73
+      "start_line": 71
     },
     "api/service.py::_write_service_init_progress": {
       "complexity": 2,
       "coverage_fraction": 0.428571,
       "crap": 2.746356,
-      "end_line": 69,
+      "end_line": 67,
       "path": "api/service.py",
       "qualname": "_write_service_init_progress",
-      "start_line": 55
+      "start_line": 53
     },
     "api/service.py::format_elapsed_ms": {
       "complexity": 4,
       "coverage_fraction": 1.0,
       "crap": 4.0,
-      "end_line": 220,
+      "end_line": 218,
       "path": "api/service.py",
       "qualname": "format_elapsed_ms",
-      "start_line": 205
+      "start_line": 203
     },
     "auth.py::DotMDOAuthProvider.__init__": {
       "complexity": 1,
@@ -1847,8 +1892,8 @@
     },
     "ingestion/pipeline.py::IndexingPipeline.__init__": {
       "complexity": 7,
-      "coverage_fraction": 0.886076,
-      "crap": 7.072451,
+      "coverage_fraction": 0.949367,
+      "crap": 7.006361,
       "end_line": 619,
       "path": "ingestion/pipeline.py",
       "qualname": "IndexingPipeline.__init__",
@@ -5958,320 +6003,257 @@
       "qualname": "create_reranker",
       "start_line": 249
     },
-    "search/semantic.py::SemanticSearchEngine.__init__": {
+    "search/semantic.py::EmbeddingEncoder.__init__": {
       "complexity": 2,
       "coverage_fraction": 1.0,
       "crap": 2.0,
-      "end_line": 70,
+      "end_line": 48,
       "path": "search/semantic.py",
-      "qualname": "SemanticSearchEngine.__init__",
-      "start_line": 51
+      "qualname": "EmbeddingEncoder.__init__",
+      "start_line": 32
     },
-    "search/semantic.py::SemanticSearchEngine._encode_via_tei": {
-      "complexity": 10,
+    "search/semantic.py::EmbeddingEncoder._encode_local": {
+      "complexity": 1,
       "coverage_fraction": 0.0,
-      "crap": 110.0,
-      "end_line": 192,
+      "crap": 2.0,
+      "end_line": 114,
       "path": "search/semantic.py",
-      "qualname": "SemanticSearchEngine._encode_via_tei",
-      "start_line": 127
+      "qualname": "EmbeddingEncoder._encode_local",
+      "start_line": 111
     },
-    "search/semantic.py::SemanticSearchEngine._load_model": {
+    "search/semantic.py::EmbeddingEncoder._encode_local_batch": {
       "complexity": 2,
       "coverage_fraction": 0.0,
       "crap": 6.0,
-      "end_line": 102,
+      "end_line": 119,
       "path": "search/semantic.py",
-      "qualname": "SemanticSearchEngine._load_model",
-      "start_line": 96
+      "qualname": "EmbeddingEncoder._encode_local_batch",
+      "start_line": 116
     },
-    "search/semantic.py::SemanticSearchEngine._probe_tei_batch_size": {
-      "complexity": 4,
+    "search/semantic.py::EmbeddingEncoder._encode_remote": {
+      "complexity": 2,
       "coverage_fraction": 0.0,
-      "crap": 20.0,
-      "end_line": 125,
+      "crap": 6.0,
+      "end_line": 154,
       "path": "search/semantic.py",
-      "qualname": "SemanticSearchEngine._probe_tei_batch_size",
+      "qualname": "EmbeddingEncoder._encode_remote",
+      "start_line": 149
+    },
+    "search/semantic.py::EmbeddingEncoder._encode_remote_batch": {
+      "complexity": 1,
+      "coverage_fraction": 0.0,
+      "crap": 2.0,
+      "end_line": 194,
+      "path": "search/semantic.py",
+      "qualname": "EmbeddingEncoder._encode_remote_batch",
+      "start_line": 185
+    },
+    "search/semantic.py::EmbeddingEncoder._encode_remote_batches": {
+      "complexity": 2,
+      "coverage_fraction": 0.0,
+      "crap": 6.0,
+      "end_line": 183,
+      "path": "search/semantic.py",
+      "qualname": "EmbeddingEncoder._encode_remote_batches",
+      "start_line": 156
+    },
+    "search/semantic.py::EmbeddingEncoder._format_tei_eta": {
+      "complexity": 2,
+      "coverage_fraction": 0.0,
+      "crap": 6.0,
+      "end_line": 236,
+      "path": "search/semantic.py",
+      "qualname": "EmbeddingEncoder._format_tei_eta",
+      "start_line": 233
+    },
+    "search/semantic.py::EmbeddingEncoder._load_model": {
+      "complexity": 2,
+      "coverage_fraction": 0.0,
+      "crap": 6.0,
+      "end_line": 109,
+      "path": "search/semantic.py",
+      "qualname": "EmbeddingEncoder._load_model",
       "start_line": 104
     },
-    "search/semantic.py::SemanticSearchEngine.encode": {
+    "search/semantic.py::EmbeddingEncoder._log_tei_completion": {
       "complexity": 2,
       "coverage_fraction": 0.0,
       "crap": 6.0,
-      "end_line": 214,
+      "end_line": 269,
       "path": "search/semantic.py",
-      "qualname": "SemanticSearchEngine.encode",
-      "start_line": 208
+      "qualname": "EmbeddingEncoder._log_tei_completion",
+      "start_line": 260
     },
-    "search/semantic.py::SemanticSearchEngine.encode_batch": {
-      "complexity": 6,
-      "coverage_fraction": 0.555556,
-      "crap": 9.160494,
-      "end_line": 230,
+    "search/semantic.py::EmbeddingEncoder._log_tei_progress": {
+      "complexity": 2,
+      "coverage_fraction": 0.0,
+      "crap": 6.0,
+      "end_line": 221,
       "path": "search/semantic.py",
-      "qualname": "SemanticSearchEngine.encode_batch",
-      "start_line": 216
+      "qualname": "EmbeddingEncoder._log_tei_progress",
+      "start_line": 196
     },
-    "search/semantic.py::SemanticSearchEngine.get_tei_model_id": {
+    "search/semantic.py::EmbeddingEncoder._log_tei_progress_line": {
+      "complexity": 3,
+      "coverage_fraction": 0.0,
+      "crap": 12.0,
+      "end_line": 257,
+      "path": "search/semantic.py",
+      "qualname": "EmbeddingEncoder._log_tei_progress_line",
+      "start_line": 238
+    },
+    "search/semantic.py::EmbeddingEncoder._probe_tei_batch_size": {
+      "complexity": 3,
+      "coverage_fraction": 0.0,
+      "crap": 12.0,
+      "end_line": 131,
+      "path": "search/semantic.py",
+      "qualname": "EmbeddingEncoder._probe_tei_batch_size",
+      "start_line": 121
+    },
+    "search/semantic.py::EmbeddingEncoder._probe_tei_batch_size_once": {
+      "complexity": 3,
+      "coverage_fraction": 0.0,
+      "crap": 12.0,
+      "end_line": 147,
+      "path": "search/semantic.py",
+      "qualname": "EmbeddingEncoder._probe_tei_batch_size_once",
+      "start_line": 133
+    },
+    "search/semantic.py::EmbeddingEncoder._should_log_tei_progress": {
+      "complexity": 2,
+      "coverage_fraction": 0.0,
+      "crap": 6.0,
+      "end_line": 231,
+      "path": "search/semantic.py",
+      "qualname": "EmbeddingEncoder._should_log_tei_progress",
+      "start_line": 223
+    },
+    "search/semantic.py::EmbeddingEncoder.encode": {
+      "complexity": 2,
+      "coverage_fraction": 0.0,
+      "crap": 6.0,
+      "end_line": 93,
+      "path": "search/semantic.py",
+      "qualname": "EmbeddingEncoder.encode",
+      "start_line": 89
+    },
+    "search/semantic.py::EmbeddingEncoder.encode_batch": {
+      "complexity": 3,
+      "coverage_fraction": 0.666667,
+      "crap": 3.333333,
+      "end_line": 102,
+      "path": "search/semantic.py",
+      "qualname": "EmbeddingEncoder.encode_batch",
+      "start_line": 95
+    },
+    "search/semantic.py::EmbeddingEncoder.format_passages": {
+      "complexity": 3,
+      "coverage_fraction": 0.666667,
+      "crap": 3.333333,
+      "end_line": 87,
+      "path": "search/semantic.py",
+      "qualname": "EmbeddingEncoder.format_passages",
+      "start_line": 83
+    },
+    "search/semantic.py::EmbeddingEncoder.format_query": {
+      "complexity": 3,
+      "coverage_fraction": 1.0,
+      "crap": 3.0,
+      "end_line": 81,
+      "path": "search/semantic.py",
+      "qualname": "EmbeddingEncoder.format_query",
+      "start_line": 75
+    },
+    "search/semantic.py::EmbeddingEncoder.get_tei_model_id": {
       "complexity": 4,
       "coverage_fraction": 0.0,
       "crap": 20.0,
-      "end_line": 90,
+      "end_line": 63,
+      "path": "search/semantic.py",
+      "qualname": "EmbeddingEncoder.get_tei_model_id",
+      "start_line": 50
+    },
+    "search/semantic.py::EmbeddingEncoder.uses_remote_embeddings": {
+      "complexity": 1,
+      "coverage_fraction": 0.0,
+      "crap": 2.0,
+      "end_line": 73,
+      "path": "search/semantic.py",
+      "qualname": "EmbeddingEncoder.uses_remote_embeddings",
+      "start_line": 71
+    },
+    "search/semantic.py::EmbeddingEncoder.warmup": {
+      "complexity": 2,
+      "coverage_fraction": 0.0,
+      "crap": 6.0,
+      "end_line": 68,
+      "path": "search/semantic.py",
+      "qualname": "EmbeddingEncoder.warmup",
+      "start_line": 65
+    },
+    "search/semantic.py::SemanticSearchEngine.__init__": {
+      "complexity": 1,
+      "coverage_fraction": 1.0,
+      "crap": 1.0,
+      "end_line": 315,
+      "path": "search/semantic.py",
+      "qualname": "SemanticSearchEngine.__init__",
+      "start_line": 298
+    },
+    "search/semantic.py::SemanticSearchEngine.encode": {
+      "complexity": 1,
+      "coverage_fraction": 0.0,
+      "crap": 2.0,
+      "end_line": 336,
+      "path": "search/semantic.py",
+      "qualname": "SemanticSearchEngine.encode",
+      "start_line": 334
+    },
+    "search/semantic.py::SemanticSearchEngine.encode_batch": {
+      "complexity": 1,
+      "coverage_fraction": 1.0,
+      "crap": 1.0,
+      "end_line": 344,
+      "path": "search/semantic.py",
+      "qualname": "SemanticSearchEngine.encode_batch",
+      "start_line": 338
+    },
+    "search/semantic.py::SemanticSearchEngine.get_tei_model_id": {
+      "complexity": 1,
+      "coverage_fraction": 0.0,
+      "crap": 2.0,
+      "end_line": 319,
       "path": "search/semantic.py",
       "qualname": "SemanticSearchEngine.get_tei_model_id",
-      "start_line": 72
+      "start_line": 318
     },
     "search/semantic.py::SemanticSearchEngine.search": {
-      "complexity": 7,
+      "complexity": 5,
       "coverage_fraction": 0.0,
-      "crap": 56.0,
-      "end_line": 251,
+      "crap": 30.0,
+      "end_line": 360,
       "path": "search/semantic.py",
       "qualname": "SemanticSearchEngine.search",
-      "start_line": 232
+      "start_line": 346
     },
     "search/semantic.py::SemanticSearchEngine.uses_remote_embeddings": {
       "complexity": 1,
       "coverage_fraction": 0.0,
       "crap": 2.0,
-      "end_line": 197,
+      "end_line": 324,
       "path": "search/semantic.py",
       "qualname": "SemanticSearchEngine.uses_remote_embeddings",
-      "start_line": 195
+      "start_line": 322
     },
     "search/semantic.py::SemanticSearchEngine.warmup": {
-      "complexity": 2,
+      "complexity": 1,
       "coverage_fraction": 0.0,
-      "crap": 6.0,
-      "end_line": 202,
+      "crap": 2.0,
+      "end_line": 328,
       "path": "search/semantic.py",
       "qualname": "SemanticSearchEngine.warmup",
-      "start_line": 199
-    },
-    "search/surreal_contract.py::SurrealRetrievalContract.cutover_gate_for": {
-      "complexity": 1,
-      "coverage_fraction": 1.0,
-      "crap": 1.0,
-      "end_line": 69,
-      "path": "search/surreal_contract.py",
-      "qualname": "SurrealRetrievalContract.cutover_gate_for",
-      "start_line": 66
-    },
-    "search/surreal_contract.py::default_surreal_retrieval_contract": {
-      "complexity": 1,
-      "coverage_fraction": 1.0,
-      "crap": 1.0,
-      "end_line": 122,
-      "path": "search/surreal_contract.py",
-      "qualname": "default_surreal_retrieval_contract",
-      "start_line": 72
-    },
-    "search/surreal_eval.py::SurrealEvalDiffRow.accepted": {
-      "complexity": 2,
-      "coverage_fraction": 1.0,
-      "crap": 2.0,
-      "end_line": 117,
-      "path": "search/surreal_eval.py",
-      "qualname": "SurrealEvalDiffRow.accepted",
-      "start_line": 116
-    },
-    "search/surreal_eval.py::SurrealEvalDiffRow.to_jsonable": {
-      "complexity": 1,
-      "coverage_fraction": 0.0,
-      "crap": 2.0,
-      "end_line": 161,
-      "path": "search/surreal_eval.py",
-      "qualname": "SurrealEvalDiffRow.to_jsonable",
-      "start_line": 144
-    },
-    "search/surreal_eval.py::SurrealEvalDiffRow.with_acceptance": {
-      "complexity": 3,
-      "coverage_fraction": 1.0,
-      "crap": 3.0,
-      "end_line": 141,
-      "path": "search/surreal_eval.py",
-      "qualname": "SurrealEvalDiffRow.with_acceptance",
-      "start_line": 119
-    },
-    "search/surreal_eval.py::SurrealEvalSummary.passed": {
-      "complexity": 2,
-      "coverage_fraction": 1.0,
-      "crap": 2.0,
-      "end_line": 177,
-      "path": "search/surreal_eval.py",
-      "qualname": "SurrealEvalSummary.passed",
-      "start_line": 176
-    },
-    "search/surreal_eval.py::_label_refs": {
-      "complexity": 2,
-      "coverage_fraction": 1.0,
-      "crap": 2.0,
-      "end_line": 374,
-      "path": "search/surreal_eval.py",
-      "qualname": "_label_refs",
-      "start_line": 373
-    },
-    "search/surreal_eval.py::_load_jsonl": {
-      "complexity": 5,
-      "coverage_fraction": 0.714286,
-      "crap": 5.58309,
-      "end_line": 194,
-      "path": "search/surreal_eval.py",
-      "qualname": "_load_jsonl",
-      "start_line": 180
-    },
-    "search/surreal_eval.py::_matched_approved_refs": {
-      "complexity": 5,
-      "coverage_fraction": 1.0,
-      "crap": 5.0,
-      "end_line": 413,
-      "path": "search/surreal_eval.py",
-      "qualname": "_matched_approved_refs",
-      "start_line": 397
-    },
-    "search/surreal_eval.py::_matched_engines": {
-      "complexity": 2,
-      "coverage_fraction": 1.0,
-      "crap": 2.0,
-      "end_line": 426,
-      "path": "search/surreal_eval.py",
-      "qualname": "_matched_engines",
-      "start_line": 416
-    },
-    "search/surreal_eval.py::_matches_contains_anchor": {
-      "complexity": 6,
-      "coverage_fraction": 0.923077,
-      "crap": 6.016386,
-      "end_line": 394,
-      "path": "search/surreal_eval.py",
-      "qualname": "_matches_contains_anchor",
-      "start_line": 381
-    },
-    "search/surreal_eval.py::_parse_category": {
-      "complexity": 2,
-      "coverage_fraction": 0.5,
-      "crap": 2.5,
-      "end_line": 201,
-      "path": "search/surreal_eval.py",
-      "qualname": "_parse_category",
-      "start_line": 197
-    },
-    "search/surreal_eval.py::_parse_difference": {
-      "complexity": 2,
-      "coverage_fraction": 0.0,
-      "crap": 6.0,
-      "end_line": 215,
-      "path": "search/surreal_eval.py",
-      "qualname": "_parse_difference",
-      "start_line": 211
-    },
-    "search/surreal_eval.py::_parse_engine_map": {
-      "complexity": 6,
-      "coverage_fraction": 0.6,
-      "crap": 8.304,
-      "end_line": 246,
-      "path": "search/surreal_eval.py",
-      "qualname": "_parse_engine_map",
-      "start_line": 234
-    },
-    "search/surreal_eval.py::_parse_label_list": {
-      "complexity": 7,
-      "coverage_fraction": 0.727273,
-      "crap": 7.993989,
-      "end_line": 260,
-      "path": "search/surreal_eval.py",
-      "qualname": "_parse_label_list",
-      "start_line": 249
-    },
-    "search/surreal_eval.py::_parse_str_list": {
-      "complexity": 4,
-      "coverage_fraction": 0.8,
-      "crap": 4.128,
-      "end_line": 223,
-      "path": "search/surreal_eval.py",
-      "qualname": "_parse_str_list",
-      "start_line": 218
-    },
-    "search/surreal_eval.py::_parse_str_map": {
-      "complexity": 4,
-      "coverage_fraction": 0.0,
-      "crap": 20.0,
-      "end_line": 231,
-      "path": "search/surreal_eval.py",
-      "qualname": "_parse_str_map",
-      "start_line": 226
-    },
-    "search/surreal_eval.py::_parse_surface": {
-      "complexity": 2,
-      "coverage_fraction": 0.5,
-      "crap": 2.5,
-      "end_line": 208,
-      "path": "search/surreal_eval.py",
-      "qualname": "_parse_surface",
-      "start_line": 204
-    },
-    "search/surreal_eval.py::_result_rank_map": {
-      "complexity": 2,
-      "coverage_fraction": 1.0,
-      "crap": 2.0,
-      "end_line": 378,
-      "path": "search/surreal_eval.py",
-      "qualname": "_result_rank_map",
-      "start_line": 377
-    },
-    "search/surreal_eval.py::classify_difference": {
-      "complexity": 20,
-      "coverage_fraction": 0.826087,
-      "crap": 22.104052,
-      "end_line": 509,
-      "path": "search/surreal_eval.py",
-      "qualname": "classify_difference",
-      "start_line": 430
-    },
-    "search/surreal_eval.py::load_eval_results": {
-      "complexity": 8,
-      "coverage_fraction": 0.7,
-      "crap": 9.728,
-      "end_line": 370,
-      "path": "search/surreal_eval.py",
-      "qualname": "load_eval_results",
-      "start_line": 311
-    },
-    "search/surreal_eval.py::load_golden_queries": {
-      "complexity": 5,
-      "coverage_fraction": 0.916667,
-      "crap": 5.014468,
-      "end_line": 308,
-      "path": "search/surreal_eval.py",
-      "qualname": "load_golden_queries",
-      "start_line": 263
-    },
-    "search/surreal_eval.py::required_golden_query_categories": {
-      "complexity": 1,
-      "coverage_fraction": 0.0,
-      "crap": 2.0,
-      "end_line": 37,
-      "path": "search/surreal_eval.py",
-      "qualname": "required_golden_query_categories",
-      "start_line": 34
-    },
-    "search/surreal_eval.py::summarize_diffs": {
-      "complexity": 16,
-      "coverage_fraction": 0.823529,
-      "crap": 17.40688,
-      "end_line": 551,
-      "path": "search/surreal_eval.py",
-      "qualname": "summarize_diffs",
-      "start_line": 513
-    },
-    "search/surreal_eval.py::validate_required_category_coverage": {
-      "complexity": 5,
-      "coverage_fraction": 0.0,
-      "crap": 30.0,
-      "end_line": 53,
-      "path": "search/surreal_eval.py",
-      "qualname": "validate_required_category_coverage",
-      "start_line": 40
+      "start_line": 326
     },
     "search/surreal_fts.py::SurrealFTSConfig.__post_init__": {
       "complexity": 5,
@@ -6462,392 +6444,140 @@
       "qualname": "build_surreal_native_engine_overrides",
       "start_line": 18
     },
-    "search/surreal_parity.py::RetrievalParityReport.blocking_failure_categories": {
-      "complexity": 9,
-      "coverage_fraction": 0.7,
-      "crap": 11.187,
-      "end_line": 88,
-      "path": "search/surreal_parity.py",
-      "qualname": "RetrievalParityReport.blocking_failure_categories",
-      "start_line": 74
-    },
-    "search/surreal_parity.py::RetrievalParityReport.passed": {
-      "complexity": 5,
-      "coverage_fraction": 1.0,
-      "crap": 5.0,
-      "end_line": 71,
-      "path": "search/surreal_parity.py",
-      "qualname": "RetrievalParityReport.passed",
-      "start_line": 68
-    },
-    "search/surreal_parity.py::RetrievalParityReport.recommendation_gate": {
-      "complexity": 2,
-      "coverage_fraction": 1.0,
-      "crap": 2.0,
-      "end_line": 92,
-      "path": "search/surreal_parity.py",
-      "qualname": "RetrievalParityReport.recommendation_gate",
-      "start_line": 91
-    },
-    "search/surreal_parity.py::RetrievalParityResult.blocking": {
-      "complexity": 1,
-      "coverage_fraction": 1.0,
-      "crap": 1.0,
-      "end_line": 57,
-      "path": "search/surreal_parity.py",
-      "qualname": "RetrievalParityResult.blocking",
-      "start_line": 56
-    },
-    "search/surreal_parity.py::SurrealRetrievalParityHarness.__init__": {
-      "complexity": 1,
-      "coverage_fraction": 1.0,
-      "crap": 1.0,
-      "end_line": 504,
-      "path": "search/surreal_parity.py",
-      "qualname": "SurrealRetrievalParityHarness.__init__",
-      "start_line": 497
-    },
-    "search/surreal_parity.py::SurrealRetrievalParityHarness._call": {
-      "complexity": 2,
-      "coverage_fraction": 0.6,
-      "crap": 2.256,
-      "end_line": 559,
-      "path": "search/surreal_parity.py",
-      "qualname": "SurrealRetrievalParityHarness._call",
-      "start_line": 549
-    },
-    "search/surreal_parity.py::SurrealRetrievalParityHarness._unpack_hybrid_payload": {
-      "complexity": 10,
-      "coverage_fraction": 0.0,
-      "crap": 110.0,
-      "end_line": 586,
-      "path": "search/surreal_parity.py",
-      "qualname": "SurrealRetrievalParityHarness._unpack_hybrid_payload",
-      "start_line": 562
-    },
-    "search/surreal_parity.py::SurrealRetrievalParityHarness.run": {
-      "complexity": 2,
-      "coverage_fraction": 1.0,
-      "crap": 2.0,
-      "end_line": 545,
-      "path": "search/surreal_parity.py",
-      "qualname": "SurrealRetrievalParityHarness.run",
-      "start_line": 537
-    },
-    "search/surreal_parity.py::SurrealRetrievalParityHarness.run_case": {
-      "complexity": 6,
-      "coverage_fraction": 0.428571,
-      "crap": 12.717201,
-      "end_line": 535,
-      "path": "search/surreal_parity.py",
-      "qualname": "SurrealRetrievalParityHarness.run_case",
-      "start_line": 506
-    },
-    "search/surreal_parity.py::_current_weighted_fields": {
-      "complexity": 3,
-      "coverage_fraction": 0.75,
-      "crap": 3.140625,
-      "end_line": 155,
-      "path": "search/surreal_parity.py",
-      "qualname": "_current_weighted_fields",
-      "start_line": 148
-    },
-    "search/surreal_parity.py::_ids": {
-      "complexity": 2,
-      "coverage_fraction": 1.0,
-      "crap": 2.0,
-      "end_line": 104,
-      "path": "search/surreal_parity.py",
-      "qualname": "_ids",
-      "start_line": 103
-    },
-    "search/surreal_parity.py::_matched_engine_map": {
-      "complexity": 5,
-      "coverage_fraction": 1.0,
-      "crap": 5.0,
-      "end_line": 371,
-      "path": "search/surreal_parity.py",
-      "qualname": "_matched_engine_map",
-      "start_line": 359
-    },
-    "search/surreal_parity.py::_normalize_graph_related_sections": {
-      "complexity": 2,
-      "coverage_fraction": 1.0,
-      "crap": 2.0,
-      "end_line": 271,
-      "path": "search/surreal_parity.py",
-      "qualname": "_normalize_graph_related_sections",
-      "start_line": 264
-    },
-    "search/surreal_parity.py::_normalize_surreal_relation_rows": {
-      "complexity": 9,
-      "coverage_fraction": 0.8,
-      "crap": 9.648,
-      "end_line": 299,
-      "path": "search/surreal_parity.py",
-      "qualname": "_normalize_surreal_relation_rows",
-      "start_line": 274
-    },
-    "search/surreal_parity.py::_percentile": {
-      "complexity": 3,
-      "coverage_fraction": 0.0,
-      "crap": 12.0,
-      "end_line": 432,
-      "path": "search/surreal_parity.py",
-      "qualname": "_percentile",
-      "start_line": 420
-    },
-    "search/surreal_parity.py::_rank_map": {
-      "complexity": 2,
-      "coverage_fraction": 1.0,
-      "crap": 2.0,
-      "end_line": 112,
-      "path": "search/surreal_parity.py",
-      "qualname": "_rank_map",
-      "start_line": 111
-    },
-    "search/surreal_parity.py::_score_map": {
-      "complexity": 1,
-      "coverage_fraction": 1.0,
-      "crap": 1.0,
-      "end_line": 108,
-      "path": "search/surreal_parity.py",
-      "qualname": "_score_map",
-      "start_line": 107
-    },
-    "search/surreal_parity.py::_shared_rank_and_score_deltas": {
-      "complexity": 3,
-      "coverage_fraction": 1.0,
-      "crap": 3.0,
-      "end_line": 145,
-      "path": "search/surreal_parity.py",
-      "qualname": "_shared_rank_and_score_deltas",
-      "start_line": 128
-    },
-    "search/surreal_parity.py::_stable_sort_pairs": {
-      "complexity": 1,
-      "coverage_fraction": 1.0,
-      "crap": 1.0,
-      "end_line": 96,
-      "path": "search/surreal_parity.py",
-      "qualname": "_stable_sort_pairs",
-      "start_line": 95
-    },
-    "search/surreal_parity.py::_top_k_overlap": {
-      "complexity": 1,
-      "coverage_fraction": 1.0,
-      "crap": 1.0,
-      "end_line": 125,
-      "path": "search/surreal_parity.py",
-      "qualname": "_top_k_overlap",
-      "start_line": 115
-    },
-    "search/surreal_parity.py::_trim_pairs": {
-      "complexity": 1,
-      "coverage_fraction": 1.0,
-      "crap": 1.0,
-      "end_line": 100,
-      "path": "search/surreal_parity.py",
-      "qualname": "_trim_pairs",
-      "start_line": 99
-    },
-    "search/surreal_parity.py::classify_fts_parity_failure": {
-      "complexity": 6,
-      "coverage_fraction": 0.888889,
-      "crap": 6.049383,
-      "end_line": 182,
-      "path": "search/surreal_parity.py",
-      "qualname": "classify_fts_parity_failure",
-      "start_line": 158
-    },
-    "search/surreal_parity.py::compare_fts_results": {
-      "complexity": 4,
-      "coverage_fraction": 1.0,
-      "crap": 4.0,
-      "end_line": 224,
-      "path": "search/surreal_parity.py",
-      "qualname": "compare_fts_results",
-      "start_line": 186
-    },
-    "search/surreal_parity.py::compare_graph_direct_results": {
-      "complexity": 11,
-      "coverage_fraction": 0.875,
-      "crap": 11.236328,
-      "end_line": 355,
-      "path": "search/surreal_parity.py",
-      "qualname": "compare_graph_direct_results",
-      "start_line": 302
-    },
-    "search/surreal_parity.py::compare_hybrid_results": {
-      "complexity": 7,
-      "coverage_fraction": 1.0,
-      "crap": 7.0,
-      "end_line": 416,
-      "path": "search/surreal_parity.py",
-      "qualname": "compare_hybrid_results",
-      "start_line": 374
-    },
-    "search/surreal_parity.py::compare_vector_results": {
-      "complexity": 5,
-      "coverage_fraction": 1.0,
-      "crap": 5.0,
-      "end_line": 259,
-      "path": "search/surreal_parity.py",
-      "qualname": "compare_vector_results",
-      "start_line": 228
-    },
-    "search/surreal_parity.py::evaluate_surreal_scale_gate": {
-      "complexity": 13,
-      "coverage_fraction": 0.652174,
-      "crap": 20.111696,
-      "end_line": 490,
-      "path": "search/surreal_parity.py",
-      "qualname": "evaluate_surreal_scale_gate",
-      "start_line": 435
-    },
     "search/surreal_vector.py::SurrealVectorSearchEngine.__init__": {
       "complexity": 1,
       "coverage_fraction": 1.0,
       "crap": 1.0,
-      "end_line": 127,
+      "end_line": 100,
       "path": "search/surreal_vector.py",
       "qualname": "SurrealVectorSearchEngine.__init__",
-      "start_line": 98
+      "start_line": 67
     },
     "search/surreal_vector.py::SurrealVectorSearchEngine._build_search_statement": {
       "complexity": 1,
       "coverage_fraction": 1.0,
       "crap": 1.0,
-      "end_line": 224,
+      "end_line": 207,
       "path": "search/surreal_vector.py",
       "qualname": "SurrealVectorSearchEngine._build_search_statement",
-      "start_line": 214
+      "start_line": 197
     },
     "search/surreal_vector.py::SurrealVectorSearchEngine._ensure_retrieval_preconditions": {
       "complexity": 4,
       "coverage_fraction": 0.642857,
       "crap": 4.728863,
-      "end_line": 205,
+      "end_line": 195,
       "path": "search/surreal_vector.py",
       "qualname": "SurrealVectorSearchEngine._ensure_retrieval_preconditions",
-      "start_line": 177
+      "start_line": 167
     },
     "search/surreal_vector.py::SurrealVectorSearchEngine._load_precondition_rows": {
       "complexity": 5,
       "coverage_fraction": 0.857143,
       "crap": 5.072886,
-      "end_line": 175,
+      "end_line": 165,
       "path": "search/surreal_vector.py",
       "qualname": "SurrealVectorSearchEngine._load_precondition_rows",
-      "start_line": 147
-    },
-    "search/surreal_vector.py::SurrealVectorSearchEngine._normalize_query_text": {
-      "complexity": 3,
-      "coverage_fraction": 1.0,
-      "crap": 3.0,
-      "end_line": 212,
-      "path": "search/surreal_vector.py",
-      "qualname": "SurrealVectorSearchEngine._normalize_query_text",
-      "start_line": 207
+      "start_line": 137
     },
     "search/surreal_vector.py::SurrealVectorSearchEngine._normalize_results": {
       "complexity": 5,
       "coverage_fraction": 0.727273,
       "crap": 5.507137,
-      "end_line": 244,
+      "end_line": 227,
       "path": "search/surreal_vector.py",
       "qualname": "SurrealVectorSearchEngine._normalize_results",
-      "start_line": 233
+      "start_line": 216
     },
     "search/surreal_vector.py::SurrealVectorSearchEngine._placeholder_validation_rows": {
       "complexity": 1,
       "coverage_fraction": 1.0,
       "crap": 1.0,
-      "end_line": 133,
+      "end_line": 123,
       "path": "search/surreal_vector.py",
       "qualname": "SurrealVectorSearchEngine._placeholder_validation_rows",
-      "start_line": 129
+      "start_line": 119
     },
     "search/surreal_vector.py::SurrealVectorSearchEngine._validate_request_bounds": {
       "complexity": 3,
       "coverage_fraction": 1.0,
       "crap": 3.0,
-      "end_line": 144,
+      "end_line": 134,
       "path": "search/surreal_vector.py",
       "qualname": "SurrealVectorSearchEngine._validate_request_bounds",
-      "start_line": 137
+      "start_line": 127
+    },
+    "search/surreal_vector.py::SurrealVectorSearchEngine.encode": {
+      "complexity": 1,
+      "coverage_fraction": 0.0,
+      "crap": 2.0,
+      "end_line": 114,
+      "path": "search/surreal_vector.py",
+      "qualname": "SurrealVectorSearchEngine.encode",
+      "start_line": 113
+    },
+    "search/surreal_vector.py::SurrealVectorSearchEngine.encode_batch": {
+      "complexity": 1,
+      "coverage_fraction": 0.0,
+      "crap": 2.0,
+      "end_line": 117,
+      "path": "search/surreal_vector.py",
+      "qualname": "SurrealVectorSearchEngine.encode_batch",
+      "start_line": 116
+    },
+    "search/surreal_vector.py::SurrealVectorSearchEngine.get_tei_model_id": {
+      "complexity": 1,
+      "coverage_fraction": 0.0,
+      "crap": 2.0,
+      "end_line": 104,
+      "path": "search/surreal_vector.py",
+      "qualname": "SurrealVectorSearchEngine.get_tei_model_id",
+      "start_line": 102
     },
     "search/surreal_vector.py::SurrealVectorSearchEngine.search": {
       "complexity": 9,
       "coverage_fraction": 0.96875,
       "crap": 9.002472,
-      "end_line": 299,
+      "end_line": 282,
       "path": "search/surreal_vector.py",
       "qualname": "SurrealVectorSearchEngine.search",
-      "start_line": 246
+      "start_line": 229
+    },
+    "search/surreal_vector.py::SurrealVectorSearchEngine.uses_remote_embeddings": {
+      "complexity": 1,
+      "coverage_fraction": 0.0,
+      "crap": 2.0,
+      "end_line": 108,
+      "path": "search/surreal_vector.py",
+      "qualname": "SurrealVectorSearchEngine.uses_remote_embeddings",
+      "start_line": 107
+    },
+    "search/surreal_vector.py::SurrealVectorSearchEngine.warmup": {
+      "complexity": 1,
+      "coverage_fraction": 0.0,
+      "crap": 2.0,
+      "end_line": 111,
+      "path": "search/surreal_vector.py",
+      "qualname": "SurrealVectorSearchEngine.warmup",
+      "start_line": 110
     },
     "search/surreal_vector.py::_SurrealQueryConnection.query": {
       "complexity": 1,
       "coverage_fraction": 1.0,
       "crap": 1.0,
-      "end_line": 64,
+      "end_line": 61,
       "path": "search/surreal_vector.py",
       "qualname": "_SurrealQueryConnection.query",
-      "start_line": 60
-    },
-    "search/surreal_vector.py::_UnusedVectorStore.add_chunks": {
-      "complexity": 1,
-      "coverage_fraction": 0.0,
-      "crap": 2.0,
-      "end_line": 76,
-      "path": "search/surreal_vector.py",
-      "qualname": "_UnusedVectorStore.add_chunks",
-      "start_line": 68
-    },
-    "search/surreal_vector.py::_UnusedVectorStore.count": {
-      "complexity": 1,
-      "coverage_fraction": 0.0,
-      "crap": 2.0,
-      "end_line": 92,
-      "path": "search/surreal_vector.py",
-      "qualname": "_UnusedVectorStore.count",
-      "start_line": 91
-    },
-    "search/surreal_vector.py::_UnusedVectorStore.delete_all": {
-      "complexity": 1,
-      "coverage_fraction": 0.0,
-      "crap": 2.0,
-      "end_line": 86,
-      "path": "search/surreal_vector.py",
-      "qualname": "_UnusedVectorStore.delete_all",
-      "start_line": 85
-    },
-    "search/surreal_vector.py::_UnusedVectorStore.lookup_embeddings_by_text_hash": {
-      "complexity": 1,
-      "coverage_fraction": 0.0,
-      "crap": 2.0,
-      "end_line": 89,
-      "path": "search/surreal_vector.py",
-      "qualname": "_UnusedVectorStore.lookup_embeddings_by_text_hash",
-      "start_line": 88
-    },
-    "search/surreal_vector.py::_UnusedVectorStore.search": {
-      "complexity": 1,
-      "coverage_fraction": 0.0,
-      "crap": 2.0,
-      "end_line": 83,
-      "path": "search/surreal_vector.py",
-      "qualname": "_UnusedVectorStore.search",
-      "start_line": 78
+      "start_line": 57
     },
     "search/surreal_vector.py::_write_vector_progress": {
       "complexity": 3,
       "coverage_fraction": 0.5,
       "crap": 4.125,
-      "end_line": 55,
+      "end_line": 52,
       "path": "search/surreal_vector.py",
       "qualname": "_write_vector_progress",
-      "start_line": 40
+      "start_line": 37
     },
     "storage/base.py::GraphStoreProtocol.add_edge": {
       "complexity": 1,

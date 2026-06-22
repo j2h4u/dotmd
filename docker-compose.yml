@@ -25,19 +25,6 @@ services:
       start_period: 120s
       retries: 10
 
-  falkordb:
-    image: falkordb/falkordb:latest
-    profiles: [bundled]
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      start_period: 30s
-      retries: 5
-    volumes:
-      - falkordb-data:/data
-
 volumes:
   dotmd-index:
   dotmd-hf-models:
-  falkordb-data:

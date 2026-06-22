@@ -21,6 +21,7 @@ from typing import Any, NotRequired, Protocol, TypedDict, cast
 from dotmd.core.config import Settings, load_settings
 from dotmd.core.models import (
     ChunkProvenance,
+    FileInfo,
     IndexStats,
     SearchCandidate,
     SearchMode,
@@ -39,11 +40,8 @@ from dotmd.ingestion.telegram_provider import (
 from dotmd.ingestion.trickle import TrickleIndexer
 from dotmd.search.base import SearchEngineProtocol
 from dotmd.search.fusion import build_candidates, fuse_results
-from dotmd.search.graph_direct import GraphDirectEngine
-from dotmd.search.graph_search import GraphSearchEngine
 from dotmd.search.query import QueryExpander
 from dotmd.search.reranker import RerankerFactory
-from dotmd.search.semantic import SemanticSearchEngine
 from dotmd.storage.base import MetadataStoreProtocol
 
 logger = logging.getLogger(__name__)
@@ -299,33 +297,9 @@ class DotMDService:
         # Search engines -- reuse stores and shared connection from pipeline.
         self._surreal_connection: Any | None = None
         self._surreal_metadata_store: MetadataStoreProtocol | None = None
-        self._uses_surreal_search_backend = (
-            self._settings.surreal_retrieval_database is not None
-            and self._settings.surreal_retrieval_embedding_dimension is not None
-        )
+        self._surreal_graph_store: Any | None = None
         _write_service_init_progress("service:keyword_graph_engines", "running")
-        if self._uses_surreal_search_backend:
-            self._configure_surreal_search_backend()
-        else:
-            _write_service_init_progress("service:semantic_engine", "running")
-            self._semantic_engine = SemanticSearchEngine(
-                self._pipeline.vector_store,
-                self._settings.embedding_model,
-                score_floor=self._settings.semantic_score_floor,
-                embedding_url=self._settings.embedding_url,
-                tei_batch_size=self._settings.tei_batch_size,
-                use_prefix=self._settings.needs_embedding_prefix,
-                query_instruction=self._settings.query_instruction,
-            )
-            _write_service_init_progress("service:semantic_engine", "applied")
-            self._keyword_engine = self._pipeline.keyword_engine
-            self._graph_direct_engine = GraphDirectEngine(
-                self._pipeline.graph_store,
-            )
-            self._graph_engine = GraphSearchEngine(
-                self._pipeline.graph_store,
-                cast(MetadataStoreProtocol, self._pipeline.metadata_store),
-            )
+        self._configure_surreal_search_backend()
         _write_service_init_progress("service:keyword_graph_engines", "applied")
 
         # Load acronym dictionary if available
@@ -414,6 +388,7 @@ class DotMDService:
         from dotmd.search.surreal_native import build_surreal_native_engine_overrides
         from dotmd.storage.surreal import (
             SurrealConnection,
+            SurrealGraphStore,
             SurrealMetadataStore,
             SurrealStoreConfig,
         )
@@ -445,6 +420,7 @@ class DotMDService:
         )
         self._surreal_connection = connection
         self._surreal_metadata_store = cast(MetadataStoreProtocol, SurrealMetadataStore(connection))
+        self._surreal_graph_store = SurrealGraphStore(connection)
         self._semantic_engine = overrides["semantic"]
         self._keyword_engine = overrides["keyword"]
         self._graph_direct_engine = overrides["graph_direct"]
@@ -488,7 +464,7 @@ class DotMDService:
     def warmup(self) -> None:
         """Eagerly load ML models so first query is fast."""
         logger.info("Warming up models...")
-        self._semantic_engine.warmup()
+        cast(Any, self._semantic_engine).warmup()
         try:
             self._reranker_factory.get().warmup()
         except (RuntimeError, OSError, ValueError):
@@ -497,9 +473,9 @@ class DotMDService:
                 exc_info=True,
             )
         if hasattr(self._keyword_engine, "load_index"):
-            self._keyword_engine.load_index()
+            cast(Any, self._keyword_engine).load_index()
         if hasattr(self._graph_direct_engine, "load_catalog"):
-            self._graph_direct_engine.load_catalog()
+            cast(Any, self._graph_direct_engine).load_catalog()
         self._check_embedding_model()
         logger.info("Models ready")
 
@@ -517,7 +493,7 @@ class DotMDService:
         stored = vs.get_model_name()
         if not stored:
             return
-        active = self._semantic_engine.get_tei_model_id()
+        active = cast(Any, self._semantic_engine).get_tei_model_id()
         if active and stored != active:
             logger.warning(
                 "Embedding model mismatch: index was built with %r, "
@@ -1309,11 +1285,9 @@ class DotMDService:
         strategy = self._settings.chunk_strategy
         chunk_ids = [chunk_id for chunk_id, _score in fused]
         store = self._active_metadata_store()
-        all_provenance = store.get_chunk_provenance_for_chunk_ids(strategy, chunk_ids)
-        active_provenance = store.get_active_chunk_provenance_for_chunk_ids(
-            strategy,
-            chunk_ids,
-        )
+        store_any = cast(Any, store)
+        all_provenance = store_any.get_chunk_provenance_for_chunk_ids(strategy, chunk_ids)
+        active_provenance = store_any.get_active_chunk_provenance_for_chunk_ids(strategy, chunk_ids)
 
         filtered: list[tuple[str, float]] = []
         inactive_count = 0
@@ -1520,7 +1494,7 @@ class DotMDService:
                     top_k=pool_size,
                     seed_chunk_ids=seed_ids,
                 )
-            except Exception:  # noqa: BLE001 - graph enrichment is best-effort.
+            except Exception:  # noqa: BLE001, RUF100 - graph enrichment is best-effort.
                 logger.warning(
                     "graph enrichment failed; continuing with primary fused results",
                     exc_info=True,
@@ -2044,59 +2018,67 @@ class DotMDService:
         IndexStats
             The most recent index statistics enriched with trickle state.
         """
-        stats = self._pipeline.metadata_store.get_stats()
-        if stats is None:
-            stats = IndexStats()
-        # Live counts from actual tables (stats table may be stale/empty)
+        stats = self._load_status_stats()
+        self._apply_status_live_diff(stats, live_diff=live_diff)
+        self._apply_status_trickle_stats(stats)
+        return stats
+
+    def _load_status_stats(self) -> IndexStats:
+        metadata_store = self._active_metadata_store()
+        stats = metadata_store.get_stats() or IndexStats()
+        self._apply_metadata_count_fallback(stats, metadata_store)
+        return stats
+
+    def _apply_metadata_count_fallback(
+        self, stats: IndexStats, metadata_store: MetadataStoreProtocol
+    ) -> None:
         try:
-            conn = self._pipeline.conn
-            chunks_table = self._pipeline._chunks_table
-            stats.total_chunks = conn.execute(f"SELECT COUNT(*) FROM {chunks_table}").fetchone()[0]
-            # Phase 16 P5: file count from M2M table (chunks_* has no file_path column)
-            strategy = chunks_table.removeprefix("chunks_")
-            m2m_table = f"chunk_file_paths_{strategy}"
-            stats.total_files = conn.execute(
-                f"SELECT COUNT(DISTINCT file_path) FROM {m2m_table}"
-            ).fetchone()[0]
-        except (AttributeError, sqlite3.Error):
-            logger.debug("live chunk/file count failed", exc_info=True)
-        # Live graph counts (stats table is only updated by batch run(), not trickle)
+            if stats.total_chunks != 0 and stats.total_files != 0:
+                return
+            chunks = metadata_store.get_all_chunks()
+        except (AttributeError, RuntimeError):
+            logger.debug("surreal metadata count fallback failed", exc_info=True)
+            return
+
+        if stats.total_chunks == 0:
+            stats.total_chunks = len(chunks)
+        if stats.total_files == 0:
+            stats.total_files = len({str(path) for chunk in chunks for path in chunk.file_paths})
+
+    def _apply_status_live_diff(self, stats: IndexStats, *, live_diff: bool) -> None:
+        if not live_diff:
+            return
         try:
-            stats.total_entities = self._pipeline.graph_store.node_count()
-            stats.total_edges = self._pipeline.graph_store.edge_count()
-        except (RuntimeError, ValueError):
-            logger.debug("live graph count failed", exc_info=True)
-        # Change detection: run live diff against all known paths (skip for MCP)
-        if live_diff:
-            try:
-                if self._settings.indexing_paths:
-                    from dotmd.ingestion.reader import discover_files_multi
+            files = self._discover_status_files(stats)
+            if not files:
+                return
+            diff = self._pipeline.chunk_tracker.diff(files)
+        except (OSError, sqlite3.Error) as e:
+            logger.warning("Change detection failed: %s", e, exc_info=True)
+            return
 
-                    files = discover_files_multi(
-                        self._settings.indexing_paths,
-                        self._settings.effective_indexing_exclude,
-                    )
-                elif stats.data_dir:
-                    data_path = Path(stats.data_dir)
-                    if data_path.is_dir():
-                        from dotmd.ingestion.reader import discover_files
+        stats.new_files = len(diff.new)
+        stats.modified_files = len(diff.modified)
+        stats.deleted_files = len(diff.deleted)
+        stats.unchanged_files = len(diff.unchanged)
 
-                        files = discover_files(data_path)
-                    else:
-                        files = []
-                else:
-                    files = []
+    def _discover_status_files(self, stats: IndexStats) -> list[FileInfo]:
+        if self._settings.indexing_paths:
+            from dotmd.ingestion.reader import discover_files_multi
 
-                if files:
-                    diff = self._pipeline.chunk_tracker.diff(files)
-                    stats.new_files = len(diff.new)
-                    stats.modified_files = len(diff.modified)
-                    stats.deleted_files = len(diff.deleted)
-                    stats.unchanged_files = len(diff.unchanged)
-            except (OSError, sqlite3.Error) as e:
-                logger.warning("Change detection failed: %s", e, exc_info=True)
+            return discover_files_multi(
+                self._settings.indexing_paths,
+                self._settings.effective_indexing_exclude,
+            )
+        if stats.data_dir:
+            data_path = Path(stats.data_dir)
+            if data_path.is_dir():
+                from dotmd.ingestion.reader import discover_files
 
-        # Trickle indexer progress
+                return discover_files(data_path)
+        return []
+
+    def _apply_status_trickle_stats(self, stats: IndexStats) -> None:
         trickle_state = self._trickle_indexer.state
         stats.trickle_status = trickle_state.status
         stats.trickle_indexed = trickle_state.indexed_count
@@ -2112,32 +2094,23 @@ class DotMDService:
             round(trickle_state.eta_minutes, 1) if trickle_state.eta_minutes is not None else None
         )
 
-        return stats
-
     def graph_data(self) -> dict:
         """Return all graph nodes and edges for visualization."""
-        return self._pipeline.graph_store.get_graph_data()
+        if self._surreal_graph_store is None:
+            raise RuntimeError("graph_data requires SurrealDB graph storage")
+        return cast(dict, self._surreal_graph_store.get_graph_data())
 
     def drop_vectors(self) -> None:
-        """Drop local embedding-cache artifacts for current (strategy, model)."""
-        self._pipeline.drop_vectors()
+        """Drop vectors is not exposed in the SurrealDB-only runtime."""
+        raise RuntimeError("drop_vectors is not available in the SurrealDB-only runtime")
 
     def drop_chunks(self) -> None:
-        """Drop local chunk/cache artifacts for current strategy.
-
-        CASCADE operation: everything derived from chunks under the
-        current strategy is removed.
-        """
-        self._pipeline.drop_chunks()
+        """Drop chunks is not exposed in the SurrealDB-only runtime."""
+        raise RuntimeError("drop_chunks is not available in the SurrealDB-only runtime")
 
     def clear(self) -> None:
-        """Remove all indexed data from every backing store.
-
-        .. deprecated::
-            Use :meth:`drop_vectors` or :meth:`drop_chunks` for granular
-            cleanup.  Retained temporarily for backward compatibility.
-        """
-        self._pipeline.clear()
+        """Clear is not exposed in the SurrealDB-only runtime."""
+        raise RuntimeError("clear is not available in the SurrealDB-only runtime")
 
     def _load_acronyms(self) -> dict[str, list[str]] | None:
         """Load acronym dictionary from disk if available.

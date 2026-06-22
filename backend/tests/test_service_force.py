@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import MagicMock
 
+from tests.conftest import make_surreal_service
+
 if TYPE_CHECKING:
     from dotmd.api.service import DotMDService
 
@@ -15,11 +17,12 @@ class TestServiceForceParameter:
 
     def _make_service(self, tmp_path: Path) -> DotMDService:
         """Create a DotMDService with mocked-out heavy deps."""
-        from dotmd.api.service import DotMDService
-        from dotmd.core.config import Settings
-
-        settings = Settings(index_dir=tmp_path / "idx", embedding_url="http://test:8088")
-        service = DotMDService(settings=settings)
+        service = make_surreal_service(
+            tmp_path / "idx",
+            data_dir=tmp_path,
+            indexing_paths=[str(tmp_path)],
+            embedding_url="http://test:8088",
+        )
         # Replace the pipeline's index method with a mock
         service._pipeline.index = cast(Any, MagicMock(return_value=MagicMock()))
         return service

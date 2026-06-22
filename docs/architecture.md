@@ -3,7 +3,8 @@
 dotMD is a local markdown retrieval service exposed through a CLI, REST API,
 and MCP server. The current production architecture uses standalone SurrealDB
 for metadata, keyword retrieval, vector retrieval, and graph-backed entity
-retrieval.
+retrieval. SQLite/sqlite-vec/FTS5/FalkorDB/LadybugDB are not production
+runtime backends in the current product.
 
 ## Pipeline Flowchart
 

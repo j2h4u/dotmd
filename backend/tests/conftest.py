@@ -5,9 +5,14 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Generator
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
+
+from dotmd.core.config import Settings
+from dotmd.core.models import ExtractDepth
+from dotmd.storage.base import MetadataStoreProtocol
 
 # ---------------------------------------------------------------------------
 # Global env fixtures
@@ -34,7 +39,7 @@ class InMemoryGraphStore:
     """Small test double for GraphStoreProtocol.
 
     Unit tests exercise pipeline behavior, not graph-backend connectivity. Keep
-    this fake in tests only so production has a single real graph backend.
+    this fake in tests only so production has a single real retrieval backend.
     """
 
     def __init__(self) -> None:
@@ -304,6 +309,85 @@ def _mock_schema_version_check(request: pytest.FixtureRequest) -> Generator[None
         return
     with patch("dotmd.ingestion.pipeline.IndexingPipeline._check_schema_version"):
         yield
+
+
+# ---------------------------------------------------------------------------
+# Shared service helpers
+# ---------------------------------------------------------------------------
+
+
+def make_surreal_runtime_settings(**overrides: object) -> Settings:
+    """Construct runtime-ready Settings with the Surreal retrieval fields set."""
+    settings_kwargs: dict[str, Any] = {
+        "data_dir": Path("/mnt"),
+        "index_dir": Path("/dotmd-index"),
+        "indexing_paths": ["/mnt"],
+        "embedding_url": "http://tei:80",
+        "embedding_model": "BAAI/bge-small-en-v1.5",
+        "chunk_strategy": "heading_512_50",
+        "extract_depth": ExtractDepth.NER,
+        "ner_model_name": "urchade/gliner_multi-v2.1",
+        "reranker_name": "mmarco-minilm",
+        "reranker_model": "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
+        "reranker_backend": "cross_encoder",
+        "embedding_weights": "text=0.7,meta=0.3",
+        "surreal_retrieval_url": "http://surrealdb:8000",
+        "surreal_retrieval_namespace": "dotmd",
+        "surreal_retrieval_database": "production",
+        "surreal_retrieval_username": None,
+        "surreal_retrieval_password": None,
+        "surreal_retrieval_access_token": "token",
+        "surreal_retrieval_embedding_dimension": 1024,
+        "surreal_retrieval_hnsw_ef": 40,
+        "surreal_retrieval_embedding_shard_count": 1,
+    }
+    settings_kwargs.update(overrides)
+    return Settings(**cast(Any, settings_kwargs))
+
+
+def make_surreal_service(
+    tmp_path: Path,
+    *,
+    semantic_engine: Any | None = None,
+    keyword_engine: Any | None = None,
+    graph_direct_engine: Any | None = None,
+    **settings_overrides: object,
+) -> Any:
+    """Construct DotMDService through the Surreal-only retrieval path."""
+    from unittest.mock import MagicMock, patch
+
+    from dotmd.api.service import DotMDService
+
+    class _PipelineMetadataStoreProxy:
+        def __init__(self, pipeline: Any) -> None:
+            self._pipeline = pipeline
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._pipeline._metadata_store, name)
+
+    settings = make_surreal_runtime_settings(index_dir=tmp_path, **settings_overrides)
+    connection = MagicMock()
+    connection.raw = MagicMock()
+    semantic_engine = semantic_engine or MagicMock(name="semantic_engine")
+    keyword_engine = keyword_engine or MagicMock(name="keyword_engine")
+    graph_direct_engine = graph_direct_engine or MagicMock(name="graph_direct_engine")
+
+    with (
+        patch("dotmd.storage.surreal.SurrealConnection", return_value=connection),
+        patch(
+            "dotmd.search.surreal_native.build_surreal_native_engine_overrides",
+            return_value={
+                "semantic": semantic_engine,
+                "keyword": keyword_engine,
+                "graph_direct": graph_direct_engine,
+            },
+        ),
+    ):
+        service = DotMDService(settings)
+        service._surreal_metadata_store = cast(
+            MetadataStoreProtocol, _PipelineMetadataStoreProxy(service._pipeline)
+        )
+        return service
 
 
 # ---------------------------------------------------------------------------

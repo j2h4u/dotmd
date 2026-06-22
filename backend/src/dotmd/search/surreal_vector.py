@@ -7,11 +7,11 @@ import logging
 import os
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
 
 from surrealdb import SurrealError
 
-from dotmd.search.semantic import SemanticSearchEngine
+from dotmd.search.semantic import EmbeddingEncoder
 from dotmd.storage.surreal_schema import (
     DEFAULT_EMBEDDING_SHARD_COUNT,
     DEFAULT_HNSW_EF,
@@ -20,9 +20,6 @@ from dotmd.storage.surreal_schema import (
     surreal_embedding_shard_tables,
     validate_surreal_native_retrieval_contract,
 )
-
-if TYPE_CHECKING:
-    from dotmd.core.models import Chunk
 
 logger = logging.getLogger(__name__)
 
@@ -64,35 +61,7 @@ class _SurrealQueryConnection(Protocol):
     ) -> list[Any]: ...
 
 
-class _UnusedVectorStore:
-    def add_chunks(
-        self,
-        chunks: list[Chunk],
-        embeddings: list[list[float]],
-        *,
-        overwrite: bool = True,
-        text_hashes: dict[str, str] | None = None,
-    ) -> None:
-        raise NotImplementedError("SurrealVectorSearchEngine does not write through VectorStore")
-
-    def search(
-        self,
-        query_embedding: list[float],
-        top_k: int = 10,
-    ) -> list[tuple[str, float]]:
-        raise AssertionError("SurrealVectorSearchEngine overrides search()")
-
-    def delete_all(self) -> None:
-        raise NotImplementedError
-
-    def lookup_embeddings_by_text_hash(self, text_hashes: list[str]) -> dict[str, list[float]]:
-        raise NotImplementedError
-
-    def count(self) -> int:
-        raise NotImplementedError
-
-
-class SurrealVectorSearchEngine(SemanticSearchEngine):
+class SurrealVectorSearchEngine:
     """HNSW-backed vector retrieval over Surreal embeddings."""
 
     def __init__(
@@ -110,21 +79,42 @@ class SurrealVectorSearchEngine(SemanticSearchEngine):
         hnsw_ef: int = DEFAULT_HNSW_EF,
         embedding_shard_count: int = DEFAULT_EMBEDDING_SHARD_COUNT,
     ) -> None:
-        super().__init__(
-            _UnusedVectorStore(),
+        self._encoder = EmbeddingEncoder(
             model_name=model_name,
-            score_floor=score_floor,
             embedding_url=embedding_url,
             tei_batch_size=tei_batch_size,
             use_prefix=use_prefix,
             query_instruction=query_instruction,
         )
+        self._model_name = model_name
+        self._embedding_url = self._encoder._embedding_url
+        self._tei_batch_size = tei_batch_size
+        self._query_instruction = query_instruction
+        self._use_prefix = use_prefix
+        self._score_floor = score_floor
         self._connection = connection
         self._chunk_strategy = chunk_strategy
         self._embedding_dimension = embedding_dimension
         self._hnsw_ef = hnsw_ef
         self._embedding_tables = surreal_embedding_shard_tables(embedding_shard_count)
         self._preconditions_valid: bool | None = None
+
+    def get_tei_model_id(self) -> str | None:
+        """Return the actual embedding model name."""
+        return self._encoder.get_tei_model_id()
+
+    @property
+    def uses_remote_embeddings(self) -> bool:
+        return self._encoder.uses_remote_embeddings
+
+    def warmup(self) -> None:
+        self._encoder.warmup()
+
+    def encode(self, text: str) -> list[float]:
+        return self._encoder.encode(text)
+
+    def encode_batch(self, texts: list[str]) -> list[list[float]]:
+        return self._encoder.encode_batch(texts)
 
     def _placeholder_validation_rows(self) -> list[dict[str, object]]:
         return [
@@ -204,13 +194,6 @@ class SurrealVectorSearchEngine(SemanticSearchEngine):
         self._preconditions_valid = True
         return True
 
-    def _normalize_query_text(self, query: str) -> str:
-        if self._query_instruction:
-            return f"{self._query_instruction}\nQuery: {query}"
-        if self._use_prefix:
-            return f"query: {query}"
-        return query
-
     def _build_search_statement(self, *, table_name: str, top_k: int) -> str:
         shard_top_k = min(top_k, _MAX_HNSW_RESULTS_PER_SHARD)
         return f"""
@@ -256,7 +239,7 @@ LIMIT $limit;
             return []
         _write_vector_progress("preconditions", "applied")
 
-        encoded_query = self._normalize_query_text(query)
+        encoded_query = self._encoder.format_query(query)
         _write_vector_progress("encode", "running")
         query_embedding = self.encode(encoded_query)
         _write_vector_progress("encode", "applied")

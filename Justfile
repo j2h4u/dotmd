@@ -105,9 +105,9 @@ docker-build:
 docker-up:
     docker compose up dotmd
 
-# Start dotMD with bundled TEI and FalkorDB.
+# Start dotMD with bundled TEI only; SurrealDB is external.
 docker-up-bundled:
-    docker compose --profile bundled up dotmd tei falkordb
+    docker compose --profile bundled up dotmd tei
 
 # Stop containers.
 docker-down:

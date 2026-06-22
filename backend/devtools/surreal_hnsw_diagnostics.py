@@ -221,7 +221,7 @@ def _worker_main(args: argparse.Namespace) -> int:
             )
         ) as connection:
             connection.query(payload["statement"])
-    except Exception as exc:  # noqa: BLE001 - diagnostics must report arbitrary worker failures.
+    except Exception as exc:  # noqa: BLE001, RUF100 - diagnostics must report arbitrary worker failures.
         result.update(
             {
                 "status": "failed",

@@ -69,7 +69,7 @@ def _get_runtime_service_from_ctx(ctx: click.Context, **overrides: object) -> Do
     "--extract-depth",
     type=click.Choice(["structural", "ner"]),
     default="ner",
-    help="Extraction depth for graph building.",
+    help="Extraction depth for indexing.",
 )
 @click.option(
     "--entity-types",

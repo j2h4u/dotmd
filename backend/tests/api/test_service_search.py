@@ -12,25 +12,29 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dotmd.storage.metadata import SQLiteMetadataStore
+from tests.conftest import make_surreal_runtime_settings, make_surreal_service
 
 
 def _get_service(tmp_path: Path):  # type: ignore[no-untyped-def]
-    from dotmd.api.service import DotMDService
-    from dotmd.core.config import Settings
-
     # Explicitly disable Telegram socket so env vars from production deployment
     # (DOTMD_TELEGRAM_DAEMON_SOCKET) do not inject a live lifecycle bundle into
     # unit tests that only mock local search behavior.
-    settings = Settings(
-        index_dir=tmp_path, embedding_url="http://localhost:8088", telegram_daemon_socket=None
+    return make_surreal_service(
+        tmp_path,
+        data_dir=tmp_path,
+        indexing_paths=[str(tmp_path)],
+        embedding_url="http://localhost:8088",
+        telegram_daemon_socket=None,
     )
-    return DotMDService(settings)
 
 
 class _LifecycleFactoryFixture:
     def __init__(self, provider: object | None) -> None:
+        from dotmd.ingestion.source_registry import default_source_registry
+
         self.provider = provider
         self.calls: list[str] = []
+        self._registry = default_source_registry()
 
     def build_if_configured(self, namespace: str) -> object | None:
         from dotmd.ingestion.source_lifecycle import (
@@ -53,6 +57,14 @@ class _LifecycleFactoryFixture:
         )
 
 
+class _FailingLifecycleFactoryFixture(_LifecycleFactoryFixture):
+    def build_if_configured(self, namespace: str) -> object | None:
+        self.calls.append(namespace)
+        if namespace == "telegram":
+            raise RuntimeError("telegram unavailable")
+        return None
+
+
 def test_build_telegram_provider_uses_lifecycle_factory(tmp_path: Path) -> None:
     service = _get_service(tmp_path)
     provider = MagicMock()
@@ -63,6 +75,36 @@ def test_build_telegram_provider_uses_lifecycle_factory(tmp_path: Path) -> None:
 
     assert built is provider
     assert factory.calls == ["telegram"]
+
+
+def test_build_federated_bundles_registers_search_capable_bundle(tmp_path: Path) -> None:
+    service = _get_service(tmp_path)
+    provider = MagicMock()
+    factory = _LifecycleFactoryFixture(provider)
+    service._source_runtime_factory = factory  # type: ignore[attr-defined]
+    service._lifecycle_bundles = {}
+    service._lifecycle_init_errors = {}
+
+    service._build_federated_bundles()
+
+    assert factory.calls == ["filesystem", "telegram", "gmail"]
+    assert set(service._lifecycle_bundles) == {"telegram"}
+    assert service._lifecycle_bundles["telegram"].provider is provider
+    assert service._lifecycle_init_errors == {}
+
+
+def test_build_federated_bundles_records_lifecycle_errors(tmp_path: Path) -> None:
+    service = _get_service(tmp_path)
+    factory = _FailingLifecycleFactoryFixture(provider=None)
+    service._source_runtime_factory = factory  # type: ignore[attr-defined]
+    service._lifecycle_bundles = {}
+    service._lifecycle_init_errors = {}
+
+    service._build_federated_bundles()
+
+    assert factory.calls == ["filesystem", "telegram", "gmail"]
+    assert service._lifecycle_bundles == {}
+    assert service._lifecycle_init_errors == {"telegram": "telegram unavailable"}
 
 
 def test_format_elapsed_ms_for_human_diagnostics() -> None:
@@ -1366,7 +1408,6 @@ class TestSurrealHybridOverrides:
         tmp_path: Path,
     ) -> None:
         from dotmd.api.service import DotMDService
-        from dotmd.core.config import Settings
         from dotmd.core.models import SearchMode
 
         semantic = _RecordingSearchEngine([("semantic-hit", 0.91)])
@@ -1374,18 +1415,13 @@ class TestSurrealHybridOverrides:
         graph_direct = _RecordingSearchEngine([("graph-hit", 1.0)])
         connection = MagicMock()
         connection.raw = MagicMock()
-        semantic_ctor = MagicMock(name="SemanticSearchEngine")
-        graph_direct_ctor = MagicMock(name="GraphDirectEngine")
-        graph_search_ctor = MagicMock(name="GraphSearchEngine")
 
-        settings = Settings(
+        settings = make_surreal_runtime_settings(
             index_dir=tmp_path,
             embedding_url="http://localhost:8088",
-            surreal_retrieval_url="http://surrealdb:8000",
-            surreal_retrieval_database="production",
             surreal_retrieval_username="root",
             surreal_retrieval_password="root",
-            surreal_retrieval_embedding_dimension=1024,
+            surreal_retrieval_access_token=None,
             surreal_retrieval_hnsw_ef=80,
             telegram_daemon_socket=None,
         )
@@ -1400,9 +1436,6 @@ class TestSurrealHybridOverrides:
                     "graph_direct": graph_direct,
                 },
             ) as build_overrides,
-            patch("dotmd.api.service.SemanticSearchEngine", semantic_ctor),
-            patch("dotmd.api.service.GraphDirectEngine", graph_direct_ctor),
-            patch("dotmd.api.service.GraphSearchEngine", graph_search_ctor),
         ):
             service = DotMDService(settings)
 
@@ -1424,9 +1457,7 @@ class TestSurrealHybridOverrides:
         assert service._semantic_engine is semantic
         assert service._keyword_engine is keyword
         assert service._graph_direct_engine is graph_direct
-        semantic_ctor.assert_not_called()
-        graph_direct_ctor.assert_not_called()
-        graph_search_ctor.assert_not_called()
+        assert service._graph_engine.__class__.__name__ == "_DisabledGraphEnrichmentEngine"
 
         with patch("dotmd.api.service.fuse_results", return_value=[("semantic-hit", 0.9)]):
             pool = service._collect_candidate_pool(

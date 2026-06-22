@@ -17,21 +17,21 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tests.conftest import make_surreal_service
+
 if TYPE_CHECKING:
     from dotmd.api.service import DotMDService
 
 
 def _make_service(tmp_path: Path) -> DotMDService:
     """Create a DotMDService with real internals for integration testing."""
-    from dotmd.api.service import DotMDService
-    from dotmd.core.config import Settings
-
-    settings = Settings(
-        index_dir=tmp_path / "idx",
+    return make_surreal_service(
+        tmp_path / "idx",
+        data_dir=tmp_path,
+        indexing_paths=[str(tmp_path)],
         embedding_url="http://test:8088",
         rerank_pool_size=20,
     )
-    return DotMDService(settings=settings)
 
 
 def _seed_chunk_provenance(service: DotMDService, chunk_ids: list[str]) -> None:

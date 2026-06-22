@@ -254,7 +254,7 @@ def _worker_main(args: argparse.Namespace) -> int:
                 result["info"] = connection.query_raw(f"INFO FOR TABLE {table_name};")
             else:
                 connection.query(worker_input["statement"])
-    except Exception as exc:  # noqa: BLE001 - worker results must capture arbitrary failures.
+    except Exception as exc:  # noqa: BLE001, RUF100 - worker results must capture arbitrary failures.
         result.update(
             {
                 "status": "failed",

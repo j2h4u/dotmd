@@ -1,6 +1,6 @@
 # SurrealDB-Native Retrieval Contract
 
-dotMD uses SurrealDB as the production storage and retrieval backend.
+dotMD uses SurrealDB as the only production storage and retrieval backend.
 This contract defines the current retrieval surfaces and the invariants that
 the production/admin tooling must preserve.
 
@@ -37,7 +37,7 @@ targeted maintenance task.
 ## Non-Goals
 
 - No productized compatibility mode for old SQLite/Falkor retrieval behavior.
-- No runtime fallback backend.
+- No alternate production runtime backend.
 - No compatibility shims for hypothetical external clients.
 - No legacy SQLite/sqlite-vec/FTS5/FalkorDB/LadybugDB code kept in the
   production retrieval path.

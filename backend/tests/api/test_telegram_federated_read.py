@@ -12,9 +12,19 @@ from unittest.mock import MagicMock
 import pytest
 
 from dotmd.api.service import DotMDService
-from dotmd.core.config import Settings
 from dotmd.core.models import ExtractDepth, SourceUnit, SourceUnitWindow
 from dotmd.ingestion.telegram_provider import TelegramApplicationSourceProvider
+from tests.conftest import make_surreal_service
+
+
+def _get_service(tmp_path: Path) -> DotMDService:
+    return make_surreal_service(
+        tmp_path / "index",
+        data_dir=tmp_path,
+        indexing_paths=[str(tmp_path)],
+        embedding_url="http://localhost:18088",
+        extract_depth=ExtractDepth.STRUCTURAL,
+    )
 
 
 class TestFederatedTelegramRead:
@@ -23,16 +33,7 @@ class TestFederatedTelegramRead:
     def test_federated_only_message_round_trip(self, tmp_path: Path) -> None:
         """Non-indexed Telegram message routes to provider.read_unit_window."""
         # RED: This test fails because read() doesn't check for federated-only refs yet
-        index_dir = tmp_path / "index"
-        service = DotMDService(
-            Settings(
-                data_dir=tmp_path,
-                indexing_paths=[str(tmp_path)],
-                index_dir=index_dir,
-                embedding_url="http://localhost:18088",
-                extract_depth=ExtractDepth.STRUCTURAL,
-            )
-        )
+        service = _get_service(tmp_path)
 
         # Mock provider to return text for the message
         provider = MagicMock(spec=TelegramApplicationSourceProvider)
@@ -73,16 +74,7 @@ class TestFederatedTelegramRead:
     def test_federated_drill_returns_provider_metadata(self, tmp_path: Path) -> None:
         """drill(ref) returns provider metadata for federated-only refs."""
         # RED: drill() doesn't support federated refs yet
-        index_dir = tmp_path / "index"
-        service = DotMDService(
-            Settings(
-                data_dir=tmp_path,
-                indexing_paths=[str(tmp_path)],
-                index_dir=index_dir,
-                embedding_url="http://localhost:18088",
-                extract_depth=ExtractDepth.STRUCTURAL,
-            )
-        )
+        service = _get_service(tmp_path)
 
         # Mock provider metadata with units payload
         provider = MagicMock(spec=TelegramApplicationSourceProvider)
@@ -122,16 +114,7 @@ class TestFederatedTelegramRead:
     def test_federated_read_provider_down_attribution(self, tmp_path: Path) -> None:
         """Provider down error is clear and attributed."""
         # RED: Provider error attribution not implemented yet
-        index_dir = tmp_path / "index"
-        service = DotMDService(
-            Settings(
-                data_dir=tmp_path,
-                indexing_paths=[str(tmp_path)],
-                index_dir=index_dir,
-                embedding_url="http://localhost:18088",
-                extract_depth=ExtractDepth.STRUCTURAL,
-            )
-        )
+        service = _get_service(tmp_path)
 
         # Mock provider to raise an error
         provider = MagicMock(spec=TelegramApplicationSourceProvider)
@@ -149,16 +132,7 @@ class TestFederatedTelegramRead:
     def test_truly_federated_telegram_ref_routes_to_provider(self, tmp_path: Path) -> None:
         """CRITICAL: No local entry → provider path (Cycle-2 HIGH-7)."""
         # RED: federated-only routing not implemented
-        index_dir = tmp_path / "index"
-        service = DotMDService(
-            Settings(
-                data_dir=tmp_path,
-                indexing_paths=[str(tmp_path)],
-                index_dir=index_dir,
-                embedding_url="http://localhost:18088",
-                extract_depth=ExtractDepth.STRUCTURAL,
-            )
-        )
+        service = _get_service(tmp_path)
 
         # No local indexing of this message
         telegram_ref = "telegram:dialog:12345:message:67890"
@@ -203,16 +177,7 @@ class TestFederatedTelegramRead:
     ) -> None:
         """CRITICAL: Inactive local entry raises PermissionError, no fallthrough (Cycle-2 HIGH-7)."""
         # RED: binding gate and provider fallthrough not implemented
-        index_dir = tmp_path / "index"
-        service = DotMDService(
-            Settings(
-                data_dir=tmp_path,
-                indexing_paths=[str(tmp_path)],
-                index_dir=index_dir,
-                embedding_url="http://localhost:18088",
-                extract_depth=ExtractDepth.STRUCTURAL,
-            )
-        )
+        service = _get_service(tmp_path)
 
         telegram_ref = "telegram:dialog:12345:message:67890"
 
@@ -263,16 +228,7 @@ class TestFederatedTelegramRead:
     def test_active_locally_indexed_telegram_ref_uses_local_path(self, tmp_path: Path) -> None:
         """Active local entry uses local read path (not provider)."""
         # RED: binding-aware read routing not implemented
-        index_dir = tmp_path / "index"
-        service = DotMDService(
-            Settings(
-                data_dir=tmp_path,
-                indexing_paths=[str(tmp_path)],
-                index_dir=index_dir,
-                embedding_url="http://localhost:18088",
-                extract_depth=ExtractDepth.STRUCTURAL,
-            )
-        )
+        service = _get_service(tmp_path)
 
         telegram_ref = "telegram:dialog:12345:message:67890"
 
@@ -325,16 +281,7 @@ class TestFederatedTelegramRead:
     def test_federated_read_helper_naming(self, tmp_path: Path) -> None:
         """Helper method names/signatures correct."""
         # RED: Helper methods not implemented yet
-        index_dir = tmp_path / "index"
-        service = DotMDService(
-            Settings(
-                data_dir=tmp_path,
-                indexing_paths=[str(tmp_path)],
-                index_dir=index_dir,
-                embedding_url="http://localhost:18088",
-                extract_depth=ExtractDepth.STRUCTURAL,
-            )
-        )
+        service = _get_service(tmp_path)
 
         # Verify helper methods exist and have correct signatures
         assert hasattr(service, "_resolve_telegram_read_path")

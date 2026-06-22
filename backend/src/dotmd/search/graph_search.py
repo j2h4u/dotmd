@@ -152,7 +152,7 @@ class GraphSearchEngine:
         if callable(batch_getter):
             try:
                 return list(batch_getter(seed_chunk_ids))
-            except Exception:  # noqa: BLE001 - graph enrichment is best-effort.
+            except Exception:  # noqa: BLE001, RUF100 - graph enrichment is best-effort.
                 logger.warning(
                     "graph enrichment batch query failed; continuing without enrichment",
                     exc_info=True,
@@ -163,7 +163,7 @@ class GraphSearchEngine:
         for seed_id in seed_chunk_ids:
             try:
                 neighbors = self._graph_store.get_related_sections(seed_id)
-            except Exception:  # noqa: BLE001 - graph enrichment is best-effort.
+            except Exception:  # noqa: BLE001, RUF100 - graph enrichment is best-effort.
                 logger.warning(
                     "graph enrichment seed query failed; skipping seed",
                     exc_info=True,

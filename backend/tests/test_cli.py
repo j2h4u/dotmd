@@ -12,13 +12,25 @@ from click.testing import CliRunner
 
 from dotmd.cli import main
 from dotmd.core.models import SearchResponse
+from tests.conftest import make_surreal_runtime_settings
+
+
+def _cli_runtime_settings(tmp_path: Path):
+    return make_surreal_runtime_settings(
+        data_dir=tmp_path,
+        index_dir=tmp_path,
+        indexing_paths=[str(tmp_path)],
+        embedding_url="http://localhost:8088",
+        telegram_daemon_socket=None,
+    )
 
 
 def test_search_accepts_reranker_option(tmp_path: Path) -> None:
-    with patch(
-        "dotmd.api.service.DotMDService.search",
-        return_value=SearchResponse(),
-    ) as search:
+    with (
+        patch("dotmd.cli.load_settings", return_value=_cli_runtime_settings(tmp_path)),
+        patch("dotmd.cli.DotMDService") as service_cls,
+    ):
+        service_cls.return_value.search.return_value = SearchResponse()
         result = CliRunner().invoke(
             main,
             [
@@ -32,14 +44,15 @@ def test_search_accepts_reranker_option(tmp_path: Path) -> None:
         )
 
     assert result.exit_code == 0, result.output
-    assert search.call_args.kwargs["reranker_name"] == "msmarco-minilm"
+    assert service_cls.return_value.search.call_args.kwargs["reranker_name"] == "msmarco-minilm"
 
 
 def test_search_accepts_federated_option(tmp_path: Path) -> None:
-    with patch(
-        "dotmd.api.service.DotMDService.search",
-        return_value=SearchResponse(),
-    ) as search:
+    with (
+        patch("dotmd.cli.load_settings", return_value=_cli_runtime_settings(tmp_path)),
+        patch("dotmd.cli.DotMDService") as service_cls,
+    ):
+        service_cls.return_value.search.return_value = SearchResponse()
         result = CliRunner().invoke(
             main,
             [
@@ -52,14 +65,17 @@ def test_search_accepts_federated_option(tmp_path: Path) -> None:
         )
 
     assert result.exit_code == 0, result.output
-    assert search.call_args.kwargs["include_federated"] is True
+    assert service_cls.return_value.search.call_args.kwargs["include_federated"] is True
 
 
 def test_search_unknown_reranker_is_click_error(tmp_path: Path) -> None:
-    with patch(
-        "dotmd.api.service.DotMDService.search",
-        side_effect=ValueError("Unknown reranker 'missing'; available: mmarco-minilm"),
+    with (
+        patch("dotmd.cli.load_settings", return_value=_cli_runtime_settings(tmp_path)),
+        patch("dotmd.cli.DotMDService") as service_cls,
     ):
+        service_cls.return_value.search.side_effect = ValueError(
+            "Unknown reranker 'missing'; available: mmarco-minilm"
+        )
         result = CliRunner().invoke(
             main,
             [
@@ -114,10 +130,11 @@ def test_rerank_compare_command_outputs_diagnostics(tmp_path: Path) -> None:
         "overlap_reference": "mmarco-minilm",
         "overlap": {"mmarco-minilm": 2, "msmarco-minilm": 1},
     }
-    with patch(
-        "dotmd.api.service.DotMDService.compare_rerankers",
-        return_value=comparison,
-    ) as compare:
+    with (
+        patch("dotmd.cli.load_settings", return_value=_cli_runtime_settings(tmp_path)),
+        patch("dotmd.cli.DotMDService") as service_cls,
+    ):
+        service_cls.return_value.compare_rerankers.return_value = comparison
         result = CliRunner().invoke(
             main,
             [
@@ -132,7 +149,7 @@ def test_rerank_compare_command_outputs_diagnostics(tmp_path: Path) -> None:
         )
 
     assert result.exit_code == 0, result.output
-    compare.assert_called_once_with(
+    service_cls.return_value.compare_rerankers.assert_called_once_with(
         query="test query",
         reranker_names=["mmarco-minilm", "msmarco-minilm"],
         top_k=10,
@@ -150,10 +167,13 @@ def test_rerank_compare_command_outputs_diagnostics(tmp_path: Path) -> None:
 
 
 def test_rerank_compare_unknown_reranker_is_click_error(tmp_path: Path) -> None:
-    with patch(
-        "dotmd.api.service.DotMDService.compare_rerankers",
-        side_effect=ValueError("Unknown reranker 'missing'; available: mmarco-minilm"),
+    with (
+        patch("dotmd.cli.load_settings", return_value=_cli_runtime_settings(tmp_path)),
+        patch("dotmd.cli.DotMDService") as service_cls,
     ):
+        service_cls.return_value.compare_rerankers.side_effect = ValueError(
+            "Unknown reranker 'missing'; available: mmarco-minilm"
+        )
         result = CliRunner().invoke(
             main,
             [
@@ -225,5 +245,6 @@ def test_status_verbose_reports_surrealdb_graph_and_skips_sqlite_tables(tmp_path
 
     assert result.exit_code == 0, result.output
     assert "Graph:    SurrealDB @ http://surrealdb:8000/dotmd/production" in result.output
-    assert "falkordb" not in result.output.lower()
     assert "Strategies:" not in result.output
+    assert "sqlite" not in result.output.lower()
+    assert "falkor" not in result.output.lower()

@@ -182,12 +182,11 @@ def test_embed_chunks_sends_context_prefixed_text_to_encode_boundary(
     pipeline = IndexingPipeline(minimal_settings)
     recorded_batches: list[list[str]] = []
 
-    def record_tei_boundary(inputs: str | list[str]) -> list[list[float]]:
-        batch = [inputs] if isinstance(inputs, str) else list(inputs)
-        recorded_batches.append(batch)
-        return [[0.1, 0.2, 0.3] for _ in batch]
+    def record_tei_boundary(inputs: list[str]) -> list[list[float]]:
+        recorded_batches.append(list(inputs))
+        return [[0.1, 0.2, 0.3] for _ in inputs]
 
-    monkeypatch.setattr(pipeline._semantic_engine, "_encode_via_tei", record_tei_boundary)
+    monkeypatch.setattr(pipeline._semantic_engine._encoder, "_encode_remote", record_tei_boundary)
 
     chunk = Chunk(
         chunk_id="d" * 64,

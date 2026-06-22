@@ -84,8 +84,8 @@ def test_surreal_runtime_settings_are_the_only_public_graph_runtime_config() -> 
     settings = Settings(embedding_url="http://localhost:8088")
 
     assert "search_backend" not in Settings.model_fields
-    assert "falkordb_url" not in Settings.model_fields
-    assert "falkordb_graph_name" not in Settings.model_fields
+    assert "graph_backend" not in Settings.model_fields
+    assert "graph_name" not in Settings.model_fields
     assert settings.surreal_retrieval_url == config.DEFAULT_SURREAL_URL
     assert settings.surreal_retrieval_namespace == config.DEFAULT_SURREAL_NAMESPACE
 
@@ -225,14 +225,31 @@ def test_service_status_consumes_effective_indexing_exclude() -> None:
     service: Any = object.__new__(DotMDService)
     service._settings = settings
     service._pipeline = SimpleNamespace(
-        metadata_store=SimpleNamespace(get_stats=Mock(return_value=IndexStats())),
-        conn=None,
+        metadata_store=SimpleNamespace(
+            get_stats=Mock(
+                return_value=IndexStats(
+                    total_files=1,
+                    total_chunks=2,
+                    total_entities=3,
+                    total_edges=4,
+                )
+            ),
+            get_all_chunks=Mock(return_value=[]),
+        ),
+        conn=SimpleNamespace(
+            execute=Mock(side_effect=lambda *_args, **_kwargs: pytest.fail("sqlite scan ran"))
+        ),
         graph_store=SimpleNamespace(
-            node_count=Mock(side_effect=RuntimeError("not needed")),
-            edge_count=Mock(side_effect=RuntimeError("not needed")),
+            node_count=Mock(
+                side_effect=lambda *_args, **_kwargs: pytest.fail("graph node count ran")
+            ),
+            edge_count=Mock(
+                side_effect=lambda *_args, **_kwargs: pytest.fail("graph edge count ran")
+            ),
         ),
         chunk_tracker=SimpleNamespace(diff=Mock()),
     )
+    service._surreal_metadata_store = service._pipeline.metadata_store
     service._trickle_indexer = SimpleNamespace(
         state=SimpleNamespace(
             status=TrickleStatus.IDLE,
@@ -248,9 +265,109 @@ def test_service_status_consumes_effective_indexing_exclude() -> None:
     with patch("dotmd.ingestion.reader.discover_files_multi", return_value=[]) as discover:
         service.status()
 
+    service._pipeline.metadata_store.get_stats.assert_called_once_with()
+    service._pipeline.metadata_store.get_all_chunks.assert_not_called()
+    service._pipeline.conn.execute.assert_not_called()
+    service._pipeline.graph_store.node_count.assert_not_called()
+    service._pipeline.graph_store.edge_count.assert_not_called()
     discover.assert_called_once_with(settings.indexing_paths, settings.effective_indexing_exclude)
     assert "**/.git" in discover.call_args.args[1]
     assert "**/private" in discover.call_args.args[1]
+
+
+def test_service_status_uses_surreal_metadata_count_fallback() -> None:
+    settings = Settings(embedding_url="http://localhost:8088")
+    service: Any = object.__new__(DotMDService)
+    service._settings = settings
+    service._pipeline = SimpleNamespace(
+        metadata_store=SimpleNamespace(
+            get_stats=Mock(
+                return_value=IndexStats(
+                    total_files=0,
+                    total_chunks=0,
+                    total_entities=0,
+                    total_edges=0,
+                )
+            ),
+            get_all_chunks=Mock(
+                return_value=[
+                    SimpleNamespace(file_paths=[Path("/mnt/a.md"), Path("/mnt/b.md")]),
+                    SimpleNamespace(file_paths=[Path("/mnt/a.md")]),
+                ]
+            ),
+        ),
+        chunk_tracker=SimpleNamespace(diff=Mock()),
+    )
+    service._surreal_metadata_store = service._pipeline.metadata_store
+    service._trickle_indexer = SimpleNamespace(
+        state=SimpleNamespace(
+            status=TrickleStatus.IDLE,
+            indexed_count=0,
+            total_files=0,
+            current_file=None,
+            chunks_per_hour=0.0,
+            files_per_hour=0.0,
+            eta_minutes=None,
+        )
+    )
+
+    stats = service._load_status_stats()
+
+    assert stats.total_chunks == 2
+    assert stats.total_files == 2
+    service._pipeline.metadata_store.get_stats.assert_called_once_with()
+    service._pipeline.metadata_store.get_all_chunks.assert_called_once_with()
+
+
+def test_service_active_metadata_store_prefers_surreal_store() -> None:
+    service: Any = object.__new__(DotMDService)
+    surreal_store = SimpleNamespace()
+    pipeline_store = SimpleNamespace()
+    service._surreal_metadata_store = surreal_store
+    service._pipeline = SimpleNamespace(metadata_store=pipeline_store)
+
+    assert service._active_metadata_store() is surreal_store
+
+
+def test_service_active_metadata_store_falls_back_to_pipeline_store() -> None:
+    service: Any = object.__new__(DotMDService)
+    pipeline_store = SimpleNamespace()
+    service._surreal_metadata_store = None
+    service._pipeline = SimpleNamespace(metadata_store=pipeline_store)
+
+    assert service._active_metadata_store() is pipeline_store
+
+
+def test_service_graph_data_uses_surreal_graph_store_only() -> None:
+    service: Any = object.__new__(DotMDService)
+    service._surreal_graph_store = SimpleNamespace(
+        get_graph_data=Mock(return_value={"nodes": [], "edges": []})
+    )
+    service._pipeline = SimpleNamespace(
+        graph_store=SimpleNamespace(
+            get_graph_data=Mock(side_effect=lambda: pytest.fail("legacy graph store read"))
+        )
+    )
+
+    assert service.graph_data() == {"nodes": [], "edges": []}
+    service._surreal_graph_store.get_graph_data.assert_called_once_with()
+    service._pipeline.graph_store.get_graph_data.assert_not_called()
+
+
+def test_service_graph_data_requires_surreal_graph_store() -> None:
+    service: Any = object.__new__(DotMDService)
+    service._surreal_graph_store = None
+
+    with pytest.raises(RuntimeError, match="SurrealDB graph storage"):
+        service.graph_data()
+
+
+@pytest.mark.parametrize("method_name", ["drop_vectors", "drop_chunks", "clear"])
+def test_service_admin_surface_methods_fail_fast_in_surreal_runtime(method_name: str) -> None:
+    service = object.__new__(DotMDService)
+
+    with pytest.raises(RuntimeError, match="SurrealDB-only runtime"):
+        getattr(service, method_name)()
 
 
 def test_mcp_stdio_runtime_path_uses_runtime_settings_helper() -> None:

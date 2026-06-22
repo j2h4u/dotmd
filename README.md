@@ -2,7 +2,7 @@
 
 **Local markdown knowledgebase search for humans and AI agents.**
 
-dotMD indexes markdown files and exposes hybrid retrieval through a CLI, REST API, and MCP server. Production retrieval now runs through standalone SurrealDB for semantic vectors, keyword search, and graph-backed entity retrieval, then fuses and reranks results for higher precision.
+dotMD indexes markdown files and exposes hybrid retrieval through a CLI, REST API, and MCP server. Production retrieval now runs through standalone SurrealDB for semantic vectors, keyword search, and graph-backed entity retrieval, then fuses and reranks results for higher precision. SurrealDB is the only production storage and retrieval backend; `index.db` remains migration/internal-cache scaffolding.
 
 Everything runs against local or self-hosted services. No hosted LLM API key is required for normal indexing or search.
 
@@ -20,7 +20,7 @@ keeps only `mmarco-minilm`; rejected historical candidates remain documented in
 - Hybrid search across semantic vectors, keyword search, and knowledge graph entities
 - MCP server for Claude Code, Cursor, VS Code, OpenCode, and other MCP clients
 - Content-aware markdown chunking for docs, meeting transcripts, and voicenotes
-- Standalone SurrealDB production storage and retrieval
+- Standalone SurrealDB is the only production storage and retrieval backend
 - Multiple chunk strategies and embedding models in the same index
 - External TEI embedding server support
 - Background trickle indexer for incremental file changes
@@ -34,7 +34,7 @@ keeps only `mmarco-minilm`; rejected historical candidates remain documented in
 | Docker and Docker Compose | Containerized runtime and bundled services |
 | just | Development task runner |
 | TEI | Required embedding server for normal indexing/search |
-| SurrealDB | Required production storage and retrieval database |
+| SurrealDB | Required production storage and retrieval database; single production backend |
 
 Optional tools:
 
@@ -167,7 +167,7 @@ just docker-build
 just docker-up
 ```
 
-To start bundled local dependencies:
+To start the bundled container stack with a running external SurrealDB instance:
 
 ```bash
 just docker-up-bundled
@@ -177,7 +177,8 @@ The compose profile starts:
 
 - `dotmd` - MCP HTTP server
 - `tei` - Hugging Face Text Embeddings Inference
-- `surrealdb` - storage and retrieval database
+
+The production storage and retrieval backend is the external SurrealDB deployment. `index.db` stays migration/internal-cache scaffolding only.
 
 Index data is stored in the `dotmd-index` Docker volume.
 

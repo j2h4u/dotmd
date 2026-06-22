@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from dotmd.core.models import SourceUnitWindow
+from tests.conftest import make_surreal_service
 
 
 def _telegram_unit_dict(message_id: int, text: str) -> dict[str, Any]:
@@ -56,11 +57,13 @@ def _source_unit(message_id: int, text: str):
 
 
 def _get_service(tmp_path: Path):  # type: ignore[no-untyped-def]
-    from dotmd.api.service import DotMDService
-    from dotmd.core.config import Settings
-
-    settings = Settings(index_dir=tmp_path, embedding_url="http://localhost:8088")
-    return DotMDService(settings)
+    return make_surreal_service(
+        tmp_path,
+        data_dir=tmp_path,
+        indexing_paths=[str(tmp_path)],
+        embedding_url="http://localhost:8088",
+        telegram_daemon_socket=None,
+    )
 
 
 def test_federated_only_message_round_trip(tmp_path: Path) -> None:

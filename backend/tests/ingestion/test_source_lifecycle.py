@@ -180,6 +180,25 @@ def test_build_fails_fast_when_required_filesystem_paths_missing(
         factory.build("filesystem")
 
 
+def test_build_fails_fast_when_filesystem_config_has_wrong_type(tmp_path: Path) -> None:
+    factory = SourceRuntimeFactory(
+        registry=default_source_registry(),
+        config_store=InMemorySourceConfigStore(
+            [
+                SourceConfigRecord(
+                    namespace="filesystem",
+                    config=TelegramSourceConfig(socket_path=tmp_path / "daemon.sock"),
+                )
+            ]
+        ),
+        credential_provider=DefaultSourceCredentialProvider(),
+        cursor_store=SQLiteSourceCursorStore(_metadata_store(tmp_path)),
+    )
+
+    with pytest.raises(SourceLifecycleConfigError, match=r"filesystem\.paths"):
+        factory.build("filesystem")
+
+
 def test_build_fails_fast_when_telegram_socket_missing(tmp_path: Path) -> None:
     factory = SourceRuntimeFactory(
         registry=default_source_registry(),

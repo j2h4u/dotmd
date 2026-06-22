@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from dotmd.core.models import Chunk
+from dotmd.search.graph_direct import GraphDirectEngine
 from dotmd.search.graph_search import GraphSearchEngine
 
 
@@ -19,6 +20,15 @@ class _FakeGraphStore:
             ("missing", "MENTIONS", 1.0),
             (chunk_id, "MENTIONS", 1.0),
         ]
+
+    def get_all_entity_names(self) -> list[str]:
+        return []
+
+
+def test_graph_direct_engine_initializes_with_empty_catalog() -> None:
+    engine = GraphDirectEngine(_FakeGraphStore())  # type: ignore[arg-type]
+
+    assert engine._entity_catalog == {}  # pyright: ignore[reportPrivateUsage]
 
 
 class _FakeBatchGraphStore:

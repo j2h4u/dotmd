@@ -73,3 +73,15 @@ def test_direct_surreal_pipeline_init_skips_legacy_vec_and_fts(
         assert pipeline.conn.execute("SELECT COUNT(*) FROM resource_bindings").fetchone()[0] == 1
     finally:
         pipeline.close()
+
+
+def test_direct_surreal_pipeline_internal_accessors_are_initialized(tmp_path: Path) -> None:
+    settings, _file_path = _direct_ingest_settings(tmp_path)
+    pipeline = IndexingPipeline(settings)
+
+    try:
+        assert pipeline.vector_store is pipeline._vector_store
+        assert pipeline.keyword_engine is pipeline._keyword_engine
+        assert pipeline.graph_store is pipeline._graph_store
+    finally:
+        pipeline.close()

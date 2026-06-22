@@ -31,7 +31,7 @@ The project has been substantially reworked:
 - **M2M content-addressed schema**: chunks → file_paths many-to-many (Phase 16)
 - **SurrealDB-native retrieval**: semantic, keyword, and graph-direct retrieval
   run through standalone SurrealDB
-- **Retired storage backends**: only SurrealDB is a production runtime choice
+- **Retired storage backends**: SQLite/sqlite-vec/FTS5/FalkorDB/LadybugDB are retired and must not be described as production runtime choices
 - **TEI**: external embedding server (Text Embeddings Inference), CPU-only
 
 ## Phase 37: Airweave Connector Compatibility
