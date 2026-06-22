@@ -471,7 +471,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--m-values", default="12")
     parser.add_argument("--efc-values", default="64")
     parser.add_argument("--segment-sizes", default="default")
-    parser.add_argument("--vector-type", choices=("F32", "F64"), default="F32")
+    parser.add_argument("--vector-type", choices=("F16", "F32", "F64"), default="F16")
     parser.add_argument("--source-kind", choices=("synthetic", "actual"), default="synthetic")
     parser.add_argument("--source-sqlite", type=Path)
     parser.add_argument(

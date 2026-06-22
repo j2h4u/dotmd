@@ -290,7 +290,7 @@ def test_retrieval_index_plan_exposes_runtime_compatible_bm25_hnsw_and_relation_
     assert retrieval_plan.embedding_dimension == 3
     assert retrieval_plan.hnsw_m == 4
     assert retrieval_plan.hnsw_ef == 40
-    assert retrieval_plan.vector_index_type == "F32"
+    assert retrieval_plan.vector_index_type == "F16"
     assert retrieval_plan.analyzer_statement == (
         "DEFINE ANALYZER dotmd_fts TOKENIZERS CLASS,PUNCT FILTERS LOWERCASE"
     )
@@ -299,7 +299,7 @@ def test_retrieval_index_plan_exposes_runtime_compatible_bm25_hnsw_and_relation_
         "DEFINE INDEX chunks_text_fts ON chunks FIELDS text FULLTEXT ANALYZER dotmd_fts BM25(1.2,0.75)",
     )
     assert retrieval_plan.hnsw_index_statement == (
-        "DEFINE INDEX embeddings_vector_hnsw ON TABLE embeddings FIELDS vector HNSW DIMENSION 3 DIST COSINE TYPE F32 EFC 40 M 4;"
+        "DEFINE INDEX embeddings_vector_hnsw ON TABLE embeddings FIELDS vector HNSW DIMENSION 3 DIST COSINE TYPE F16 EFC 40 M 4;"
     )
     assert retrieval_plan.relation_index_statements == (
         "DEFINE INDEX relations_rel_type_idx ON TABLE relations COLUMNS rel_type;",
@@ -470,6 +470,7 @@ def test_probe_surreal_native_retrieval_capabilities_reports_required_and_observ
             connection,
             embedding_dimension=3,
             hnsw_ef=40,
+            vector_index_type="F32",
             allow_target_mutation=True,
         )
 

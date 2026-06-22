@@ -1032,6 +1032,7 @@ def probe_surreal_native_retrieval_capabilities(
     *,
     embedding_dimension: int,
     hnsw_ef: int = DEFAULT_HNSW_EF,
+    vector_index_type: str = DEFAULT_SURREAL_HNSW_VECTOR_INDEX_TYPE,
     allow_target_mutation: bool = False,
 ) -> SurrealRetrievalCapabilityReport:
     if not allow_target_mutation:
@@ -1041,6 +1042,7 @@ def probe_surreal_native_retrieval_capabilities(
     retrieval_plan = build_surreal_native_retrieval_index_plan(
         embedding_dimension=embedding_dimension,
         hnsw_ef=hnsw_ef,
+        vector_index_type=vector_index_type,
     )
 
     required_checks = (

@@ -29,6 +29,7 @@ def apply_surreal_native_retrieval_schema(
     *,
     embedding_dimension: int = 3,
     hnsw_ef: int = 40,
+    vector_index_type: str = "F32",
 ) -> SurrealRetrievalIndexPlan:
     define_dotmd_surreal_schema(connection)
 
@@ -37,6 +38,7 @@ def apply_surreal_native_retrieval_schema(
     retrieval_plan = schema_module.build_surreal_native_retrieval_index_plan(
         embedding_dimension=embedding_dimension,
         hnsw_ef=hnsw_ef,
+        vector_index_type=vector_index_type,
     )
     for statement in retrieval_plan.statements:
         try:

@@ -97,7 +97,7 @@ def test_surreal_runtime_defaults_export_surreal_settings() -> None:
     assert settings.surreal_retrieval_namespace == "dotmd"
     assert settings.surreal_retrieval_database is None
     assert settings.surreal_retrieval_embedding_dimension is None
-    assert settings.surreal_retrieval_vector_index_type == "F32"
+    assert settings.surreal_retrieval_vector_index_type == "F16"
 
 
 def test_surreal_retrieval_vector_index_type_normalizes_and_validates() -> None:

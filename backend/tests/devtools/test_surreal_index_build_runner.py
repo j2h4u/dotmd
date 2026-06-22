@@ -29,7 +29,7 @@ def test_index_build_plan_orders_unique_guard_before_secondary_indexes() -> None
     assert steps[0].statement.endswith("embedding_model UNIQUE;")
     assert steps[-1].statement == (
         "DEFINE INDEX embeddings_vector_hnsw ON TABLE embeddings FIELDS vector "
-        "HNSW DIMENSION 1024 DIST COSINE TYPE F32 EFC 64 M 4;"
+        "HNSW DIMENSION 1024 DIST COSINE TYPE F16 EFC 64 M 4;"
     )
 
 
@@ -75,7 +75,7 @@ def test_index_build_plan_can_target_sharded_hnsw_indexes() -> None:
     assert [step.table_name for step in steps] == ["embeddings_0", "embeddings_1", "embeddings_2"]
     assert steps[0].statement == (
         "DEFINE INDEX embeddings_0_vector_hnsw ON TABLE embeddings_0 FIELDS vector "
-        "HNSW DIMENSION 1024 DIST COSINE TYPE F32 EFC 32 M 4;"
+        "HNSW DIMENSION 1024 DIST COSINE TYPE F16 EFC 32 M 4;"
     )
 
 
