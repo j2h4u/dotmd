@@ -364,7 +364,7 @@ def test_write_surreal_migration_evidence_reports_preserves_non_ascii_and_redact
         deep_sample_checks=["Сообщение: всё хорошо"],
         embedding_reuse_verified=True,
         no_recompute_verified=True,
-        unsupported_categories=["search_log"],
+        unsupported_categories=["stats"],
         redaction_policy="redacted",
         sample_limit=1,
         restore_manifest=restore_manifest,

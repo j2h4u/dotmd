@@ -160,7 +160,6 @@ def test_define_dotmd_surreal_schema_declares_required_record_shapes_and_schema_
     assert schema["schema_version"] == SURREAL_SCHEMA_VERSION
     assert schema["apply_status"].status == "not-applied"
     assert "stats" in schema["unsupported_categories"]
-    assert "search_log" in schema["unsupported_categories"]
     assert "chunk_file_bindings" in schema["required_categories"]
     assert any(
         "DEFINE TABLE documents SCHEMAFULL" in statement for statement in schema["statements"]

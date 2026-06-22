@@ -345,13 +345,9 @@ class TestKeywordSurvivalThroughReranking:
             side_effect=lambda ids: [chunks[cid] for cid in ids if cid in chunks]
         )
         _seed_chunk_provenance(service, ["s1", "b1"])
-        service._pipeline.log_search = MagicMock()
-
         results = service.search("test query", top_k=10, mode="hybrid", rerank=True)
 
         assert results
-        service._pipeline.log_search.assert_called_once()
-        assert service._pipeline.log_search.call_args.kwargs["reranked"] is False
 
 
 class TestRerankerFactorySearchWiring:
@@ -387,8 +383,6 @@ class TestRerankerFactorySearchWiring:
         )
         service._pipeline.metadata_store.get_chunks = MagicMock(return_value=[chunk])
         _seed_chunk_provenance(service, ["s1"])
-        service._pipeline.log_search = MagicMock()
-
         results = service.search(
             "test query",
             top_k=10,
@@ -430,8 +424,6 @@ class TestRerankerFactorySearchWiring:
         )
         service._pipeline.metadata_store.get_chunks = MagicMock(return_value=[chunk])
         _seed_chunk_provenance(service, ["s1"])
-        service._pipeline.log_search = MagicMock()
-
         service.search("test query", top_k=10, mode="hybrid", rerank=True)
 
         service._reranker_factory.get.assert_called_once_with(None)
@@ -467,8 +459,6 @@ class TestRerankerFactorySearchWiring:
             side_effect=lambda ids: [chunks[cid] for cid in ids if cid in chunks]
         )
         _seed_chunk_provenance(service, ["s1", "gx1"])
-        service._pipeline.log_search = MagicMock()
-
         results = service.search(
             "test query",
             top_k=10,
@@ -502,7 +492,6 @@ class TestSearchResultContracts:
         reranker.rerank.return_value = [("s1", 1.0)]
         service._reranker_factory = MagicMock()
         service._reranker_factory.get.return_value = reranker
-        service._pipeline.log_search = MagicMock()
         _seed_chunk_provenance(service, ["s1", "gx1"])
 
         import dotmd.api.service as svc_module
@@ -550,12 +539,7 @@ class TestSearchResultContracts:
         )
         service._pipeline.metadata_store.get_chunks = MagicMock(return_value=[chunk])
         _seed_chunk_provenance(service, ["s1"])
-        service._pipeline.log_search = MagicMock()
-
         service.search("test query", top_k=10, mode="hybrid", rerank=True)
-
-        service._pipeline.log_search.assert_called_once()
-        assert service._pipeline.log_search.call_args.kwargs["reranked"] is True
 
 
 class TestDiagnosticLogging:

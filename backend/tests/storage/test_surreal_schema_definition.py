@@ -82,7 +82,6 @@ def test_build_dotmd_surreal_schema_plan_covers_required_categories_and_tokens()
     }
     assert {
         "stats",
-        "search_log",
         "embedding_cache",
         "embedding_cache_meta",
         "extraction_cache",

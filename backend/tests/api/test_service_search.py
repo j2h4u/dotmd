@@ -449,7 +449,6 @@ class TestActiveSearchFiltering:
             {"active-1", "active-2"},
         )
         service._pipeline._metadata_store = cast(SQLiteMetadataStore, metadata)
-        service._pipeline.log_search = MagicMock()
         active_provenance_map = {
             "active-1": _chunk_provenance("active-1"),
             "active-2": _chunk_provenance("active-2"),
@@ -514,7 +513,6 @@ class TestActiveSearchFiltering:
             {"active-1"},
         )
         service._pipeline._metadata_store = cast(SQLiteMetadataStore, metadata)
-        service._pipeline.log_search = MagicMock()
         active_provenance_map = {
             "active-1": _chunk_provenance("active-1"),
         }
@@ -558,7 +556,6 @@ class TestActiveSearchFiltering:
         active = ["active-1", "active-2"]
         metadata = _SearchMetadataStore(inactive + active, set(active))
         service._pipeline._metadata_store = cast(SQLiteMetadataStore, metadata)
-        service._pipeline.log_search = MagicMock()
 
         # Build provenance for active items
         active_provenance_map = {
@@ -604,7 +601,6 @@ class TestActiveSearchFiltering:
             {"active-1", "active-2"},
         )
         service._pipeline._metadata_store = cast(SQLiteMetadataStore, metadata)
-        service._pipeline.log_search = MagicMock()
         service._collect_candidate_pool = MagicMock(
             return_value={
                 "fused": [
@@ -643,7 +639,6 @@ class TestActiveSearchFiltering:
             {"graph-active"},
         )
         service._pipeline._metadata_store = cast(SQLiteMetadataStore, metadata)
-        service._pipeline.log_search = MagicMock()
         service._collect_candidate_pool = MagicMock(
             return_value={
                 "fused": [("graph-inactive", 0.9), ("graph-active", 0.8)],
@@ -1557,7 +1552,6 @@ class TestSurrealHybridOverrides:
         service = _get_service(tmp_path)
         metadata = _SearchMetadataStore(["shared"], {"shared"})
         service._pipeline._metadata_store = cast(SQLiteMetadataStore, metadata)
-        service._pipeline.log_search = MagicMock()
         service._collect_active_candidate_pool = MagicMock(
             return_value=(
                 {

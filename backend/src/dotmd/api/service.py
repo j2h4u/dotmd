@@ -582,7 +582,6 @@ class DotMDService:
         RuntimeError
             If called from inside a running event loop.
 
-        Side effect: appends one row to ``search_log`` in ``index.db`` on every call.
         """
         # Check for unsafe nesting inside a running event loop (cycle-2 HIGH-5)
         try:
@@ -795,7 +794,6 @@ class DotMDService:
             return []
 
         # -- Optional reranking -----------------------------------------------
-        reranked_applied = False
         if rerank and fused:
             rerank_limit = min(pool_size, len(fused))
             rerank_candidates = fused[:rerank_limit]
@@ -813,7 +811,6 @@ class DotMDService:
                 reranked = []
             # Blend reranker scores with fusion scores via min-max normalization
             if reranked:
-                reranked_applied = True
                 re_scores = [s for _, s in reranked]
                 re_min, re_max = min(re_scores), max(re_scores)
                 re_range = re_max - re_min if re_max > re_min else 1.0
@@ -857,7 +854,7 @@ class DotMDService:
         # Note: fused contains (chunk_id, score) pairs at this point.
         # build_candidates will hydrate these into full SearchCandidate objects
         # using the metadata_store and provenance map.
-        candidates = build_candidates(
+        return build_candidates(
             fused[:top_k],
             per_engine=engine_results,
             metadata_store=self._active_metadata_store(),
@@ -866,27 +863,6 @@ class DotMDService:
             top_k=top_k,
             snippet_length=self._settings.snippet_length,
         )
-
-        # Log search for observability and future auto-calibration (Phase 999.12)
-        try:
-            self._pipeline.log_search(
-                query=original_query,
-                weights_used=self._settings.parsed_embedding_weights,
-                top_results=[
-                    {
-                        "chunk_id": c.chunk_id or c.ref,
-                        "score": float(c.fused_score),
-                        "engine": c.matched_engines[0] if c.matched_engines else "unknown",
-                    }
-                    for c in candidates[:top_k]
-                ],
-                mode=mode if isinstance(mode, str) else str(mode),
-                reranked=reranked_applied,
-            )
-        except (sqlite3.Error, RuntimeError):
-            logger.warning("search log failed — non-fatal", exc_info=True)
-
-        return candidates
 
     def _run_local_search_sequence(
         self,

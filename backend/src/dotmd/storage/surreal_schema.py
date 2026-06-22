@@ -45,7 +45,6 @@ _REQUIRED_MIGRATION_CATEGORIES = (
 
 _UNSUPPORTED_MIGRATION_CATEGORIES = (
     "stats",
-    "search_log",
     "embedding_cache",
     "embedding_cache_meta",
     "extraction_cache",
@@ -828,7 +827,7 @@ def build_dotmd_surreal_schema_plan() -> SurrealSchemaPlan:
             "SCHEMAFULL tables keep flexible metadata/properties fields for legacy JSON payloads.",
             "Relations preserve rel_type, weight, source_id, target_id, source_table, and target_table without ENFORCED endpoint rejection.",
             "vector_components remains optional derived storage and is not a retrieval prerequisite.",
-            "stats, search_log, and cache categories are not required migration-success criteria.",
+            "stats and cache categories are not required migration-success criteria.",
         ),
         downstream_phase_consumables=(
             "documents.ref",
