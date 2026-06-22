@@ -28,8 +28,8 @@ def _make_service(tmp_path: Path) -> DotMDService:
     return make_surreal_service(
         tmp_path / "idx",
         data_dir=tmp_path,
-        indexing_paths=[str(tmp_path)],
-        embedding_url="http://test:8088",
+        indexing={"paths": [str(tmp_path)]},
+        embedding={"url": "http://test:8088"},
         rerank_pool_size=20,
     )
 
@@ -38,7 +38,7 @@ def _seed_chunk_provenance(service: DotMDService, chunk_ids: list[str]) -> None:
     """Seed source provenance for synthetic chunks returned by mocked engines."""
     from dotmd.core.models import ChunkProvenance, ResourceBinding, SourceDocument
 
-    strategy = service._settings.chunk_strategy
+    strategy = service._settings.indexing.chunk_strategy
     store = service._pipeline.metadata_store
     store.ensure_chunk_source_provenance_table(strategy)
     store.ensure_resource_bindings_table()

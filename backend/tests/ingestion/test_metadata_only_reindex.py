@@ -72,10 +72,9 @@ def pipeline_settings(tmp_path):
     return Settings(
         data_dir=data_dir,
         index_dir=index_dir,
-        embedding_url="http://localhost:18088",
-        indexing_paths=[str(data_dir)],
-        extract_depth=ExtractDepth.STRUCTURAL,
-        embedding_weights="text=0.7,meta=0.3",
+        embedding={"url": "http://localhost:18088", "weights": "text=0.7,meta=0.3"},
+        indexing={"paths": [str(data_dir)]},
+        extraction={"depth": ExtractDepth.STRUCTURAL},
     )
 
 
@@ -83,13 +82,17 @@ def pipeline_settings(tmp_path):
 def surreal_pipeline_settings(pipeline_settings):
     return pipeline_settings.model_copy(
         update={
-            "surreal_retrieval_url": "http://surrealdb:8000",
-            "surreal_retrieval_namespace": "dotmd",
-            "surreal_retrieval_database": "phase46_direct_ingest",
-            "surreal_retrieval_username": "root",
-            "surreal_retrieval_password": "root",
-            "surreal_retrieval_access_token": None,
-            "surreal_retrieval_embedding_dimension": 768,
+            "surreal_retrieval": pipeline_settings.surreal_retrieval.model_copy(
+                update={
+                    "url": "http://surrealdb:8000",
+                    "namespace": "dotmd",
+                    "database": "phase46_direct_ingest",
+                    "username": "root",
+                    "password": "root",
+                    "access_token": None,
+                    "embedding_dimension": 768,
+                }
+            ),
         }
     )
 
@@ -207,13 +210,14 @@ def test_surreal_metadata_only_reindex_skips_derived_vec_and_fts_tables(tmp_path
     settings = Settings(
         data_dir=data_dir,
         index_dir=index_dir,
-        embedding_url="http://localhost:18088",
-        indexing_paths=[str(data_dir)],
-        extract_depth=ExtractDepth.STRUCTURAL,
-        chunk_strategy="contextual_512_50",
-        surreal_retrieval_url=f"surrealkv://{surreal_db}",
-        surreal_retrieval_database="metadata_only_visibility",
-        surreal_retrieval_embedding_dimension=3,
+        embedding={"url": "http://localhost:18088"},
+        indexing={"paths": [str(data_dir)], "chunk_strategy": "contextual_512_50"},
+        extraction={"depth": ExtractDepth.STRUCTURAL},
+        surreal_retrieval={
+            "url": f"surrealkv://{surreal_db}",
+            "database": "metadata_only_visibility",
+            "embedding_dimension": 3,
+        },
     )
 
     doc = data_dir / "surreal.md"

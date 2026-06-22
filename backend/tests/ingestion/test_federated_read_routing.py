@@ -60,8 +60,8 @@ def _get_service(tmp_path: Path):  # type: ignore[no-untyped-def]
     return make_surreal_service(
         tmp_path,
         data_dir=tmp_path,
-        indexing_paths=[str(tmp_path)],
-        embedding_url="http://localhost:8088",
+        indexing={"paths": [str(tmp_path)]},
+        embedding={"url": "http://localhost:8088"},
         telegram_daemon_socket=None,
     )
 
@@ -94,7 +94,7 @@ def test_federated_only_message_round_trip(tmp_path: Path) -> None:
 
     # Count chunk rows before
     chunk_count_before = service._pipeline._conn.execute(
-        f"SELECT COUNT(*) FROM chunks_{service._settings.chunk_strategy}"
+        f"SELECT COUNT(*) FROM chunks_{service._settings.indexing.chunk_strategy}"
     ).fetchone()[0]
 
     # Act: read a federated-only Telegram ref — must NOT raise
@@ -121,7 +121,7 @@ def test_federated_only_message_round_trip(tmp_path: Path) -> None:
 
     # No chunk rows were inserted
     chunk_count_after = service._pipeline._conn.execute(
-        f"SELECT COUNT(*) FROM chunks_{service._settings.chunk_strategy}"
+        f"SELECT COUNT(*) FROM chunks_{service._settings.indexing.chunk_strategy}"
     ).fetchone()[0]
     assert chunk_count_after == chunk_count_before, (
         f"Federated read inserted {chunk_count_after - chunk_count_before} "

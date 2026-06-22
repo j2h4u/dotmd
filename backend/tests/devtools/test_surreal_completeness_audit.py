@@ -270,15 +270,15 @@ class _FakeAuditConnection:
 
 
 def test_read_settings_from_env_uses_live_surreal_env(monkeypatch) -> None:
-    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL_URL", "http://surrealdb:8000")
-    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL_NAMESPACE", "dotmd")
-    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL_DATABASE", "production")
-    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL_USERNAME", "alice")
-    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL_PASSWORD", "secret")
-    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL_EMBEDDING_DIMENSION", "3")
-    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL_EMBEDDING_SHARD_COUNT", "2")
-    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL_HNSW_EF", "40")
-    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL_VECTOR_INDEX_TYPE", "f16")
+    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL__URL", "http://surrealdb:8000")
+    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL__NAMESPACE", "dotmd")
+    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL__DATABASE", "production")
+    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL__USERNAME", "alice")
+    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL__PASSWORD", "secret")
+    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL__EMBEDDING_DIMENSION", "3")
+    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL__EMBEDDING_SHARD_COUNT", "2")
+    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL__HNSW_EF", "40")
+    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL__VECTOR_INDEX_TYPE", "f16")
 
     settings = read_settings_from_env()
 

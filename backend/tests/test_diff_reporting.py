@@ -46,28 +46,27 @@ def _mock_pipeline_settings(index_dir: Path, md_dir: Path) -> MagicMock:
     settings.index_dir = index_dir
     settings.index_db_path = index_dir / "index.db"
     settings.acronyms_path = index_dir / "acronyms.json"
-    settings.embedding_model = "test-model"
-    settings.embedding_url = "http://test:8088"
-    settings.indexing_paths = [str(md_dir)]
+    settings.embedding = MagicMock(model="test-model", url="http://test:8088", tei_batch_size=32)
+    settings.indexing = MagicMock(paths=[str(md_dir)], chunk_strategy="heading_512_50")
     settings.effective_indexing_exclude = []
     settings.telegram_daemon_socket = None
-    settings.extract_depth = "structural"
-    settings.ner_entity_types = []
-    settings.ner_model_name = "urchade/gliner_multi-v2.1"
-    settings.chunk_strategy = "heading_512_50"
-    settings.max_chunk_tokens = 512
-    settings.chunk_overlap_tokens = 50
+    settings.extraction = MagicMock(depth="structural")
+    settings.extraction.ner_entity_types = []
+    settings.extraction.ner_model_name = "urchade/gliner_multi-v2.1"
+    settings.indexing.max_chunk_tokens = 512
+    settings.indexing.chunk_overlap_tokens = 50
     settings.read_only = False
-    settings.tei_batch_size = 32
     settings.needs_embedding_prefix = False
-    settings.allow_destructive_startup_repair = False
-    settings.surreal_retrieval_database = None
-    settings.surreal_retrieval_url = ""
-    settings.surreal_retrieval_namespace = ""
-    settings.surreal_retrieval_username = None
-    settings.surreal_retrieval_password = None
-    settings.surreal_retrieval_access_token = None
-    settings.surreal_retrieval_embedding_dimension = None
+    settings.indexing.allow_destructive_startup_repair = False
+    settings.surreal_retrieval = MagicMock(
+        database=None,
+        url="",
+        namespace="",
+        username=None,
+        password=None,
+        access_token=None,
+        embedding_dimension=None,
+    )
     settings.parsed_embedding_weights = {"text": 0.7, "meta": 0.3}
     return settings
 

@@ -79,7 +79,7 @@ def _get_pipeline(db_path: Path):  # type: ignore[no-untyped-def]
 
     settings = Settings(
         index_dir=db_path.parent,
-        embedding_url="http://localhost:18088",
+        embedding={"url": "http://localhost:18088"},
     )
     return IndexingPipeline(settings)
 
@@ -95,14 +95,14 @@ def _get_pipeline_with_direct_writer(
 
     settings = Settings(
         index_dir=db_path.parent,
-        embedding_url="http://localhost:18088",
-        embedding_model=MODEL,
+        embedding={"url": "http://localhost:18088", "model": MODEL},
     )
     if use_surreal_direct_writer:
         settings = settings.model_copy(
             update={
-                "surreal_retrieval_url": "http://localhost:8000",
-                "surreal_retrieval_database": "dotmd",
+                "surreal_retrieval": settings.surreal_retrieval.model_copy(
+                    update={"url": "http://localhost:8000", "database": "dotmd"}
+                ),
             }
         )
         with patch.object(

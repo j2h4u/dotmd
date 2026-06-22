@@ -92,9 +92,12 @@ def index(
     DEV ONLY — in production, trickle indexer handles this automatically.
     Use for one-off debugging or after schema changes that require a full rebuild.
     """
-    overrides: dict[str, object] = {"extract_depth": extract_depth}
+    overrides: dict[str, object] = {"extraction": {"depth": extract_depth}}
     if entity_types:
-        overrides["ner_entity_types"] = [t.strip() for t in entity_types.split(",")]
+        overrides["extraction"] = {
+            "depth": extract_depth,
+            "ner_entity_types": [t.strip() for t in entity_types.split(",")],
+        }
 
     service = _get_service(**overrides)
     mode_label = "full re-index" if force else "incremental"
@@ -247,8 +250,8 @@ def status(ctx: click.Context, verbose: bool) -> None:
     click.echo(f"Edges:    {stats.total_edges}")
     click.echo(
         "Graph:    SurrealDB @ "
-        f"{settings.surreal_retrieval_url}/{settings.surreal_retrieval_namespace}/"
-        f"{settings.surreal_retrieval_database}"
+        f"{settings.surreal_retrieval.url}/{settings.surreal_retrieval.namespace}/"
+        f"{settings.surreal_retrieval.database}"
     )
     if stats.last_indexed:
         click.echo(f"Last indexed: {stats.last_indexed.isoformat()}")

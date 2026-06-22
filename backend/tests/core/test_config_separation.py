@@ -2,7 +2,7 @@
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 import pytest
@@ -20,34 +20,42 @@ def _runtime_settings(**overrides: object) -> Settings:
     values: dict[str, Any] = {
         "data_dir": Path("/mnt"),
         "index_dir": Path("/dotmd-index"),
-        "indexing_paths": ["/mnt"],
-        "embedding_url": "http://tei:80",
-        "embedding_model": "BAAI/bge-small-en-v1.5",
-        "chunk_strategy": "heading_512_50",
-        "extract_depth": ExtractDepth.NER,
-        "ner_model_name": "urchade/gliner_multi-v2.1",
+        "indexing": {
+            "paths": ["/mnt"],
+            "chunk_strategy": "heading_512_50",
+        },
+        "embedding": {
+            "url": "http://tei:80",
+            "model": "BAAI/bge-small-en-v1.5",
+            "weights": "text=0.7,meta=0.3",
+        },
+        "extraction": {
+            "depth": ExtractDepth.NER,
+            "ner_model_name": "urchade/gliner_multi-v2.1",
+        },
         "reranker_name": "mmarco-minilm",
         "reranker_model": "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
         "reranker_backend": "cross_encoder",
-        "embedding_weights": "text=0.7,meta=0.3",
-        "surreal_retrieval_url": "http://surrealdb:8000",
-        "surreal_retrieval_namespace": "dotmd",
-        "surreal_retrieval_database": "production",
-        "surreal_retrieval_username": None,
-        "surreal_retrieval_password": None,
-        "surreal_retrieval_access_token": "token",
-        "surreal_retrieval_embedding_dimension": 1024,
-        "surreal_retrieval_hnsw_ef": 40,
-        "surreal_retrieval_embedding_shard_count": 1,
+        "surreal_retrieval": {
+            "url": "http://surrealdb:8000",
+            "namespace": "dotmd",
+            "database": "production",
+            "username": None,
+            "password": None,
+            "access_token": "token",
+            "embedding_dimension": 1024,
+            "hnsw_ef": 40,
+            "embedding_shard_count": 1,
+        },
     }
     values.update(overrides)
     return Settings(**values)
 
 
 def test_settings_still_constructs_with_current_defaults() -> None:
-    settings = Settings(embedding_url="http://localhost:8088")
+    settings = Settings(embedding={"url": "http://localhost:8088"})
 
-    assert settings.embedding_url == "http://localhost:8088"
+    assert settings.embedding.url == "http://localhost:8088"
     assert settings.data_dir == Path()
     assert settings.index_dir == Path.home() / ".dotmd"
     assert settings.default_top_k == 10
@@ -62,7 +70,7 @@ def test_default_indexing_exclude_is_exported() -> None:
 
 
 def test_effective_indexing_exclude_includes_builtin_defaults() -> None:
-    settings = Settings(embedding_url="http://localhost:8088")
+    settings = Settings(embedding={"url": "http://localhost:8088"})
 
     assert all(
         pattern in settings.effective_indexing_exclude
@@ -72,8 +80,8 @@ def test_effective_indexing_exclude_includes_builtin_defaults() -> None:
 
 def test_indexing_extra_exclude_is_additive() -> None:
     settings = Settings(
-        embedding_url="http://localhost:8088",
-        indexing_extra_exclude=["**/private"],
+        embedding={"url": "http://localhost:8088"},
+        indexing={"extra_exclude": ["**/private"]},
     )
 
     assert "**/.git" in settings.effective_indexing_exclude
@@ -81,52 +89,54 @@ def test_indexing_extra_exclude_is_additive() -> None:
 
 
 def test_surreal_runtime_settings_are_the_only_public_graph_runtime_config() -> None:
-    settings = Settings(embedding_url="http://localhost:8088")
+    settings = Settings(embedding={"url": "http://localhost:8088"})
 
     assert "search_backend" not in Settings.model_fields
     assert "graph_backend" not in Settings.model_fields
     assert "graph_name" not in Settings.model_fields
-    assert settings.surreal_retrieval_url == config.DEFAULT_SURREAL_URL
-    assert settings.surreal_retrieval_namespace == config.DEFAULT_SURREAL_NAMESPACE
+    assert settings.surreal_retrieval.url == config.DEFAULT_SURREAL_URL
+    assert settings.surreal_retrieval.namespace == config.DEFAULT_SURREAL_NAMESPACE
 
 
 def test_surreal_runtime_defaults_export_surreal_settings() -> None:
-    settings = Settings(embedding_url="http://localhost:8088")
+    settings = Settings(embedding={"url": "http://localhost:8088"})
 
-    assert settings.surreal_retrieval_url == "http://127.0.0.1:8000"
-    assert settings.surreal_retrieval_namespace == "dotmd"
-    assert settings.surreal_retrieval_database is None
-    assert settings.surreal_retrieval_embedding_dimension is None
-    assert settings.surreal_retrieval_vector_index_type == "F16"
+    assert settings.surreal_retrieval.url == "http://127.0.0.1:8000"
+    assert settings.surreal_retrieval.namespace == "dotmd"
+    assert settings.surreal_retrieval.database is None
+    assert settings.surreal_retrieval.embedding_dimension is None
+    assert settings.surreal_retrieval.vector_index_type == "F16"
 
 
 def test_surreal_retrieval_vector_index_type_normalizes_and_validates() -> None:
     settings = Settings(
-        embedding_url="http://localhost:8088",
-        surreal_retrieval_vector_index_type="f16",
+        embedding={"url": "http://localhost:8088"},
+        surreal_retrieval={"vector_index_type": "f16"},
     )
 
-    assert settings.surreal_retrieval_vector_index_type == "F16"
+    assert settings.surreal_retrieval.vector_index_type == "F16"
 
-    with pytest.raises(ValueError, match="surreal_retrieval_vector_index_type"):
+    with pytest.raises(ValueError, match=r"surreal_retrieval\.vector_index_type"):
         Settings(
-            embedding_url="http://localhost:8088",
-            surreal_retrieval_vector_index_type="diskann",
+            embedding={"url": "http://localhost:8088"},
+            surreal_retrieval={"vector_index_type": "diskann"},
         )
 
 
 def test_runtime_validation_requires_surreal_runtime_fields() -> None:
-    settings = _runtime_settings(surreal_retrieval_database=None)
+    settings = _runtime_settings(surreal_retrieval={"database": None})
 
-    with pytest.raises(ValueError, match="surreal_retrieval_database"):
+    with pytest.raises(ValueError, match=r"surreal_retrieval\.database"):
         settings.validate_for_runtime()
 
 
 def test_runtime_validation_accepts_surreal_runtime_configuration() -> None:
     settings = _runtime_settings(
-        surreal_retrieval_url="http://surrealdb:8000",
-        surreal_retrieval_database="production",
-        surreal_retrieval_embedding_dimension=1024,
+        surreal_retrieval={
+            "url": "http://surrealdb:8000",
+            "database": "production",
+            "embedding_dimension": 1024,
+        },
     )
 
     settings.validate_for_runtime()
@@ -135,25 +145,30 @@ def test_runtime_validation_accepts_surreal_runtime_configuration() -> None:
 @pytest.mark.parametrize(
     "overrides",
     [
-        {"surreal_retrieval_username": "root"},
-        {"surreal_retrieval_password": "secret"},
+        {"surreal_retrieval": {"username": "root"}},
+        {"surreal_retrieval": {"password": "secret"}},
         {
-            "surreal_retrieval_username": "root",
-            "surreal_retrieval_password": "secret",
-            "surreal_retrieval_access_token": "token",
+            "surreal_retrieval": {
+                "username": "root",
+                "password": "secret",
+                "access_token": "token",
+            },
         },
-        {"surreal_retrieval_hnsw_ef": 0},
-        {"surreal_retrieval_embedding_shard_count": 0},
+        {"surreal_retrieval": {"hnsw_ef": 0}},
+        {"surreal_retrieval": {"embedding_shard_count": 0}},
     ],
 )
 def test_runtime_validation_rejects_invalid_surreal_runtime_auth_or_bounds(
     overrides: dict[str, object],
 ) -> None:
+    surreal_overrides = cast(dict[str, object], overrides["surreal_retrieval"])
     settings = _runtime_settings(
-        surreal_retrieval_url="http://surrealdb:8000",
-        surreal_retrieval_database="production",
-        surreal_retrieval_embedding_dimension=1024,
-        **overrides,
+        surreal_retrieval={
+            "url": "http://surrealdb:8000",
+            "database": "production",
+            "embedding_dimension": 1024,
+            **surreal_overrides,
+        },
     )
 
     with pytest.raises(ValueError, match="surreal_retrieval"):
@@ -165,7 +180,7 @@ def test_runtime_validation_rejects_invalid_surreal_runtime_auth_or_bounds(
     [
         ("data_dir", {"data_dir": Path()}),
         ("index_dir", {"index_dir": Path.home() / ".dotmd"}),
-        ("indexing_paths", {"indexing_paths": []}),
+        ("indexing.paths", {"indexing": {"paths": []}}),
         ("data_dir", {"data_dir": Path("/data")}),
         ("index_dir", {"index_dir": Path("/tmp/dotmd-index")}),
     ],
@@ -185,7 +200,7 @@ def test_runtime_validation_rejects_unsafe_deployment_defaults(
     [
         ("data_dir", {"data_dir": Path("data")}),
         ("index_dir", {"index_dir": Path("idx")}),
-        ("indexing_paths", {"indexing_paths": ["data"]}),
+        ("indexing.paths", {"indexing": {"paths": ["data"]}}),
     ],
 )
 def test_runtime_validation_rejects_relative_runtime_paths(
@@ -199,7 +214,7 @@ def test_runtime_validation_rejects_relative_runtime_paths(
 
 
 def test_runtime_validation_accepts_absolute_indexing_globs() -> None:
-    settings = _runtime_settings(indexing_paths=["/mnt/**/*.md"])
+    settings = _runtime_settings(indexing={"paths": ["/mnt/**/*.md"]})
 
     settings.validate_for_runtime()
 
@@ -211,16 +226,15 @@ def test_runtime_validation_accepts_explicit_deployment_values() -> None:
 
 
 def test_base_url_none_remains_valid() -> None:
-    settings = Settings(embedding_url="http://localhost:8088", base_url=None)
+    settings = Settings(embedding={"url": "http://localhost:8088"}, base_url=None)
 
     assert settings.base_url is None
 
 
 def test_service_status_consumes_effective_indexing_exclude() -> None:
     settings = Settings(
-        embedding_url="http://localhost:8088",
-        indexing_paths=["/mnt"],
-        indexing_extra_exclude=["**/private"],
+        embedding={"url": "http://localhost:8088"},
+        indexing={"paths": ["/mnt"], "extra_exclude": ["**/private"]},
     )
     service: Any = object.__new__(DotMDService)
     service._settings = settings
@@ -270,13 +284,13 @@ def test_service_status_consumes_effective_indexing_exclude() -> None:
     service._pipeline.conn.execute.assert_not_called()
     service._pipeline.graph_store.node_count.assert_not_called()
     service._pipeline.graph_store.edge_count.assert_not_called()
-    discover.assert_called_once_with(settings.indexing_paths, settings.effective_indexing_exclude)
+    discover.assert_called_once_with(settings.indexing.paths, settings.effective_indexing_exclude)
     assert "**/.git" in discover.call_args.args[1]
     assert "**/private" in discover.call_args.args[1]
 
 
 def test_service_status_uses_surreal_metadata_count_fallback() -> None:
-    settings = Settings(embedding_url="http://localhost:8088")
+    settings = Settings(embedding={"url": "http://localhost:8088"})
     service: Any = object.__new__(DotMDService)
     service._settings = settings
     service._pipeline = SimpleNamespace(

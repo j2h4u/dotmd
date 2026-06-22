@@ -135,16 +135,20 @@ Production env vars (source: `/opt/docker/dotmd/.env`):
 |----------|---------|
 | `DOTMD_DATA_DIR` | Markdown source root — **locked to `/mnt`**, never narrow |
 | `DOTMD_INDEX_DIR` | Index directory (docker volume mount) |
-| `DOTMD_EMBEDDING_URL` | TEI server URL |
-| `DOTMD_EMBEDDING_MODEL` | Model name passed to TEI |
-| `DOTMD_TEI_BATCH_SIZE` | TEI call batch size |
-| `DOTMD_EXTRACT_DEPTH` | `structural` or `ner` |
-| `DOTMD_SURREAL_RETRIEVAL_URL` | Standalone SurrealDB URL |
-| `DOTMD_SURREAL_RETRIEVAL_NAMESPACE` | SurrealDB namespace, normally `dotmd` |
-| `DOTMD_SURREAL_RETRIEVAL_DATABASE` | SurrealDB database, normally `production` |
-| `DOTMD_SURREAL_RETRIEVAL_EMBEDDING_DIMENSION` | Embedding dimension, currently `1024` |
-| `DOTMD_SURREAL_RETRIEVAL_VECTOR_INDEX_TYPE` | HNSW vector type, currently `F16` |
-| `DOTMD_PROFILE_INDEXING` | Enable pipeline timing logs |
+| `DOTMD_EMBEDDING__URL` | TEI server URL |
+| `DOTMD_EMBEDDING__MODEL` | Model name passed to TEI |
+| `DOTMD_EMBEDDING__TEI_BATCH_SIZE` | TEI call batch size |
+| `DOTMD_EXTRACTION__DEPTH` | `structural` or `ner` |
+| `DOTMD_SURREAL_RETRIEVAL__URL` | Standalone SurrealDB URL |
+| `DOTMD_SURREAL_RETRIEVAL__NAMESPACE` | SurrealDB namespace, normally `dotmd` |
+| `DOTMD_SURREAL_RETRIEVAL__DATABASE` | SurrealDB database, normally `production` |
+| `DOTMD_SURREAL_RETRIEVAL__EMBEDDING_DIMENSION` | Embedding dimension, currently `1024` |
+| `DOTMD_SURREAL_RETRIEVAL__VECTOR_INDEX_TYPE` | HNSW vector type, currently `F16` |
+| `DOTMD_INDEXING__PROFILE` | Enable pipeline timing logs |
+
+Nested settings live under `[embedding]`, `[indexing]`, `[extraction]`, and
+`[surreal_retrieval]` in `~/.dotmd/config.toml`; environment overrides use
+`DOTMD_*__*` names for nested fields.
 
 ## Deployment
 

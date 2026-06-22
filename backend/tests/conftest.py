@@ -23,16 +23,16 @@ from dotmd.storage.base import MetadataStoreProtocol
 def _dotmd_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Set minimal env vars so Settings() and IndexingPipeline can be constructed.
 
-    - DOTMD_EMBEDDING_URL: required field with no default (prevents misconfiguration
+    - DOTMD_EMBEDDING__URL: required field with no default (prevents misconfiguration
       in production). A non-routable stub is fine — tests that need real embeddings
       mock the HTTP call at a higher level.
-    - DOTMD_EXTRACT_DEPTH: override to 'structural' so tests that construct a full
+    - DOTMD_EXTRACTION__DEPTH: override to 'structural' so tests that construct a full
       IndexingPipeline do not accidentally load NER models or call TEI during ingest.
       Tests that specifically exercise NER must override this fixture or set the env
       var directly.
     """
-    monkeypatch.setenv("DOTMD_EMBEDDING_URL", "http://test-tei:8088")
-    monkeypatch.setenv("DOTMD_EXTRACT_DEPTH", "structural")
+    monkeypatch.setenv("DOTMD_EMBEDDING__URL", "http://test-tei:8088")
+    monkeypatch.setenv("DOTMD_EXTRACTION__DEPTH", "structural")
 
 
 class InMemoryGraphStore:
@@ -321,25 +321,33 @@ def make_surreal_runtime_settings(**overrides: object) -> Settings:
     settings_kwargs: dict[str, Any] = {
         "data_dir": Path("/mnt"),
         "index_dir": Path("/dotmd-index"),
-        "indexing_paths": ["/mnt"],
-        "embedding_url": "http://tei:80",
-        "embedding_model": "BAAI/bge-small-en-v1.5",
-        "chunk_strategy": "heading_512_50",
-        "extract_depth": ExtractDepth.NER,
-        "ner_model_name": "urchade/gliner_multi-v2.1",
+        "indexing": {
+            "paths": ["/mnt"],
+            "chunk_strategy": "heading_512_50",
+        },
+        "embedding": {
+            "url": "http://tei:80",
+            "model": "BAAI/bge-small-en-v1.5",
+            "weights": "text=0.7,meta=0.3",
+        },
+        "extraction": {
+            "depth": ExtractDepth.NER,
+            "ner_model_name": "urchade/gliner_multi-v2.1",
+        },
         "reranker_name": "mmarco-minilm",
         "reranker_model": "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
         "reranker_backend": "cross_encoder",
-        "embedding_weights": "text=0.7,meta=0.3",
-        "surreal_retrieval_url": "http://surrealdb:8000",
-        "surreal_retrieval_namespace": "dotmd",
-        "surreal_retrieval_database": "production",
-        "surreal_retrieval_username": None,
-        "surreal_retrieval_password": None,
-        "surreal_retrieval_access_token": "token",
-        "surreal_retrieval_embedding_dimension": 1024,
-        "surreal_retrieval_hnsw_ef": 40,
-        "surreal_retrieval_embedding_shard_count": 1,
+        "surreal_retrieval": {
+            "url": "http://surrealdb:8000",
+            "namespace": "dotmd",
+            "database": "production",
+            "username": None,
+            "password": None,
+            "access_token": "token",
+            "embedding_dimension": 1024,
+            "hnsw_ef": 40,
+            "embedding_shard_count": 1,
+        },
     }
     settings_kwargs.update(overrides)
     return Settings(**cast(Any, settings_kwargs))

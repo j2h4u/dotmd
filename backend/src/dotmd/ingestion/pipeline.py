@@ -371,32 +371,32 @@ def _create_surreal_direct_writer(settings: Settings) -> Any:
     from dotmd.storage.surreal import SurrealConnection, SurrealStoreConfig
     from dotmd.storage.surreal_schema import define_dotmd_surreal_schema
 
-    if not settings.surreal_retrieval_url:
-        raise ValueError("surreal_retrieval_url must be set for Surreal direct ingest")
-    if not settings.surreal_retrieval_namespace:
-        raise ValueError("surreal_retrieval_namespace must be set for Surreal direct ingest")
-    if not settings.surreal_retrieval_database:
-        raise ValueError("surreal_retrieval_database must be set for Surreal direct ingest")
+    if not settings.surreal_retrieval.url:
+        raise ValueError("surreal_retrieval.url must be set for Surreal direct ingest")
+    if not settings.surreal_retrieval.namespace:
+        raise ValueError("surreal_retrieval.namespace must be set for Surreal direct ingest")
+    if not settings.surreal_retrieval.database:
+        raise ValueError("surreal_retrieval.database must be set for Surreal direct ingest")
 
-    has_username = bool(settings.surreal_retrieval_username)
-    has_password = bool(settings.surreal_retrieval_password)
+    has_username = bool(settings.surreal_retrieval.username)
+    has_password = bool(settings.surreal_retrieval.password)
     if has_username != has_password:
         raise ValueError(
-            "surreal_retrieval_username and surreal_retrieval_password must be set together"
+            "surreal_retrieval.username and surreal_retrieval.password must be set together"
         )
-    if (has_username or has_password) and settings.surreal_retrieval_access_token:
+    if (has_username or has_password) and settings.surreal_retrieval.access_token:
         raise ValueError(
-            "surreal_retrieval_access_token must not be combined with username/password auth"
+            "surreal_retrieval.access_token must not be combined with username/password auth"
         )
 
     connection = SurrealConnection(
         SurrealStoreConfig(
-            url=settings.surreal_retrieval_url,
-            namespace=settings.surreal_retrieval_namespace,
-            database=settings.surreal_retrieval_database,
-            username=settings.surreal_retrieval_username,
-            password=settings.surreal_retrieval_password,
-            access_token=settings.surreal_retrieval_access_token,
+            url=settings.surreal_retrieval.url,
+            namespace=settings.surreal_retrieval.namespace,
+            database=settings.surreal_retrieval.database,
+            username=settings.surreal_retrieval.username,
+            password=settings.surreal_retrieval.password,
+            access_token=settings.surreal_retrieval.access_token,
         )
     )
     try:
@@ -435,7 +435,7 @@ class IndexingPipeline:
 
         # Ensure the index directory exists.
         settings.index_dir.mkdir(parents=True, exist_ok=True)
-        self._uses_surreal_direct_ingest = bool(settings.surreal_retrieval_database)
+        self._uses_surreal_direct_ingest = bool(settings.surreal_retrieval.database)
 
         # -- Unified SQLite connection ----------------------------------------
         # ONE connection shared by metadata store, embedding cache, and
@@ -451,8 +451,8 @@ class IndexingPipeline:
 
         # -- Strategy + model table name derivation ---------------------------
         _write_pipeline_init_progress("pipeline:table_names", "running")
-        strategy = re.sub(r"[^a-z0-9_]", "_", str(settings.chunk_strategy).lower())
-        model_suffix = _model_to_table_suffix(settings.embedding_model)
+        strategy = re.sub(r"[^a-z0-9_]", "_", str(settings.indexing.chunk_strategy).lower())
+        model_suffix = _model_to_table_suffix(settings.embedding.model)
 
         self._strategy = strategy
         self._model_suffix = model_suffix
@@ -521,9 +521,9 @@ class IndexingPipeline:
         _write_pipeline_init_progress("pipeline:search_engines", "running")
         self._semantic_engine = SemanticSearchEngine(
             self._vector_store,
-            settings.embedding_model,
-            embedding_url=settings.embedding_url,
-            tei_batch_size=settings.tei_batch_size,
+            settings.embedding.model,
+            embedding_url=settings.embedding.url,
+            tei_batch_size=settings.embedding.tei_batch_size,
             use_prefix=settings.needs_embedding_prefix,
         )
         self._keyword_engine = _NoopKeywordSearchEngine()
@@ -535,11 +535,11 @@ class IndexingPipeline:
         self._keyterm_extractor = KeyTermExtractor()
         self._extraction_cache: ExtractionCache | None = None
         self._ner_extractor: NERExtractor | None = None
-        if settings.extract_depth == ExtractDepth.NER:
-            entity_types = settings.ner_entity_types or []
+        if settings.extraction.depth == ExtractDepth.NER:
+            entity_types = settings.extraction.ner_entity_types or []
             self._extraction_cache = ExtractionCache(
                 self._conn,
-                settings.ner_model_name,
+                settings.extraction.ner_model_name,
                 entity_types,
                 threshold=0.5,  # matches NERExtractor default threshold
             )
@@ -553,7 +553,7 @@ class IndexingPipeline:
                 self._extraction_cache.update_model_sig()
             self._ner_extractor = NERExtractor(
                 entity_types,
-                model_name=settings.ner_model_name,
+                model_name=settings.extraction.ner_model_name,
                 threshold=0.5,
                 extraction_cache=self._extraction_cache,
             )
@@ -562,7 +562,7 @@ class IndexingPipeline:
         # Global embedding cache — keyed on (text_hash, model_name).
         # Survives file moves; invalidated automatically on embedding model change.
         _write_pipeline_init_progress("pipeline:embedding_cache", "running")
-        self._embedding_cache = EmbeddingCache(self._conn, settings.embedding_model)
+        self._embedding_cache = EmbeddingCache(self._conn, settings.embedding.model)
         if self._embedding_cache.should_invalidate():
             logger.info("Embedding model changed — clearing embedding_cache")
             self._embedding_cache.clear()
@@ -585,7 +585,7 @@ class IndexingPipeline:
         # Startup integrity checks can delete derived state. They must be an
         # explicit repair action, never a side effect of service startup.
         _write_pipeline_init_progress("pipeline:startup_checks", "running")
-        if settings.allow_destructive_startup_repair:
+        if settings.indexing.allow_destructive_startup_repair:
             self._check_schema_version()  # Must run first (may wipe state)
             self._check_weights_changed()  # Runs after schema check (uses intact state)
         else:
@@ -757,7 +757,7 @@ class IndexingPipeline:
                     e_fused_vectors=tuple(e_fused_vectors),
                     text_hashes=dict(text_hashes),
                     chunk_strategy=self._strategy,
-                    embedding_model=self._settings.embedding_model,
+                    embedding_model=self._settings.embedding.model,
                 ),
                 source_selection=SurrealDeltaSourceSelection(
                     source_name=namespace,
@@ -2013,7 +2013,7 @@ class IndexingPipeline:
                 embeddings=tuple(e_fused_vectors),
                 text_hashes=dict(text_hashes),
                 chunk_strategy=self._strategy,
-                embedding_model=self._settings.embedding_model,
+                embedding_model=self._settings.embedding.model,
             )
             direct_manifest = build_surreal_direct_manifest(
                 direct_write,
@@ -2422,8 +2422,8 @@ class IndexingPipeline:
                 _chunker_module.chunk_file(
                     fi.path,
                     content,
-                    max_tokens=self._settings.max_chunk_tokens,
-                    overlap_tokens=self._settings.chunk_overlap_tokens,
+                    max_tokens=self._settings.indexing.max_chunk_tokens,
+                    overlap_tokens=self._settings.indexing.chunk_overlap_tokens,
                     kind=fi.kind,
                     chunk_strategy=self._strategy,
                     provenance=self._filesystem_chunk_provenance(source_document),
@@ -2530,7 +2530,7 @@ class IndexingPipeline:
                 embeddings=tuple(e_fused),
                 text_hashes=dict(text_hashes),
                 chunk_strategy=self._strategy,
-                embedding_model=self._settings.embedding_model,
+                embedding_model=self._settings.embedding.model,
             )
             direct_manifest = build_surreal_direct_manifest(
                 direct_write,
@@ -2572,7 +2572,7 @@ class IndexingPipeline:
             time.perf_counter() - t0,
         )
         if hasattr(self._vector_store, "set_model_name"):
-            self._vector_store.set_model_name(self._settings.embedding_model)  # type: ignore[attr-defined]
+            self._vector_store.set_model_name(self._settings.embedding.model)  # type: ignore[attr-defined]
 
         t0 = time.perf_counter()
         file_meta = self._build_file_meta_from_fileinfo(files)
@@ -2834,16 +2834,16 @@ class IndexingPipeline:
                     )
                     changes.append(
                         SurrealDeltaChange(
-                            ref=f"{strategy}\x1f{self._settings.embedding_model}\x1f{chunk_id}",
+                            ref=f"{strategy}\x1f{self._settings.embedding.model}\x1f{chunk_id}",
                             table="embeddings",
                             change_type=SurrealDeltaChangeType.TOMBSTONE,
                             tombstone=SurrealDeltaTombstone(
-                                ref=f"{strategy}\x1f{self._settings.embedding_model}\x1f{chunk_id}",
+                                ref=f"{strategy}\x1f{self._settings.embedding.model}\x1f{chunk_id}",
                                 table="embeddings",
                                 reason=reason,
                                 previous_row={
                                     "chunk_strategy": strategy,
-                                    "embedding_model": self._settings.embedding_model,
+                                    "embedding_model": self._settings.embedding.model,
                                     "chunk_id": chunk_id,
                                 },
                             ),
@@ -3072,7 +3072,7 @@ class IndexingPipeline:
         path_str = str(file_info.path)
         self._rebind_retained_filesystem_document(source_document)
         needs_embed = False
-        prof = self._settings.profile_indexing  # gate: DOTMD_PROFILE_INDEXING=true
+        prof = self._settings.indexing.profile
 
         # Phase beacon: write current phase to a file so external monitors
         # (docker stats samplers) can correlate CPU/IO with pipeline phase
@@ -3129,8 +3129,8 @@ class IndexingPipeline:
             chunks = _chunker_module.chunk_file(
                 file_info.path,
                 content,
-                max_tokens=self._settings.max_chunk_tokens,
-                overlap_tokens=self._settings.chunk_overlap_tokens,
+                max_tokens=self._settings.indexing.max_chunk_tokens,
+                overlap_tokens=self._settings.indexing.chunk_overlap_tokens,
                 kind=file_info.kind,
                 chunk_strategy=self._strategy,
                 provenance=self._filesystem_chunk_provenance(source_document),

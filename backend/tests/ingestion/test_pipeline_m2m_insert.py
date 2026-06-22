@@ -30,10 +30,10 @@ def _build_post_v16_db(tmp_path: Path) -> tuple[Path, str, str]:
 
     settings = Settings(
         index_dir=tmp_path,
-        embedding_url="http://localhost:18088",
+        embedding={"url": "http://localhost:18088"},
     )
-    strategy = settings.chunk_strategy
-    model_key = _model_to_table_suffix(settings.embedding_model).lstrip("_")
+    strategy = settings.indexing.chunk_strategy
+    model_key = _model_to_table_suffix(settings.embedding.model).lstrip("_")
 
     db_path = tmp_path / "index.db"
     conn = sqlite3.connect(str(db_path))
@@ -71,8 +71,8 @@ def _settings(tmp_path: Path):
 
     return Settings(
         index_dir=tmp_path,
-        embedding_url="http://localhost:18088",
-        indexing_paths=[str(tmp_path)],
+        embedding={"url": "http://localhost:18088"},
+        indexing={"paths": [str(tmp_path)]},
     )
 
 

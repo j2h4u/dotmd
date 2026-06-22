@@ -442,7 +442,7 @@ def source_runtime_factory_from_settings(
         SourceConfigRecord(
             namespace="filesystem",
             config=FilesystemSourceConfig(
-                paths=list(settings.indexing_paths),
+                paths=list(settings.indexing.paths),
                 exclude=list(settings.effective_indexing_exclude),
             ),
             credential_ref=SourceCredentialRef(namespace="filesystem"),

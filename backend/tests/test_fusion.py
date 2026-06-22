@@ -561,24 +561,22 @@ def test_fuse_vectors_dimension_mismatch_raises():
 
 def test_weight_validation_sum_must_be_one():
     """Settings rejects weights that don't sum to 1.0."""
-    os.environ.setdefault("DOTMD_EMBEDDING_URL", "http://localhost:8088")
+    os.environ.setdefault("DOTMD_EMBEDDING__URL", "http://localhost:8088")
     from dotmd.core.config import Settings
 
     with pytest.raises(Exception, match="sum"):
         Settings(
-            embedding_url="http://localhost:8088",
-            embedding_weights="text=0.5,meta=0.3",
+            embedding={"url": "http://localhost:8088", "weights": "text=0.5,meta=0.3"},
         )
 
 
 def test_weight_validation_accepts_valid():
     """Settings accepts valid weights."""
-    os.environ.setdefault("DOTMD_EMBEDDING_URL", "http://localhost:8088")
+    os.environ.setdefault("DOTMD_EMBEDDING__URL", "http://localhost:8088")
     from dotmd.core.config import Settings
 
     s = Settings(
-        embedding_url="http://localhost:8088",
-        embedding_weights="text=0.7,meta=0.3",
+        embedding={"url": "http://localhost:8088", "weights": "text=0.7,meta=0.3"},
     )
     w = s.parsed_embedding_weights
     assert abs(w["text"] - 0.7) < 1e-9
@@ -587,13 +585,12 @@ def test_weight_validation_accepts_valid():
 
 def test_weight_validation_invalid_format():
     """Settings rejects malformed weight entries."""
-    os.environ.setdefault("DOTMD_EMBEDDING_URL", "http://localhost:8088")
+    os.environ.setdefault("DOTMD_EMBEDDING__URL", "http://localhost:8088")
     from dotmd.core.config import Settings
 
     with pytest.raises(Exception):
         Settings(
-            embedding_url="http://localhost:8088",
-            embedding_weights="text_0.7_meta_0.3",
+            embedding={"url": "http://localhost:8088", "weights": "text_0.7_meta_0.3"},
         )
 
 
@@ -603,25 +600,23 @@ def test_weight_validation_requires_text_key():
     Addresses Codex MEDIUM review concern: validator must require both 'text' and
     'meta' keys. Accepting arbitrary keys would silently omit a component from fusion.
     """
-    os.environ.setdefault("DOTMD_EMBEDDING_URL", "http://localhost:8088")
+    os.environ.setdefault("DOTMD_EMBEDDING__URL", "http://localhost:8088")
     from dotmd.core.config import Settings
 
     with pytest.raises(Exception, match="text"):
         Settings(
-            embedding_url="http://localhost:8088",
-            embedding_weights="other=0.7,meta=0.3",
+            embedding={"url": "http://localhost:8088", "weights": "other=0.7,meta=0.3"},
         )
 
 
 def test_weight_validation_requires_meta_key():
     """Settings rejects weights missing the 'meta' key."""
-    os.environ.setdefault("DOTMD_EMBEDDING_URL", "http://localhost:8088")
+    os.environ.setdefault("DOTMD_EMBEDDING__URL", "http://localhost:8088")
     from dotmd.core.config import Settings
 
     with pytest.raises(Exception, match="meta"):
         Settings(
-            embedding_url="http://localhost:8088",
-            embedding_weights="text=0.7,other=0.3",
+            embedding={"url": "http://localhost:8088", "weights": "text=0.7,other=0.3"},
         )
 
 

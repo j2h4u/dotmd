@@ -196,9 +196,9 @@ def test_pipeline_helper_builds_filesystem_chunk_provenance(
         Settings(
             data_dir=data_dir,
             index_dir=index_dir,
-            embedding_url="http://localhost:18088",
-            extract_depth=ExtractDepth.STRUCTURAL,
-            indexing_paths=[str(data_dir)],
+            embedding={"url": "http://localhost:18088"},
+            extraction={"depth": ExtractDepth.STRUCTURAL},
+            indexing={"paths": [str(data_dir)]},
         )
     )
     normalized = pipeline._file_info_and_source_document(md_path)
@@ -224,9 +224,9 @@ def _pipeline_with_mock_embedding(data_dir: Path, index_dir: Path):
         Settings(
             data_dir=data_dir,
             index_dir=index_dir,
-            embedding_url="http://localhost:18088",
-            extract_depth=ExtractDepth.STRUCTURAL,
-            indexing_paths=[str(data_dir)],
+            embedding={"url": "http://localhost:18088"},
+            extraction={"depth": ExtractDepth.STRUCTURAL},
+            indexing={"paths": [str(data_dir)]},
         )
     )
     mock_engine = MagicMock()

@@ -17,6 +17,7 @@ from typing import Any
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from dotmd.core.config import Settings
 from dotmd.storage.surreal import SurrealConnection, SurrealStoreConfig
 from dotmd.storage.surreal_schema import (
     DEFAULT_HNSW_EF,
@@ -238,14 +239,15 @@ def _worker_main(args: argparse.Namespace) -> int:
         "started_at": _utc_now(),
     }
     try:
+        settings = Settings()
         with SurrealConnection(
             SurrealStoreConfig(
                 url=worker_input["target_url"],
                 namespace=worker_input["target_namespace"],
                 database=worker_input["target_database"],
-                username=os.environ.get("DOTMD_SURREAL_RETRIEVAL_USERNAME") or None,
-                password=os.environ.get("DOTMD_SURREAL_RETRIEVAL_PASSWORD") or None,
-                access_token=os.environ.get("DOTMD_SURREAL_RETRIEVAL_ACCESS_TOKEN") or None,
+                username=settings.surreal_retrieval.username,
+                password=settings.surreal_retrieval.password,
+                access_token=settings.surreal_retrieval.access_token,
                 http_query_timeout_seconds=float(worker_input["query_timeout_seconds"]),
             )
         ) as connection:

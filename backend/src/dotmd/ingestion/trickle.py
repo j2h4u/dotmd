@@ -191,7 +191,7 @@ class TrickleIndexer:
         shutdown:
             Event set by the server lifespan to signal graceful shutdown.
         """
-        if not self._settings.indexing_paths:
+        if not self._settings.indexing.paths:
             logger.info("Trickle indexer idle — no indexing_paths in config")
             self._state.status = TrickleStatus.IDLE
             await shutdown.wait()
@@ -206,8 +206,8 @@ class TrickleIndexer:
         """Body of run(), executed while holding the indexing lock."""
         logger.info(
             "Trickle indexer starting — %d paths configured: %s",
-            len(self._settings.indexing_paths),
-            ", ".join(self._settings.indexing_paths),
+            len(self._settings.indexing.paths),
+            ", ".join(self._settings.indexing.paths),
         )
 
         # Reset counters once at startup (not on every poll cycle)
@@ -282,7 +282,7 @@ class TrickleIndexer:
 
             all_files = await asyncio.to_thread(
                 discover_files_multi,
-                self._settings.indexing_paths,
+                self._settings.indexing.paths,
                 self._settings.effective_indexing_exclude,
             )
             discovered_paths = {str(fi.path) for fi in all_files}
@@ -318,7 +318,7 @@ class TrickleIndexer:
         self._state.status = TrickleStatus.BACKLOG
         logger.info(
             "Discovering unindexed files from %d paths...",
-            len(self._settings.indexing_paths),
+            len(self._settings.indexing.paths),
         )
 
         # Discover all files from configured paths
@@ -326,7 +326,7 @@ class TrickleIndexer:
 
         all_files = await asyncio.to_thread(
             discover_files_multi,
-            self._settings.indexing_paths,
+            self._settings.indexing.paths,
             self._settings.effective_indexing_exclude,
         )
 
@@ -464,7 +464,7 @@ class TrickleIndexer:
         self._state.status = TrickleStatus.WATCHING
         logger.info(
             "Entering watch mode (poll interval: %ds)",
-            int(self._settings.poll_interval_seconds),
+            int(self._settings.indexing.poll_interval_seconds),
         )
 
         while not shutdown.is_set():
@@ -555,7 +555,7 @@ class TrickleIndexer:
             try:
                 done, _ = await asyncio.wait(
                     {shutdown_task, queue_task},
-                    timeout=self._settings.poll_interval_seconds,
+                    timeout=self._settings.indexing.poll_interval_seconds,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
             finally:
@@ -619,7 +619,7 @@ class TrickleIndexer:
         observer = Observer()
         self._observer = observer
 
-        for path_spec in self._settings.indexing_paths:
+        for path_spec in self._settings.indexing.paths:
             # Only watch actual directories, not glob patterns
             if "*" not in path_spec and "?" not in path_spec:
                 watch_path = Path(path_spec)

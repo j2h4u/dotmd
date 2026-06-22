@@ -1,7 +1,7 @@
 """Read-only SurrealDB completeness audit for dotMD retrieval data.
 
-The audit reads the live Surreal retrieval settings from the DOTMD_SURREAL_RETRIEVAL_*
-environment variables, runs a bounded set of read-only queries, and emits a JSON report
+The audit reads the live retrieval settings from dotMD Settings / nested DOTMD_*
+configuration, runs a bounded set of read-only queries, and emits a JSON report
 plus a short human summary. It never writes to SurrealDB.
 """
 
@@ -22,11 +22,10 @@ from typing import Any
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from dotmd.core.config import Settings
 from dotmd.storage.surreal import SurrealConnection, SurrealStoreConfig
 from dotmd.storage.surreal_schema import (
-    DEFAULT_HNSW_EF,
     DEFAULT_HNSW_M,
-    DEFAULT_SURREAL_HNSW_VECTOR_INDEX_TYPE,
     build_surreal_embedding_hnsw_index_statement,
     surreal_embedding_hnsw_index_name,
     surreal_embedding_shard_tables,
@@ -149,51 +148,40 @@ def _coerce_int(raw: str | None, *, field_name: str, default: int | None = None)
 
 
 def read_settings_from_env() -> SurrealCompletenessAuditSettings:
-    url = os.environ.get("DOTMD_SURREAL_RETRIEVAL_URL", "").strip()
-    namespace = os.environ.get("DOTMD_SURREAL_RETRIEVAL_NAMESPACE", "").strip()
-    database = os.environ.get("DOTMD_SURREAL_RETRIEVAL_DATABASE", "").strip()
+    settings = Settings()
+    url = (settings.surreal_retrieval.url or "").strip()
+    namespace = settings.surreal_retrieval.namespace.strip()
+    database = (settings.surreal_retrieval.database or "").strip()
     if not url:
-        raise ValueError("DOTMD_SURREAL_RETRIEVAL_URL must be set")
+        raise ValueError("surreal_retrieval.url must be set")
     if not namespace:
-        raise ValueError("DOTMD_SURREAL_RETRIEVAL_NAMESPACE must be set")
+        raise ValueError("surreal_retrieval.namespace must be set")
     if not database:
-        raise ValueError("DOTMD_SURREAL_RETRIEVAL_DATABASE must be set")
+        raise ValueError("surreal_retrieval.database must be set")
 
-    username = os.environ.get("DOTMD_SURREAL_RETRIEVAL_USERNAME") or None
-    password = os.environ.get("DOTMD_SURREAL_RETRIEVAL_PASSWORD") or None
-    access_token = os.environ.get("DOTMD_SURREAL_RETRIEVAL_ACCESS_TOKEN") or None
+    username = settings.surreal_retrieval.username
+    password = settings.surreal_retrieval.password
+    access_token = settings.surreal_retrieval.access_token
     has_username = bool(username)
     has_password = bool(password)
     if has_username != has_password:
         raise ValueError(
-            "DOTMD_SURREAL_RETRIEVAL_USERNAME and DOTMD_SURREAL_RETRIEVAL_PASSWORD must be set together"
+            "surreal_retrieval.username and surreal_retrieval.password must be set together"
         )
     if (has_username or has_password) and access_token:
         raise ValueError(
-            "DOTMD_SURREAL_RETRIEVAL_ACCESS_TOKEN must not be combined with username/password auth"
+            "surreal_retrieval.access_token must not be combined with username/password auth"
         )
 
-    embedding_dimension = _coerce_int(
-        os.environ.get("DOTMD_SURREAL_RETRIEVAL_EMBEDDING_DIMENSION"),
-        field_name="DOTMD_SURREAL_RETRIEVAL_EMBEDDING_DIMENSION",
-    )
-    embedding_shard_count = _coerce_int(
-        os.environ.get("DOTMD_SURREAL_RETRIEVAL_EMBEDDING_SHARD_COUNT"),
-        field_name="DOTMD_SURREAL_RETRIEVAL_EMBEDDING_SHARD_COUNT",
-        default=1,
-    )
-    hnsw_ef = _coerce_int(
-        os.environ.get("DOTMD_SURREAL_RETRIEVAL_HNSW_EF"),
-        field_name="DOTMD_SURREAL_RETRIEVAL_HNSW_EF",
-        default=DEFAULT_HNSW_EF,
-    )
-    vector_index_type = (
-        os.environ.get("DOTMD_SURREAL_RETRIEVAL_VECTOR_INDEX_TYPE")
-        or DEFAULT_SURREAL_HNSW_VECTOR_INDEX_TYPE
-    ).strip().upper()
+    if settings.surreal_retrieval.embedding_dimension is None:
+        raise ValueError("surreal_retrieval.embedding_dimension must be set")
+    embedding_dimension = settings.surreal_retrieval.embedding_dimension
+    embedding_shard_count = settings.surreal_retrieval.embedding_shard_count
+    hnsw_ef = settings.surreal_retrieval.hnsw_ef
+    vector_index_type = settings.surreal_retrieval.vector_index_type.strip().upper()
     hnsw_m = _coerce_int(
-        os.environ.get("DOTMD_SURREAL_RETRIEVAL_HNSW_M"),
-        field_name="DOTMD_SURREAL_RETRIEVAL_HNSW_M",
+        os.environ.get("DOTMD_SURREAL_RETRIEVAL__HNSW_M"),
+        field_name="DOTMD_SURREAL_RETRIEVAL__HNSW_M",
         default=DEFAULT_HNSW_M,
     )
     return SurrealCompletenessAuditSettings(

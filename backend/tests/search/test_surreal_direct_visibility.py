@@ -24,13 +24,14 @@ def _pipeline_settings(tmp_path: Path, surreal_db: Path) -> Settings:
     return Settings(
         data_dir=data_dir,
         index_dir=index_dir,
-        embedding_url="http://localhost:18088",
-        indexing_paths=[str(data_dir)],
-        extract_depth=ExtractDepth.STRUCTURAL,
-        chunk_strategy="contextual_512_50",
-        surreal_retrieval_url=f"surrealkv://{surreal_db}",
-        surreal_retrieval_database="direct_visibility",
-        surreal_retrieval_embedding_dimension=3,
+        embedding={"url": "http://localhost:18088"},
+        indexing={"paths": [str(data_dir)], "chunk_strategy": "contextual_512_50"},
+        extraction={"depth": ExtractDepth.STRUCTURAL},
+        surreal_retrieval={
+            "url": f"surrealkv://{surreal_db}",
+            "database": "direct_visibility",
+            "embedding_dimension": 3,
+        },
     )
 
 

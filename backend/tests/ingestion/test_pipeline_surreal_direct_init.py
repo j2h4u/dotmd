@@ -18,13 +18,14 @@ def _direct_ingest_settings(tmp_path: Path) -> tuple[Settings, Path]:
     settings = Settings(
         data_dir=data_dir,
         index_dir=index_dir,
-        embedding_url="http://localhost:18088",
-        indexing_paths=[str(data_dir)],
-        extract_depth=ExtractDepth.STRUCTURAL,
-        chunk_strategy="contextual_512_50",
-        surreal_retrieval_url=f"surrealkv://{surreal_db}",
-        surreal_retrieval_database="direct_init",
-        surreal_retrieval_embedding_dimension=3,
+        embedding={"url": "http://localhost:18088"},
+        indexing={"paths": [str(data_dir)], "chunk_strategy": "contextual_512_50"},
+        extraction={"depth": ExtractDepth.STRUCTURAL},
+        surreal_retrieval={
+            "url": f"surrealkv://{surreal_db}",
+            "database": "direct_init",
+            "embedding_dimension": 3,
+        },
     )
     file_path = settings.data_dir / "directinitsmoke.md"
     file_path.write_text(

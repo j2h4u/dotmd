@@ -12,8 +12,7 @@ def _settings(tmp_path: Path):  # type: ignore[no-untyped-def]
 
     return Settings(
         index_dir=tmp_path,
-        embedding_url="http://localhost:8088",
-        embedding_model="intfloat/multilingual-e5-large",
+        embedding={"url": "http://localhost:8088", "model": "intfloat/multilingual-e5-large"},
         telegram_daemon_socket=None,
     )
 
@@ -44,13 +43,13 @@ def test_build_surreal_native_engine_overrides_uses_phase42_engine_contract(
     assert isinstance(overrides["semantic"], SurrealVectorSearchEngine)
     assert overrides["semantic"]._embedding_dimension == 1024
     assert overrides["semantic"]._hnsw_ef == 40
-    assert overrides["semantic"]._model_name == settings.embedding_model
-    assert overrides["semantic"]._chunk_strategy == settings.chunk_strategy
-    assert overrides["semantic"]._embedding_url == settings.embedding_url
-    assert overrides["semantic"]._tei_batch_size == settings.tei_batch_size
+    assert overrides["semantic"]._model_name == settings.embedding.model
+    assert overrides["semantic"]._chunk_strategy == settings.indexing.chunk_strategy
+    assert overrides["semantic"]._embedding_url == settings.embedding.url
+    assert overrides["semantic"]._tei_batch_size == settings.embedding.tei_batch_size
     assert overrides["semantic"]._use_prefix is settings.needs_embedding_prefix
     assert overrides["semantic"]._query_instruction == settings.query_instruction
-    assert overrides["keyword"]._chunk_strategy == settings.chunk_strategy
+    assert overrides["keyword"]._chunk_strategy == settings.indexing.chunk_strategy
 
 
 def test_build_surreal_native_engine_overrides_uses_vector_engine_bounds_validation(

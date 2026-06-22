@@ -71,15 +71,15 @@ or, if you prefer Compose:
 docker compose exec dotmd sh -lc 'cd /mnt/home/repos/j2h4u/dotmd/backend && python3 devtools/surreal_embedding_backfill.py --chunk-id <chunk-id> --apply'
 ```
 
-Inside that container network, the standard env values are already valid:
-`DOTMD_EMBEDDING_URL=http://embeddings:80` and
-`DOTMD_SURREAL_RETRIEVAL_URL=http://surrealdb:8000`.
+Inside that container network, the standard nested env values are already valid:
+`DOTMD_EMBEDDING__URL=http://embeddings:80` and
+`DOTMD_SURREAL_RETRIEVAL__URL=http://surrealdb:8000`.
 
 Use host overrides only for dev/debug on the local machine:
 
 ```bash
-DOTMD_EMBEDDING_URL=http://127.0.0.1:8088 \
-DOTMD_SURREAL_RETRIEVAL_URL=ws://127.0.0.1:8000 \
+DOTMD_EMBEDDING__URL=http://127.0.0.1:8088 \
+DOTMD_SURREAL_RETRIEVAL__URL=ws://127.0.0.1:8000 \
 uv run python devtools/surreal_embedding_backfill.py --chunk-id <chunk-id> --apply
 ```
 

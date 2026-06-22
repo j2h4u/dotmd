@@ -34,15 +34,19 @@ def _pipeline(
     settings = Settings(
         data_dir=data_dir,
         index_dir=index_dir,
-        embedding_url="http://localhost:18088",
-        indexing_paths=[str(data_dir)],
-        extract_depth=ExtractDepth.STRUCTURAL,
+        embedding={"url": "http://localhost:18088"},
+        indexing={"paths": [str(data_dir)]},
+        extraction={"depth": ExtractDepth.STRUCTURAL},
     )
     if use_surreal_direct_writer:
         settings = settings.model_copy(
             update={
-                "surreal_retrieval_url": "http://localhost:8000",
-                "surreal_retrieval_database": "dotmd",
+                "surreal_retrieval": settings.surreal_retrieval.model_copy(
+                    update={
+                        "url": "http://localhost:8000",
+                        "database": "dotmd",
+                    }
+                ),
             }
         )
         with patch.object(

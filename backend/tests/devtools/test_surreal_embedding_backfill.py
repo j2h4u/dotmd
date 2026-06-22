@@ -54,16 +54,16 @@ class _FakeWriter:
 
 
 def _set_env(monkeypatch) -> None:
-    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL_URL", "http://surreal.example:8000")
-    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL_NAMESPACE", "dotmd")
-    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL_DATABASE", "production")
-    monkeypatch.delenv("DOTMD_SURREAL_RETRIEVAL_USERNAME", raising=False)
-    monkeypatch.delenv("DOTMD_SURREAL_RETRIEVAL_PASSWORD", raising=False)
-    monkeypatch.delenv("DOTMD_SURREAL_RETRIEVAL_ACCESS_TOKEN", raising=False)
-    monkeypatch.setenv("DOTMD_EMBEDDING_URL", "http://embeddings.example:8088")
-    monkeypatch.setenv("DOTMD_EMBEDDING_MODEL", "model-a")
-    monkeypatch.setenv("DOTMD_TEI_BATCH_SIZE", "8")
-    monkeypatch.setenv("DOTMD_CHUNK_STRATEGY", "env_strategy")
+    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL__URL", "http://surreal.example:8000")
+    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL__NAMESPACE", "dotmd")
+    monkeypatch.setenv("DOTMD_SURREAL_RETRIEVAL__DATABASE", "production")
+    monkeypatch.delenv("DOTMD_SURREAL_RETRIEVAL__USERNAME", raising=False)
+    monkeypatch.delenv("DOTMD_SURREAL_RETRIEVAL__PASSWORD", raising=False)
+    monkeypatch.delenv("DOTMD_SURREAL_RETRIEVAL__ACCESS_TOKEN", raising=False)
+    monkeypatch.setenv("DOTMD_EMBEDDING__URL", "http://embeddings.example:8088")
+    monkeypatch.setenv("DOTMD_EMBEDDING__MODEL", "model-a")
+    monkeypatch.setenv("DOTMD_EMBEDDING__TEI_BATCH_SIZE", "8")
+    monkeypatch.setenv("DOTMD_INDEXING__CHUNK_STRATEGY", "env_strategy")
 
 
 def test_dry_run_reads_chunk_ids_file_without_writing(monkeypatch, tmp_path: Path) -> None:
@@ -235,8 +235,8 @@ def test_help_includes_container_default_and_host_debug_examples() -> None:
     assert "docker exec dotmd" in help_text
     assert "docker compose exec dotmd" in help_text
     assert "python3 devtools/surreal_embedding_backfill.py" in help_text
-    assert "DOTMD_EMBEDDING_URL=http://embeddings:80" in help_text
-    assert "DOTMD_SURREAL_RETRIEVAL_URL=http://surrealdb:8000" in help_text
+    assert "DOTMD_EMBEDDING__URL=http://embeddings:80" in help_text
+    assert "DOTMD_SURREAL_RETRIEVAL__URL=http://surrealdb:8000" in help_text
     assert "Dev/debug only" in help_text
-    assert "DOTMD_EMBEDDING_URL=http://127.0.0.1:8088" in help_text
-    assert "DOTMD_SURREAL_RETRIEVAL_URL=ws://127.0.0.1:8000" in help_text
+    assert "DOTMD_EMBEDDING__URL=http://127.0.0.1:8088" in help_text
+    assert "DOTMD_SURREAL_RETRIEVAL__URL=ws://127.0.0.1:8000" in help_text

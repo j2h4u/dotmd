@@ -9,7 +9,7 @@ def test_settings_has_telegram_sync_interval() -> None:
     """Settings must expose telegram_sync_interval_seconds with default 300.0."""
     from dotmd.core.config import Settings
 
-    s = Settings(embedding_url="http://localhost:18088")
+    s = Settings(embedding={"url": "http://localhost:18088"})
     assert hasattr(s, "telegram_sync_interval_seconds")
     assert s.telegram_sync_interval_seconds == 300.0
 

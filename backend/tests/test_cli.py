@@ -19,8 +19,8 @@ def _cli_runtime_settings(tmp_path: Path):
     return make_surreal_runtime_settings(
         data_dir=tmp_path,
         index_dir=tmp_path,
-        indexing_paths=[str(tmp_path)],
-        embedding_url="http://localhost:8088",
+        indexing={"paths": [str(tmp_path)]},
+        embedding={"url": "http://localhost:8088"},
         telegram_daemon_socket=None,
     )
 
@@ -219,9 +219,11 @@ def test_oauth_code_create_outputs_pairing_code(tmp_path: Path) -> None:
 def test_status_verbose_reports_surrealdb_graph_and_skips_sqlite_tables(tmp_path: Path) -> None:
     service = SimpleNamespace(
         _settings=SimpleNamespace(
-            surreal_retrieval_url="http://surrealdb:8000",
-            surreal_retrieval_namespace="dotmd",
-            surreal_retrieval_database="production",
+            surreal_retrieval=SimpleNamespace(
+                url="http://surrealdb:8000",
+                namespace="dotmd",
+                database="production",
+            ),
         ),
         _pipeline=SimpleNamespace(
             conn=SimpleNamespace(execute=lambda *_args, **_kwargs: pytest.fail("sqlite scan ran"))

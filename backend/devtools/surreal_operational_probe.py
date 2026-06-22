@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -21,6 +20,8 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import requests
+
+from dotmd.core.config import Settings
 
 _DOCKER_LOG_TAIL = 200
 _DOCKER_LOG_DETAIL_LINES = 5
@@ -85,28 +86,29 @@ def _tail_non_empty_lines(text: str, max_lines: int, max_chars: int) -> str:
 
 
 def _read_settings_from_env() -> ProbeSettings:
-    url = os.environ.get("DOTMD_SURREAL_RETRIEVAL_URL", "").strip()
-    namespace = os.environ.get("DOTMD_SURREAL_RETRIEVAL_NAMESPACE", "").strip()
-    database = os.environ.get("DOTMD_SURREAL_RETRIEVAL_DATABASE", "").strip()
+    settings = Settings()
+    url = (settings.surreal_retrieval.url or "").strip()
+    namespace = settings.surreal_retrieval.namespace.strip()
+    database = (settings.surreal_retrieval.database or "").strip()
     if not url:
-        raise ValueError("DOTMD_SURREAL_RETRIEVAL_URL must be set")
+        raise ValueError("surreal_retrieval.url must be set")
     if not namespace:
-        raise ValueError("DOTMD_SURREAL_RETRIEVAL_NAMESPACE must be set")
+        raise ValueError("surreal_retrieval.namespace must be set")
     if not database:
-        raise ValueError("DOTMD_SURREAL_RETRIEVAL_DATABASE must be set")
+        raise ValueError("surreal_retrieval.database must be set")
 
-    username = os.environ.get("DOTMD_SURREAL_RETRIEVAL_USERNAME") or None
-    password = os.environ.get("DOTMD_SURREAL_RETRIEVAL_PASSWORD") or None
-    access_token = os.environ.get("DOTMD_SURREAL_RETRIEVAL_ACCESS_TOKEN") or None
+    username = settings.surreal_retrieval.username
+    password = settings.surreal_retrieval.password
+    access_token = settings.surreal_retrieval.access_token
     has_username = bool(username)
     has_password = bool(password)
     if has_username != has_password:
         raise ValueError(
-            "DOTMD_SURREAL_RETRIEVAL_USERNAME and DOTMD_SURREAL_RETRIEVAL_PASSWORD must be set together"
+            "surreal_retrieval.username and surreal_retrieval.password must be set together"
         )
     if (has_username or has_password) and access_token:
         raise ValueError(
-            "DOTMD_SURREAL_RETRIEVAL_ACCESS_TOKEN must not be combined with username/password auth"
+            "surreal_retrieval.access_token must not be combined with username/password auth"
         )
 
     return ProbeSettings(
@@ -124,7 +126,7 @@ def _read_settings_from_env() -> ProbeSettings:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Minimal SurrealDB operational probe")
-    parser.add_argument("--url", default=None, help="Override DOTMD_SURREAL_RETRIEVAL_URL.")
+    parser.add_argument("--url", default=None, help="Override surreal_retrieval.url.")
     parser.add_argument(
         "--container",
         default="surrealdb",

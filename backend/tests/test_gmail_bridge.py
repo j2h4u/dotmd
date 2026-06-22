@@ -382,7 +382,7 @@ def test_partial_gmail_env_vars_logs_warning(tmp_path: object) -> None:
     from dotmd.ingestion.source_lifecycle import source_runtime_factory_from_settings
 
     settings = Settings(
-        embedding_url="http://localhost:18088",
+        embedding={"url": "http://localhost:18088"},
         gmail_client_id="my-client-id",
         gmail_client_secret=None,
         gmail_refresh_token=None,

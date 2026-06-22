@@ -1,8 +1,8 @@
 """Targeted backfill for missing SurrealDB embeddings.
 
 Run the production/default flow inside the dotMD container network, where
-``DOTMD_EMBEDDING_URL=http://embeddings:80`` and
-``DOTMD_SURREAL_RETRIEVAL_URL=http://surrealdb:8000`` are already valid.
+``DOTMD_EMBEDDING__URL=http://embeddings:80`` and
+``DOTMD_SURREAL_RETRIEVAL__URL=http://surrealdb:8000`` are already valid.
 Use host URL overrides only for local dev/debug runs.
 """
 
@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 from dataclasses import dataclass
@@ -23,6 +22,7 @@ import blake3
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from dotmd.core.config import Settings
 from dotmd.ingestion.surreal_delta_sync import (
     SurrealDeltaChange,
     SurrealDeltaStoreWriter,
@@ -40,7 +40,7 @@ Production/default, inside the container network:
   docker compose exec dotmd sh -lc 'cd /mnt/home/repos/j2h4u/dotmd/backend && python3 devtools/surreal_embedding_backfill.py --chunk-id <chunk-id> --apply'
 
 Dev/debug only, from the host:
-  DOTMD_EMBEDDING_URL=http://127.0.0.1:8088 DOTMD_SURREAL_RETRIEVAL_URL=ws://127.0.0.1:8000 uv run python devtools/surreal_embedding_backfill.py --chunk-id <chunk-id> --apply
+  DOTMD_EMBEDDING__URL=http://127.0.0.1:8088 DOTMD_SURREAL_RETRIEVAL__URL=ws://127.0.0.1:8000 uv run python devtools/surreal_embedding_backfill.py --chunk-id <chunk-id> --apply
 """
 
 
@@ -85,44 +85,42 @@ def _log_phase(phase: str, started_at: float, **fields: Any) -> None:
 
 
 def _read_settings_from_env() -> BackfillSettings:
-    surreal_url = os.environ.get("DOTMD_SURREAL_RETRIEVAL_URL", "").strip()
-    surreal_namespace = os.environ.get("DOTMD_SURREAL_RETRIEVAL_NAMESPACE", "").strip()
-    surreal_database = os.environ.get("DOTMD_SURREAL_RETRIEVAL_DATABASE", "").strip()
-    embedding_url = os.environ.get("DOTMD_EMBEDDING_URL", "").strip()
-    embedding_model = os.environ.get("DOTMD_EMBEDDING_MODEL", "").strip()
+    settings = Settings()
+    surreal_url = settings.surreal_retrieval.url.strip()
+    surreal_namespace = settings.surreal_retrieval.namespace.strip()
+    surreal_database = (settings.surreal_retrieval.database or "").strip()
+    embedding_url = (settings.embedding.url or "").strip()
+    embedding_model = settings.embedding.model.strip()
     if not surreal_url:
-        raise ValueError("DOTMD_SURREAL_RETRIEVAL_URL must be set")
+        raise ValueError("surreal_retrieval.url must be set")
     if not surreal_namespace:
-        raise ValueError("DOTMD_SURREAL_RETRIEVAL_NAMESPACE must be set")
+        raise ValueError("surreal_retrieval.namespace must be set")
     if not surreal_database:
-        raise ValueError("DOTMD_SURREAL_RETRIEVAL_DATABASE must be set")
+        raise ValueError("surreal_retrieval.database must be set")
     if not embedding_url:
-        raise ValueError("DOTMD_EMBEDDING_URL must be set")
+        raise ValueError("embedding.url must be set")
     if not embedding_model:
-        raise ValueError("DOTMD_EMBEDDING_MODEL must be set")
+        raise ValueError("embedding.model must be set")
 
-    surreal_username = os.environ.get("DOTMD_SURREAL_RETRIEVAL_USERNAME") or None
-    surreal_password = os.environ.get("DOTMD_SURREAL_RETRIEVAL_PASSWORD") or None
-    surreal_access_token = os.environ.get("DOTMD_SURREAL_RETRIEVAL_ACCESS_TOKEN") or None
+    surreal_username = settings.surreal_retrieval.username
+    surreal_password = settings.surreal_retrieval.password
+    surreal_access_token = settings.surreal_retrieval.access_token
     has_username = bool(surreal_username)
     has_password = bool(surreal_password)
     if has_username != has_password:
         raise ValueError(
-            "DOTMD_SURREAL_RETRIEVAL_USERNAME and DOTMD_SURREAL_RETRIEVAL_PASSWORD must be set together"
+            "surreal_retrieval.username and surreal_retrieval.password must be set together"
         )
     if (has_username or has_password) and surreal_access_token:
         raise ValueError(
-            "DOTMD_SURREAL_RETRIEVAL_ACCESS_TOKEN must not be combined with username/password auth"
+            "surreal_retrieval.access_token must not be combined with username/password auth"
         )
 
-    tei_batch_size_raw = os.environ.get("DOTMD_TEI_BATCH_SIZE", "").strip()
-    tei_batch_size = int(tei_batch_size_raw) if tei_batch_size_raw else 32
+    tei_batch_size = settings.embedding.tei_batch_size
     if tei_batch_size <= 0:
-        raise ValueError("DOTMD_TEI_BATCH_SIZE must be positive")
+        raise ValueError("embedding.tei_batch_size must be positive")
 
-    default_chunk_strategy = os.environ.get("DOTMD_CHUNK_STRATEGY", _DEFAULT_CHUNK_STRATEGY).strip()
-    if not default_chunk_strategy:
-        default_chunk_strategy = _DEFAULT_CHUNK_STRATEGY
+    default_chunk_strategy = settings.indexing.chunk_strategy.strip() or _DEFAULT_CHUNK_STRATEGY
 
     return BackfillSettings(
         surreal_url=surreal_url,

@@ -101,7 +101,7 @@ The schema is two-dimensional where needed: `(chunk_strategy, embedding_model)`.
 ### 4. Extraction and Graph
 
 - Structural extraction handles headings, tags, wikilinks, markdown links, and frontmatter-derived signals.
-- GLiNER NER can add named entities when `DOTMD_EXTRACT_DEPTH=ner`.
+- GLiNER NER can add named entities when `DOTMD_EXTRACTION__DEPTH=ner`.
 - SurrealDB relations are the graph backend.
 
 ### 5. Query Pipeline

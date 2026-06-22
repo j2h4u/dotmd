@@ -22,8 +22,8 @@ def _get_service(tmp_path: Path):  # type: ignore[no-untyped-def]
     return make_surreal_service(
         tmp_path,
         data_dir=tmp_path,
-        indexing_paths=[str(tmp_path)],
-        embedding_url="http://localhost:8088",
+        indexing={"paths": [str(tmp_path)]},
+        embedding={"url": "http://localhost:8088"},
         telegram_daemon_socket=None,
     )
 
@@ -793,7 +793,7 @@ class TestReadRefContract:
                     document_ref="dialog:-1001",
                     ref="telegram:dialog:-1001",
                     source_unit_refs=["dialog:-1001:message:42"],
-                    chunk_strategy=service._settings.chunk_strategy,
+                    chunk_strategy=service._settings.indexing.chunk_strategy,
                     parser_name="telegram-message",
                 ),
             )
@@ -807,7 +807,7 @@ class TestReadRefContract:
             "telegram",
             "dialog:-1001",
             "dialog:-1001:message:42",
-            service._settings.chunk_strategy,
+            service._settings.indexing.chunk_strategy,
         )
         assert payload["ref"] == "telegram:dialog:-1001:message:42"
         assert payload["target_unit_ref"] == "dialog:-1001:message:42"
@@ -858,11 +858,11 @@ class TestReadRefContract:
         assert payload["total_chunks"] == 2
         assert payload["chunks"] == [{"index": 0, "heading_hierarchy": ["H"], "text": "Body"}]
         metadata.get_chunk_count_for_file.assert_called_once_with(
-            service._settings.chunk_strategy,
+            service._settings.indexing.chunk_strategy,
             str(note_path.resolve()),
         )
         metadata.get_chunks_for_file_range.assert_called_once_with(
-            service._settings.chunk_strategy,
+            service._settings.indexing.chunk_strategy,
             str(note_path.resolve()),
             0,
             1,
@@ -904,7 +904,7 @@ class TestReadRefContract:
         assert payload["frontmatter"]["title"] == "Legacy Note"
         assert payload["total_chunks"] == 1
         metadata.get_chunk_count_for_file.assert_any_call(
-            service._settings.chunk_strategy,
+            service._settings.indexing.chunk_strategy,
             str(note_path.resolve()),
         )
 
@@ -1009,7 +1009,7 @@ class TestReadRefContract:
             raise AssertionError("drill() should reject existing non-indexed files")
 
         metadata.get_chunk_count_for_file.assert_called_once_with(
-            service._settings.chunk_strategy,
+            service._settings.indexing.chunk_strategy,
             str(note_path.resolve()),
         )
 
@@ -1413,11 +1413,13 @@ class TestSurrealHybridOverrides:
 
         settings = make_surreal_runtime_settings(
             index_dir=tmp_path,
-            embedding_url="http://localhost:8088",
-            surreal_retrieval_username="root",
-            surreal_retrieval_password="root",
-            surreal_retrieval_access_token=None,
-            surreal_retrieval_hnsw_ef=80,
+            embedding={"url": "http://localhost:8088"},
+            surreal_retrieval={
+                "username": "root",
+                "password": "root",
+                "access_token": None,
+                "hnsw_ef": 80,
+            },
             telegram_daemon_socket=None,
         )
 
@@ -1905,7 +1907,7 @@ class TestSourceProvenanceSafetyGate:
 
         assert results == []
         metadata.backfill_missing_source_provenance_from_file_paths.assert_called_once_with(
-            service._settings.chunk_strategy,
+            service._settings.indexing.chunk_strategy,
             dry_run=False,
         )
 
@@ -1972,7 +1974,7 @@ class TestSourceProvenanceSafetyGate:
 
         assert results == []
         service._pipeline.backfill_filesystem_source_documents_from_provenance.assert_called_once_with(
-            service._settings.chunk_strategy,
+            service._settings.indexing.chunk_strategy,
             dry_run=False,
         )
 

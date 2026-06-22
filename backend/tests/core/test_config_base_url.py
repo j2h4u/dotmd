@@ -7,7 +7,7 @@ from dotmd.core.config import Settings
 
 
 def _settings(base_url: str | None = None) -> Settings:
-    return Settings(embedding_url="http://localhost:8088", base_url=base_url)
+    return Settings(embedding={"url": "http://localhost:8088"}, base_url=base_url)
 
 
 def test_base_url_defaults_to_none() -> None:

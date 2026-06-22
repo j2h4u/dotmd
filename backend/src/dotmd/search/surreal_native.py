@@ -28,12 +28,12 @@ def build_surreal_native_engine_overrides(
     return {
         "semantic": SurrealVectorSearchEngine(
             connection,
-            model_name=settings.embedding_model,
-            chunk_strategy=settings.chunk_strategy,
+            model_name=settings.embedding.model,
+            chunk_strategy=settings.indexing.chunk_strategy,
             embedding_dimension=embedding_dimension,
             score_floor=settings.semantic_score_floor,
-            embedding_url=settings.embedding_url,
-            tei_batch_size=settings.tei_batch_size,
+            embedding_url=settings.embedding.url,
+            tei_batch_size=settings.embedding.tei_batch_size,
             use_prefix=settings.needs_embedding_prefix,
             query_instruction=settings.query_instruction,
             hnsw_ef=hnsw_ef,
@@ -41,10 +41,10 @@ def build_surreal_native_engine_overrides(
         ),
         "keyword": SurrealFTSSearchEngine(
             connection,
-            chunk_strategy=settings.chunk_strategy,
+            chunk_strategy=settings.indexing.chunk_strategy,
         ),
         "graph_direct": SurrealGraphDirectEngine(
             connection,
-            chunk_strategy=settings.chunk_strategy,
+            chunk_strategy=settings.indexing.chunk_strategy,
         ),
     }

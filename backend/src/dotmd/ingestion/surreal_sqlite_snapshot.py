@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import sqlite3
 import struct
@@ -13,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from dotmd.core.config import Settings
 from dotmd.ingestion.pipeline import _model_to_table_suffix
 from dotmd.storage.surreal_schema import SURREAL_SCHEMA_VERSION
 
@@ -110,10 +110,7 @@ def _discover_chunk_strategies(known_tables: set[str]) -> list[str]:
 
 
 def _runtime_embedding_model() -> str | None:
-    model_name = os.getenv("DOTMD_EMBEDDING_MODEL")
-    if model_name is None:
-        return None
-    model_name = model_name.strip()
+    model_name = Settings().embedding.model.strip()
     return model_name or None
 
 
@@ -137,7 +134,7 @@ def _resolve_vector_dataset_embedding_model(
     if runtime_model_key != model_key:
         raise ValueError(
             f"{config_table} is missing required 'model' key for model_key={model_key!r}; "
-            f"DOTMD_EMBEDDING_MODEL={runtime_model!r} resolves to {runtime_model_key!r}"
+            f"embedding.model={runtime_model!r} resolves to {runtime_model_key!r}"
         )
     return runtime_model
 

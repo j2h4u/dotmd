@@ -1,7 +1,7 @@
 """TEI concurrency benchmark for SPEED-01.
 
 Measures texts/sec for 1, 2, and 3 concurrent TEI request workers,
-keeping batch_size fixed at the production value (DOTMD_TEI_BATCH_SIZE).
+keeping batch_size fixed at the production value (DOTMD_EMBEDDING__TEI_BATCH_SIZE).
 
 This is a standalone script -- does not import from dotmd package
 and never touches production indexes.
@@ -73,8 +73,8 @@ def benchmark_concurrency(
 
 
 def main() -> None:
-    url = os.environ.get("DOTMD_EMBEDDING_URL", "http://embeddings:80")
-    batch_size = int(os.environ.get("DOTMD_TEI_BATCH_SIZE", "4"))
+    url = os.environ.get("DOTMD_EMBEDDING__URL", "http://embeddings:80")
+    batch_size = int(os.environ.get("DOTMD_EMBEDDING__TEI_BATCH_SIZE", "4"))
     worker_counts = [1, 2, 3]
     iterations = 3
     n_texts = 100

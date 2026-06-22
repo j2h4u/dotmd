@@ -42,9 +42,9 @@ import pytest
 try:
     from dotmd.core.config import Settings as _Settings
 
-    STRATEGY: str = _Settings(embedding_url="http://localhost:8088").chunk_strategy
+    STRATEGY: str = _Settings(embedding={"url": "http://localhost:8088"}).indexing.chunk_strategy
 except (OSError, ValueError):
-    # Fallback for environments where DOTMD_EMBEDDING_URL is not set at collection time.
+    # Keep collection-time import robust when Settings cannot be constructed.
     STRATEGY = "heading_512_50"
 # ---------------------------------------------------------------------------
 # Inline DB builder (post-v16 schema — no file_path col in chunks_*)
@@ -134,8 +134,8 @@ def _get_pipeline(db_path: Path):  # type: ignore[no-untyped-def]
 
     settings = Settings(
         index_dir=db_path.parent,
-        indexing_paths=[str(db_path.parent)],
-        embedding_url="http://localhost:18088",
+        indexing={"paths": [str(db_path.parent)]},
+        embedding={"url": "http://localhost:18088"},
     )
     return IndexingPipeline(settings)
 
@@ -464,8 +464,8 @@ class TestPropertyReindexHolderInvariant:
         db_path = _build_db(tmp_path)
         settings = Settings(
             index_dir=tmp_path,
-            indexing_paths=[str(tmp_path)],
-            embedding_url="http://localhost:18088",
+            indexing={"paths": [str(tmp_path)]},
+            embedding={"url": "http://localhost:18088"},
         )
         pipeline = IndexingPipeline(settings)
 

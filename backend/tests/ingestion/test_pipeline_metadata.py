@@ -40,10 +40,9 @@ def minimal_settings(tmp_path):
     return Settings(
         data_dir=data_dir,
         index_dir=index_dir,
-        embedding_url="http://localhost:18088",  # not real; mocked
-        indexing_paths=[str(data_dir)],
-        extract_depth=ExtractDepth.STRUCTURAL,
-        embedding_weights="text=0.7,meta=0.3",
+        embedding={"url": "http://localhost:18088", "weights": "text=0.7,meta=0.3"},
+        indexing={"paths": [str(data_dir)]},
+        extraction={"depth": ExtractDepth.STRUCTURAL},
     )
 
 
@@ -97,7 +96,7 @@ def test_pipeline_init_runs_destructive_startup_repair_only_when_enabled(
     monkeypatch.setattr(IndexingPipeline, "_check_schema_version", schema_check)
     monkeypatch.setattr(IndexingPipeline, "_check_weights_changed", weights_check)
 
-    minimal_settings.allow_destructive_startup_repair = True
+    minimal_settings.indexing.allow_destructive_startup_repair = True
     IndexingPipeline(minimal_settings)
 
     schema_check.assert_called_once_with()
@@ -409,10 +408,9 @@ def test_weight_change_recomputes_fused_without_tei(minimal_settings, tmp_path):
     new_settings = Settings(
         data_dir=minimal_settings.data_dir,
         index_dir=minimal_settings.index_dir,
-        embedding_url=minimal_settings.embedding_url,
-        indexing_paths=list(minimal_settings.indexing_paths),
-        extract_depth=ExtractDepth.STRUCTURAL,
-        embedding_weights="text=0.6,meta=0.4",
+        indexing={"paths": list(minimal_settings.indexing.paths)},
+        extraction={"depth": ExtractDepth.STRUCTURAL},
+        embedding={"url": minimal_settings.embedding.url, "weights": "text=0.6,meta=0.4"},
     )
     pipeline._settings = new_settings
 

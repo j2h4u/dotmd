@@ -20,8 +20,8 @@ class TestServiceForceParameter:
         service = make_surreal_service(
             tmp_path / "idx",
             data_dir=tmp_path,
-            indexing_paths=[str(tmp_path)],
-            embedding_url="http://test:8088",
+            indexing={"paths": [str(tmp_path)]},
+            embedding={"url": "http://test:8088"},
         )
         # Replace the pipeline's index method with a mock
         service._pipeline.index = cast(Any, MagicMock(return_value=MagicMock()))

@@ -131,15 +131,28 @@ uv run dotmd feedback status <id> done --reason "handled"
 
 ## Configuration
 
-The server uses the same `DOTMD_` settings as the CLI and REST API. Important variables:
+The server uses the same `Settings` model as the CLI and REST API. Put product
+defaults in `~/.dotmd/config.toml` and use nested env overrides for runtime
+URLs and secrets.
 
-| Variable | Description |
-|----------|-------------|
-| `DOTMD_INDEX_DIR` | Index storage directory |
-| `DOTMD_EMBEDDING_URL` | TEI-compatible embedding endpoint |
-| `DOTMD_SURREAL_RETRIEVAL_URL` | Standalone SurrealDB URL |
-| `DOTMD_SURREAL_RETRIEVAL_NAMESPACE` | SurrealDB namespace |
-| `DOTMD_SURREAL_RETRIEVAL_DATABASE` | SurrealDB database |
-| `DOTMD_BASE_URL` | Public HTTPS base URL for OAuth-enabled remote MCP |
+```toml
+data_dir = "/mnt"
+index_dir = "/dotmd-index"
 
-See the main [README](../README.md) for the full configuration table.
+[embedding]
+model = "BAAI/bge-small-en-v1.5"
+
+[surreal_retrieval]
+namespace = "dotmd"
+database = "production"
+embedding_dimension = 1024
+```
+
+```bash
+DOTMD_EMBEDDING__URL=http://tei:80
+DOTMD_SURREAL_RETRIEVAL__URL=http://surrealdb:8000
+DOTMD_SURREAL_RETRIEVAL__USERNAME=root
+DOTMD_SURREAL_RETRIEVAL__PASSWORD=change-me
+```
+
+See the main [README](../README.md) for the full configuration example.

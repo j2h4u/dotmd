@@ -20,8 +20,8 @@ def _get_service(tmp_path: Path):  # type: ignore[no-untyped-def]
     return make_surreal_service(
         tmp_path,
         data_dir=tmp_path,
-        indexing_paths=[str(tmp_path)],
-        embedding_url="http://localhost:8088",
+        indexing={"paths": [str(tmp_path)]},
+        embedding={"url": "http://localhost:8088"},
     )
 
 

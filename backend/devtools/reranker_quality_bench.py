@@ -17,7 +17,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from dotmd.api.service import DotMDService, format_elapsed_ms
-from dotmd.core.config import Settings
+from dotmd.core.config import EmbeddingSettings, Settings
 
 PHASE = "21"
 DEFAULT_RERANKERS = [
@@ -134,7 +134,7 @@ def find_chunks_for_file_contains(
     service: BenchmarkService, file_path: str, contains: str
 ) -> list[str]:
     """Resolve a file_path + substring label to chunk ids in the active chunk strategy."""
-    strategy = service._settings.chunk_strategy
+    strategy = service._settings.indexing.chunk_strategy
     metadata_store = service._pipeline.metadata_store
     total = metadata_store.get_chunk_count_for_file(strategy, file_path)
     chunks = metadata_store.get_chunks_for_file_range(strategy, file_path, 0, total)
@@ -425,13 +425,13 @@ def run_benchmark(
             BenchmarkService,
             DotMDService(
                 Settings(
-                    embedding_url="http://localhost:8088",
+                    embedding=EmbeddingSettings(url="http://localhost:8088"),
                     rerank_pool_size=config.pool_size,
                 )
             ),
         )
     commit = config.commit or get_commit()
-    chunk_strategy = service._settings.chunk_strategy
+    chunk_strategy = service._settings.indexing.chunk_strategy
     labels = load_labels(config.labels)
     config.output.parent.mkdir(parents=True, exist_ok=True)
     config.output.write_text("", encoding="utf-8")

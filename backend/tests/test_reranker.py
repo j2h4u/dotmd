@@ -228,7 +228,7 @@ class TestRerankerScoring:
         """Settings class does NOT have rerank_score_threshold attribute."""
         from dotmd.core.config import Settings
 
-        settings = Settings(embedding_url="http://test:8088")
+        settings = Settings(embedding={"url": "http://test:8088"})
         legacy_attr = "rerank_score_threshold"
         with pytest.raises(AttributeError):
             getattr(settings, legacy_attr)
@@ -237,7 +237,7 @@ class TestRerankerScoring:
         """Settings defaults to the latency-surviving multilingual reranker."""
         from dotmd.core.config import Settings
 
-        settings = Settings(embedding_url="http://test:8088")
+        settings = Settings(embedding={"url": "http://test:8088"})
 
         assert settings.reranker_backend == "cross_encoder"
         assert settings.reranker_model == "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
@@ -247,7 +247,7 @@ class TestRerankerScoring:
         """Settings defaults to the stable multilingual MiniLM reranker name."""
         from dotmd.core.config import Settings
 
-        settings = Settings(embedding_url="http://test:8088")
+        settings = Settings(embedding={"url": "http://test:8088"})
 
         assert settings.reranker_name == "mmarco-minilm"
 
@@ -255,7 +255,7 @@ class TestRerankerScoring:
         """Settings exposes default comparison names as a parsed list."""
         from dotmd.core.config import Settings
 
-        settings = Settings(embedding_url="http://test:8088")
+        settings = Settings(embedding={"url": "http://test:8088"})
 
         assert settings.parsed_reranker_compare_names == [
             "mmarco-minilm",
@@ -266,7 +266,7 @@ class TestRerankerScoring:
         from dotmd.core.config import Settings
 
         settings = Settings(
-            embedding_url="http://test:8088",
+            embedding={"url": "http://test:8088"},
             reranker_compare_names="mmarco-minilm, ,candidate",
         )
 
@@ -311,7 +311,7 @@ class TestRerankerFactory:
         from dotmd.core.config import Settings
         from dotmd.search.reranker import create_reranker
 
-        settings = Settings(embedding_url="http://test:8088")
+        settings = Settings(embedding={"url": "http://test:8088"})
 
         reranker = create_reranker("mmarco-minilm", settings)
         assert isinstance(reranker, CrossEncoderReranker)
@@ -325,7 +325,7 @@ class TestRerankerFactory:
         from dotmd.core.config import Settings
         from dotmd.search.reranker import create_reranker
 
-        settings = Settings(embedding_url="http://test:8088")
+        settings = Settings(embedding={"url": "http://test:8088"})
 
         with pytest.raises(ValueError, match=r"Unknown reranker.*mmarco-minilm"):
             create_reranker("does-not-exist", settings)
@@ -335,7 +335,7 @@ class TestRerankerFactory:
         from dotmd.core.config import Settings
         from dotmd.search.reranker import RerankerFactory
 
-        settings = Settings(embedding_url="http://test:8088")
+        settings = Settings(embedding={"url": "http://test:8088"})
         factory = RerankerFactory(settings)
 
         assert factory.get("mmarco-minilm") is factory.get("mmarco-minilm")
@@ -386,7 +386,7 @@ class TestRerankerFactory:
         from dotmd.search.reranker import create_reranker
 
         settings = Settings(
-            embedding_url="http://test:8088",
+            embedding={"url": "http://test:8088"},
             reranker_length_penalty=False,
             reranker_min_length=123,
             reranker_relevance_floor=0.25,

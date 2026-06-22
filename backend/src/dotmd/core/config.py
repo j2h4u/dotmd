@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Literal, cast
 
-from pydantic import Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, TomlConfigSettingsSource
 
 from dotmd.core.models import ExtractDepth
@@ -66,6 +66,126 @@ def _path_spec_is_absolute(path_spec: str) -> bool:
     return Path(prefix).is_absolute()
 
 
+class EmbeddingSettings(BaseModel):
+    """Embedding model and TEI client settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Local SentenceTransformers model — used only when embedding.url is unset.
+    # When TEI is configured, the actual model is determined by TEI (query /info).
+    model: str = "BAAI/bge-small-en-v1.5"
+    # URL to a TEI-compatible embedding server (e.g. http://host:8088).
+    # Required for runtime — dotMD is designed to run with an external embedding server.
+    url: str | None = None
+    # Whether the active embedding model uses E5-family instruction prefixes.
+    # E5 models require "query: " / "passage: " prefixes. pplx-embed does not.
+    uses_prefix: bool | None = None
+    # Instruction prefix for query encoding (Qwen3-style models).
+    query_instruction: str | None = None
+    # Initial TEI batch size for embedding requests. Auto-tuned down on 413 errors.
+    tei_batch_size: int = DEFAULT_TEI_BATCH_SIZE
+    # Fusion weights for N-vector unified embeddings.
+    weights: str = "text=0.7,meta=0.3"
+
+    @field_validator("weights")
+    @classmethod
+    def validate_weights(cls, v: str) -> str:
+        """Parse and validate embedding fusion weights."""
+        pairs = [p.strip() for p in v.split(",") if p.strip()]
+        parsed: dict[str, float] = {}
+        total = 0.0
+        for pair in pairs:
+            if "=" not in pair:
+                raise ValueError(
+                    f"embedding.weights: invalid entry {pair!r} — expected key=value format"
+                )
+            key, val = pair.split("=", 1)
+            key = key.strip()
+            try:
+                w = float(val.strip())
+            except ValueError:
+                raise ValueError(
+                    f"embedding.weights: value for {key!r} is not a float: {val!r}"
+                ) from None
+            parsed[key] = w
+            total += w
+        if abs(total - 1.0) > 0.001:
+            raise ValueError(f"embedding.weights: weights must sum to 1.0 (got {total:.4f})")
+        if "text" not in parsed:
+            raise ValueError("embedding.weights: missing required key 'text'")
+        if "meta" not in parsed:
+            raise ValueError("embedding.weights: missing required key 'meta'")
+        return v
+
+
+class ExtractionSettings(BaseModel):
+    """Content extraction and NER settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    depth: ExtractDepth = ExtractDepth.NER
+    ner_entity_types: list[str] = [
+        "person",
+        "organization",
+        "technology",
+        "concept",
+        "location",
+        "object",
+        "activity",
+        "date_time",
+    ]
+    ner_model_name: str = "urchade/gliner_multi-v2.1"
+
+
+class IndexingSettings(BaseModel):
+    """Filesystem discovery, chunking, and indexing loop settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Directories (full recursive .md scan) or glob patterns (e.g., "/home/**/README.md")
+    paths: list[str] = []
+    # Replace-only exclude config. Prefer extra_exclude for operator additions.
+    exclude: list[str] = list(DEFAULT_INDEXING_EXCLUDE)
+    extra_exclude: list[str] = []
+    poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS
+    profile: bool = False
+    allow_destructive_startup_repair: bool = False
+    chunk_strategy: str = "heading_512_50"
+    max_chunk_tokens: int = DEFAULT_MAX_CHUNK_TOKENS
+    chunk_overlap_tokens: int = DEFAULT_CHUNK_OVERLAP_TOKENS
+
+
+class SurrealRetrievalSettings(BaseModel):
+    """Standalone SurrealDB retrieval runtime settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = DEFAULT_SURREAL_URL
+    namespace: str = DEFAULT_SURREAL_NAMESPACE
+    database: str | None = None
+    username: str | None = None
+    password: str | None = None
+    access_token: str | None = None
+    embedding_dimension: int | None = None
+    hnsw_ef: int = DEFAULT_SURREAL_HNSW_EF
+    vector_index_type: str = DEFAULT_SURREAL_HNSW_VECTOR_INDEX_TYPE
+    embedding_shard_count: int = DEFAULT_SURREAL_EMBEDDING_SHARD_COUNT
+
+    @field_validator("vector_index_type", mode="before")
+    @classmethod
+    def validate_vector_index_type(cls, v: object) -> str:
+        """Normalize and validate the Surreal HNSW vector element type."""
+        if not isinstance(v, str):
+            raise ValueError("surreal_retrieval.vector_index_type must be a string")
+        normalized = v.strip().upper()
+        if normalized not in SUPPORTED_SURREAL_HNSW_VECTOR_INDEX_TYPES:
+            raise ValueError(
+                "surreal_retrieval.vector_index_type must be one of "
+                f"{', '.join(SUPPORTED_SURREAL_HNSW_VECTOR_INDEX_TYPES)}"
+            )
+        return normalized
+
+
 class Settings(BaseSettings):
     """Global configuration for dotMD.
 
@@ -77,6 +197,7 @@ class Settings(BaseSettings):
 
     model_config = {
         "env_prefix": "DOTMD_",
+        "env_nested_delimiter": "__",
         "toml_file": str(Path.home() / ".dotmd" / "config.toml"),
         "populate_by_name": True,
     }
@@ -85,23 +206,7 @@ class Settings(BaseSettings):
     data_dir: Path = Path()
     index_dir: Path = Path.home() / ".dotmd"
 
-    # Local SentenceTransformers model — used only when embedding_url is unset.
-    # When TEI is configured, the actual model is determined by TEI (query /info).
-    embedding_model: str = "BAAI/bge-small-en-v1.5"
-    # URL to a TEI-compatible embedding server (e.g. http://host:8088).
-    # Required — dotMD is designed to run with an external embedding server.
-    # Set DOTMD_EMBEDDING_URL in your environment or docker-compose.yml.
-    embedding_url: str
-
-    # Whether the active embedding model uses E5-family instruction prefixes.
-    # E5 models require "query: " / "passage: " prefixes. pplx-embed does not.
-    # Auto-detected from embedding_model name if not explicitly set.
-    embedding_uses_prefix: bool | None = None
-
-    # Instruction prefix for query encoding (Qwen3-style models).
-    # If set, queries are encoded as: "<instruction>\nQuery: <query>"
-    # Auto-detected from embedding_model name if not explicitly set.
-    embedding_query_instruction: str | None = None
+    embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
 
     # Reranker
     reranker_backend: Literal["cross_encoder"] = "cross_encoder"
@@ -112,82 +217,8 @@ class Settings(BaseSettings):
     reranker_length_penalty: bool = DEFAULT_RERANKER_LENGTH_PENALTY
     reranker_min_length: int = DEFAULT_RERANKER_MIN_LENGTH
 
-    # Chunking
-    chunk_strategy: str = "heading_512_50"
-    max_chunk_tokens: int = DEFAULT_MAX_CHUNK_TOKENS
-    chunk_overlap_tokens: int = DEFAULT_CHUNK_OVERLAP_TOKENS
-
-    # Extraction
-    extract_depth: ExtractDepth = ExtractDepth.NER
-    ner_entity_types: list[str] = [
-        "person",
-        "organization",
-        "technology",
-        "concept",
-        "location",
-        "object",
-        "activity",
-        "date_time",
-    ]
-    # GLiNER model for NER extraction. Changing this clears the extraction_cache.
-    ner_model_name: str = "urchade/gliner_multi-v2.1"
-
-    # Initial TEI batch size for embedding requests. Auto-tuned down on 413 errors.
-    # Small batches (4-8) are often faster on CPU due to lower TEI queue/inference time.
-    tei_batch_size: int = DEFAULT_TEI_BATCH_SIZE
-
-    # Fusion weights for N-vector unified embeddings (Phase 999.12).
-    # Format: "text=0.7,meta=0.3" — component names to float weights, comma-separated.
-    # Must sum to 1.0 (±0.001 tolerance). Validated at startup — fails fast.
-    # Must include both "text" and "meta" keys (dual-encoder architecture requires both).
-    # Recomputing e_fused after weight change is local math only (no TEI calls).
-    embedding_weights: str = "text=0.7,meta=0.3"
-
-    @field_validator("embedding_weights")
-    @classmethod
-    def validate_embedding_weights(cls, v: str) -> str:
-        """Parse and validate embedding_weights string.
-
-        Expected format: "text=0.7,meta=0.3"
-        Raises ValueError if:
-        - Any entry is not in key=value format
-        - Any value is not a valid float
-        - Values do not sum to 1.0 (±0.001 tolerance)
-        - Either "text" or "meta" key is missing (dual-encoder requires both)
-        """
-        pairs = [p.strip() for p in v.split(",") if p.strip()]
-        parsed: dict[str, float] = {}
-        total = 0.0
-        for pair in pairs:
-            if "=" not in pair:
-                raise ValueError(
-                    f"embedding_weights: invalid entry {pair!r} — expected key=value format"
-                )
-            key, val = pair.split("=", 1)
-            key = key.strip()
-            try:
-                w = float(val.strip())
-            except ValueError:
-                raise ValueError(
-                    f"embedding_weights: value for {key!r} is not a float: {val!r}"
-                ) from None
-            parsed[key] = w
-            total += w
-        if abs(total - 1.0) > 0.001:
-            raise ValueError(f"embedding_weights: weights must sum to 1.0 (got {total:.4f})")
-        # Require both "text" and "meta" keys — dual-encoder architecture requires both
-        # components. Accepting arbitrary keys would silently omit a component from fusion.
-        if "text" not in parsed:
-            raise ValueError(
-                "embedding_weights: missing required key 'text' "
-                "(dual-encoder requires both 'text' and 'meta')"
-            )
-        if "meta" not in parsed:
-            raise ValueError(
-                "embedding_weights: missing required key 'meta' "
-                "(dual-encoder requires both 'text' and 'meta')"
-            )
-        return v
+    extraction: ExtractionSettings = Field(default_factory=ExtractionSettings)
+    indexing: IndexingSettings = Field(default_factory=IndexingSettings)
 
     @field_validator("reranker_relevance_floor", mode="before")
     @classmethod
@@ -197,20 +228,6 @@ class Settings(BaseSettings):
             return None
         return v
 
-    @field_validator("surreal_retrieval_vector_index_type", mode="before")
-    @classmethod
-    def validate_surreal_retrieval_vector_index_type(cls, v: object) -> str:
-        """Normalize and validate the Surreal HNSW vector element type."""
-        if not isinstance(v, str):
-            raise ValueError("surreal_retrieval_vector_index_type must be a string")
-        normalized = v.strip().upper()
-        if normalized not in SUPPORTED_SURREAL_HNSW_VECTOR_INDEX_TYPES:
-            raise ValueError(
-                "surreal_retrieval_vector_index_type must be one of "
-                f"{', '.join(SUPPORTED_SURREAL_HNSW_VECTOR_INDEX_TYPES)}"
-            )
-        return normalized
-
     # Search
     default_top_k: int = DEFAULT_DEFAULT_TOP_K
     fusion_k: int = DEFAULT_FUSION_K
@@ -218,33 +235,10 @@ class Settings(BaseSettings):
     semantic_score_floor: float = DEFAULT_SEMANTIC_SCORE_FLOOR
     snippet_length: int = DEFAULT_SNIPPET_LENGTH
 
-    # Indexing paths (multi-path discovery)
-    # Directories (full recursive .md scan) or glob patterns (e.g., "/home/**/README.md")
-    indexing_paths: list[str] = []
-    # Legacy replace-only exclude config. Prefer indexing_extra_exclude for
-    # operator additions, and effective_indexing_exclude for call sites.
-    indexing_exclude: list[str] = list(DEFAULT_INDEXING_EXCLUDE)
-    indexing_extra_exclude: list[str] = []
-
-    # Trickle indexer settings
-    poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS
-    profile_indexing: bool = False  # DOTMD_PROFILE_INDEXING=true → per-phase timing in logs
-    allow_destructive_startup_repair: bool = False
-
     # Graph
     graph_max_hops: int = DEFAULT_GRAPH_MAX_HOPS
 
-    # Standalone SurrealDB search runtime.
-    surreal_retrieval_url: str = DEFAULT_SURREAL_URL
-    surreal_retrieval_namespace: str = DEFAULT_SURREAL_NAMESPACE
-    surreal_retrieval_database: str | None = None
-    surreal_retrieval_username: str | None = None
-    surreal_retrieval_password: str | None = None
-    surreal_retrieval_access_token: str | None = None
-    surreal_retrieval_embedding_dimension: int | None = None
-    surreal_retrieval_hnsw_ef: int = DEFAULT_SURREAL_HNSW_EF
-    surreal_retrieval_vector_index_type: str = DEFAULT_SURREAL_HNSW_VECTOR_INDEX_TYPE
-    surreal_retrieval_embedding_shard_count: int = DEFAULT_SURREAL_EMBEDDING_SHARD_COUNT
+    surreal_retrieval: SurrealRetrievalSettings = Field(default_factory=SurrealRetrievalSettings)
 
     # Base URL for OAuth 2.0 endpoints served by FastMCP.
     # Must be the full Tailscale-facing URL including path prefix
@@ -342,9 +336,9 @@ class Settings(BaseSettings):
 
     @property
     def parsed_embedding_weights(self) -> dict[str, float]:
-        """Return embedding_weights as {component_name: weight} dict."""
+        """Return embedding.weights as {component_name: weight} dict."""
         result: dict[str, float] = {}
-        for pair in self.embedding_weights.split(","):
+        for pair in self.embedding.weights.split(","):
             pair = pair.strip()
             if "=" in pair:
                 key, val = pair.split("=", 1)
@@ -359,10 +353,10 @@ class Settings(BaseSettings):
     @property
     def effective_indexing_exclude(self) -> list[str]:
         """Return resolved exclude patterns with built-ins and operator extras."""
-        patterns = self.indexing_exclude or list(DEFAULT_INDEXING_EXCLUDE)
+        patterns = self.indexing.exclude or list(DEFAULT_INDEXING_EXCLUDE)
         result: list[str] = []
         seen: set[str] = set()
-        for pattern in [*patterns, *self.indexing_extra_exclude]:
+        for pattern in [*patterns, *self.indexing.extra_exclude]:
             if pattern in seen:
                 continue
             seen.add(pattern)
@@ -380,45 +374,45 @@ class Settings(BaseSettings):
             errors.append("index_dir must be absolute for runtime startup")
         elif self.index_dir != RUNTIME_INDEX_DIR:
             errors.append("index_dir must be /dotmd-index for runtime startup")
-        if not self.indexing_paths:
-            errors.append("indexing_paths must not be empty for runtime startup")
-        elif any(not _path_spec_is_absolute(path_spec) for path_spec in self.indexing_paths):
-            errors.append("indexing_paths must contain absolute paths for runtime startup")
-        if not self.embedding_url:
-            errors.append("embedding_url must not be empty for runtime startup")
-        if not self.surreal_retrieval_url:
-            errors.append("surreal_retrieval_url must be set for runtime startup")
-        if not self.surreal_retrieval_namespace:
-            errors.append("surreal_retrieval_namespace must be set for runtime startup")
-        if not self.surreal_retrieval_database:
-            errors.append("surreal_retrieval_database must be set for runtime startup")
-        if self.surreal_retrieval_embedding_dimension is None:
-            errors.append("surreal_retrieval_embedding_dimension must be set for runtime startup")
-        has_username = bool(self.surreal_retrieval_username)
-        has_password = bool(self.surreal_retrieval_password)
+        if not self.indexing.paths:
+            errors.append("indexing.paths must not be empty for runtime startup")
+        elif any(not _path_spec_is_absolute(path_spec) for path_spec in self.indexing.paths):
+            errors.append("indexing.paths must contain absolute paths for runtime startup")
+        if not self.embedding.url:
+            errors.append("embedding.url must not be empty for runtime startup")
+        if not self.surreal_retrieval.url:
+            errors.append("surreal_retrieval.url must be set for runtime startup")
+        if not self.surreal_retrieval.namespace:
+            errors.append("surreal_retrieval.namespace must be set for runtime startup")
+        if not self.surreal_retrieval.database:
+            errors.append("surreal_retrieval.database must be set for runtime startup")
+        if self.surreal_retrieval.embedding_dimension is None:
+            errors.append("surreal_retrieval.embedding_dimension must be set for runtime startup")
+        has_username = bool(self.surreal_retrieval.username)
+        has_password = bool(self.surreal_retrieval.password)
         if has_username != has_password:
             errors.append(
-                "surreal_retrieval_username and surreal_retrieval_password must be set together"
+                "surreal_retrieval.username and surreal_retrieval.password must be set together"
             )
-        if (has_username or has_password) and self.surreal_retrieval_access_token:
+        if (has_username or has_password) and self.surreal_retrieval.access_token:
             errors.append(
-                "surreal_retrieval_access_token must not be combined with username/password auth"
+                "surreal_retrieval.access_token must not be combined with username/password auth"
             )
-        if self.surreal_retrieval_hnsw_ef < 1:
-            errors.append("surreal_retrieval_hnsw_ef must be >= 1 for runtime startup")
-        if self.surreal_retrieval_embedding_shard_count < 1:
+        if self.surreal_retrieval.hnsw_ef < 1:
+            errors.append("surreal_retrieval.hnsw_ef must be >= 1 for runtime startup")
+        if self.surreal_retrieval.embedding_shard_count < 1:
             errors.append(
-                "surreal_retrieval_embedding_shard_count must be >= 1 for runtime startup"
+                "surreal_retrieval.embedding_shard_count must be >= 1 for runtime startup"
             )
 
         identity_fields = {
-            "embedding_model": self.embedding_model,
-            "chunk_strategy": self.chunk_strategy,
-            "ner_model_name": self.ner_model_name,
+            "embedding.model": self.embedding.model,
+            "indexing.chunk_strategy": self.indexing.chunk_strategy,
+            "extraction.ner_model_name": self.extraction.ner_model_name,
             "reranker_name": self.reranker_name,
             "reranker_model": self.reranker_model,
             "reranker_backend": self.reranker_backend,
-            "embedding_weights": self.embedding_weights,
+            "embedding.weights": self.embedding.weights,
         }
         for field_name, value in identity_fields.items():
             if value == "":
@@ -438,10 +432,10 @@ class Settings(BaseSettings):
     @property
     def needs_embedding_prefix(self) -> bool:
         """Whether the embedding model requires E5-style instruction prefixes."""
-        if self.embedding_uses_prefix is not None:
-            return self.embedding_uses_prefix
+        if self.embedding.uses_prefix is not None:
+            return self.embedding.uses_prefix
         # Auto-detect: E5 family and BGE models need prefixes, others don't
-        model_lower = self.embedding_model.lower()
+        model_lower = self.embedding.model.lower()
         return "e5" in model_lower or "bge" in model_lower
 
     @property
@@ -451,9 +445,9 @@ class Settings(BaseSettings):
         Qwen3-Embedding and similar instruction-aware models encode queries as:
         ``"<instruction>\\nQuery: <query>"`` and documents without any prefix.
         """
-        if self.embedding_query_instruction is not None:
-            return self.embedding_query_instruction
-        model_lower = self.embedding_model.lower()
+        if self.embedding.query_instruction is not None:
+            return self.embedding.query_instruction
+        model_lower = self.embedding.model.lower()
         if "qwen3-embedding" in model_lower:
             return (
                 "Instruct: Given a search query, retrieve relevant passages that answer the query"
@@ -471,12 +465,7 @@ class Settings(BaseSettings):
 
 
 def load_settings(**overrides: object) -> Settings:
-    """Construct Settings while preserving BaseSettings env/config loading.
-
-    `embedding_url` is intentionally provided by environment/config in
-    production. Pyright treats it as a required constructor argument because it
-    cannot model pydantic-settings sources.
-    """
+    """Construct Settings while preserving BaseSettings env/config loading."""
     return Settings(**overrides)  # type: ignore[call-arg]
 
 

@@ -275,9 +275,9 @@ def _pipeline(tmp_path: Path) -> IndexingPipeline:
         Settings(
             data_dir=data_dir,
             index_dir=index_dir,
-            embedding_url="http://localhost:18088",
-            indexing_paths=[str(data_dir)],
-            extract_depth=ExtractDepth.STRUCTURAL,
+            embedding={"url": "http://localhost:18088"},
+            indexing={"paths": [str(data_dir)]},
+            extraction={"depth": ExtractDepth.STRUCTURAL},
         )
     )
     pipeline._semantic_engine.encode_batch = lambda texts: [  # type: ignore[method-assign]
@@ -633,7 +633,7 @@ def test_filesystem_and_telegram_chunks_coexist(tmp_path: Path) -> None:
 def test_settings_accepts_telegram_daemon_socket_only(tmp_path: Path) -> None:
     settings = Settings(
         index_dir=tmp_path / "index",
-        embedding_url="http://localhost:18088",
+        embedding={"url": "http://localhost:18088"},
         telegram_daemon_socket=tmp_path / "mcp-telegram.sock",
     )
 
@@ -656,7 +656,7 @@ def test_telegram_ingest_cli_requires_configured_socket(tmp_path: Path) -> None:
             "--single-batch",
             "--dry-run",
         ],
-        env={"DOTMD_EMBEDDING_URL": "http://localhost:18088"},
+        env={"DOTMD_EMBEDDING__URL": "http://localhost:18088"},
     )
 
     assert result.exit_code != 0

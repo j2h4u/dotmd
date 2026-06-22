@@ -261,7 +261,7 @@ def test_source_runtime_factory_from_settings_seeds_telegram_config_when_socket_
     settings = Settings(
         data_dir=tmp_path / "data",
         index_dir=tmp_path / "index",
-        embedding_url="http://localhost:18088",
+        embedding={"url": "http://localhost:18088"},
         telegram_daemon_socket=socket_path,
     )
     metadata_store = _metadata_store(tmp_path)
@@ -398,9 +398,8 @@ def test_source_runtime_factory_from_settings_seeds_filesystem_config(
     settings = Settings(
         data_dir=data_dir,
         index_dir=index_dir,
-        embedding_url="http://localhost:18088",
-        indexing_paths=[str(data_dir)],
-        indexing_extra_exclude=["ignored"],
+        embedding={"url": "http://localhost:18088"},
+        indexing={"paths": [str(data_dir)], "extra_exclude": ["ignored"]},
     )
 
     factory = source_lifecycle.source_runtime_factory_from_settings(

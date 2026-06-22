@@ -48,8 +48,8 @@ class TestRefRendering:
         settings = make_surreal_runtime_settings(
             data_dir=tmp_path,
             index_dir=tmp_path,
-            indexing_paths=[str(tmp_path)],
-            embedding_url="http://localhost:8088",
+            indexing={"paths": [str(tmp_path)]},
+            embedding={"url": "http://localhost:8088"},
             telegram_daemon_socket=None,
         )
         with (

@@ -393,30 +393,30 @@ class DotMDService:
             SurrealStoreConfig,
         )
 
-        if not self._settings.surreal_retrieval_database:
-            raise ValueError("surreal_retrieval_database must be set for Surreal retrieval")
-        if self._settings.surreal_retrieval_embedding_dimension is None:
+        if not self._settings.surreal_retrieval.database:
+            raise ValueError("surreal_retrieval.database must be set for Surreal retrieval")
+        if self._settings.surreal_retrieval.embedding_dimension is None:
             raise ValueError(
-                "surreal_retrieval_embedding_dimension must be set for Surreal retrieval"
+                "surreal_retrieval.embedding_dimension must be set for Surreal retrieval"
             )
 
         connection = SurrealConnection(
             SurrealStoreConfig(
-                url=self._settings.surreal_retrieval_url,
-                namespace=self._settings.surreal_retrieval_namespace,
-                database=self._settings.surreal_retrieval_database,
-                username=self._settings.surreal_retrieval_username,
-                password=self._settings.surreal_retrieval_password,
-                access_token=self._settings.surreal_retrieval_access_token,
+                url=self._settings.surreal_retrieval.url,
+                namespace=self._settings.surreal_retrieval.namespace,
+                database=self._settings.surreal_retrieval.database,
+                username=self._settings.surreal_retrieval.username,
+                password=self._settings.surreal_retrieval.password,
+                access_token=self._settings.surreal_retrieval.access_token,
             )
         )
 
         overrides = build_surreal_native_engine_overrides(
             connection,
             self._settings,
-            embedding_dimension=self._settings.surreal_retrieval_embedding_dimension,
-            hnsw_ef=self._settings.surreal_retrieval_hnsw_ef,
-            embedding_shard_count=self._settings.surreal_retrieval_embedding_shard_count,
+            embedding_dimension=self._settings.surreal_retrieval.embedding_dimension,
+            hnsw_ef=self._settings.surreal_retrieval.hnsw_ef,
+            embedding_shard_count=self._settings.surreal_retrieval.embedding_shard_count,
         )
         self._surreal_connection = connection
         self._surreal_metadata_store = cast(MetadataStoreProtocol, SurrealMetadataStore(connection))
@@ -1258,7 +1258,7 @@ class DotMDService:
         fused: list[tuple[str, float]],
     ) -> tuple[list[tuple[str, float]], dict[str, ChunkProvenance], int]:
         """Drop inactive public candidates while preserving missing-provenance errors."""
-        strategy = self._settings.chunk_strategy
+        strategy = self._settings.indexing.chunk_strategy
         chunk_ids = [chunk_id for chunk_id, _score in fused]
         store = self._active_metadata_store()
         store_any = cast(Any, store)
@@ -1501,7 +1501,7 @@ class DotMDService:
 
     def _ensure_source_provenance_ready(self) -> None:
         """Ensure the active strategy can hydrate public source refs before search."""
-        strategy = self._settings.chunk_strategy
+        strategy = self._settings.indexing.chunk_strategy
         if strategy in self._source_provenance_ready_strategies:
             return
 
@@ -1599,7 +1599,7 @@ class DotMDService:
         if namespace == "filesystem":
             resolved = Path(document_ref).resolve()
             active_chunk_count = self._pipeline.metadata_store.get_chunk_count_for_file(
-                self._settings.chunk_strategy,
+                self._settings.indexing.chunk_strategy,
                 str(resolved),
             )
             if not isinstance(active_chunk_count, int) or active_chunk_count <= 0:
@@ -1788,7 +1788,7 @@ class DotMDService:
             "telegram",
             document.document_ref,
             unit_ref,
-            self._settings.chunk_strategy,
+            self._settings.indexing.chunk_strategy,
         )
 
         if not chunks:
@@ -1915,7 +1915,7 @@ class DotMDService:
         frontmatter = self._read_frontmatter(path)
 
         # Phase 26 read(ref) is active-strategy-only; future source adapters may add explicit strategy discovery.
-        strategy = self._settings.chunk_strategy
+        strategy = self._settings.indexing.chunk_strategy
         total_chunks = self._pipeline.metadata_store.get_chunk_count_for_file(
             strategy,
             file_path,
@@ -1949,7 +1949,7 @@ class DotMDService:
         file_path = self._filesystem_path_for_source(document, ref)
         frontmatter = self._read_frontmatter(Path(file_path))
         total_chunks = self._pipeline.metadata_store.get_chunk_count_for_file(
-            self._settings.chunk_strategy,
+            self._settings.indexing.chunk_strategy,
             file_path,
         )
         return {
@@ -1973,7 +1973,7 @@ class DotMDService:
             "active": int(binding_counts.get("active", 0)),
             "inactive": int(binding_counts.get("inactive", 0)),
             "retained": self._pipeline.metadata_store.count_retained_inactive_chunks(
-                self._settings.chunk_strategy,
+                self._settings.indexing.chunk_strategy,
             ),
             "reused": reused,
         }
@@ -2039,11 +2039,11 @@ class DotMDService:
         stats.unchanged_files = len(diff.unchanged)
 
     def _discover_status_files(self, stats: IndexStats) -> list[FileInfo]:
-        if self._settings.indexing_paths:
+        if self._settings.indexing.paths:
             from dotmd.ingestion.reader import discover_files_multi
 
             return discover_files_multi(
-                self._settings.indexing_paths,
+                self._settings.indexing.paths,
                 self._settings.effective_indexing_exclude,
             )
         if stats.data_dir:

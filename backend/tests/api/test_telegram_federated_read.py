@@ -21,9 +21,9 @@ def _get_service(tmp_path: Path) -> DotMDService:
     return make_surreal_service(
         tmp_path / "index",
         data_dir=tmp_path,
-        indexing_paths=[str(tmp_path)],
-        embedding_url="http://localhost:18088",
-        extract_depth=ExtractDepth.STRUCTURAL,
+        indexing={"paths": [str(tmp_path)]},
+        embedding={"url": "http://localhost:18088"},
+        extraction={"depth": ExtractDepth.STRUCTURAL},
     )
 
 

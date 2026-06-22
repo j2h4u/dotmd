@@ -18,7 +18,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from dotmd.api.service import DotMDService, format_elapsed_ms
-from dotmd.core.config import Settings
+from dotmd.core.config import EmbeddingSettings, Settings
 
 PHASE = "20"
 QUERY_SET_NAME = "QUERY_SET_V1"
@@ -168,7 +168,7 @@ def run_model_sequence(
     factory = service_factory or DotMDService
     service = factory(
         Settings(
-            embedding_url="http://localhost:8088",
+            embedding=EmbeddingSettings(url="http://localhost:8088"),
             rerank_pool_size=config.pool_size,
         )
     )

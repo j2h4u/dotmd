@@ -22,12 +22,14 @@ def _surreal_settings(tmp_path: Path) -> Settings:
     return Settings(
         data_dir=data_dir,
         index_dir=index_dir,
-        embedding_url="http://localhost:18088",
-        indexing_paths=[str(data_dir)],
-        extract_depth=ExtractDepth.STRUCTURAL,
-        surreal_retrieval_url="http://surrealdb:8000",
-        surreal_retrieval_database="dotmd",
-        surreal_retrieval_embedding_dimension=3,
+        embedding={"url": "http://localhost:18088"},
+        indexing={"paths": [str(data_dir)]},
+        extraction={"depth": ExtractDepth.STRUCTURAL},
+        surreal_retrieval={
+            "url": "http://surrealdb:8000",
+            "database": "dotmd",
+            "embedding_dimension": 3,
+        },
     )
 
 
