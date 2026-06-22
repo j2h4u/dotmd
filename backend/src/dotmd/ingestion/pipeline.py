@@ -2609,7 +2609,7 @@ class IndexingPipeline:
         self,
         files: list[FileInfo],
         chunks: list[Chunk],
-        extraction: ExtractionResult | None,
+        extraction: ExtractionResult | _ExtractionBundle | None,
         *,
         source_cursor: str,
         source_time: datetime | None = None,

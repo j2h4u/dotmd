@@ -1221,8 +1221,8 @@ class _SyncPhase:
     rows: tuple[SurrealDeltaChange, ...]
 
 
-def _sorted_changes(rows: Sequence[SurrealDeltaChange]) -> tuple[SurrealDeltaChange, ...]:
-    return tuple(sorted(rows, key=lambda row: (row.table, row.ref)))
+def _sorted_changes(rows: Sequence[SurrealDeltaChange]) -> list[SurrealDeltaChange]:
+    return sorted(rows, key=lambda row: (row.table, row.ref))
 
 
 def _manifest_units(manifest: SurrealDeltaManifest) -> list[_SyncPhase]:

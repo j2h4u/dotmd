@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 import os
 from collections import Counter
@@ -32,7 +33,8 @@ def _configure_torch_threads() -> int | None:
     """Configure PyTorch thread counts only when NER is actually used."""
     if os.environ.get("OMP_NUM_THREADS"):
         return None
-    import torch
+
+    torch = cast(Any, importlib.import_module("torch"))
 
     cpu_count = os.cpu_count() or 4
     torch.set_num_threads(cpu_count)

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
+from collections.abc import Callable, Iterable
+from typing import cast
 
 from dotmd.storage.base import GraphStoreProtocol, MetadataStoreProtocol
 
@@ -148,7 +150,10 @@ class GraphSearchEngine:
         if not seed_chunk_ids:
             return []
 
-        batch_getter = getattr(self._graph_store, "get_related_sections_for_seeds", None)
+        batch_getter = cast(
+            Callable[[list[str]], Iterable[tuple[str, str, float]]],
+            getattr(self._graph_store, "get_related_sections_for_seeds", None),
+        )
         if callable(batch_getter):
             try:
                 return list(batch_getter(seed_chunk_ids))

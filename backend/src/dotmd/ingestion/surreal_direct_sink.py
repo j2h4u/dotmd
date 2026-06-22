@@ -5,14 +5,16 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Protocol
 
 from dotmd.core.models import (
     ApplicationSourceChange,
     Chunk,
     DocKind,
+    Entity,
     EntityType,
-    ExtractionResult,
     FileInfo,
+    Relation,
     RelationType,
     SourceDocument,
     SourceUnit,
@@ -53,6 +55,11 @@ class SurrealApplicationSourceWrite:
     text_hashes: Mapping[str, str]
     chunk_strategy: str
     embedding_model: str
+
+
+class _GraphExtractionLike(Protocol):
+    entities: list[Entity]
+    relations: list[Relation]
 
 
 def _stable_composite_ref(*parts: object) -> str:
@@ -452,7 +459,7 @@ def _graph_row_sort_key(change: SurrealDeltaChange) -> tuple[int, str]:
 def build_surreal_graph_rows(
     files: Sequence[FileInfo],
     chunks: Sequence[Chunk],
-    extraction: ExtractionResult | None = None,
+    extraction: _GraphExtractionLike | None = None,
 ) -> list[SurrealDeltaChange]:
     """Build direct graph rows from in-memory file, chunk, and extraction state."""
 
@@ -601,7 +608,7 @@ def build_surreal_graph_rows(
 def build_surreal_graph_manifest(
     files: Sequence[FileInfo],
     chunks: Sequence[Chunk],
-    extraction: ExtractionResult | None,
+    extraction: _GraphExtractionLike | None,
     *,
     source_selection: SurrealDeltaSourceSelection,
     checkpoint_candidate: SurrealDeltaCheckpointCandidate,
