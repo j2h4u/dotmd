@@ -18,8 +18,8 @@ The project has been substantially reworked:
 
 - **Standalone SurrealDB cutover**: production storage and retrieval target
   the standalone SurrealDB database `dotmd/production`
-- **Internal cache database**: `index.db` remains migration/internal-cache
-  scaffolding; it is not a production retrieval backend
+- **Internal cache database**: `index.db` is leftover cutover debt kept only
+  until the removal slice lands; it is not a production retrieval backend
 - **Two-dimensional storage**: tables keyed by `(chunk_strategy, embedding_model)` — supports multiple chunking strategies and embedding models simultaneously
 - **Content-aware chunking**: speaker-turn splitting for meeting transcripts, paragraph splitting for voicenotes, heading-based for docs
 - **Context prefix injection**: document title prepended to embeddings at encode time
@@ -125,7 +125,7 @@ Production storage lives in standalone SurrealDB:
 - database: `production`
 - data directory: `/srv/surrealdb/data`
 
-`/dotmd-index/index.db` remains migration/cache scaffolding.
+`/dotmd-index/index.db` is temporary cutover debt scheduled for removal.
 
 ## Configuration
 

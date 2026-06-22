@@ -2,7 +2,7 @@
 
 **Local markdown knowledgebase search for humans and AI agents.**
 
-dotMD indexes markdown files and exposes hybrid retrieval through a CLI, REST API, and MCP server. Production retrieval now runs through standalone SurrealDB for semantic vectors, keyword search, and graph-backed entity retrieval, then fuses and reranks results for higher precision. SurrealDB is the only production storage and retrieval backend; `index.db` remains migration/internal-cache scaffolding.
+dotMD indexes markdown files and exposes hybrid retrieval through a CLI, REST API, and MCP server. Production retrieval now runs through standalone SurrealDB for semantic vectors, keyword search, and graph-backed entity retrieval, then fuses and reranks results for higher precision. SurrealDB is the only production storage and retrieval backend; `index.db` is leftover cutover debt kept only until the removal slice lands.
 
 Everything runs against local or self-hosted services. No hosted LLM API key is required for normal indexing or search.
 
@@ -178,7 +178,7 @@ The compose profile starts:
 - `dotmd` - MCP HTTP server
 - `tei` - Hugging Face Text Embeddings Inference
 
-The production storage and retrieval backend is the external SurrealDB deployment. `index.db` stays migration/internal-cache scaffolding only.
+The production storage and retrieval backend is the external SurrealDB deployment. `index.db` is temporary cutover debt, not a desired permanent backend.
 
 Index data is stored in the `dotmd-index` Docker volume.
 
@@ -203,7 +203,7 @@ Set these for the live container:
 
 Set the SurrealDB credentials from the `/opt/docker/surrealdb` deployment
 environment. The production retrieval stack is SurrealDB-only; `index.db`
-remains migration/internal-cache scaffolding.
+is temporary cutover debt scheduled for removal.
 
 Path filtering:
 

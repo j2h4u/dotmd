@@ -10,6 +10,7 @@ from pytest import CaptureFixture
 class BaselineFunction(TypedDict):
     crap: float
     coverage_fraction: float
+    complexity: int
 
 
 class BaselineReport(TypedDict):
@@ -157,7 +158,10 @@ def test_tighten_baseline_only_decreases_existing_crap(tmp_path: Path) -> None:
 
     baseline = cast(BaselineReport, json.loads(baseline_path.read_text(encoding="utf-8")))
     simple_key = "sample.py::simple"
+    complex_key = "sample.py::complex"
     baseline["functions"][simple_key]["crap"] += 10.0
+    baseline["functions"][complex_key]["crap"] += 1.0
+    baseline_before = cast(BaselineReport, json.loads(json.dumps(baseline)))
     baseline_path.write_text(
         json.dumps(baseline, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -178,7 +182,65 @@ def test_tighten_baseline_only_decreases_existing_crap(tmp_path: Path) -> None:
 
     tightened = cast(BaselineReport, json.loads(baseline_path.read_text(encoding="utf-8")))
     assert exit_code == 0
-    assert tightened["functions"][simple_key]["crap"] < baseline["functions"][simple_key]["crap"]
+    for key, original in baseline_before["functions"].items():
+        assert tightened["functions"][key]["crap"] <= original["crap"]
+    assert (
+        tightened["functions"][simple_key]["crap"]
+        < baseline_before["functions"][simple_key]["crap"]
+    )
+    assert (
+        tightened["functions"][complex_key]["crap"]
+        < baseline_before["functions"][complex_key]["crap"]
+    )
+
+
+def test_tighten_baseline_only_decreases_existing_complexity(tmp_path: Path) -> None:
+    source_root, coverage_path, baseline_path = _write_source_tree(tmp_path)
+    source_path = source_root / "sample.py"
+    _write_report(coverage_path, source_path)
+
+    assert (
+        main(
+            [
+                "--coverage",
+                str(coverage_path),
+                "--baseline",
+                str(baseline_path),
+                "--src",
+                str(source_root),
+                "--write-baseline",
+            ],
+        )
+        == 0
+    )
+
+    baseline = cast(BaselineReport, json.loads(baseline_path.read_text(encoding="utf-8")))
+    simple_key = "sample.py::simple"
+    baseline["functions"][simple_key]["complexity"] += 10
+    baseline_path.write_text(
+        json.dumps(baseline, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+    exit_code = main(
+        [
+            "--coverage",
+            str(coverage_path),
+            "--baseline",
+            str(baseline_path),
+            "--src",
+            str(source_root),
+            "--tighten-baseline",
+            "--threshold",
+            "30",
+        ],
+    )
+
+    tightened = cast(BaselineReport, json.loads(baseline_path.read_text(encoding="utf-8")))
+    assert exit_code == 0
+    assert (
+        tightened["functions"][simple_key]["complexity"]
+        < baseline["functions"][simple_key]["complexity"]
+    )
 
 
 def test_tighten_baseline_leaves_unchanged_functions_when_not_worse(tmp_path: Path) -> None:
@@ -269,6 +331,55 @@ def test_tighten_baseline_rejects_regressions(tmp_path: Path, capsys: CaptureFix
     assert exit_code == 1
     assert "CRAP ratchet failed: 1 issue(s)" in captured.out
     assert f"{simple_key} CRAP 0.10 -> 2.50 (+2.40)" in captured.out
+
+
+def test_tighten_baseline_rejects_complexity_regressions(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
+    source_root, coverage_path, baseline_path = _write_source_tree(tmp_path)
+    source_path = source_root / "sample.py"
+    _write_report(coverage_path, source_path)
+
+    assert (
+        main(
+            [
+                "--coverage",
+                str(coverage_path),
+                "--baseline",
+                str(baseline_path),
+                "--src",
+                str(source_root),
+                "--write-baseline",
+            ]
+        )
+        == 0
+    )
+
+    baseline = cast(BaselineReport, json.loads(baseline_path.read_text(encoding="utf-8")))
+    simple_key = "sample.py::simple"
+    baseline["functions"][simple_key]["complexity"] = 1
+    baseline_path.write_text(
+        json.dumps(baseline, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+    exit_code = main(
+        [
+            "--coverage",
+            str(coverage_path),
+            "--baseline",
+            str(baseline_path),
+            "--src",
+            str(source_root),
+            "--tighten-baseline",
+            "--epsilon",
+            "0.0",
+        ],
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "CRAP ratchet failed: 1 issue(s)" in captured.out
+    assert f"{simple_key} CC 1.00 -> 2.00 (+1.00)" in captured.out
 
 
 def test_ratchet_flags_regression_and_new_offender(

@@ -91,8 +91,9 @@ class FunctionMetric:
 class RatchetIssue:
     key: str
     kind: str
-    current_crap: float
-    baseline_crap: float | None
+    metric: str
+    current_value: float
+    baseline_value: float | None
     delta: float | None
 
 
@@ -269,8 +270,20 @@ def _compare_metrics(
                     RatchetIssue(
                         key=metric.key,
                         kind="new-offender",
-                        current_crap=metric.crap,
-                        baseline_crap=None,
+                        metric="CRAP",
+                        current_value=metric.crap,
+                        baseline_value=None,
+                        delta=None,
+                    ),
+                )
+            if metric.complexity > threshold + epsilon:
+                issues.append(
+                    RatchetIssue(
+                        key=metric.key,
+                        kind="new-offender",
+                        metric="CC",
+                        current_value=float(metric.complexity),
+                        baseline_value=None,
                         delta=None,
                     ),
                 )
@@ -286,9 +299,26 @@ def _compare_metrics(
                 RatchetIssue(
                     key=metric.key,
                     kind="regression",
-                    current_crap=metric.crap,
-                    baseline_crap=baseline_crap,
+                    metric="CRAP",
+                    current_value=metric.crap,
+                    baseline_value=baseline_crap,
                     delta=delta,
+                ),
+            )
+        baseline_complexity = _expect_int(
+            baseline_entry.get("complexity", 0),
+            f"baseline entry for {metric.key} has invalid complexity",
+        )
+        complexity_delta = metric.complexity - baseline_complexity
+        if complexity_delta > epsilon:
+            issues.append(
+                RatchetIssue(
+                    key=metric.key,
+                    kind="regression",
+                    metric="CC",
+                    current_value=float(metric.complexity),
+                    baseline_value=float(baseline_complexity),
+                    delta=float(complexity_delta),
                 ),
             )
 
@@ -296,7 +326,7 @@ def _compare_metrics(
         key=lambda issue: (
             0 if issue.kind == "regression" else 1,
             -(issue.delta or 0.0),
-            -issue.current_crap,
+            -issue.current_value,
             issue.key,
         ),
     )
@@ -320,8 +350,21 @@ def _tighten_baseline(
                     RatchetIssue(
                         key=metric.key,
                         kind="new-offender",
-                        current_crap=metric.crap,
-                        baseline_crap=None,
+                        metric="CRAP",
+                        current_value=metric.crap,
+                        baseline_value=None,
+                        delta=None,
+                    )
+                )
+                continue
+            if metric.complexity > threshold + epsilon:
+                issues.append(
+                    RatchetIssue(
+                        key=metric.key,
+                        kind="new-offender",
+                        metric="CC",
+                        current_value=float(metric.complexity),
+                        baseline_value=None,
                         delta=None,
                     )
                 )
@@ -339,9 +382,26 @@ def _tighten_baseline(
                 RatchetIssue(
                     key=metric.key,
                     kind="regression",
-                    current_crap=metric.crap,
-                    baseline_crap=baseline_crap,
+                    metric="CRAP",
+                    current_value=metric.crap,
+                    baseline_value=baseline_crap,
                     delta=metric.crap - baseline_crap,
+                )
+            )
+            continue
+        baseline_complexity = _expect_int(
+            baseline_entry.get("complexity", 0),
+            f"baseline entry for {metric.key} has invalid complexity",
+        )
+        if metric.complexity > baseline_complexity + epsilon:
+            issues.append(
+                RatchetIssue(
+                    key=metric.key,
+                    kind="regression",
+                    metric="CC",
+                    current_value=float(metric.complexity),
+                    baseline_value=float(baseline_complexity),
+                    delta=float(metric.complexity - baseline_complexity),
                 )
             )
             continue
@@ -378,8 +438,11 @@ def _tighten_baseline(
 
 def _format_issue(issue: RatchetIssue) -> str:
     if issue.kind == "regression":
-        return f"{issue.key} CRAP {issue.baseline_crap:.2f} -> {issue.current_crap:.2f} (+{issue.delta:.2f})"
-    return f"{issue.key} CRAP {issue.current_crap:.2f} exceeds threshold"
+        return (
+            f"{issue.key} {issue.metric} {issue.baseline_value:.2f} "
+            f"-> {issue.current_value:.2f} (+{issue.delta:.2f})"
+        )
+    return f"{issue.key} {issue.metric} {issue.current_value:.2f} exceeds threshold"
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -401,7 +464,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--threshold",
         type=float,
         default=DEFAULT_THRESHOLD,
-        help="CRAP threshold for new functions",
+        help="CRAP and complexity threshold for new functions",
     )
     parser.add_argument(
         "--epsilon",

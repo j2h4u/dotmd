@@ -11,11 +11,12 @@ baseline to tighten only when the operator re-runs ``--update`` from the host.
 
 Usage:
     python devtools/pyright_ratchet.py             # check only, exit 1 on regression
-    python devtools/pyright_ratchet.py --update    # rewrite baseline (host only — RO bind in container)
+    python devtools/pyright_ratchet.py --tighten   # lower baseline only, exit 1 on regression
+    python devtools/pyright_ratchet.py --update    # alias for --tighten
 
 Files with fewer errors than baseline are treated as silent improvements
-in check mode.  ``--update`` must be run by the operator after fixing some
-issues to record the lower count and prevent backsliding.
+in check mode. Tighten mode records lower counts and refuses to raise any
+per-file baseline, so the checked-in floor only moves in one direction.
 """
 
 from __future__ import annotations
@@ -91,19 +92,54 @@ def write_baseline(counts: dict[str, int]) -> None:
     )
 
 
+def regressions_against_baseline(
+    current: dict[str, int],
+    baseline: dict[str, int],
+) -> list[tuple[str, int, int]]:
+    regressions: list[tuple[str, int, int]] = []
+    for f, n in sorted(current.items()):
+        b = baseline.get(f, 0)
+        if n > b:
+            regressions.append((f, n, b))
+    return regressions
+
+
+def improvements_against_baseline(
+    current: dict[str, int],
+    baseline: dict[str, int],
+) -> list[tuple[str, int, int]]:
+    improvements: list[tuple[str, int, int]] = []
+    for f, b in baseline.items():
+        n = current.get(f, 0)
+        if n < b:
+            improvements.append((f, b, n))
+    return improvements
+
+
+def write_tightened_baseline(current: dict[str, int]) -> None:
+    tightened = {path: count for path, count in current.items() if count > 0}
+    write_baseline(tightened)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Pyright ratchet.")
-    parser.add_argument(
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument(
         "--update",
         action="store_true",
-        help="Rewrite the baseline with current counts (host only, requires writable devtools/).",
+        help="Alias for --tighten; kept for existing operator muscle memory.",
+    )
+    modes.add_argument(
+        "--tighten",
+        action="store_true",
+        help="Rewrite the baseline only when doing so lowers or preserves every per-file count.",
     )
     args = parser.parse_args(argv)
 
     current = run_pyright()
     total = sum(current.values())
 
-    if args.update:
+    if (args.update or args.tighten) and not BASELINE.exists():
         write_baseline(current)
         print(
             f"baseline updated: {total} errors across {len(current)} files",
@@ -119,17 +155,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     baseline = load_baseline()
-    regressions: list[tuple[str, int, int]] = []
-    for f, n in sorted(current.items()):
-        b = baseline.get(f, 0)
-        if n > b:
-            regressions.append((f, n, b))
-
-    improvements: list[tuple[str, int, int]] = []
-    for f, b in baseline.items():
-        n = current.get(f, 0)
-        if n < b:
-            improvements.append((f, b, n))
+    regressions = regressions_against_baseline(current, baseline)
+    improvements = improvements_against_baseline(current, baseline)
 
     baseline_total = sum(baseline.values())
     print(
@@ -146,10 +173,19 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     if regressions:
+        if args.update or args.tighten:
+            print("  refused to raise baseline", file=sys.stderr)
         print("  REGRESSIONS:", file=sys.stderr)
         for f, now, was in regressions:
             print(f"    {f}: {now} (was {was}, +{now - was})", file=sys.stderr)
         return 1
+
+    if args.update or args.tighten:
+        write_tightened_baseline(current)
+        print(
+            f"baseline tightened: {total} errors across {len(current)} files",
+            file=sys.stderr,
+        )
 
     return 0
 

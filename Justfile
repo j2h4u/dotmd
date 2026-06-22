@@ -34,6 +34,10 @@ _actionlint:
 _typecheck:
     cd {{backend}} && UV_LINK_MODE=hardlink uv run python devtools/pyright_ratchet.py
 
+# Tighten the Pyright baseline without allowing regressions.
+_typecheck-tighten:
+    cd {{backend}} && UV_LINK_MODE=hardlink uv run python devtools/pyright_ratchet.py --tighten
+
 # Scan for dead code. Vendored Airweave is excluded because local deltas are
 # tracked separately in vendor notes and should stay close to upstream shape.
 _dead-code:
@@ -89,7 +93,7 @@ typecheck-strict:
     cd {{backend}} && UV_LINK_MODE=hardlink uv run basedpyright src --warnings
 
 # Static and test quality gate for local development.
-check: _fmt-check _lint-strict _typecheck _import-contracts _actionlint _compile _dead-code _crap-tighten
+check: _fmt-check _lint-strict _typecheck-tighten _import-contracts _actionlint _compile _dead-code _crap-tighten
 
 # Non-mutating quality gate for CI.
 ci: _fmt-check _lint-strict _typecheck _import-contracts _actionlint _compile _dead-code _crap-ratchet
