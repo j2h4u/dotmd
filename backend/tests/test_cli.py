@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -228,17 +228,19 @@ def test_status_verbose_reports_surrealdb_graph_and_skips_sqlite_tables(tmp_path
         _pipeline=SimpleNamespace(
             conn=SimpleNamespace(execute=lambda *_args, **_kwargs: pytest.fail("sqlite scan ran"))
         ),
-        status=lambda: SimpleNamespace(
-            total_files=1,
-            total_chunks=2,
-            total_entities=3,
-            total_edges=4,
-            last_indexed=None,
-            data_dir=None,
-            new_files=0,
-            modified_files=0,
-            deleted_files=0,
-            trickle_status=None,
+        status=Mock(
+            return_value=SimpleNamespace(
+                total_files=1,
+                total_chunks=2,
+                total_entities=3,
+                total_edges=4,
+                last_indexed=None,
+                data_dir=None,
+                new_files=0,
+                modified_files=0,
+                deleted_files=0,
+                trickle_status=None,
+            )
         ),
     )
 
@@ -246,7 +248,43 @@ def test_status_verbose_reports_surrealdb_graph_and_skips_sqlite_tables(tmp_path
         result = CliRunner().invoke(main, ["--index-dir", str(tmp_path), "status", "-V"])
 
     assert result.exit_code == 0, result.output
+    assert service.status.call_args.kwargs == {"live_diff": False}
     assert "Graph:    SurrealDB @ http://surrealdb:8000/dotmd/production" in result.output
     assert "Strategies:" not in result.output
     assert "sqlite" not in result.output.lower()
     assert "falkor" not in result.output.lower()
+
+
+def test_status_live_diff_flag_opts_into_source_scan(tmp_path: Path) -> None:
+    service = SimpleNamespace(
+        _settings=SimpleNamespace(
+            surreal_retrieval=SimpleNamespace(
+                url="http://surrealdb:8000",
+                namespace="dotmd",
+                database="production",
+            ),
+        ),
+        status=Mock(
+            return_value=SimpleNamespace(
+                total_files=1,
+                total_chunks=2,
+                total_entities=3,
+                total_edges=4,
+                last_indexed=None,
+                data_dir=None,
+                new_files=0,
+                modified_files=0,
+                deleted_files=0,
+                trickle_status=None,
+            )
+        ),
+    )
+
+    with patch("dotmd.cli._get_runtime_service_from_ctx", return_value=service):
+        result = CliRunner().invoke(
+            main,
+            ["--index-dir", str(tmp_path), "status", "--live-diff"],
+        )
+
+    assert result.exit_code == 0, result.output
+    service.status.assert_called_once_with(live_diff=True)

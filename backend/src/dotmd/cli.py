@@ -237,12 +237,13 @@ def compare(
 
 @main.command()
 @click.option("--verbose", "-V", is_flag=True, help="Show per-strategy/model table details.")
+@click.option("--live-diff", is_flag=True, help="Scan source files for pending changes.")
 @click.pass_context
-def status(ctx: click.Context, verbose: bool) -> None:
+def status(ctx: click.Context, verbose: bool, live_diff: bool) -> None:
     """Show index statistics."""
     service = _get_runtime_service_from_ctx(ctx)
     settings = service._settings
-    stats = service.status()
+    stats = service.status(live_diff=live_diff)
 
     click.echo(f"Files:    {stats.total_files}")
     click.echo(f"Chunks:   {stats.total_chunks}")

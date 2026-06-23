@@ -260,6 +260,16 @@ class SurrealConnection:
             return []
         return [dict(row) for row in selected if isinstance(row, dict)]
 
+    def count_table(self, table_name: str) -> int:
+        payload = self.query(f"SELECT count() FROM {table_name} GROUP ALL;")
+        if not isinstance(payload, list) or not payload:
+            return 0
+        first = payload[0]
+        if not isinstance(first, dict):
+            return 0
+        count = first.get("count")
+        return int(count) if count is not None else 0
+
     def inspect_schema(self) -> dict[str, Any]:
         """Best-effort schema inspection for apply-status decisions."""
 
@@ -420,13 +430,34 @@ class SurrealMetadataStore:
     def get_stats(self) -> IndexStats | None:
         stored = self._connection.select(self._codec.encode("stats", "latest"))
         if not stored:
-            return None
+            return self._count_runtime_stats()
+        return self._stats_from_record(stored)
+
+    def _stats_from_record(self, stored: dict[str, Any]) -> IndexStats:
+        total_files = int(stored.get("total_files", 0))
+        total_chunks = int(stored.get("total_chunks", 0))
+        total_entities = int(stored.get("total_entities", 0))
+        total_edges = int(stored.get("total_edges", 0))
+        if 0 in (total_files, total_chunks, total_entities, total_edges):
+            counted = self._count_runtime_stats()
+            total_files = total_files or counted.total_files
+            total_chunks = total_chunks or counted.total_chunks
+            total_entities = total_entities or counted.total_entities
+            total_edges = total_edges or counted.total_edges
         return IndexStats(
-            total_files=int(stored.get("total_files", 0)),
-            total_chunks=int(stored.get("total_chunks", 0)),
-            total_entities=int(stored.get("total_entities", 0)),
-            total_edges=int(stored.get("total_edges", 0)),
+            total_files=total_files,
+            total_chunks=total_chunks,
+            total_entities=total_entities,
+            total_edges=total_edges,
             last_indexed=stored.get("last_indexed"),
+        )
+
+    def _count_runtime_stats(self) -> IndexStats:
+        return IndexStats(
+            total_files=self._connection.count_table("files"),
+            total_chunks=self._connection.count_table("chunks"),
+            total_entities=self._connection.count_table("entities"),
+            total_edges=self._connection.count_table("relations"),
         )
 
     def get_chunk_ids_by_file(self, file_path: str) -> list[str]:

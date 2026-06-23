@@ -43,6 +43,20 @@ class _FakeFeedbackProvider:
         return self._rows[:limit]
 
 
+class _FakeSurrealStatsConnection:
+    def __init__(self, stored: dict[str, object] | None, counts: dict[str, int]) -> None:
+        self.stored = stored
+        self.counts = counts
+        self.count_calls: list[str] = []
+
+    def select(self, _record: object) -> dict[str, object]:
+        return self.stored or {}
+
+    def count_table(self, table_name: str) -> int:
+        self.count_calls.append(table_name)
+        return self.counts[table_name]
+
+
 def test_collect_feedback_inventory_uses_provider_abstraction_and_not_raw_sql(
     tmp_path: Path,
 ) -> None:
@@ -98,6 +112,48 @@ def test_build_surreal_migration_map_marks_known_categories_and_rejects_unknown(
     assert migration_map.categories["graph"].disposition in {"transformable", "unsafe"}
     assert migration_map.categories["mystery_table"].disposition == "unsupported"
     assert "unknown" in migration_map.categories["mystery_table"].reason.lower()
+
+
+def test_surreal_metadata_stats_uses_aggregate_counts_when_stats_row_is_missing() -> None:
+    from dotmd.storage.surreal import SurrealMetadataStore
+
+    connection = _FakeSurrealStatsConnection(
+        stored=None,
+        counts={"files": 11, "chunks": 22, "entities": 33, "relations": 44},
+    )
+
+    stats = SurrealMetadataStore(connection).get_stats()  # type: ignore[arg-type]
+
+    assert stats is not None
+    assert stats.total_files == 11
+    assert stats.total_chunks == 22
+    assert stats.total_entities == 33
+    assert stats.total_edges == 44
+    assert connection.count_calls == ["files", "chunks", "entities", "relations"]
+
+
+def test_surreal_metadata_stats_fills_zero_fields_with_aggregate_counts() -> None:
+    from dotmd.storage.surreal import SurrealMetadataStore
+
+    connection = _FakeSurrealStatsConnection(
+        stored={
+            "total_files": 0,
+            "total_chunks": 2,
+            "total_entities": 0,
+            "total_edges": 4,
+            "last_indexed": None,
+        },
+        counts={"files": 11, "chunks": 22, "entities": 33, "relations": 44},
+    )
+
+    stats = SurrealMetadataStore(connection).get_stats()  # type: ignore[arg-type]
+
+    assert stats is not None
+    assert stats.total_files == 11
+    assert stats.total_chunks == 2
+    assert stats.total_entities == 33
+    assert stats.total_edges == 4
+    assert connection.count_calls == ["files", "chunks", "entities", "relations"]
 
 
 def test_surreal_record_id_codec_round_trips_special_characters_without_leaking_raw_values() -> (
