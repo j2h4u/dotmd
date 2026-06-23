@@ -141,17 +141,17 @@ class _FakeAuditConnection:
                     "count": 1,
                 },
             ],
-            "SELECT chunk_id FROM embeddings_0 WHERE chunk_id IN [\"chunk-a\", \"chunk-b\", \"chunk-c\"] LIMIT 20;": [
+            'SELECT chunk_id FROM embeddings_0 WHERE chunk_id IN ["chunk-a", "chunk-b", "chunk-c"] LIMIT 20;': [
                 {"chunk_id": "chunk-b"}
             ],
-            "SELECT chunk_id FROM embeddings_1 WHERE chunk_id IN [\"chunk-a\", \"chunk-b\", \"chunk-c\"] LIMIT 20;": [
+            'SELECT chunk_id FROM embeddings_1 WHERE chunk_id IN ["chunk-a", "chunk-b", "chunk-c"] LIMIT 20;': [
                 {"chunk_id": "chunk-c"}
             ],
-            "SELECT chunk_id FROM provenance WHERE chunk_id IN [\"chunk-a\", \"chunk-b\", \"chunk-c\"] LIMIT 20;": [
+            'SELECT chunk_id FROM provenance WHERE chunk_id IN ["chunk-a", "chunk-b", "chunk-c"] LIMIT 20;': [
                 {"chunk_id": "chunk-a"},
                 {"chunk_id": "chunk-c"},
             ],
-            "SELECT chunk_id FROM chunks WHERE chunk_id IN [\"chunk-a\", \"chunk-b\", \"chunk-c\", \"chunk-orphan\"] LIMIT 20;": [
+            'SELECT chunk_id FROM chunks WHERE chunk_id IN ["chunk-a", "chunk-b", "chunk-c", "chunk-orphan"] LIMIT 20;': [
                 {"chunk_id": "chunk-a"},
                 {"chunk_id": "chunk-b"},
                 {"chunk_id": "chunk-c"},
@@ -162,10 +162,10 @@ class _FakeAuditConnection:
             "SELECT chunk_id FROM embeddings_1 LIMIT 20;": [
                 {"chunk_id": "chunk-c"},
             ],
-            "SELECT chunk_id FROM chunks WHERE chunk_id IN [\"chunk-b\"] LIMIT 20;": [
+            'SELECT chunk_id FROM chunks WHERE chunk_id IN ["chunk-b"] LIMIT 20;': [
                 {"chunk_id": "chunk-b"},
             ],
-            "SELECT chunk_id FROM chunks WHERE chunk_id IN [\"chunk-c\"] LIMIT 20;": [
+            'SELECT chunk_id FROM chunks WHERE chunk_id IN ["chunk-c"] LIMIT 20;': [
                 {"chunk_id": "chunk-c"},
             ],
             "SELECT count() AS count FROM chunks WHERE chunk_id NOT IN (SELECT chunk_id FROM provenance GROUP ALL) GROUP ALL;": [
@@ -406,21 +406,39 @@ def test_audit_completeness_reports_coverage_indexes_distribution_and_graph_coun
         "SELECT chunk_id, embedding_model, chunk_strategy, text_hash, array::len(vector) AS embedding_dimension FROM embeddings_0 LIMIT 50;",
         "SELECT chunk_id, embedding_model, chunk_strategy, text_hash, array::len(vector) AS embedding_dimension FROM embeddings_1 LIMIT 50;",
         "SELECT chunk_id FROM chunks LIMIT 20;",
-        "SELECT chunk_id FROM provenance WHERE chunk_id IN [\"chunk-a\", \"chunk-b\", \"chunk-c\"] LIMIT 20;",
+        'SELECT chunk_id FROM provenance WHERE chunk_id IN ["chunk-a", "chunk-b", "chunk-c"] LIMIT 20;',
         "SELECT chunk_id FROM provenance LIMIT 20;",
-        "SELECT chunk_id FROM chunks WHERE chunk_id IN [\"chunk-a\", \"chunk-b\", \"chunk-c\", \"chunk-orphan\"] LIMIT 20;",
+        'SELECT chunk_id FROM chunks WHERE chunk_id IN ["chunk-a", "chunk-b", "chunk-c", "chunk-orphan"] LIMIT 20;',
         "SELECT chunk_id FROM embeddings_0 LIMIT 20;",
-        "SELECT chunk_id FROM chunks WHERE chunk_id IN [\"chunk-b\"] LIMIT 20;",
+        'SELECT chunk_id FROM chunks WHERE chunk_id IN ["chunk-b"] LIMIT 20;',
         "SELECT chunk_id FROM embeddings_1 LIMIT 20;",
-        "SELECT chunk_id FROM chunks WHERE chunk_id IN [\"chunk-c\"] LIMIT 20;",
+        'SELECT chunk_id FROM chunks WHERE chunk_id IN ["chunk-c"] LIMIT 20;',
         "SELECT chunk_id, namespace, document_ref, 1 AS count FROM provenance LIMIT 20;",
     ]
-    assert "SELECT chunk_id FROM chunks WHERE chunk_id NOT IN (SELECT chunk_id FROM provenance GROUP ALL) LIMIT 20;" not in connection.query_calls
-    assert "SELECT count() AS count FROM chunks WHERE chunk_id NOT IN (SELECT chunk_id FROM provenance GROUP ALL) GROUP ALL;" not in connection.query_calls
-    assert "SELECT chunk_id FROM provenance WHERE chunk_id NOT IN (SELECT chunk_id FROM chunks GROUP ALL) LIMIT 20;" not in connection.query_calls
-    assert "SELECT count() AS count FROM provenance WHERE chunk_id NOT IN (SELECT chunk_id FROM chunks GROUP ALL) GROUP ALL;" not in connection.query_calls
-    assert "SELECT chunk_id FROM embeddings_0 WHERE chunk_id NOT IN (SELECT chunk_id FROM chunks GROUP ALL) LIMIT 20;" not in connection.query_calls
-    assert "SELECT chunk_id FROM embeddings_1 WHERE chunk_id NOT IN (SELECT chunk_id FROM chunks GROUP ALL) LIMIT 20;" not in connection.query_calls
+    assert (
+        "SELECT chunk_id FROM chunks WHERE chunk_id NOT IN (SELECT chunk_id FROM provenance GROUP ALL) LIMIT 20;"
+        not in connection.query_calls
+    )
+    assert (
+        "SELECT count() AS count FROM chunks WHERE chunk_id NOT IN (SELECT chunk_id FROM provenance GROUP ALL) GROUP ALL;"
+        not in connection.query_calls
+    )
+    assert (
+        "SELECT chunk_id FROM provenance WHERE chunk_id NOT IN (SELECT chunk_id FROM chunks GROUP ALL) LIMIT 20;"
+        not in connection.query_calls
+    )
+    assert (
+        "SELECT count() AS count FROM provenance WHERE chunk_id NOT IN (SELECT chunk_id FROM chunks GROUP ALL) GROUP ALL;"
+        not in connection.query_calls
+    )
+    assert (
+        "SELECT chunk_id FROM embeddings_0 WHERE chunk_id NOT IN (SELECT chunk_id FROM chunks GROUP ALL) LIMIT 20;"
+        not in connection.query_calls
+    )
+    assert (
+        "SELECT chunk_id FROM embeddings_1 WHERE chunk_id NOT IN (SELECT chunk_id FROM chunks GROUP ALL) LIMIT 20;"
+        not in connection.query_calls
+    )
     assert "[audit] SELECT chunk_id FROM chunks LIMIT 20;: start" in captured.err
     assert "[audit] SELECT chunk_id FROM chunks LIMIT 20;: done in" in captured.err
 
@@ -550,14 +568,14 @@ def test_audit_completeness_keeps_fanout_informational_when_keys_are_unique() ->
                     {"chunk_id": "chunk-b"},
                     {"chunk_id": "chunk-c"},
                 ],
-                "SELECT chunk_id FROM embeddings_0 WHERE chunk_id IN [\"chunk-a\", \"chunk-b\", \"chunk-c\"] LIMIT 20;": [
+                'SELECT chunk_id FROM embeddings_0 WHERE chunk_id IN ["chunk-a", "chunk-b", "chunk-c"] LIMIT 20;': [
                     {"chunk_id": "chunk-a"},
                     {"chunk_id": "chunk-b"},
                 ],
-                "SELECT chunk_id FROM embeddings_1 WHERE chunk_id IN [\"chunk-a\", \"chunk-b\", \"chunk-c\"] LIMIT 20;": [
+                'SELECT chunk_id FROM embeddings_1 WHERE chunk_id IN ["chunk-a", "chunk-b", "chunk-c"] LIMIT 20;': [
                     {"chunk_id": "chunk-c"},
                 ],
-                "SELECT chunk_id FROM provenance WHERE chunk_id IN [\"chunk-a\", \"chunk-b\", \"chunk-c\"] LIMIT 20;": [
+                'SELECT chunk_id FROM provenance WHERE chunk_id IN ["chunk-a", "chunk-b", "chunk-c"] LIMIT 20;': [
                     {"chunk_id": "chunk-a"},
                     {"chunk_id": "chunk-b"},
                     {"chunk_id": "chunk-c"},
@@ -567,7 +585,7 @@ def test_audit_completeness_keeps_fanout_informational_when_keys_are_unique() ->
                     {"chunk_id": "chunk-b"},
                     {"chunk_id": "chunk-c"},
                 ],
-                "SELECT chunk_id FROM chunks WHERE chunk_id IN [\"chunk-a\", \"chunk-b\", \"chunk-c\"] LIMIT 20;": [
+                'SELECT chunk_id FROM chunks WHERE chunk_id IN ["chunk-a", "chunk-b", "chunk-c"] LIMIT 20;': [
                     {"chunk_id": "chunk-a"},
                     {"chunk_id": "chunk-b"},
                     {"chunk_id": "chunk-c"},
@@ -576,14 +594,14 @@ def test_audit_completeness_keeps_fanout_informational_when_keys_are_unique() ->
                     {"chunk_id": "chunk-a"},
                     {"chunk_id": "chunk-b"},
                 ],
-                "SELECT chunk_id FROM chunks WHERE chunk_id IN [\"chunk-a\", \"chunk-b\"] LIMIT 20;": [
+                'SELECT chunk_id FROM chunks WHERE chunk_id IN ["chunk-a", "chunk-b"] LIMIT 20;': [
                     {"chunk_id": "chunk-a"},
                     {"chunk_id": "chunk-b"},
                 ],
                 "SELECT chunk_id FROM embeddings_1 LIMIT 20;": [
                     {"chunk_id": "chunk-c"},
                 ],
-                "SELECT chunk_id FROM chunks WHERE chunk_id IN [\"chunk-c\"] LIMIT 20;": [
+                'SELECT chunk_id FROM chunks WHERE chunk_id IN ["chunk-c"] LIMIT 20;': [
                     {"chunk_id": "chunk-c"},
                 ],
                 "SELECT embedding_model, array::len(vector) AS embedding_dimension FROM embeddings_0 LIMIT 50;": [
@@ -705,8 +723,14 @@ def test_audit_completeness_can_full_scan_vector_dimensions_when_requested() -> 
         "missing_provenance=exact(1) missing_embeddings=exact(1) provenance_fanout_chunks=1 duplicate_provenance_keys=1 "
         "index_missing=0 index_mismatches=0 graph_relations=15"
     )
-    assert "SELECT embedding_model, array::len(vector) AS embedding_dimension FROM embeddings_0;" in connection.query_calls
-    assert "SELECT embedding_model, array::len(vector) AS embedding_dimension FROM embeddings_1;" in connection.query_calls
+    assert (
+        "SELECT embedding_model, array::len(vector) AS embedding_dimension FROM embeddings_0;"
+        in connection.query_calls
+    )
+    assert (
+        "SELECT embedding_model, array::len(vector) AS embedding_dimension FROM embeddings_1;"
+        in connection.query_calls
+    )
 
 
 def test_audit_completeness_marks_missing_embedding_index_definitions() -> None:

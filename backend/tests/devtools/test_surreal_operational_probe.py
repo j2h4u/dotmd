@@ -24,9 +24,7 @@ class _FakeResponse:
         return self._payload
 
 
-def test_main_reports_success_and_redacts_docker_logs(
-    monkeypatch, capsys, tmp_path: Path
-) -> None:
+def test_main_reports_success_and_redacts_docker_logs(monkeypatch, capsys, tmp_path: Path) -> None:
     calls: list[tuple[str, str]] = []
     secrets = {
         "username": "probe-user",
@@ -47,18 +45,18 @@ def test_main_reports_success_and_redacts_docker_logs(
         calls.append(("post", url))
         assert kwargs["auth"] == (secrets["username"], secrets["password"])
         assert kwargs["data"] == b"RETURN 1;"
-        return _FakeResponse(200, [{"status": "OK", "result": 1}], "[{\"status\":\"OK\",\"result\":1}]")
+        return _FakeResponse(200, [{"status": "OK", "result": 1}], '[{"status":"OK","result":1}]')
 
     monkeypatch.setattr(
         probe,
         "requests",
         types.SimpleNamespace(get=fake_get, post=fake_post, exceptions=requests.exceptions),
     )
-    monkeypatch.setattr(probe.shutil, "which", lambda name: "/usr/bin/docker" if name == "docker" else None)
+    monkeypatch.setattr(
+        probe.shutil, "which", lambda name: "/usr/bin/docker" if name == "docker" else None
+    )
 
-    def fake_run(
-        argv: list[str], timeout_seconds: float
-    ) -> subprocess.CompletedProcess[str]:
+    def fake_run(argv: list[str], timeout_seconds: float) -> subprocess.CompletedProcess[str]:
         assert timeout_seconds == 5.0
         if argv[1] == "stats":
             return subprocess.CompletedProcess(
@@ -115,14 +113,9 @@ def test_main_reports_success_and_redacts_docker_logs(
     assert secrets["username"] not in captured.err
     assert secrets["password"] not in captured.err
     assert secrets["token"] not in captured.err
-    assert payload["checks"][4]["detail"] == "\n".join(
-        [
-            "boot username=[redacted] password=[redacted]",
-            "line 4",
-            "line 5",
-            "line 6",
-            "line 7",
-        ]
+    assert (
+        payload["checks"][4]["detail"]
+        == "boot username=[redacted] password=[redacted]\nline 4\nline 5\nline 6\nline 7"
     )
     assert len(payload["checks"][4]["detail"]) <= 1000
     assert "SurrealDB 2.0.0" not in payload["checks"][4]["detail"]
@@ -185,11 +178,11 @@ def test_main_distinguishes_connect_and_read_timeouts(monkeypatch, capsys) -> No
         "requests",
         types.SimpleNamespace(get=fake_get, post=fake_post, exceptions=requests.exceptions),
     )
-    monkeypatch.setattr(probe.shutil, "which", lambda name: "/usr/bin/docker" if name == "docker" else None)
+    monkeypatch.setattr(
+        probe.shutil, "which", lambda name: "/usr/bin/docker" if name == "docker" else None
+    )
 
-    def fake_run(
-        argv: list[str], timeout_seconds: float
-    ) -> subprocess.CompletedProcess[str]:
+    def fake_run(argv: list[str], timeout_seconds: float) -> subprocess.CompletedProcess[str]:
         assert timeout_seconds == 5.0
         if argv[1] == "stats":
             return subprocess.CompletedProcess(

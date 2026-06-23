@@ -198,18 +198,22 @@ def _http_get(settings: ProbeSettings, path: str) -> CheckResult:
             timeout=settings.timeout_seconds,
         )
         response.raise_for_status()
-    except Exception as exc:
+    except requests.exceptions.RequestException as exc:
         elapsed_ms = _elapsed_ms(started_at)
         status = _request_timeout_error(exc)
         if status in {"connect timeout", "read timeout", "timeout"}:
-            return CheckResult(name=path.lstrip("/"), status="timeout", elapsed_ms=elapsed_ms, detail=status)
-        return CheckResult(name=path.lstrip("/"), status="error", elapsed_ms=elapsed_ms, detail=str(exc))
+            return CheckResult(
+                name=path.lstrip("/"), status="timeout", elapsed_ms=elapsed_ms, detail=status
+            )
+        return CheckResult(
+            name=path.lstrip("/"), status="error", elapsed_ms=elapsed_ms, detail=str(exc)
+        )
 
     body_text = (response.text or "").strip()
     if path == "/health":
         try:
             payload = response.json()
-        except Exception:
+        except ValueError:
             payload = None
         health_ok = response.status_code == 200 and (
             body_text == ""
@@ -230,7 +234,9 @@ def _http_get(settings: ProbeSettings, path: str) -> CheckResult:
         else:
             detail = f"{response.status_code} {body_text[:120]}".strip()
             status = "error"
-    return CheckResult(name=path.lstrip("/"), status=status, elapsed_ms=_elapsed_ms(started_at), detail=detail)
+    return CheckResult(
+        name=path.lstrip("/"), status=status, elapsed_ms=_elapsed_ms(started_at), detail=detail
+    )
 
 
 def _sql_return_one(settings: ProbeSettings) -> CheckResult:
@@ -249,7 +255,7 @@ def _sql_return_one(settings: ProbeSettings) -> CheckResult:
         )
         response.raise_for_status()
         payload = response.json()
-    except Exception as exc:
+    except (requests.exceptions.RequestException, ValueError) as exc:
         elapsed_ms = _elapsed_ms(started_at)
         status = _request_timeout_error(exc)
         if status in {"connect timeout", "read timeout", "timeout"}:
@@ -283,7 +289,9 @@ def _sql_return_one(settings: ProbeSettings) -> CheckResult:
 
 
 def _run_subprocess(argv: list[str], timeout_seconds: float) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(argv, check=False, capture_output=True, text=True, timeout=timeout_seconds)
+    return subprocess.run(
+        argv, check=False, capture_output=True, text=True, timeout=timeout_seconds
+    )
 
 
 def _docker_stats(settings: ProbeSettings) -> CheckResult:
@@ -312,7 +320,7 @@ def _docker_stats(settings: ProbeSettings) -> CheckResult:
             elapsed_ms=_elapsed_ms(started_at),
             detail="timeout",
         )
-    except Exception as exc:
+    except (OSError, subprocess.SubprocessError) as exc:
         return CheckResult(
             name="docker_stats",
             status="error",
@@ -362,7 +370,7 @@ def _docker_logs(settings: ProbeSettings) -> CheckResult:
             elapsed_ms=_elapsed_ms(started_at),
             detail="timeout",
         )
-    except Exception as exc:
+    except (OSError, subprocess.SubprocessError) as exc:
         return CheckResult(
             name="docker_logs",
             status="error",
@@ -423,7 +431,11 @@ def _json_payload(report: ProbeReport) -> dict[str, Any]:
     docker_stats_ok = report.checks[3].status == "ok"
     if health_ok and sql_ok:
         diagnosis = "ok"
-    elif docker_stats_ok and report.checks[0].status == "timeout" and report.checks[2].status == "timeout":
+    elif (
+        docker_stats_ok
+        and report.checks[0].status == "timeout"
+        and report.checks[2].status == "timeout"
+    ):
         diagnosis = "process_alive_http_query_plane_unavailable"
     elif health_ok and report.checks[2].status == "timeout":
         diagnosis = "health_alive_sql_unavailable"

@@ -9,7 +9,7 @@ from dotmd.ingestion.surreal_delta_sync import SurrealDeltaChange
 
 
 def _embedding_ref(chunk_strategy: str, embedding_model: str, chunk_id: str) -> str:
-    return "\x1f".join((chunk_strategy, embedding_model, chunk_id))
+    return f"{chunk_strategy}\x1f{embedding_model}\x1f{chunk_id}"
 
 
 class _FakeBackfillConnection:
@@ -96,7 +96,9 @@ def test_dry_run_reads_chunk_ids_file_without_writing(monkeypatch, tmp_path: Pat
     writer = _FakeWriter(connection)
     configs: list[object] = []
 
-    monkeypatch.setattr(backfill, "SurrealConnection", lambda config: configs.append(config) or connection)
+    monkeypatch.setattr(
+        backfill, "SurrealConnection", lambda config: configs.append(config) or connection
+    )
     monkeypatch.setattr(backfill, "EmbeddingEncoder", lambda *args, **kwargs: encoder)
     monkeypatch.setattr(backfill, "SurrealDeltaStoreWriter", lambda connection: writer)
 

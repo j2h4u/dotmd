@@ -81,7 +81,11 @@ def _log_phase(phase: str, started_at: float, **fields: Any) -> None:
         "elapsed_seconds": round(time.monotonic() - started_at, 3),
         **fields,
     }
-    print(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=_json_default), file=sys.stderr, flush=True)
+    print(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, default=_json_default),
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def _read_settings_from_env() -> BackfillSettings:
@@ -160,7 +164,7 @@ def _parse_chunk_ids(args: argparse.Namespace) -> list[str]:
 
 
 def _stable_embedding_ref(chunk_strategy: str, embedding_model: str, chunk_id: str) -> str:
-    return "\x1f".join((chunk_strategy, embedding_model, chunk_id))
+    return f"{chunk_strategy}\x1f{embedding_model}\x1f{chunk_id}"
 
 
 def _chunk_strategy_from_row(row: dict[str, Any], default_chunk_strategy: str) -> str:
@@ -187,7 +191,9 @@ def _existing_embedding_record_id(
     embedding_model: str,
     chunk_id: str,
 ) -> Any:
-    return codec.encode("embeddings", _stable_embedding_ref(chunk_strategy, embedding_model, chunk_id))
+    return codec.encode(
+        "embeddings", _stable_embedding_ref(chunk_strategy, embedding_model, chunk_id)
+    )
 
 
 def _fetch_chunk_row(connection: SurrealConnection, chunk_id: str) -> dict[str, Any] | None:
@@ -248,7 +254,12 @@ def _run_backfill(args: argparse.Namespace) -> dict[str, Any]:
     started_at_iso = _utc_now()
     settings = _read_settings_from_env()
     chunk_ids = _parse_chunk_ids(args)
-    _log_phase("settings_loaded", started_at, chunk_ids=len(chunk_ids), mode="apply" if args.apply else "dry_run")
+    _log_phase(
+        "settings_loaded",
+        started_at,
+        chunk_ids=len(chunk_ids),
+        mode="apply" if args.apply else "dry_run",
+    )
 
     connection = SurrealConnection(
         SurrealStoreConfig(
@@ -363,7 +374,9 @@ def _run_backfill(args: argparse.Namespace) -> dict[str, Any]:
             }
             chunk_results.append(result)
 
-        status = "blocked" if errors or (args.apply and applied != len(planned_changes)) else "verified"
+        status = (
+            "blocked" if errors or (args.apply and applied != len(planned_changes)) else "verified"
+        )
 
         result = {
             "status": status,
@@ -376,7 +389,9 @@ def _run_backfill(args: argparse.Namespace) -> dict[str, Any]:
             "requested_chunk_ids": chunk_ids,
             "chunk_count": len(chunk_ids),
             "found_chunks": len(requested) - len(errors),
-            "already_present": sum(1 for item in requested if item.get("status") == "already_present"),
+            "already_present": sum(
+                1 for item in requested if item.get("status") == "already_present"
+            ),
             "planned_writes": len(planned_changes),
             "applied_writes": applied,
             "skipped": errors,

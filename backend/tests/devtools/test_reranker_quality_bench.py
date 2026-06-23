@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from devtools.reranker_quality_bench import (
@@ -62,7 +63,7 @@ class FakePipeline:
 
 
 class FakeSettings:
-    chunk_strategy = "strategy-v1"
+    indexing = SimpleNamespace(chunk_strategy="strategy-v1")
 
 
 class FakeService:

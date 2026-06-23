@@ -92,14 +92,17 @@ format: fmt
 typecheck-strict:
     cd {{backend}} && UV_LINK_MODE=hardlink uv run basedpyright src --warnings
 
-# Static and test quality gate for local development.
-check: _fmt-check _lint-strict _typecheck-tighten _import-contracts _actionlint _compile _dead-code _crap-tighten
-
-# Non-mutating quality gate for CI.
+# Canonical non-mutating quality gate. CI and local verification must stay identical.
 ci: _fmt-check _lint-strict _typecheck _import-contracts _actionlint _compile _dead-code _crap-ratchet
 
+# Local quality gate alias. Keep this identical to CI.
+check: ci
+
 # Full local gate for agents before claiming completion.
-verify: check
+verify: ci
+
+# Explicit one-way ratchet tightening. This is opt-in, never part of CI aliases.
+tighten: _typecheck-tighten _crap-tighten
 
 # Build the dotMD container image.
 docker-build:

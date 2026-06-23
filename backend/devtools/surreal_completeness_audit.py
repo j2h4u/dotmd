@@ -199,7 +199,9 @@ def read_settings_from_env() -> SurrealCompletenessAuditSettings:
     )
 
 
-def _report_settings_from_settings(settings: SurrealCompletenessAuditSettings) -> SurrealCompletenessAuditReportSettings:
+def _report_settings_from_settings(
+    settings: SurrealCompletenessAuditSettings,
+) -> SurrealCompletenessAuditReportSettings:
     if settings.access_token:
         auth_mode = "access_token"
     elif settings.username or settings.password:
@@ -237,11 +239,7 @@ def _normalize_result(result: Any) -> list[dict[str, Any]]:
     if result is None:
         return []
     if isinstance(result, list):
-        rows: list[dict[str, Any]] = []
-        for item in result:
-            if isinstance(item, dict):
-                rows.append(dict(item))
-        return rows
+        return [dict(item) for item in result if isinstance(item, dict)]
     if isinstance(result, dict):
         if "result" in result:
             return _normalize_result(result["result"])
@@ -250,7 +248,9 @@ def _normalize_result(result: Any) -> list[dict[str, Any]]:
     return []
 
 
-def _safe_query_rows(connection: Any, statement: str, variables: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+def _safe_query_rows(
+    connection: Any, statement: str, variables: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
     try:
         return _normalize_result(
             _query_with_progress(connection, statement, variables, label=statement)
@@ -261,7 +261,9 @@ def _safe_query_rows(connection: Any, statement: str, variables: dict[str, Any] 
         raise
 
 
-def _safe_query_raw(connection: Any, statement: str, variables: dict[str, Any] | None = None) -> Any:
+def _safe_query_raw(
+    connection: Any, statement: str, variables: dict[str, Any] | None = None
+) -> Any:
     try:
         return _query_with_progress(connection, statement, variables, label=statement, raw=True)
     except Exception as exc:
@@ -364,7 +366,9 @@ def _normalize_index_identifier(value: str) -> str:
 
 
 def _index_definition_signature(statement: str) -> tuple[Any, ...] | None:
-    tokens = [token for token in re.findall(r"[^\s,;]+|,|;", statement.strip()) if token not in {",", ";"}]
+    tokens = [
+        token for token in re.findall(r"[^\s,;]+|,|;", statement.strip()) if token not in {",", ";"}
+    ]
     if len(tokens) < 6:
         return None
     if tokens[0].upper() != "DEFINE" or tokens[1].upper() != "INDEX" or tokens[3].upper() != "ON":
@@ -393,9 +397,7 @@ def _index_definition_signature(statement: str) -> tuple[Any, ...] | None:
         position += 1
 
     fields = tuple(
-        _normalize_index_identifier(field)
-        for field in field_tokens
-        if field and field != ","
+        _normalize_index_identifier(field) for field in field_tokens if field and field != ","
     )
 
     if position < len(tokens) and tokens[position].upper() == "HNSW":
@@ -416,7 +418,9 @@ def _index_definition_signature(statement: str) -> tuple[Any, ...] | None:
             tuple(
                 (
                     key,
-                    hnsw_params.get(key, "").upper() if key == "DIST" or key == "TYPE" else hnsw_params.get(key, ""),
+                    hnsw_params.get(key, "").upper()
+                    if key == "DIST" or key == "TYPE"
+                    else hnsw_params.get(key, ""),
                 )
                 for key in ("DIMENSION", "DIST", "TYPE", "EFC", "M")
             ),
@@ -558,7 +562,10 @@ def _audit_embedding_distribution(
         "model_counts": dict(sorted(model_counts.items())),
         "dimension_counts": {
             ("null" if dimension is None else str(dimension)): count
-            for dimension, count in sorted(dimension_counts.items(), key=lambda item: (-1 if item[0] is None else int(item[0]), item[1]))
+            for dimension, count in sorted(
+                dimension_counts.items(),
+                key=lambda item: (-1 if item[0] is None else int(item[0]), item[1]),
+            )
         },
         "model_dimension_counts": [
             {
@@ -569,7 +576,9 @@ def _audit_embedding_distribution(
             for (model, dimension), count in sorted(model_dimension_counts.items())
         ],
         "configured_dimension_mismatch_count": sum(
-            count for (model, dimension), count in model_dimension_counts.items() if dimension not in (None, configured_dimension)
+            count
+            for (model, dimension), count in model_dimension_counts.items()
+            if dimension not in (None, configured_dimension)
         ),
     }
 
@@ -630,15 +639,21 @@ def _build_duplicate_provenance_keys(
             "chunk_id": str(row["chunk_id"]),
             "namespace": str(row["namespace"]),
             "document_ref": str(row["document_ref"]),
-            "count": int(row.get("count", 1)) if isinstance(row.get("count", 1), (int, float)) else 1,
+            "count": int(row.get("count", 1))
+            if isinstance(row.get("count", 1), (int, float))
+            else 1,
         }
         for row in provenance_key_rows
-        if all(isinstance(row.get(field), str) for field in ("chunk_id", "namespace", "document_ref"))
+        if all(
+            isinstance(row.get(field), str) for field in ("chunk_id", "namespace", "document_ref")
+        )
         and (int(row.get("count", 1)) if isinstance(row.get("count", 1), (int, float)) else 1) > 1
     ]
 
 
-def _provenance_keys_from_rows(provenance_key_rows: list[dict[str, Any]]) -> list[tuple[str, str, str]]:
+def _provenance_keys_from_rows(
+    provenance_key_rows: list[dict[str, Any]],
+) -> list[tuple[str, str, str]]:
     return [
         (
             str(row["chunk_id"]),
@@ -646,7 +661,9 @@ def _provenance_keys_from_rows(provenance_key_rows: list[dict[str, Any]]) -> lis
             str(row["document_ref"]),
         )
         for row in provenance_key_rows
-        if all(isinstance(row.get(field), str) for field in ("chunk_id", "namespace", "document_ref"))
+        if all(
+            isinstance(row.get(field), str) for field in ("chunk_id", "namespace", "document_ref")
+        )
     ]
 
 
@@ -719,16 +736,17 @@ def _audit_completeness(
             if "embedding_dimension" in row or "embedding_model" in row
         ]
         vector_rows_by_table = {
-            table_name: embedding_counts_by_table.get(table_name, 0) for table_name in embedding_tables
+            table_name: embedding_counts_by_table.get(table_name, 0)
+            for table_name in embedding_tables
         }
 
     sampled_row_count = len(vector_rows)
 
-    sampled_chunk_rows = _safe_query_rows(connection, f"SELECT chunk_id FROM chunks LIMIT {sample_limit};")
+    sampled_chunk_rows = _safe_query_rows(
+        connection, f"SELECT chunk_id FROM chunks LIMIT {sample_limit};"
+    )
     sampled_chunk_ids = [
-        str(row["chunk_id"])
-        for row in sampled_chunk_rows
-        if isinstance(row.get("chunk_id"), str)
+        str(row["chunk_id"]) for row in sampled_chunk_rows if isinstance(row.get("chunk_id"), str)
     ]
 
     if exact_coverage:
@@ -756,9 +774,13 @@ def _audit_completeness(
                 f"SELECT chunk_id FROM provenance WHERE chunk_id IN {chunk_id_literal} LIMIT {sample_limit};",
             )
             present_provenance_ids.update(
-                str(row["chunk_id"]) for row in provenance_rows if isinstance(row.get("chunk_id"), str)
+                str(row["chunk_id"])
+                for row in provenance_rows
+                if isinstance(row.get("chunk_id"), str)
             )
-        missing_provenance = [chunk_id for chunk_id in sampled_chunk_ids if chunk_id not in present_provenance_ids]
+        missing_provenance = [
+            chunk_id for chunk_id in sampled_chunk_ids if chunk_id not in present_provenance_ids
+        ]
         missing_provenance_count = None
         missing_provenance_mode = "sample"
         missing_provenance_sample_size = len(sampled_chunk_ids)
@@ -809,7 +831,9 @@ def _audit_completeness(
         orphan_provenance_mode = "exact"
         orphan_provenance_sample_size = sample_limit
     else:
-        sampled_provenance_rows = _safe_query_rows(connection, f"SELECT chunk_id FROM provenance LIMIT {sample_limit};")
+        sampled_provenance_rows = _safe_query_rows(
+            connection, f"SELECT chunk_id FROM provenance LIMIT {sample_limit};"
+        )
         sampled_provenance_chunk_ids = [
             str(row["chunk_id"])
             for row in sampled_provenance_rows
@@ -826,7 +850,9 @@ def _audit_completeness(
                 str(row["chunk_id"]) for row in chunk_rows if isinstance(row.get("chunk_id"), str)
             )
         orphan_provenance = [
-            chunk_id for chunk_id in sampled_provenance_chunk_ids if chunk_id not in present_chunk_ids
+            chunk_id
+            for chunk_id in sampled_provenance_chunk_ids
+            if chunk_id not in present_chunk_ids
         ]
         orphan_provenance_count = None
         orphan_provenance_mode = "sample"
@@ -844,13 +870,19 @@ def _audit_completeness(
             orphan_embeddings.extend(
                 str(row["chunk_id"]) for row in rows if isinstance(row.get("chunk_id"), str)
             )
-            table_orphan_count = _count_table(connection, f"{table_name} WHERE {_not_in_chunk_ids_clause(_CHUNK_TABLE)}")
-            orphan_embeddings_count = (0 if orphan_embeddings_count is None else orphan_embeddings_count) + table_orphan_count
+            table_orphan_count = _count_table(
+                connection, f"{table_name} WHERE {_not_in_chunk_ids_clause(_CHUNK_TABLE)}"
+            )
+            orphan_embeddings_count = (
+                0 if orphan_embeddings_count is None else orphan_embeddings_count
+            ) + table_orphan_count
         orphan_embeddings_mode = "exact"
     else:
         sampled_embedding_rows_total = 0
         for table_name in embedding_tables:
-            rows = _safe_query_rows(connection, f"SELECT chunk_id FROM {table_name} LIMIT {sample_limit};")
+            rows = _safe_query_rows(
+                connection, f"SELECT chunk_id FROM {table_name} LIMIT {sample_limit};"
+            )
             sampled_embedding_rows_total += len(rows)
             sampled_embedding_chunk_ids = [
                 str(row["chunk_id"]) for row in rows if isinstance(row.get("chunk_id"), str)
@@ -862,10 +894,14 @@ def _audit_completeness(
                     f"SELECT chunk_id FROM chunks WHERE chunk_id IN {chunk_id_literal} LIMIT {sample_limit};",
                 )
                 present_chunk_ids = {
-                    str(row["chunk_id"]) for row in chunk_rows if isinstance(row.get("chunk_id"), str)
+                    str(row["chunk_id"])
+                    for row in chunk_rows
+                    if isinstance(row.get("chunk_id"), str)
                 }
                 orphan_embeddings.extend(
-                    chunk_id for chunk_id in sampled_embedding_chunk_ids if chunk_id not in present_chunk_ids
+                    chunk_id
+                    for chunk_id in sampled_embedding_chunk_ids
+                    if chunk_id not in present_chunk_ids
                 )
         orphan_embeddings = sorted(set(orphan_embeddings))
         orphan_embeddings_count = None
@@ -971,13 +1007,13 @@ def _audit_completeness(
                 expected_index_statements=(hnsw_statement,),
             )
 
-    graph_table_counts = (
+    graph_table_counts: dict[str, Any] = (
         {table_name: _count_table(connection, table_name) for table_name in _GRAPH_TABLES}
         if exact_counts
         else dict.fromkeys(_GRAPH_TABLES)
     )
 
-    report = CompletenessAuditReport(
+    return CompletenessAuditReport(
         generated_at=_utc_now(),
         status=(
             "ok"
@@ -1011,12 +1047,13 @@ def _audit_completeness(
         index_audits=index_audits,
         graph_table_counts=graph_table_counts,
     )
-    return report
 
 
 def _human_summary(report: CompletenessAuditReport) -> str:
     index_missing = sum(len(audit.missing_index_names) for audit in report.index_audits.values())
-    index_mismatches = sum(len(audit.definition_mismatches) for audit in report.index_audits.values())
+    index_mismatches = sum(
+        len(audit.definition_mismatches) for audit in report.index_audits.values()
+    )
     scan_mode = str(report.embedding_distribution["scan_mode"])
     if scan_mode == "exact":
         vector_scan = f"exact({report.embedding_distribution['sampled_row_count']})"
@@ -1029,9 +1066,7 @@ def _human_summary(report: CompletenessAuditReport) -> str:
     if embeddings_mode == "exact":
         embeddings_count = f"exact({report.counts['embeddings']})"
     else:
-        embeddings_count = (
-            f"sample({report.counts['embeddings']}/{report.counts.get('embeddings_sample_size', 0)})"
-        )
+        embeddings_count = f"sample({report.counts['embeddings']}/{report.counts.get('embeddings_sample_size', 0)})"
 
     def _format_gap(name: str) -> str:
         mode = str(report.coverage.get(f"{name}_count_mode", "exact"))
@@ -1114,12 +1149,15 @@ def main(argv: list[str] | None = None) -> int:
             dimension_sample_size=args.dimension_sample_size,
             exact_counts=args.exact_counts,
             exact_coverage=args.exact_coverage,
-            exact_embedding_coverage=args.exact_embedding_coverage or args.full_vector_dimension_scan,
+            exact_embedding_coverage=args.exact_embedding_coverage
+            or args.full_vector_dimension_scan,
         )
     report_json = asdict(report)
     if args.json_output is not None:
         _write_json(args.json_output, report_json)
-    print(json.dumps(report_json, ensure_ascii=False, indent=2, sort_keys=True, default=_json_default))
+    print(
+        json.dumps(report_json, ensure_ascii=False, indent=2, sort_keys=True, default=_json_default)
+    )
     print(_human_summary(report), file=sys.stderr)
     return 0 if report.status == "ok" else 1
 

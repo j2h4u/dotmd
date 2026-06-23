@@ -1415,10 +1415,15 @@ class TestSurrealHybridOverrides:
             index_dir=tmp_path,
             embedding={"url": "http://localhost:8088"},
             surreal_retrieval={
+                "url": "http://surrealdb:8000",
+                "namespace": "dotmd",
+                "database": "production",
                 "username": "root",
                 "password": "root",
                 "access_token": None,
+                "embedding_dimension": 1024,
                 "hnsw_ef": 80,
+                "embedding_shard_count": 1,
             },
             telegram_daemon_socket=None,
         )

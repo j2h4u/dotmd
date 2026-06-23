@@ -1,7 +1,7 @@
 """Application settings via pydantic-settings."""
 
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, TomlConfigSettingsSource
@@ -201,6 +201,10 @@ class Settings(BaseSettings):
         "toml_file": str(Path.home() / ".dotmd" / "config.toml"),
         "populate_by_name": True,
     }
+
+    def __init__(self, **data: Any) -> None:
+        """Accept Pydantic's normal mapping-based settings input shape."""
+        super().__init__(**data)
 
     # Paths
     data_dir: Path = Path()
