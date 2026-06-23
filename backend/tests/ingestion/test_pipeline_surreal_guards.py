@@ -4,6 +4,7 @@ import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock, patch
 
 import pytest
@@ -107,9 +108,8 @@ async def test_surreal_trickle_calls_deleted_file_purge_in_backlog(
     tmp_path: Path,
 ) -> None:
     settings = _surreal_settings(tmp_path)
-    indexer = TrickleIndexer(settings)
     purge_mock = Mock(return_value=None)
-    indexer._pipeline = SimpleNamespace(
+    fake_pipeline = SimpleNamespace(
         file_tracker=SimpleNamespace(
             diff=lambda all_files: SimpleNamespace(
                 new=[],
@@ -120,6 +120,7 @@ async def test_surreal_trickle_calls_deleted_file_purge_in_backlog(
         ),
         _purge_file=purge_mock,
     )
+    indexer = TrickleIndexer(settings, cast(IndexingPipeline, fake_pipeline))
 
     from dotmd.ingestion import reader as reader_module
 

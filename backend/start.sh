@@ -4,7 +4,7 @@
 # When DOTMD_RUN_STARTUP_CHECKS=true, run a restart-time pre-flight gate
 # before serving:
 #   1. ruff check (lint clean)
-#   2. pyright ratchet (no new type errors vs baseline)
+#   2. basedpyright (zero type errors)
 #   3. start MCP server in background, wait for /health
 #   4. pytest tests/e2e/ (live integration smoke)
 #   5. if all green, keep the already-running server; else kill and exit 1
@@ -42,8 +42,8 @@ echo "==> ═══════════════════════�
 echo "==> [1/3] ruff" >&2
 ruff check --cache-dir /tmp/.ruff_cache src/ tests/ devtools/ >&2
 
-echo "==> [2/3] pyright ratchet" >&2
-python3 devtools/pyright_ratchet.py >&2
+echo "==> [2/3] basedpyright" >&2
+basedpyright >&2
 
 echo "==> [3/3] e2e smoke (server in background, auth disabled)" >&2
 env -u DOTMD_BASE_URL $SERVE_CMD &

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Protocol, TypedDict, runtime_checkable
 from unittest.mock import MagicMock
 
 import pytest
@@ -14,6 +16,43 @@ from dotmd.core.config import Settings
 from dotmd.core.models import ExtractDepth, SearchMode
 from dotmd.ingestion.pipeline import IndexingPipeline
 from dotmd.storage.surreal import SurrealConnection, SurrealStoreConfig
+
+
+class _SearchCandidatePayload(TypedDict):
+    ref: str
+    snippet: str
+
+
+class _SearchPayload(TypedDict):
+    candidates: list[_SearchCandidatePayload]
+
+
+@runtime_checkable
+class _ModelDumpableSearchPayload(Protocol):
+    def model_dump(self) -> Mapping[str, object]: ...
+
+
+def _search_payload(structured_raw: object) -> _SearchPayload:
+    if isinstance(structured_raw, Mapping):
+        payload = structured_raw
+    elif isinstance(structured_raw, _ModelDumpableSearchPayload):
+        payload = structured_raw.model_dump()
+    else:
+        raise AssertionError("Expected a structured search payload")
+
+    candidates = payload.get("candidates")
+    assert isinstance(candidates, list)
+
+    normalized_candidates: list[_SearchCandidatePayload] = []
+    for candidate in candidates:
+        assert isinstance(candidate, Mapping)
+        ref = candidate.get("ref")
+        snippet = candidate.get("snippet")
+        assert isinstance(ref, str)
+        assert isinstance(snippet, str)
+        normalized_candidates.append({"ref": ref, "snippet": snippet})
+
+    return {"candidates": normalized_candidates}
 
 
 def _pipeline_settings(tmp_path: Path, surreal_db: Path) -> Settings:
@@ -237,7 +276,7 @@ def test_direct_surreal_ingest_is_visible_through_mcp_search_tool(
         mcp._service = previous_service
         service.close()
 
-    payload = structured_raw if isinstance(structured_raw, dict) else structured_raw.model_dump()
+    payload = _search_payload(structured_raw)
     assert payload["candidates"]
     assert payload["candidates"][0]["ref"].startswith(f"filesystem:{file_path.resolve()}")
     assert "surrealcutoversmoke42" in payload["candidates"][0]["snippet"]

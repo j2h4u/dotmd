@@ -15,6 +15,7 @@ from unittest.mock import Mock, patch
 
 from dotmd.ingestion.surreal_delta_sync import (
     FakeSurrealDeltaWriter,
+    SurrealDeltaManifest,
     SurrealDeltaSyncState,
     run_surreal_delta_sync,
 )
@@ -338,9 +339,9 @@ class TestOrphanSweepSurreal:
         conn.close()
 
         pipeline = _get_pipeline_with_direct_writer(db_path, use_surreal_direct_writer=True)
-        captured_manifests: list[object] = []
+        captured_manifests: list[SurrealDeltaManifest] = []
 
-        def record_manifest(manifest) -> None:  # type: ignore[no-untyped-def]
+        def record_manifest(manifest: SurrealDeltaManifest) -> None:
             captured_manifests.append(manifest)
 
         pipeline._deactivate_filesystem_binding = Mock(  # type: ignore[method-assign]

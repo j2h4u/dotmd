@@ -17,6 +17,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from dotmd.core.models import Chunk, ChunkProvenance, DocKind, FileInfo, SourceDocument
+from dotmd.ingestion.surreal_delta_sync import SurrealDeltaManifest, SurrealDeltaSyncState
 
 
 def _write_md(path: pathlib.Path, title: str, tags: list, body: str) -> None:
@@ -346,7 +347,7 @@ def test_surreal_backend_builds_direct_writer_and_routes_delta_sync(
     _write_md(file_path, "Route Doc", ["route"], "Bulk route body.")
 
     schema_calls: list[object] = []
-    run_calls: list[tuple[object, object, object]] = []
+    run_calls: list[tuple[SurrealDeltaManifest, object, SurrealDeltaSyncState]] = []
 
     class FakeSurrealConnection:
         def __init__(self, config):
@@ -363,7 +364,9 @@ def test_surreal_backend_builds_direct_writer_and_routes_delta_sync(
     def fake_define_schema(connection):
         schema_calls.append(connection)
 
-    def fake_run_surreal_delta_sync(manifest, writer, state):
+    def fake_run_surreal_delta_sync(
+        manifest: SurrealDeltaManifest, writer: object, state: SurrealDeltaSyncState
+    ) -> None:
         run_calls.append((manifest, writer, state))
 
     monkeypatch.setattr("dotmd.storage.surreal.SurrealConnection", FakeSurrealConnection)

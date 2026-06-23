@@ -1,7 +1,0 @@
-{
-  "tests/ingestion/test_bulk_fusion_pairing.py": 2,
-  "tests/ingestion/test_metadata_only_reindex.py": 6,
-  "tests/ingestion/test_pipeline_orphan_sweep.py": 7,
-  "tests/ingestion/test_pipeline_surreal_guards.py": 1,
-  "tests/search/test_surreal_direct_visibility.py": 6
-}

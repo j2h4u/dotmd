@@ -294,6 +294,7 @@ def test_index_file_embed_routes_surreal_manifests_with_complete_text_hashes(
     from dotmd.ingestion import pipeline as pipeline_module
     from dotmd.ingestion.pipeline import IndexingPipeline
     from dotmd.ingestion.reader import file_info_from_path
+    from dotmd.ingestion.surreal_delta_sync import SurrealDeltaManifest
 
     doc = surreal_pipeline_settings.data_dir / "surreal.md"
     _write_md(doc, "Initial Title", ["alpha"], "Shared body text.")
@@ -309,7 +310,7 @@ def test_index_file_embed_routes_surreal_manifests_with_complete_text_hashes(
         def __init__(self) -> None:
             self.connection = FakeConnection()
 
-    run_calls: list[tuple[object, object, object]] = []
+    run_calls: list[tuple[SurrealDeltaManifest, object, object]] = []
 
     monkeypatch.setattr(
         pipeline_module,

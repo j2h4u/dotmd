@@ -30,13 +30,9 @@ _import-contracts:
 _actionlint:
     cd {{backend}} && UV_LINK_MODE=hardlink uv run actionlint ../.github/workflows/*.yml
 
-# Run Pyright ratchet against the checked-in baseline.
+# Run Pyright as a hard zero-error gate.
 _typecheck:
-    cd {{backend}} && UV_LINK_MODE=hardlink uv run python devtools/pyright_ratchet.py
-
-# Tighten the Pyright baseline without allowing regressions.
-_typecheck-tighten:
-    cd {{backend}} && UV_LINK_MODE=hardlink uv run python devtools/pyright_ratchet.py --tighten
+    cd {{backend}} && UV_LINK_MODE=hardlink uv run basedpyright
 
 # Scan for dead code. Vendored Airweave is excluded because local deltas are
 # tracked separately in vendor notes and should stay close to upstream shape.
@@ -95,15 +91,15 @@ typecheck-strict:
 # Non-mutating quality gate for GitHub CI.
 ci: _fmt-check _lint-strict _typecheck _import-contracts _actionlint _compile _dead-code _crap-ratchet
 
-# Local hot-path quality gate. Ratchets auto-tighten here so agents do not need
-# to remember a separate baseline maintenance command.
-check: _fmt-check _lint-strict _typecheck-tighten _import-contracts _actionlint _compile _dead-code _crap-tighten
+# Local hot-path quality gate. CRAP ratchet auto-tightens here so agents do not
+# need to remember a separate baseline maintenance command.
+check: _fmt-check _lint-strict _typecheck _import-contracts _actionlint _compile _dead-code _crap-tighten
 
 # Full local gate for agents before claiming completion.
 verify: check
 
-# Explicit one-way ratchet tightening for focused baseline maintenance.
-tighten: _typecheck-tighten _crap-tighten
+# Explicit one-way ratchet tightening for focused CRAP baseline maintenance.
+tighten: _crap-tighten
 
 # Build the dotMD container image.
 docker-build:

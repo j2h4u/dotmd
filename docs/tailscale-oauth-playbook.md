@@ -385,7 +385,7 @@ DOTMD_BASE_URL=https://dotmd.tailf87223.ts.net
 During live network debugging, `ENVIRONMENT=prod` may be used in
 `/opt/docker/dotmd/docker-compose.override.yml` to skip the pre-flight gate.
 Restore `ENVIRONMENT=dev` after debugging if the deployment should run ruff,
-pyright ratchet, and e2e smoke tests before serving.
+basedpyright, and e2e smoke tests before serving.
 
 Apply env changes:
 
