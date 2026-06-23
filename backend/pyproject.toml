@@ -28,7 +28,7 @@ dependencies = [
 local-ml = [
     "sentence-transformers>=3.0",
     "gliner>=0.2",
-    "torch<2.5",
+    "torch>=2.12,<2.13",
 ]
 dev = [
     "pytest>=9.0.3",
@@ -48,9 +48,7 @@ dev = [
 dotmd = "dotmd.cli:main"
 
 [tool.uv.sources]
-torch = [
-    { index = "pytorch-cpu", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'" },
-]
+torch = { index = "pytorch-cpu" }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
