@@ -16,6 +16,7 @@ from dotmd.core.models import (
 )
 from dotmd.ingestion import pipeline as pipeline_module
 from dotmd.ingestion.pipeline import IndexingPipeline
+from dotmd.ingestion.surreal_delta_sync import SurrealDeltaManifest
 
 from .application_source_fixtures import FixtureApplicationSourceProvider
 
@@ -156,9 +157,9 @@ def test_application_source_emits_surreal_manifest_on_surreal_backend(
     tmp_path: Path,
 ) -> None:
     pipeline = _pipeline_surreal(tmp_path)
-    manifest_calls: list[object] = []
+    manifest_calls: list[SurrealDeltaManifest] = []
 
-    def record_manifest(manifest) -> None:  # type: ignore[no-untyped-def]
+    def record_manifest(manifest: SurrealDeltaManifest) -> None:
         manifest_calls.append(manifest)
 
     pipeline._write_surreal_direct_manifest = record_manifest  # type: ignore[method-assign]

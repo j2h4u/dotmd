@@ -14,18 +14,27 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
 
 from dotmd.ingestion.surreal_delta_sync import (
     FakeSurrealDeltaWriter,
+    SurrealDeltaChange,
+    SurrealDeltaManifest,
     SurrealDeltaSyncState,
     run_surreal_delta_sync,
 )
 
 STRATEGIES = ["heading_512_50"]
 MODEL = "multilingual_e5_large"
+
+
+def _tombstone_previous_row(change: SurrealDeltaChange) -> dict[str, Any]:
+    """Expose tombstone payloads to pyright after a runtime guard."""
+    assert change.tombstone is not None
+    return change.tombstone.previous_row
 
 
 def _build_post_v16_db(tmp_path: Path, strategy: str = "heading_512_50") -> Path:
@@ -773,9 +782,9 @@ class TestSurrealFilesystemLifecycle:
         conn.close()
 
         pipeline = _get_pipeline_with_direct_writer(db_path, use_surreal_direct_writer=True)
-        captured_manifests: list[object] = []
+        captured_manifests: list[SurrealDeltaManifest] = []
 
-        def record_manifest(manifest) -> None:  # type: ignore[no-untyped-def]
+        def record_manifest(manifest: SurrealDeltaManifest) -> None:
             captured_manifests.append(manifest)
 
         pipeline._write_surreal_direct_manifest = record_manifest  # type: ignore[method-assign]
@@ -785,30 +794,30 @@ class TestSurrealFilesystemLifecycle:
         manifest = captured_manifests[0]
 
         assert [row.change_type.value for row in manifest.documents.rows] == ["tombstone"]
-        assert manifest.documents.rows[0].tombstone.previous_row["document_ref"] == str(
+        assert _tombstone_previous_row(manifest.documents.rows[0])["document_ref"] == str(
             Path(file_path).resolve()
         )
         assert [row.change_type.value for row in manifest.resource_bindings.rows] == ["tombstone"]
-        assert manifest.resource_bindings.rows[0].tombstone.previous_row["resource_ref"] == str(
+        assert _tombstone_previous_row(manifest.resource_bindings.rows[0])["resource_ref"] == str(
             Path(file_path).resolve()
         )
         assert [
-            row.tombstone.previous_row["binding_id"] for row in manifest.chunk_file_bindings.rows
+            _tombstone_previous_row(row)["binding_id"] for row in manifest.chunk_file_bindings.rows
         ] == [
             f"{orphan_chunk_id}\x1f{file_path}\x1f0",
             f"{shared_chunk_id}\x1f{file_path}\x1f1",
         ]
-        assert [row.tombstone.previous_row["chunk_id"] for row in manifest.chunks.rows] == [
+        assert [_tombstone_previous_row(row)["chunk_id"] for row in manifest.chunks.rows] == [
             orphan_chunk_id,
         ]
-        assert [row.tombstone.previous_row["chunk_id"] for row in manifest.provenance.rows] == [
+        assert [_tombstone_previous_row(row)["chunk_id"] for row in manifest.provenance.rows] == [
             orphan_chunk_id,
         ]
         assert [
-            row.tombstone.previous_row["chunk_strategy"] for row in manifest.embeddings.rows
+            _tombstone_previous_row(row)["chunk_strategy"] for row in manifest.embeddings.rows
         ] == [strategy]
         assert [
-            row.tombstone.previous_row["embedding_model"] for row in manifest.embeddings.rows
+            _tombstone_previous_row(row)["embedding_model"] for row in manifest.embeddings.rows
         ] == [MODEL]
 
         conn = sqlite3.connect(str(db_path))
@@ -850,9 +859,9 @@ class TestSurrealFilesystemLifecycle:
         _add_resource_binding(db_path, file_path)
 
         pipeline = _get_pipeline_with_direct_writer(db_path, use_surreal_direct_writer=True)
-        captured_manifests: list[object] = []
+        captured_manifests: list[SurrealDeltaManifest] = []
 
-        def record_manifest(manifest) -> None:  # type: ignore[no-untyped-def]
+        def record_manifest(manifest: SurrealDeltaManifest) -> None:
             captured_manifests.append(manifest)
 
         pipeline._write_surreal_direct_manifest = record_manifest  # type: ignore[method-assign]

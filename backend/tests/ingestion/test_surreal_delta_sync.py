@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any, TypedDict
 
 import pytest
 from pydantic import ValidationError
@@ -11,10 +12,12 @@ from dotmd.ingestion.surreal_delta_sync import (
     SurrealDeltaChange,
     SurrealDeltaChangeType,
     SurrealDeltaCheckpointCandidate,
+    SurrealDeltaManifest,
     SurrealDeltaScope,
     SurrealDeltaSection,
     SurrealDeltaSourceSelection,
     SurrealDeltaStoreWriter,
+    SurrealDeltaSyncProgress,
     SurrealDeltaSyncState,
     SurrealDeltaTombstone,
     build_surreal_delta_manifest,
@@ -23,7 +26,15 @@ from dotmd.ingestion.surreal_delta_sync import (
 )
 
 
-def _base_manifest_kwargs() -> dict[str, object]:
+class _BaseManifestKwargs(TypedDict):
+    source_selection: SurrealDeltaSourceSelection
+    checkpoint_candidate: SurrealDeltaCheckpointCandidate
+
+
+type _RowManifestFixture = dict[str, list[dict[str, Any]]]
+
+
+def _base_manifest_kwargs() -> _BaseManifestKwargs:
     return {
         "source_selection": SurrealDeltaSourceSelection(
             source_name="filesystem",
@@ -38,7 +49,7 @@ def _base_manifest_kwargs() -> dict[str, object]:
     }
 
 
-def _row_manifest_fixture() -> dict[str, list[dict[str, object]]]:
+def _row_manifest_fixture() -> _RowManifestFixture:
     changed_ref = "/notes/changed.md"
     other_ref = "/notes/other.md"
     deleted_ref = "/notes/deleted.md"
@@ -454,7 +465,9 @@ def test_manifest_rejects_advanced_checkpoint_candidate() -> None:
         )
 
 
-def _sync_manifest(*, graph_deferred: bool = False, feedback_deferred: bool = False) -> object:
+def _sync_manifest(
+    *, graph_deferred: bool = False, feedback_deferred: bool = False
+) -> SurrealDeltaManifest:
     graph_section = (
         SurrealDeltaSection(
             deferred=True,
@@ -693,7 +706,7 @@ def test_incremental_sync_reports_percent_elapsed_target_size_and_eta_for_long_r
     writer = FakeSurrealDeltaWriter(target_size_bytes=16384)
     state = SurrealDeltaSyncState()
     clock = _AdvancingClock(step=30.0)
-    snapshots: list[object] = []
+    snapshots: list[SurrealDeltaSyncProgress] = []
 
     result = run_surreal_delta_sync(
         manifest,
@@ -704,13 +717,13 @@ def test_incremental_sync_reports_percent_elapsed_target_size_and_eta_for_long_r
         progress_callback=snapshots.append,
     )
 
-    eta_snapshots = [snapshot for snapshot in snapshots if snapshot.eta is not None]
+    etas = [snapshot.eta for snapshot in snapshots if snapshot.eta is not None]
 
     assert result.progress.target_size_bytes == 16384
     assert any(snapshot.percent_complete > 0 for snapshot in snapshots)
     assert any(snapshot.elapsed_seconds >= 120 for snapshot in snapshots)
-    assert eta_snapshots, "expected at least one ETA-bearing progress snapshot"
-    assert all(snapshot.eta.startswith("ETA ~") for snapshot in eta_snapshots)
+    assert etas, "expected at least one ETA-bearing progress snapshot"
+    assert all(eta.startswith("ETA ~") for eta in etas)
 
 
 class _FakeSurrealConnection:
