@@ -32,8 +32,9 @@ from dotmd.auth import DotMDOAuthProvider
 if TYPE_CHECKING:
     from mcp import ClientSession
 
-MCP_URL = "http://localhost:8080/mcp"
-AUTH_BASE_URL = "http://localhost:8080"
+BASE_URL = os.environ.get("DOTMD_E2E_BASE_URL", "http://localhost:8080").rstrip("/")
+MCP_URL = f"{BASE_URL}/mcp"
+AUTH_BASE_URL = BASE_URL
 OAUTH_STATE_PATH = "/dotmd-index/oauth_state.json"
 _MCP_HEADERS = {
     "Content-Type": "application/json",
@@ -326,13 +327,13 @@ def mcp_call(request: pytest.FixtureRequest) -> Callable[[str, dict | None], dic
 def _require_live_server() -> None:
     """Fail explicit e2e runs when the live MCP server is unavailable."""
     try:
-        r = httpx.get("http://localhost:8080/health", timeout=5.0)
+        r = httpx.get(f"{BASE_URL}/health", timeout=5.0)
         if r.status_code == 200:
             return
     except (httpx.ConnectError, httpx.TimeoutException):
         pass
 
     pytest.exit(
-        "dotMD MCP server not reachable at http://localhost:8080",
+        f"dotMD MCP server not reachable at {BASE_URL}",
         returncode=1,
     )

@@ -382,11 +382,6 @@ Required value:
 DOTMD_BASE_URL=https://dotmd.tailf87223.ts.net
 ```
 
-During live network debugging, `ENVIRONMENT=prod` may be used in
-`/opt/docker/dotmd/docker-compose.override.yml` to skip the pre-flight gate.
-Restore `ENVIRONMENT=dev` after debugging if the deployment should run ruff,
-basedpyright, and e2e smoke tests before serving.
-
 Apply env changes:
 
 ```bash
@@ -872,21 +867,9 @@ Expected:
 DOTMD_BASE_URL=https://dotmd.tailf87223.ts.net
 ```
 
-4. Restore pre-flight if it was disabled:
+4. Recreate the container after env changes.
 
-```yaml
-ENVIRONMENT: dev
-```
-
-in:
-
-```text
-/opt/docker/dotmd/docker-compose.override.yml
-```
-
-5. Recreate the container after env changes.
-
-6. Run the production MCP/Funnel smoke gate:
+5. Run the production MCP/Funnel smoke gate:
 
 ```bash
 just test-mcp-remote

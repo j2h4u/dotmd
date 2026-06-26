@@ -65,9 +65,9 @@ test *args:
 unit *args:
     cd {{backend}} && UV_LINK_MODE=hardlink uv run pytest -q -m "not e2e and not smoke" {{args}}
 
-# Run live MCP e2e tests inside the running dotMD container.
+# Run live MCP e2e tests against the running dotMD container.
 test-e2e *args:
-    docker exec dotmd sh -lc 'cd /mnt/home/repos/j2h4u/dotmd/backend && python -m pytest -c tests/e2e/pytest.ini tests/e2e/ -p no:cacheprovider --tb=short -q {{args}}'
+    cd {{backend}} && ip="$(docker inspect dotmd | jq -r '.[0].NetworkSettings.Networks.dotmd_default.IPAddress')" && DOTMD_E2E_BASE_URL="http://$ip:8080" UV_LINK_MODE=hardlink uv run pytest -c tests/e2e/pytest.ini tests/e2e/ -p no:cacheprovider --tb=short -q {{args}}
 
 # Run production MCP/Funnel connectivity smoke against live containers.
 test-mcp-remote *args:
