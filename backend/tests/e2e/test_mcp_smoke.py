@@ -21,6 +21,9 @@ Workflow when adding a new tool:
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
 from collections.abc import Callable
 
 import pytest
@@ -373,6 +376,33 @@ class TestFeedbackSmoke:
         )
         assert not _is_tool_error(data), f"feedback errored: {_tool_result_text(data)}"
         assert "recorded" in _tool_result_text(data).lower()
+
+        if os.environ.get("DOTMD_E2E_BASE_URL"):
+            query = """
+import json
+import sqlite3
+
+conn = sqlite3.connect("/dotmd-index/feedback.db")
+try:
+    row = conn.execute(
+        "SELECT severity, context, model, harness FROM feedback WHERE message = ?",
+        (MESSAGE,),
+    ).fetchone()
+    print(json.dumps(row))
+finally:
+    conn.execute("DELETE FROM feedback WHERE message LIKE ?", (MARKER,))
+    conn.commit()
+    conn.close()
+""".replace("MESSAGE", repr(message)).replace("MARKER", repr(f"{marker}%"))
+            completed = subprocess.run(
+                ["docker", "exec", "-i", "dotmd", "python", "-c", query],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            row = json.loads(completed.stdout)
+            assert row == ["question", "smoke test", "pytest", "e2e"]
+            return
 
         feedback_db = load_settings().index_dir / "feedback.db"
         try:

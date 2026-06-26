@@ -182,7 +182,7 @@ def _http_call(method: str, params: dict | None = None) -> dict:
     token = _http_access_token()
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    resp = httpx.post(MCP_URL, json=body, headers=headers, timeout=60.0)
+    resp = httpx.post(MCP_URL, json=body, headers=headers, timeout=180.0)
     resp.raise_for_status()
     return resp.json()
 
