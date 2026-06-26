@@ -30,7 +30,7 @@ _DEFAULT_ENTITY_TYPES: list[str] = [
 
 _DEFAULT_MODEL_NAME = "urchade/gliner_multi-v2.1"
 _GLINER_MAX_LEN = 512
-_GLINER_SEGMENT_WORDS = 480
+_GLINER_SEGMENT_WORDS = 320
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?…])\s+|\n+")
 
 

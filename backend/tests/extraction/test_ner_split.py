@@ -53,6 +53,6 @@ def test_long_gliner_input_is_split_before_inference_and_merged_by_chunk() -> No
     result = extractor.extract([chunk])
 
     assert len(fake_model.texts) == 2
-    assert all(len(text.split()) <= 480 for text in fake_model.texts)
+    assert all(len(text.split()) <= 320 for text in fake_model.texts)
     assert [entity.name for entity in result.entities] == ["Entity 0", "Entity 1"]
     assert all(entity.chunk_ids == [chunk.chunk_id] for entity in result.entities)
