@@ -234,11 +234,10 @@ def test_empty_chunk_is_reported_and_blocks(monkeypatch) -> None:
 def test_help_includes_container_default_and_host_debug_examples() -> None:
     help_text = backfill.build_parser().format_help()
 
-    assert "docker exec dotmd" in help_text
-    assert "docker compose exec dotmd" in help_text
-    assert "python3 devtools/surreal_embedding_backfill.py" in help_text
+    assert "docker exec -w /app dotmd" in help_text
+    assert "docker compose exec -w /app dotmd" in help_text
+    assert "-w /app" in help_text
+    assert "python devtools/surreal_embedding_backfill.py" in help_text
     assert "DOTMD_EMBEDDING__URL=http://embeddings:80" in help_text
     assert "DOTMD_SURREAL_RETRIEVAL__URL=http://surrealdb:8000" in help_text
-    assert "Dev/debug only" in help_text
-    assert "DOTMD_EMBEDDING__URL=http://127.0.0.1:8088" in help_text
-    assert "DOTMD_SURREAL_RETRIEVAL__URL=ws://127.0.0.1:8000" in help_text
+    assert "For local experiments" in help_text

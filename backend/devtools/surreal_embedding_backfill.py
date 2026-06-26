@@ -36,11 +36,11 @@ _DEFAULT_CHUNK_STRATEGY = "heading_512_50"
 _HELP_EPILOG = """Examples:
 
 Production/default, inside the container network:
-  docker exec dotmd sh -lc 'cd /mnt/home/repos/j2h4u/dotmd/backend && python3 devtools/surreal_embedding_backfill.py --chunk-id <chunk-id> --apply'
-  docker compose exec dotmd sh -lc 'cd /mnt/home/repos/j2h4u/dotmd/backend && python3 devtools/surreal_embedding_backfill.py --chunk-id <chunk-id> --apply'
+  docker exec -w /app dotmd python devtools/surreal_embedding_backfill.py --chunk-id <chunk-id> --apply
+  docker compose exec -w /app dotmd python devtools/surreal_embedding_backfill.py --chunk-id <chunk-id> --apply
 
-Dev/debug only, from the host:
-  DOTMD_EMBEDDING__URL=http://127.0.0.1:8088 DOTMD_SURREAL_RETRIEVAL__URL=ws://127.0.0.1:8000 uv run python devtools/surreal_embedding_backfill.py --chunk-id <chunk-id> --apply
+For local experiments, run the script from an environment that can reach the
+configured TEI and SurrealDB endpoints.
 """
 
 

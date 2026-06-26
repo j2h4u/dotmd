@@ -1,10 +1,10 @@
-"""MCP smoke tests — run inside the dotMD container against the live server.
+"""MCP smoke tests against a live dotMD MCP server.
 
 Parametrized over two transports (http, stdio) — same assertions, both must pass.
 
 Usage:
-    docker exec dotmd sh -c "cd /mnt/home/repos/j2h4u/dotmd/backend && \
-        python -m pytest tests/e2e/ -v -p no:cacheprovider"
+    DOTMD_E2E_BASE_URL=http://<dotmd-container-ip>:8080 \
+        uv run pytest -c tests/e2e/pytest.ini tests/e2e/ -p no:cacheprovider
 
 PINNING CONTRACT
 ---------------

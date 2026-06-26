@@ -290,7 +290,7 @@ class SemanticSearchEngine:
     model_name:
         HuggingFace model identifier (local backend only).
     embedding_url:
-        Base URL of a TEI server (e.g. ``http://embeddings:8088``).
+        Base URL of a TEI server (production: ``http://embeddings:80``).
         When set, *model_name* is ignored and all encoding is done
         via HTTP POST to ``{embedding_url}/embed``.
     """

@@ -74,7 +74,7 @@ class EmbeddingSettings(BaseModel):
     # Local SentenceTransformers model — used only when embedding.url is unset.
     # When TEI is configured, the actual model is determined by TEI (query /info).
     model: str = "BAAI/bge-small-en-v1.5"
-    # URL to a TEI-compatible embedding server (e.g. http://host:8088).
+    # URL to a TEI-compatible embedding server (production: http://embeddings:80).
     # Required for runtime — dotMD is designed to run with an external embedding server.
     url: str | None = None
     # Whether the active embedding model uses E5-family instruction prefixes.

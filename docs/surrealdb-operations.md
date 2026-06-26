@@ -62,26 +62,21 @@ the dotMD container so the production env already resolves the in-network
 services:
 
 ```bash
-docker exec dotmd sh -lc 'cd /mnt/home/repos/j2h4u/dotmd/backend && python3 devtools/surreal_embedding_backfill.py --chunk-id <chunk-id> --apply'
+docker exec -w /app dotmd python devtools/surreal_embedding_backfill.py --chunk-id <chunk-id> --apply
 ```
 
 or, if you prefer Compose:
 
 ```bash
-docker compose exec dotmd sh -lc 'cd /mnt/home/repos/j2h4u/dotmd/backend && python3 devtools/surreal_embedding_backfill.py --chunk-id <chunk-id> --apply'
+docker compose exec -w /app dotmd python devtools/surreal_embedding_backfill.py --chunk-id <chunk-id> --apply
 ```
 
 Inside that container network, the standard nested env values are already valid:
 `DOTMD_EMBEDDING__URL=http://embeddings:80` and
 `DOTMD_SURREAL_RETRIEVAL__URL=http://surrealdb:8000`.
 
-Use host overrides only for dev/debug on the local machine:
-
-```bash
-DOTMD_EMBEDDING__URL=http://127.0.0.1:8088 \
-DOTMD_SURREAL_RETRIEVAL__URL=ws://127.0.0.1:8000 \
-uv run python devtools/surreal_embedding_backfill.py --chunk-id <chunk-id> --apply
-```
+For local experiments, run the script from an environment that can reach the
+configured TEI and SurrealDB endpoints.
 
 ## Inspecting Logs Without Leaking Secrets
 

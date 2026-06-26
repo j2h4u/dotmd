@@ -1,7 +1,8 @@
 # MCP Test Client
 
-Small stdio MCP client for local regression testing of the dotmd MCP server.
-Ported from `mcp-telegram/devtools/mcp_client`; same client/cli/script schema.
+Small stdio MCP client for regression testing the dotMD MCP server over its
+stdio transport. Ported from `mcp-telegram/devtools/mcp_client`; same
+client/cli/script schema.
 
 ## Usage
 
@@ -35,7 +36,7 @@ uv run python -m devtools.mcp_client.cli script \
   -- docker exec -i dotmd dotmd mcp
 ```
 
-For live cutover validation, pair this with `docker exec dotmd curl -fsS http://127.0.0.1:8080/health`.
+For live HTTP validation against the running container, use `just test-e2e`.
 
 The smoke step that calls `search` triggers cold-start of TEI + GLiNER + the
 cross-encoder reranker on first run, which can take 15-20 s. Subsequent calls

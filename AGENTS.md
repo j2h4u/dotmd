@@ -163,10 +163,10 @@ exec dotmd mcp --transport streamable-http --host 0.0.0.0 --port 8080
 - **Health**: `GET /health` on port 8080 → `{"status":"ok"}` (used by Docker healthcheck)
 
 External dependencies (separate containers):
-- TEI (`embeddings` service, port 8088) — embedding server
+- TEI (`embeddings` service, internal port 80) — embedding server
 - SurrealDB (`surrealdb`, host port 8000) — storage and retrieval database
 
-Source code is bind-mounted into the container — code changes take effect on container restart, no image rebuild needed. Rebuild only when `pyproject.toml` or `start.sh` changes.
+Source code is bind-mounted into the container — code changes take effect on container restart, no image rebuild needed. Rebuild when image inputs such as `pyproject.toml`, `Dockerfile`, or `start.sh` change.
 
 ## MCP Interface
 
