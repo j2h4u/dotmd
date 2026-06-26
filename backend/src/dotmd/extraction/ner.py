@@ -6,6 +6,7 @@ import importlib
 import logging
 import os
 import re
+import warnings
 from collections import Counter, defaultdict
 from itertools import combinations
 from typing import TYPE_CHECKING, Any, cast
@@ -313,7 +314,14 @@ class NERExtractor:
             torch_threads = _configure_torch_threads()
             from gliner import GLiNER  # type: ignore[import-untyped]
 
-            model = cast("GLiNER", GLiNER.from_pretrained(self._model_name))
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r"The `resume_download` argument is deprecated and ignored.*",
+                    category=UserWarning,
+                    module=r"huggingface_hub\..*",
+                )
+                model = cast("GLiNER", GLiNER.from_pretrained(self._model_name))
             # ADR: Cap max sequence length to match our chunk token budget.
             # GLiNER attention is O(n^2) — shorter max_len = faster inference.
             # 512 matches our chunk_max_tokens setting.
