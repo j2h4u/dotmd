@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 FROM python:3.14-slim AS builder
 
 WORKDIR /app
@@ -9,22 +11,23 @@ RUN apt-get update && \
 # Layer 1 (rare): CPU-only PyTorch. pip does not read uv's [[tool.uv.sources]],
 # so the Docker build must pin the CPU wheel explicitly; otherwise
 # `.[local-ml]` can resolve PyPI's CUDA-enabled Linux torch wheel.
-RUN printf '%s\n' \
+RUN --mount=type=cache,id=dotmd-pip-py314,target=/root/.cache/pip,sharing=locked \
+    printf '%s\n' \
     'torch==2.12.1+cpu' \
     > /tmp/constraints.txt && \
-    pip install --no-cache-dir \
+    pip install \
       --extra-index-url https://download.pytorch.org/whl/cpu \
       -c /tmp/constraints.txt \
       'torch==2.12.1+cpu'
 
 # Layer 2 (rare): project dependencies — only rebuilds when pyproject.toml changes
 COPY pyproject.toml ./
-RUN mkdir -p src/dotmd && touch src/dotmd/__init__.py && \
-    pip install --no-cache-dir \
+RUN --mount=type=cache,id=dotmd-pip-py314,target=/root/.cache/pip,sharing=locked \
+    mkdir -p src/dotmd && touch src/dotmd/__init__.py && \
+    pip install \
       --extra-index-url https://download.pytorch.org/whl/cpu \
       -c /tmp/constraints.txt \
-      -e '.[local-ml]' && \
-    pip cache purge
+      -e '.[local-ml]'
 
 # Layer 3 (frequent): application code only
 COPY src/ ./src/
