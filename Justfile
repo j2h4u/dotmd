@@ -98,6 +98,35 @@ check: _fmt-check _lint-strict _typecheck _import-contracts _actionlint _compile
 # Full local gate for agents before claiming completion.
 verify: check
 
+# Show external repo agenda that local tests cannot see.
+agenda:
+    @echo "== git =="
+    @git status --short --branch
+    @echo
+    @echo "== open PRs =="
+    @gh pr list --state open --limit 50
+    @echo
+    @echo "== open Dependabot alerts =="
+    @gh api repos/j2h4u/dotmd/dependabot/alerts --paginate --jq '[.[] | select(.state == "open")] | length'
+    @echo
+    @echo "== recent main runs =="
+    @gh run list --branch main --limit 8
+
+# Hard external readiness gate for agents before saying "done".
+ready:
+    @test "$(git branch --show-current)" = "main" || { echo "Not on main"; exit 1; }
+    @test -z "$(git status --porcelain)" || { echo "Working tree is dirty"; git status --short; exit 1; }
+    @git fetch origin main --quiet
+    @test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" || { echo "main is not synced with origin/main"; exit 1; }
+    @test "$(gh pr list --state open --limit 100 --json number --jq 'length')" = "0" || { echo "Open PRs remain:"; gh pr list --state open --limit 100; exit 1; }
+    @test "$(gh api repos/j2h4u/dotmd/dependabot/alerts --paginate --jq '[.[] | select(.state == "open")] | length')" = "0" || { echo "Open Dependabot alerts remain"; exit 1; }
+    @head="$(git rev-parse HEAD)"; \
+    for workflow in CI CodeQL; do \
+        run="$$(gh run list --branch main --limit 20 --json headSha,workflowName,status,conclusion --jq ".[] | select(.headSha == \"$$head\" and .workflowName == \"$$workflow\") | [.status, .conclusion] | @tsv" | head -1)"; \
+        test "$$run" = "completed	success" || { echo "$$workflow is not green for $$head: $${run:-missing}"; exit 1; }; \
+    done
+    @echo "ready: git clean, main synced, no open PRs, no Dependabot alerts, CI/CodeQL green"
+
 # Explicit one-way ratchet tightening for focused CRAP baseline maintenance.
 tighten: _crap-tighten
 
