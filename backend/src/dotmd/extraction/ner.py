@@ -5,7 +5,8 @@ from __future__ import annotations
 import importlib
 import logging
 import os
-from collections import Counter
+import re
+from collections import Counter, defaultdict
 from itertools import combinations
 from typing import TYPE_CHECKING, Any, cast
 
@@ -27,6 +28,9 @@ _DEFAULT_ENTITY_TYPES: list[str] = [
 ]
 
 _DEFAULT_MODEL_NAME = "urchade/gliner_multi-v2.1"
+_GLINER_MAX_LEN = 512
+_GLINER_SEGMENT_WORDS = 480
+_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?…])\s+|\n+")
 
 
 def _configure_torch_threads() -> int | None:
@@ -226,16 +230,19 @@ class NERExtractor:
 
         model = self._get_model()
 
-        texts = [chunk.text for chunk in chunks]
-        batch_predictions: list[list[dict[str, Any]]] = cast(Any, model).inference(
-            texts,
+        segment_texts, segment_chunk_ids = _segments_for_chunks(chunks)
+
+        segment_predictions: list[list[dict[str, Any]]] = cast(Any, model).inference(
+            segment_texts,
             self._entity_types,
             threshold=self._threshold,
         )
+        predictions_by_chunk = _predictions_by_chunk(segment_chunk_ids, segment_predictions)
 
         per_chunk: dict[str, tuple[list[Entity], list[Relation]]] = {}
 
-        for chunk, predictions in zip(chunks, batch_predictions, strict=False):
+        for chunk in chunks:
+            predictions = predictions_by_chunk[chunk.chunk_id]
             chunk_entities: list[Entity] = []
             chunk_relations: list[Relation] = []
 
@@ -312,7 +319,7 @@ class NERExtractor:
             # 512 matches our chunk_max_tokens setting.
             model_config = getattr(cast(Any, model), "config", None)
             if model_config is not None and hasattr(model_config, "max_len"):
-                model_config.max_len = 512
+                model_config.max_len = _GLINER_MAX_LEN
             logger.info(
                 "GLiNER model loaded (threads=%d, max_len=%s).",
                 torch_threads or 0,
@@ -320,3 +327,64 @@ class NERExtractor:
             )
             self._model = model
         return cast("GLiNER", self._model)
+
+
+def _split_for_gliner(text: str) -> list[str]:
+    """Split long GLiNER inputs before the library truncates single sentences."""
+    words = text.split()
+    if len(words) <= _GLINER_SEGMENT_WORDS:
+        return [text]
+
+    segments: list[str] = []
+    current_parts: list[str] = []
+    current_words = 0
+
+    def flush_current() -> None:
+        nonlocal current_words
+        if current_parts:
+            segments.append(" ".join(current_parts))
+            current_parts.clear()
+            current_words = 0
+
+    for sentence in _SENTENCE_BOUNDARY_RE.split(text):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+
+        sentence_words = sentence.split()
+        if len(sentence_words) > _GLINER_SEGMENT_WORDS:
+            flush_current()
+            segments.extend(
+                " ".join(sentence_words[start : start + _GLINER_SEGMENT_WORDS])
+                for start in range(0, len(sentence_words), _GLINER_SEGMENT_WORDS)
+            )
+            continue
+
+        if current_words and current_words + len(sentence_words) > _GLINER_SEGMENT_WORDS:
+            flush_current()
+
+        current_parts.append(sentence)
+        current_words += len(sentence_words)
+
+    flush_current()
+    return segments or [text]
+
+
+def _segments_for_chunks(chunks: list[Chunk]) -> tuple[list[str], list[str]]:
+    segment_texts: list[str] = []
+    segment_chunk_ids: list[str] = []
+    for chunk in chunks:
+        segments = _split_for_gliner(chunk.text)
+        segment_texts.extend(segments)
+        segment_chunk_ids.extend([chunk.chunk_id] * len(segments))
+    return segment_texts, segment_chunk_ids
+
+
+def _predictions_by_chunk(
+    segment_chunk_ids: list[str],
+    segment_predictions: list[list[dict[str, Any]]],
+) -> defaultdict[str, list[dict[str, Any]]]:
+    predictions_by_chunk: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+    for chunk_id, predictions in zip(segment_chunk_ids, segment_predictions, strict=False):
+        predictions_by_chunk[chunk_id].extend(predictions)
+    return predictions_by_chunk
