@@ -121,8 +121,8 @@ ready:
     @test "$(gh pr list --state open --limit 100 --json number --jq 'length')" = "0" || { echo "Open PRs remain:"; gh pr list --state open --limit 100; exit 1; }
     @test "$(gh api repos/j2h4u/dotmd/dependabot/alerts --paginate --jq '[.[] | select(.state == "open")] | length')" = "0" || { echo "Open Dependabot alerts remain"; exit 1; }
     @head="$(git rev-parse HEAD)"; \
-    runs="$$(gh run list --branch main --limit 20 --json headSha,workflowName,status,conclusion)"; \
-    HEAD="$$head" RUNS="$$runs" python3 -c 'import json, os, sys; head = os.environ["HEAD"]; runs = json.loads(os.environ["RUNS"]); missing = [wf for wf in ("CI", "CodeQL") if not any(r["headSha"] == head and r["workflowName"] == wf and r["status"] == "completed" and r["conclusion"] == "success" for r in runs)]; print("Missing green workflows for " + head + ": " + ", ".join(missing)) if missing else None; sys.exit(bool(missing))'
+    runs="$(gh run list --branch main --limit 20 --json headSha,workflowName,status,conclusion)"; \
+    HEAD="$head" RUNS="$runs" python3 -c 'import json, os, sys; head = os.environ["HEAD"]; runs = json.loads(os.environ["RUNS"]); missing = [wf for wf in ("CI", "CodeQL") if not any(r["headSha"] == head and r["workflowName"] == wf and r["status"] == "completed" and r["conclusion"] == "success" for r in runs)]; print("Missing green workflows for " + head + ": " + ", ".join(missing)) if missing else None; sys.exit(bool(missing))'
     @echo "ready: git clean, main synced, no open PRs, no Dependabot alerts, CI/CodeQL green"
 
 # Explicit one-way ratchet tightening for focused CRAP baseline maintenance.
