@@ -46,8 +46,6 @@ VOLUME ["/data", "/dotmd-index"]
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl libatomic1 && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir pytest ruff basedpyright
-
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
