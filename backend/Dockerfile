@@ -6,13 +6,24 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends build-essential && \
     rm -rf /var/lib/apt/lists/*
 
-# Layer 1 (rare): CPU-only PyTorch pinned for AVX-only CPUs
-RUN pip install --no-cache-dir 'torch<2.5' --index-url https://download.pytorch.org/whl/cpu
+# Layer 1 (rare): CPU-only PyTorch. pip does not read uv's [[tool.uv.sources]],
+# so the Docker build must pin the CPU wheel explicitly; otherwise
+# `.[local-ml]` can resolve PyPI's CUDA-enabled Linux torch wheel.
+RUN printf '%s\n' \
+    'torch==2.12.1+cpu' \
+    > /tmp/constraints.txt && \
+    pip install --no-cache-dir \
+      --extra-index-url https://download.pytorch.org/whl/cpu \
+      -c /tmp/constraints.txt \
+      'torch==2.12.1+cpu'
 
 # Layer 2 (rare): project dependencies — only rebuilds when pyproject.toml changes
 COPY pyproject.toml ./
 RUN mkdir -p src/dotmd && touch src/dotmd/__init__.py && \
-    pip install --no-cache-dir -e '.[local-ml]' && \
+    pip install --no-cache-dir \
+      --extra-index-url https://download.pytorch.org/whl/cpu \
+      -c /tmp/constraints.txt \
+      -e '.[local-ml]' && \
     pip cache purge
 
 # Layer 3 (frequent): application code only

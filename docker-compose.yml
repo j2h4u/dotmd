@@ -4,6 +4,8 @@ services:
       context: ./backend
     image: dotmd
     container_name: dotmd
+    restart: unless-stopped
+    mem_limit: 4g
     volumes:
       - ${DOTMD_DATA_VOLUME:-.}/data:/data
       - dotmd-index:/dotmd-index
@@ -14,6 +16,7 @@ services:
 
   tei:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+    mem_limit: 4g
     profiles: [bundled]
     command: --model-id ${DOTMD_EMBEDDING__MODEL:-BAAI/bge-small-en-v1.5} --dtype float32
     volumes:
