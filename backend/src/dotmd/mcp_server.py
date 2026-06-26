@@ -185,7 +185,11 @@ class _AccessLogMiddleware(BaseHTTPMiddleware):
         return response
 
     async def _body_for_logging(self, request: Request) -> bytes | None:
-        if request.url.path not in {"/register", "/token", "/mcp"}:
+        if (request.method, request.url.path) not in {
+            ("POST", "/register"),
+            ("POST", "/token"),
+            ("POST", "/mcp"),
+        }:
             return None
         try:
             body = await request.body()

@@ -58,6 +58,28 @@ def test_access_log_middleware_does_not_consume_token_form(tmp_path, monkeypatch
     assert '"client_id": "client-1"' in (tmp_path / "access.log").read_text(encoding="utf-8")
 
 
+def test_access_log_middleware_does_not_consume_mcp_sse_get() -> None:
+    async def receive() -> dict:
+        raise AssertionError("GET /mcp SSE receive must not be consumed by access logging")
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/mcp",
+            "headers": [(b"accept", b"text/event-stream")],
+            "query_string": b"",
+            "server": ("testserver", 80),
+            "client": ("testclient", 50000),
+            "scheme": "http",
+        },
+        receive,
+    )
+    middleware = _AccessLogMiddleware(app=Starlette())
+
+    assert asyncio.run(middleware._body_for_logging(request)) is None
+
+
 def test_oauth_metadata_advertises_authorization_iss(monkeypatch) -> None:
     monkeypatch.setattr(mcp_server, "_base_url", "https://dotmd.example")
 
