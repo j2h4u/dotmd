@@ -16,11 +16,11 @@ dependencies = [
     "pydantic-settings[toml]>=2.14.1",
     "watchdog>=6.0",
     "pyyaml>=6.0",
-    "fastapi>=0.138.1",
+    "fastapi>=0.139.0",
     "uvicorn[standard]>=0.49.0",
     "mcp[cli]>=1.27.2",
     "httpx>=0.27",
-    "modal>=1.5.1",
+    "modal>=1.5.2",
     "surrealdb>=2.0.0",
 ]
 
@@ -28,16 +28,16 @@ dependencies = [
 local-ml = [
     "sentence-transformers>=5.6.0",
     "gliner>=0.2",
-    "torch>=2.12,<2.13",
+    "torch>=2.13.0,<2.14",
 ]
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=0.24",
     "pytest-cov>=7",
     "pytest-crap>=0.3.0",
-    "ruff>=0.15.20",
-    "basedpyright>=1.39.8",
-    "import-linter>=2.12",
+    "ruff>=0.15.21",
+    "basedpyright>=1.39.9",
+    "import-linter>=2.13",
     "vulture>=2.16",
     "radon>=6.0.1",
     "pytest-xdist>=3.8.0",
