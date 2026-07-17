@@ -28,7 +28,7 @@ dependencies = [
 local-ml = [
     "sentence-transformers>=5.6.0",
     "gliner>=0.2",
-    "torch>=2.12,<2.13",
+    "torch>=2.13.0,<2.14",
 ]
 dev = [
     "pytest>=9.1.1",
